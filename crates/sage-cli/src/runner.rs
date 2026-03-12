@@ -88,43 +88,59 @@ impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
         let mut parameters = parameters.clone();
         let start = Instant::now();
-        let fasta = sage_cloudpath::util::read_fasta(
-            &parameters.database.fasta,
-            &parameters.database.decoy_tag,
-            parameters.database.generate_decoys,
-        )
-        .with_context(|| {
-            format!(
-                "Failed to build database from `{}`",
-                parameters.database.fasta
-            )
-        })?;
 
-        let database = match parameters.database.prefilter {
-            false => parameters.database.clone().build(fasta),
-            true => {
-                parameters
-                    .database
-                    .auto_calculate_prefilter_chunk_size(&fasta);
-                if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
-                    parameters.database.clone().build(fasta)
-                } else {
-                    info!(
-                        "using {} db chunks of size {}",
-                        (fasta.targets.len() + parameters.database.prefilter_chunk_size - 1)
-                            / parameters.database.prefilter_chunk_size,
-                        parameters.database.prefilter_chunk_size,
-                    );
-                    let mini_runner = Self {
-                        database: IndexedDatabase::default(),
-                        parameters: parameters.clone(),
-                        start,
-                    };
-                    let peptides = mini_runner.prefilter_peptides(parallel, fasta);
-                    parameters.database.clone().build_from_peptides(peptides)
+        // Collect peptides from FASTA (if configured).
+        let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
+            let fasta = sage_cloudpath::util::read_fasta(
+                &parameters.database.fasta,
+                &parameters.database.decoy_tag,
+                parameters.database.generate_decoys,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to build database from `{}`",
+                    parameters.database.fasta
+                )
+            })?;
+
+            match parameters.database.prefilter {
+                false => parameters.database.digest(&fasta),
+                true => {
+                    parameters
+                        .database
+                        .auto_calculate_prefilter_chunk_size(&fasta);
+                    if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
+                        parameters.database.digest(&fasta)
+                    } else {
+                        info!(
+                            "using {} db chunks of size {}",
+                            (fasta.targets.len() + parameters.database.prefilter_chunk_size - 1)
+                                / parameters.database.prefilter_chunk_size,
+                            parameters.database.prefilter_chunk_size,
+                        );
+                        let mini_runner = Self {
+                            database: IndexedDatabase::default(),
+                            parameters: parameters.clone(),
+                            start,
+                        };
+                        mini_runner.prefilter_peptides(parallel, fasta)
+                    }
                 }
             }
+        } else {
+            vec![]
         };
+
+        // Append peptides from TSV file (if configured), additive with FASTA.
+        if let Some(peptides_path) = parameters.database.peptides.clone() {
+            let content = sage_cloudpath::util::read_text(&peptides_path)
+                .with_context(|| format!("Failed to read peptide file `{peptides_path}`"))?;
+            all_peptides.extend(parameters.database.peptides_from_tsv(&content));
+        }
+
+        // Merge, deduplicate, and build the index.
+        Parameters::reorder_peptides(&mut all_peptides);
+        let database = parameters.database.clone().build_from_peptides(all_peptides);
 
         info!(
             "generated {} fragments, {} peptides in {:#?}",

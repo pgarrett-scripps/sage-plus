@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New `database.bitmap_size` config parameter (default `30`) controls the number of 64-bit words per peptide bitmap (e.g. 30 → 1 920 bins spanning `peptide_min_mass`…`peptide_max_mass`).
   - New top-level `use_bitmap` boolean config parameter (default `false`) to opt in.
   - **Requires deisotoped spectra** (`deisotope: true`); each peak must carry a resolved neutral monoisotopic mass.
+- **Pre-digested peptide file input** (`database.peptides`): supply a TSV of peptide sequences instead of (or in addition to) a FASTA file.
+  - TSV must have a header row with a required `sequence` column; optional `protein` and `decoy` columns are also supported.
+  - Sequences are used as-is — no variable or static modifications are applied from config.
+  - Decoys are still generated automatically by reversal when `generate_decoys: true`.
+  - If both `database.fasta` and `database.peptides` are provided, peptides from both sources are merged and deduplicated before building the index.
+  - Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.
 
 ## [v0.15.0-alpha]
 ### Added

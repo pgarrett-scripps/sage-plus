@@ -227,8 +227,8 @@ impl Input {
         // avoid to later panic if these parameters are not set (but doesn't check if files exist)
 
         ensure!(
-            input.database.fasta.is_some(),
-            "`database.fasta` must be set. For more information try '--help'"
+            input.database.fasta.is_some() || input.database.peptides.is_some(),
+            "Either `database.fasta` or `database.peptides` must be set. For more information try '--help'"
         );
         ensure!(
             input

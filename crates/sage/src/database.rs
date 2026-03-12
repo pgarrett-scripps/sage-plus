@@ -1,5 +1,5 @@
 use crate::bitmap::BitmapIndex;
-use crate::enzyme::{group_digests, Enzyme, EnzymeParameters};
+use crate::enzyme::{group_digests, Digest, Enzyme, EnzymeParameters, Position};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::Arc;
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct EnzymeBuilder {
@@ -88,6 +89,10 @@ pub struct Builder {
     pub generate_decoys: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
+    /// Path to a pre-digested peptide TSV file (additive with `fasta`).
+    /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
+    /// No variable/static mods are applied; sequences are used as-is.
+    pub peptides: Option<String>,
     /// Number of sequences to handle simultaneously when pre-filtering the db
     pub prefilter_chunk_size: Option<usize>,
     /// Pre-filter the database to minimize memory usage
@@ -112,7 +117,8 @@ impl Builder {
             variable_mods: validate_var_mods(self.variable_mods),
             max_variable_mods: self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2),
             generate_decoys: self.generate_decoys.unwrap_or(true),
-            fasta: self.fasta.expect("A fasta file must be provided!"),
+            fasta: self.fasta.unwrap_or_default(),
+            peptides: self.peptides,
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
             prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
@@ -139,6 +145,7 @@ pub struct Parameters {
     pub decoy_tag: String,
     pub generate_decoys: bool,
     pub fasta: String,
+    pub peptides: Option<String>,
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
     pub prefilter_low_memory: bool,
@@ -261,6 +268,104 @@ impl Parameters {
             num_dropped,
             target_decoys.len(),
         );
+    }
+
+    /// Build a `Vec<Peptide>` from a pre-digested TSV file.
+    ///
+    /// The TSV must have a header row. The `sequence` column is required;
+    /// `protein` and `decoy` are optional. No modifications are applied —
+    /// sequences are used verbatim. Decoys are generated (by reversal) if
+    /// `self.generate_decoys` is true, subject to the same deduplication as
+    /// the normal FASTA digest path.
+    pub fn peptides_from_tsv(&self, content: &str) -> Vec<Peptide> {
+        let mut lines = content.lines().filter(|l| !l.trim().is_empty());
+
+        let header = match lines.next() {
+            Some(h) => h,
+            None => {
+                log::warn!("peptide TSV file is empty");
+                return vec![];
+            }
+        };
+
+        let cols: Vec<&str> = header.split('\t').collect();
+        let seq_col = match cols.iter().position(|&c| c == "sequence") {
+            Some(i) => i,
+            None => {
+                log::warn!("peptide TSV is missing required `sequence` column");
+                return vec![];
+            }
+        };
+        let protein_col = cols.iter().position(|&c| c == "protein");
+        let decoy_col = cols.iter().position(|&c| c == "decoy");
+
+        // Parse all rows into Peptide structs.
+        let raw: Vec<Peptide> = lines
+            .filter_map(|line| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                let seq = fields.get(seq_col)?.trim().to_string();
+                if seq.is_empty() {
+                    return None;
+                }
+                let protein: Arc<str> = protein_col
+                    .and_then(|i| fields.get(i).map(|s| s.trim()))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(seq.as_str())
+                    .into();
+                let is_decoy = decoy_col
+                    .and_then(|i| fields.get(i))
+                    .map(|s| s.trim().eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+
+                let digest = Digest {
+                    decoy: is_decoy,
+                    semi_enzymatic: false,
+                    sequence: seq,
+                    protein,
+                    missed_cleavages: 0,
+                    position: Position::Full,
+                };
+                match Peptide::try_from(digest) {
+                    Ok(p)
+                        if p.monoisotopic >= self.peptide_min_mass
+                            && p.monoisotopic <= self.peptide_max_mass =>
+                    {
+                        Some(p)
+                    }
+                    Ok(_) => None,
+                    Err(e) => {
+                        log::warn!("skipping invalid peptide sequence: {e:?}");
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        // Build target sequence set for decoy deduplication.
+        let targets: DashSet<Vec<u8>, FnvBuildHasher> = DashSet::default();
+        raw.iter()
+            .filter(|p| !p.decoy)
+            .for_each(|p| { targets.insert(p.sequence.to_vec()); });
+
+        // Emit targets (+ generated decoys) into the final list.
+        let mut result: Vec<Peptide> = raw
+            .into_iter()
+            .flat_map(|peptide| {
+                if self.generate_decoys && !peptide.decoy {
+                    let rev = peptide.reverse();
+                    if !targets.contains(&rev.sequence[..]) {
+                        vec![rev, peptide]
+                    } else {
+                        vec![peptide]
+                    }
+                } else {
+                    vec![peptide]
+                }
+            })
+            .collect();
+
+        Self::reorder_peptides(&mut result);
+        result
     }
 
     pub fn build(self, fasta: Fasta) -> IndexedDatabase {
@@ -668,6 +773,7 @@ mod test {
             decoy_tag: "rev_".into(),
             generate_decoys: false,
             fasta: "none".into(),
+            peptides: None,
             prefilter: false,
             prefilter_chunk_size: 0,
             prefilter_low_memory: true,
