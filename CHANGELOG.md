@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- **Bitmap-based preliminary search** (`use_bitmap: true`): an alternative to the bucketed binary-search preliminary scoring stage.
+  - Theoretical fragment ions (forward: A/B/C series; reverse: X/Y/Z series) are encoded as packed bitsets per peptide, stored alongside a sorted precursor-mass array for fast range lookup.
+  - Experimental spectra are encoded at query time using the fragment tolerance window; bins spanning a tolerance boundary are all set, so bin-edge fragments are never missed.
+  - Scoring is a bitwise AND + popcount, which is SIMD-friendly and extremely fast.  Only the top-N candidates from this stage proceed to full hyperscore rescoring.
+  - New `database.bitmap_size` config parameter (default `30`) controls the number of 64-bit words per peptide bitmap (e.g. 30 → 1 920 bins spanning `peptide_min_mass`…`peptide_max_mass`).
+  - New top-level `use_bitmap` boolean config parameter (default `false`) to opt in.
+  - **Requires deisotoped spectra** (`deisotope: true`); each peak must carry a resolved neutral monoisotopic mass.
+
 ## [v0.15.0-alpha]
 ### Added
 - Initial support for LFQ on data with ion mobility.
