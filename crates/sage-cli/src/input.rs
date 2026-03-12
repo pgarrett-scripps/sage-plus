@@ -47,6 +47,8 @@ pub struct Search {
     pub annotate_matches: bool,
 
     pub score_type: ScoreType,
+    /// Use the bitmap-based preliminary search (requires `deisotope: true`).
+    pub use_bitmap: bool,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +78,7 @@ pub struct Input {
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
+    pub use_bitmap: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -351,6 +354,7 @@ impl Input {
             bruker_config: self.bruker_config.unwrap_or_default(),
             write_report: self.write_report.unwrap_or(false),
             score_type,
+            use_bitmap: self.use_bitmap.unwrap_or(false),
         })
     }
 }

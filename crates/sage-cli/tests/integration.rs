@@ -33,6 +33,7 @@ fn integration() -> anyhow::Result<()> {
         wide_window: false,
         annotate_matches: false,
         score_type: ScoreType::SageHyperScore,
+        use_bitmap: false,
     };
 
     let psm = scorer.score(&processed);

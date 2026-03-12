@@ -1,3 +1,4 @@
+use crate::bitmap::BitmapIndex;
 use crate::enzyme::{group_digests, Enzyme, EnzymeParameters};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonSeries, Kind};
@@ -61,6 +62,9 @@ impl From<EnzymeBuilder> for EnzymeParameters {
 pub struct Builder {
     /// This parameter allows tuning of the internal search structure
     pub bucket_size: Option<usize>,
+    /// Number of u64 words per peptide in the bitmap index (default 30 → 1920 bins).
+    /// Only used when `use_bitmap` is enabled on the scorer.
+    pub bitmap_size: Option<usize>,
 
     pub enzyme: Option<EnzymeBuilder>,
     /// Minimum peptide monoisotopic mass that will be fragmented
@@ -97,6 +101,7 @@ impl Builder {
         let bucket_size = self.bucket_size.unwrap_or(8192).next_power_of_two();
         Parameters {
             bucket_size,
+            bitmap_size: self.bitmap_size.unwrap_or(30),
             peptide_min_mass: self.peptide_min_mass.unwrap_or(500.0),
             peptide_max_mass: self.peptide_max_mass.unwrap_or(5000.0),
             ion_kinds: self.ion_kinds.unwrap_or(vec![Kind::B, Kind::Y]),
@@ -122,6 +127,7 @@ impl Builder {
 #[derive(Serialize, Clone, Debug)]
 pub struct Parameters {
     pub bucket_size: usize,
+    pub bitmap_size: usize,
     pub enzyme: EnzymeBuilder,
     pub peptide_min_mass: f32,
     pub peptide_max_mass: f32,
@@ -351,6 +357,14 @@ impl Parameters {
             .flat_map(|(a, b)| b.iter().map(|b| (*a, *b)))
             .collect::<Vec<(ModificationSpecificity, f32)>>();
 
+        let bitmap_index = BitmapIndex::build(
+            &target_decoys,
+            &self.ion_kinds,
+            self.bitmap_size,
+            self.peptide_min_mass,
+            self.peptide_max_mass,
+        );
+
         IndexedDatabase {
             peptides: target_decoys,
             fragments,
@@ -360,6 +374,7 @@ impl Parameters {
             generate_decoys: self.generate_decoys,
             potential_mods,
             decoy_tag: self.decoy_tag,
+            bitmap_index,
         }
     }
 }
@@ -392,6 +407,8 @@ pub struct IndexedDatabase {
     pub bucket_size: usize,
     pub generate_decoys: bool,
     pub decoy_tag: String,
+    /// Bitmap-based preliminary search index (forward/reverse ion bitsets per peptide).
+    pub bitmap_index: BitmapIndex,
 }
 
 impl IndexedDatabase {
@@ -632,6 +649,7 @@ mod test {
 
         let params = Parameters {
             bucket_size: 128,
+            bitmap_size: 30,
             enzyme: EnzymeBuilder {
                 missed_cleavages: Some(1),
                 min_len: Some(6),

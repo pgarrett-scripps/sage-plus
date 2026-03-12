@@ -225,6 +225,10 @@ pub struct Scorer<'db> {
     pub wide_window: bool,
     pub annotate_matches: bool,
     pub score_type: ScoreType,
+
+    /// Use the bitmap-based preliminary search instead of the bucketed binary search.
+    /// Requires deisotoped spectra (each peak must carry a resolved neutral monoisotopic mass).
+    pub use_bitmap: bool,
 }
 
 #[inline(always)]
@@ -411,7 +415,166 @@ impl<'db> Scorer<'db> {
         }
     }
 
+    // ── Bitmap-based preliminary search ──────────────────────────────────────
+
+    /// Inner bitmap scoring for a single (precursor_mass, precursor_charge, isotope_error) triple.
+    fn matched_peaks_bitmap_with_isotope(
+        &self,
+        exp_bitmap: &[u64],
+        precursor_mass: f32,
+        precursor_charge: u8,
+        precursor_tol: Tolerance,
+        isotope_error: i8,
+    ) -> InitialHits {
+        use crate::mass::NEUTRON;
+        let search_mass = precursor_mass - isotope_error as f32 * NEUTRON;
+        let (lo, hi) = precursor_tol.bounds(search_mass);
+
+        let bm = &self.db.bitmap_index;
+        let start = bm.precursor_masses.partition_point(|&m| m < lo);
+        let end = bm.precursor_masses.partition_point(|&m| m <= hi);
+
+        if start >= end {
+            return InitialHits::default();
+        }
+
+        let potential = end - start;
+        let mut hits = InitialHits {
+            matched_peaks: 0,
+            scored_candidates: 0,
+            preliminary: vec![PreScore::default(); potential],
+        };
+
+        for i in start..end {
+            let (fwd, rev) = bm.score_peptide(exp_bitmap, i);
+            let total = fwd + rev;
+            if total > 0 {
+                let idx = i - start;
+                let sc = &mut hits.preliminary[idx];
+                sc.matched = total;
+                sc.peptide = bm.peptide_indices[i];
+                sc.precursor_charge = precursor_charge;
+                sc.isotope_error = isotope_error;
+                hits.scored_candidates += 1;
+                hits.matched_peaks += total as usize;
+            }
+        }
+
+        if hits.matched_peaks == 0 {
+            return hits;
+        }
+
+        self.trim_hits(&mut hits);
+        hits
+    }
+
+    /// Bitmap preliminary search for one (precursor_mass, precursor_charge),
+    /// iterating over isotope errors when configured.
+    fn matched_peaks_bitmap(
+        &self,
+        exp_bitmap: &[u64],
+        precursor_mass: f32,
+        precursor_charge: u8,
+        precursor_tol: Tolerance,
+    ) -> InitialHits {
+        if self.min_isotope_err != self.max_isotope_err {
+            let mut hits =
+                (self.min_isotope_err..=self.max_isotope_err).fold(
+                    InitialHits::default(),
+                    |mut hits, isotope| {
+                        hits += self.matched_peaks_bitmap_with_isotope(
+                            exp_bitmap,
+                            precursor_mass,
+                            precursor_charge,
+                            precursor_tol,
+                            isotope,
+                        );
+                        hits
+                    },
+                );
+            self.trim_hits(&mut hits);
+            hits
+        } else {
+            self.matched_peaks_bitmap_with_isotope(
+                exp_bitmap,
+                precursor_mass,
+                precursor_charge,
+                precursor_tol,
+                0,
+            )
+        }
+    }
+
+    /// Bitmap-based `initial_hits` — mirrors the structure of the bucketed path
+    /// but uses `BitmapIndex` for scoring.
+    ///
+    /// **Requires deisotoped peaks**: each `peak.mass` must be the neutral
+    /// monoisotopic mass M = (mz − H) × z as resolved by deisotoping.
+    fn initial_hits_bitmap(
+        &self,
+        query: &ProcessedSpectrum<Peak>,
+        precursor: &Precursor,
+    ) -> InitialHits {
+        let exp_bitmap = self
+            .db
+            .bitmap_index
+            .experimental_bitmap(&query.peaks, self.fragment_tol);
+
+        let mz = precursor.mz - PROTON;
+
+        let mut hits = if self.wide_window {
+            (self.min_precursor_charge..=self.max_precursor_charge).fold(
+                InitialHits::default(),
+                |mut hits, precursor_charge| {
+                    let precursor_mass = mz * precursor_charge as f32;
+                    let precursor_tol = precursor
+                        .isolation_window
+                        .unwrap_or(Tolerance::Da(-2.4, 2.4))
+                        * precursor_charge as f32;
+                    hits += self.matched_peaks_bitmap(
+                        &exp_bitmap,
+                        precursor_mass,
+                        precursor_charge,
+                        precursor_tol,
+                    );
+                    hits
+                },
+            )
+        } else if precursor.charge.is_some() && !self.override_precursor_charge {
+            let charge = precursor.charge.unwrap();
+            let precursor_mass = mz * charge as f32;
+            self.matched_peaks_bitmap(
+                &exp_bitmap,
+                precursor_mass,
+                charge,
+                self.precursor_tol,
+            )
+        } else {
+            (self.min_precursor_charge..=self.max_precursor_charge).fold(
+                InitialHits::default(),
+                |mut hits, precursor_charge| {
+                    let precursor_mass = mz * precursor_charge as f32;
+                    hits += self.matched_peaks_bitmap(
+                        &exp_bitmap,
+                        precursor_mass,
+                        precursor_charge,
+                        self.precursor_tol,
+                    );
+                    hits
+                },
+            )
+        };
+        self.trim_hits(&mut hits);
+        hits
+    }
+
+    // ── Bucketed binary-search preliminary search (existing) ─────────────────
+
     fn initial_hits(&self, query: &ProcessedSpectrum<Peak>, precursor: &Precursor) -> InitialHits {
+        if self.use_bitmap {
+            return self.initial_hits_bitmap(query, precursor);
+        }
+
         // Sage operates on masses without protons; [M] instead of [MH+]
         let mz = precursor.mz - PROTON;
 
