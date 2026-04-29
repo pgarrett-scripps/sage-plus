@@ -9,6 +9,9 @@ use crate::unimod;
 pub struct PeffMod {
     pub protein_pos: u32,
     pub mass: f32,
+    /// Human-readable Unimod name as it appeared in the PEFF entry
+    /// (e.g. `"Phospho"`); used to label this delta mass in output.
+    pub name: String,
 }
 
 /// Returns true when the supplied file contents look like a PEFF file
@@ -150,6 +153,12 @@ fn parse_mod_res_unimod(description: &str) -> Vec<PeffMod> {
             log::warn!("PEFF: unknown UNIMOD accession {}", accession);
             continue;
         };
+        let raw_name = fields[2].trim();
+        // Prefer the canonical Unimod name from the embedded table; fall
+        // back to the name string supplied by the PEFF entry.
+        let name = unimod::canonical_name(raw_name)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| raw_name.to_string());
         for raw_pos in positions_str.split(',') {
             let p = raw_pos.trim();
             let Ok(pos_1based) = p.parse::<u32>() else {
@@ -161,6 +170,7 @@ fn parse_mod_res_unimod(description: &str) -> Vec<PeffMod> {
             out.push(PeffMod {
                 protein_pos: pos_1based - 1,
                 mass,
+                name: name.clone(),
             });
         }
     }

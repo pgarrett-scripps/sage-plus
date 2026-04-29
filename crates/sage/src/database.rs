@@ -2,9 +2,10 @@ use crate::enzyme::{group_digests, DigestGroup, Enzyme, EnzymeParameters};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
-use crate::modification::{validate_mods, validate_var_mods, ModificationSpecificity};
+use crate::modification::{validate_mods, validate_var_mods, MassOrName, ModificationSpecificity};
 use crate::peff::PeffMod;
 use crate::peptide::Peptide;
+use crate::unimod;
 use dashmap::DashSet;
 use fnv::{FnvBuildHasher, FnvHashSet};
 use std::sync::Arc;
@@ -110,10 +111,13 @@ pub struct Builder {
     /// Minimum ion index to be generated: 1 will remove b1/y1 ions
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
-    /// Static modifications to add to matching amino acids
-    pub static_mods: Option<HashMap<String, f32>>,
-    /// Variable modifications to add to matching amino acids
-    pub variable_mods: Option<HashMap<String, Vec<f32>>>,
+    /// Static modifications to add to matching amino acids. Each value may
+    /// be either a numeric monoisotopic delta mass or a Unimod modification
+    /// name (e.g. `"Oxidation"`); names are resolved at validation time.
+    pub static_mods: Option<HashMap<String, MassOrName>>,
+    /// Variable modifications to add to matching amino acids. Each list
+    /// entry accepts the same number-or-name forms as `static_mods`.
+    pub variable_mods: Option<HashMap<String, Vec<MassOrName>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
     /// Use this prefix for decoy proteins
@@ -199,6 +203,16 @@ impl Parameters {
 
     pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
         log::trace!("digesting fasta");
+        // Register every PEFF-derived modification's Unimod name once, so
+        // peptides that pick up these masses render with the name in
+        // downstream output.
+        for mods in fasta.peff_mods.values() {
+            for m in mods {
+                if !m.name.is_empty() {
+                    unimod::register_label(m.mass, &m.name);
+                }
+            }
+        }
         let enzyme = self.enzyme.clone().into();
         // Generate all tryptic peptide sequences, including reversed (decoy)
         // and missed cleavages, if applicable.

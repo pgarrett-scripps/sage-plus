@@ -411,20 +411,31 @@ impl TryFrom<Digest> for Peptide {
     }
 }
 
+/// Render a delta mass as a bracketed mod tag, preferring a registered
+/// Unimod name (e.g. `[Oxidation]`) when one has been associated with the
+/// mass; otherwise fall back to the signed numeric form (e.g. `[+15.99491]`).
+fn fmt_mod(f: &mut std::fmt::Formatter<'_>, mass: f32) -> std::fmt::Result {
+    match crate::unimod::label_for(mass) {
+        Some(name) => write!(f, "[{}]", name),
+        None => write!(f, "[{:+}]", mass),
+    }
+}
+
 impl std::fmt::Display for Peptide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(m) = self.nterm {
-            write!(f, "[{:+}]-", m)?;
+            fmt_mod(f, m)?;
+            write!(f, "-")?;
         }
         for (c, m) in self.sequence.iter().zip(self.modifications.iter()) {
+            write!(f, "{}", *c as char)?;
             if *m != 0.0 {
-                write!(f, "{}[{:+}]", *c as char, m)?;
-            } else {
-                write!(f, "{}", *c as char)?;
+                fmt_mod(f, *m)?;
             }
         }
         if let Some(m) = self.cterm {
-            write!(f, "-[{:+}]", m)?;
+            write!(f, "-")?;
+            fmt_mod(f, m)?;
         }
         Ok(())
     }
@@ -770,6 +781,22 @@ mod test {
         assert!(result.iter().any(|s| s == "ACDEK"));
         assert!(result.iter().any(|s| s.contains("AC[+57.02146]DEK")));
         assert!(result.iter().any(|s| s.contains("ACD[+79.96633]EK")));
+    }
+
+    #[test]
+    fn display_uses_registered_unimod_names() {
+        // Pick a mass that is unique to this test to avoid interactions
+        // with other tests sharing the global label registry.
+        let unique_mass = 4242.42424_f32;
+        crate::unimod::register_label(unique_mass, "TestMod");
+        let mut peptide = build_peptide("ACDEK");
+        peptide.modifications[1] = unique_mass;
+        let s = peptide.to_string();
+        assert!(s.contains("C[TestMod]"), "got {}", s);
+        // Unregistered masses still render as signed numbers.
+        let mut other = build_peptide("ACDEK");
+        other.modifications[2] = 10.0;
+        assert!(other.to_string().contains("D[+10]"));
     }
 
     #[test]
