@@ -254,14 +254,23 @@ impl Peptide {
         }
     }
 
-    /// Apply variable modifications, then static modifications to a peptide
+    /// Apply variable modifications, then static modifications to a peptide.
+    ///
+    /// `positional_mods` is a list of `(peptide_index, mass)` candidates
+    /// already translated to peptide-local 0-based positions (e.g. those
+    /// derived from PEFF `\ModResUnimod` annotations). They are merged into
+    /// the same combinatorial pool as `variable_mods` and counted against
+    /// `combinations`. Duplicate `(site, mass)` candidates — including
+    /// duplicates between variable mods and positional mods — are removed
+    /// after rounding the mass to 5 decimal places.
     pub fn apply(
         mut self,
         variable_mods: &[(ModificationSpecificity, f32)],
+        positional_mods: &[(u32, f32)],
         static_mods: &HashMap<ModificationSpecificity, f32>,
         combinations: usize,
     ) -> Vec<Peptide> {
-        if variable_mods.is_empty() {
+        if variable_mods.is_empty() && positional_mods.is_empty() {
             for (target, mass) in static_mods {
                 self.static_mods(*target, *mass);
             }
@@ -272,6 +281,21 @@ impl Peptide {
             for (residue, mass) in variable_mods.iter() {
                 self.push_resi(&mut mods, *residue, *mass);
             }
+            let seq_len = self.sequence.len() as u32;
+            for (idx, mass) in positional_mods.iter() {
+                if *idx < seq_len {
+                    mods.push((Site::Sequence(*idx), *mass));
+                }
+            }
+
+            // Dedup `(Site, mass)` candidates with mass rounded to 5 decimal
+            // places. This collapses the case where a user-supplied variable
+            // mod and a PEFF-derived mod resolve to the same site/mass.
+            let mut seen = FnvHashSet::default();
+            mods.retain(|(site, mass)| {
+                let key = (*site, (*mass * 1e5).round() as i64);
+                seen.insert(key)
+            });
 
             let mut modified = Vec::new();
             modified.push(self.clone());
@@ -349,7 +373,7 @@ impl TryFrom<DigestGroup> for Peptide {
 
     fn try_from(value: DigestGroup) -> Result<Self, Self::Error> {
         let mut pep = Peptide::try_from(value.reference)?;
-        pep.proteins = value.proteins;
+        pep.proteins = value.proteins.into_iter().map(|(p, _)| p).collect();
         Ok(pep)
     }
 }
@@ -387,20 +411,31 @@ impl TryFrom<Digest> for Peptide {
     }
 }
 
+/// Render a delta mass as a bracketed mod tag, preferring a registered
+/// Unimod name (e.g. `[Oxidation]`) when one has been associated with the
+/// mass; otherwise fall back to the signed numeric form (e.g. `[+15.99491]`).
+fn fmt_mod(f: &mut std::fmt::Formatter<'_>, mass: f32) -> std::fmt::Result {
+    match crate::unimod::label_for(mass) {
+        Some(name) => write!(f, "[{}]", name),
+        None => write!(f, "[{:+}]", mass),
+    }
+}
+
 impl std::fmt::Display for Peptide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(m) = self.nterm {
-            write!(f, "[{:+}]-", m)?;
+            fmt_mod(f, m)?;
+            write!(f, "-")?;
         }
         for (c, m) in self.sequence.iter().zip(self.modifications.iter()) {
+            write!(f, "{}", *c as char)?;
             if *m != 0.0 {
-                write!(f, "{}[{:+}]", *c as char, m)?;
-            } else {
-                write!(f, "{}", *c as char)?;
+                fmt_mod(f, *m)?;
             }
         }
         if let Some(m) = self.cterm {
-            write!(f, "-[{:+}]", m)?;
+            write!(f, "-")?;
+            fmt_mod(f, m)?;
         }
         Ok(())
     }
@@ -420,7 +455,7 @@ mod test {
         let static_mods = HashMap::default();
         peptide
             .clone()
-            .apply(&mods, &static_mods, combo)
+            .apply(&mods, &[], &static_mods, combo)
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>()
@@ -667,7 +702,7 @@ mod test {
         let variable_mods = [(Residue(b'C'), 30.0)];
 
         let peptides = peptide
-            .apply(&variable_mods, &static_mods, 2)
+            .apply(&variable_mods, &[], &static_mods, 2)
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>();
@@ -717,5 +752,75 @@ mod test {
                 (Sequence(7), 43.0),
             ]
         );
+    }
+
+    fn build_peptide(seq: &str) -> Peptide {
+        Peptide::try_from(Digest {
+            sequence: seq.into(),
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn positional_mods_generate_combinations() {
+        let peptide = build_peptide("ACDEK");
+        let static_mods = HashMap::default();
+        // Two PEFF-derived candidate mods at peptide positions 1 (C) and 2 (D)
+        let positional = vec![(1u32, 57.021_46_f32), (2u32, 79.966_33_f32)];
+
+        let result = peptide
+            .clone()
+            .apply(&[], &positional, &static_mods, 2)
+            .into_iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+
+        // Expected: unmodified, +57 on C, +80 on D, +57+80 (combination of both)
+        assert_eq!(result.len(), 4, "{:?}", result);
+        assert!(result.iter().any(|s| s == "ACDEK"));
+        assert!(result.iter().any(|s| s.contains("AC[+57.02146]DEK")));
+        assert!(result.iter().any(|s| s.contains("ACD[+79.96633]EK")));
+    }
+
+    #[test]
+    fn display_uses_registered_unimod_names() {
+        // Pick a mass that is unique to this test to avoid interactions
+        // with other tests sharing the global label registry.
+        let unique_mass = 4242.42424_f32;
+        crate::unimod::register_label(unique_mass, "TestMod");
+        let mut peptide = build_peptide("ACDEK");
+        peptide.modifications[1] = unique_mass;
+        let s = peptide.to_string();
+        assert!(s.contains("C[TestMod]"), "got {}", s);
+        // Unregistered masses still render as signed numbers.
+        let mut other = build_peptide("ACDEK");
+        other.modifications[2] = 10.0;
+        assert!(other.to_string().contains("D[+10]"));
+    }
+
+    #[test]
+    fn positional_mods_deduped_against_variable_mods() {
+        use ModificationSpecificity::Residue;
+        let peptide = build_peptide("ACDEK");
+        let static_mods = HashMap::default();
+
+        // The variable mod (any C, +57.02146) and the PEFF positional mod
+        // at the C residue resolve to the same `(Site::Sequence(1), mass)`.
+        // After dedup at 5 dp they should produce a single modified variant
+        // (plus the unmodified baseline) — not two duplicates.
+        let variable = [(Residue(b'C'), 57.021_46_f32)];
+        let positional = vec![(1u32, 57.021_46_f32)];
+
+        let result = peptide
+            .clone()
+            .apply(&variable, &positional, &static_mods, 2)
+            .into_iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(result.len(), 2, "{:?}", result);
+        assert!(result.iter().any(|s| s == "ACDEK"));
+        assert!(result.iter().any(|s| s.contains("AC[+57.02146]DEK")));
     }
 }

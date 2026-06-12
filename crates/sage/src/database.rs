@@ -1,16 +1,55 @@
-use crate::enzyme::{group_digests, Enzyme, EnzymeParameters};
+use crate::enzyme::{group_digests, DigestGroup, Enzyme, EnzymeParameters};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
-use crate::modification::{validate_mods, validate_var_mods, ModificationSpecificity};
+use crate::modification::{validate_mods, validate_var_mods, MassOrName, ModificationSpecificity};
+use crate::peff::PeffMod;
 use crate::peptide::Peptide;
+use crate::unimod;
 use dashmap::DashSet;
-use fnv::FnvBuildHasher;
+use fnv::{FnvBuildHasher, FnvHashSet};
+use std::sync::Arc;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::Hash;
+
+/// Translate per-protein PEFF modifications into peptide-local positions for
+/// a single `DigestGroup`. The same cleaved sequence may originate from
+/// several proteins, each with its own `\ModResUnimod` annotations and start
+/// offset; this collects the union and dedups duplicate `(peptide_index, mass)`
+/// candidates by mass rounded to 5 decimal places.
+fn collect_peff_positional_mods(
+    group: &DigestGroup,
+    peff_mods: &HashMap<Arc<str>, Vec<PeffMod>>,
+) -> Vec<(u32, f32)> {
+    if peff_mods.is_empty() {
+        return Vec::new();
+    }
+    let seq_len = group.reference.sequence.len() as u32;
+    let mut out: Vec<(u32, f32)> = Vec::new();
+    let mut seen: FnvHashSet<(u32, i64)> = FnvHashSet::default();
+    for (acc, protein_start) in &group.proteins {
+        let Some(mods) = peff_mods.get(acc) else {
+            continue;
+        };
+        for m in mods {
+            if m.protein_pos < *protein_start {
+                continue;
+            }
+            let local = m.protein_pos - *protein_start;
+            if local >= seq_len {
+                continue;
+            }
+            let key = (local, (m.mass * 1e5).round() as i64);
+            if seen.insert(key) {
+                out.push((local, m.mass));
+            }
+        }
+    }
+    out
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct EnzymeBuilder {
@@ -72,10 +111,13 @@ pub struct Builder {
     /// Minimum ion index to be generated: 1 will remove b1/y1 ions
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
-    /// Static modifications to add to matching amino acids
-    pub static_mods: Option<HashMap<String, f32>>,
-    /// Variable modifications to add to matching amino acids
-    pub variable_mods: Option<HashMap<String, Vec<f32>>>,
+    /// Static modifications to add to matching amino acids. Each value may
+    /// be either a numeric monoisotopic delta mass or a Unimod modification
+    /// name (e.g. `"Oxidation"`); names are resolved at validation time.
+    pub static_mods: Option<HashMap<String, MassOrName>>,
+    /// Variable modifications to add to matching amino acids. Each list
+    /// entry accepts the same number-or-name forms as `static_mods`.
+    pub variable_mods: Option<HashMap<String, Vec<MassOrName>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
     /// Use this prefix for decoy proteins
@@ -161,6 +203,16 @@ impl Parameters {
 
     pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
         log::trace!("digesting fasta");
+        // Register every PEFF-derived modification's Unimod name once, so
+        // peptides that pick up these masses render with the name in
+        // downstream output.
+        for mods in fasta.peff_mods.values() {
+            for m in mods {
+                if !m.name.is_empty() {
+                    unimod::register_label(m.mass, &m.name);
+                }
+            }
+        }
         let enzyme = self.enzyme.clone().into();
         // Generate all tryptic peptide sequences, including reversed (decoy)
         // and missed cleavages, if applicable.
@@ -189,14 +241,20 @@ impl Parameters {
                 targets.insert(digest.reference.sequence.clone().into_bytes());
             });
 
+        let peff_mods = &fasta.peff_mods;
         log::trace!("modifying peptides");
         let mut target_decoys = digests
             .into_par_iter()
-            .map(Peptide::try_from)
-            .filter_map(Result::ok)
-            .flat_map_iter(|peptide| {
+            .map(|group| {
+                let positional = collect_peff_positional_mods(&group, peff_mods);
+                (group, positional)
+            })
+            .filter_map(|(group, positional)| {
+                Peptide::try_from(group).ok().map(|p| (p, positional))
+            })
+            .flat_map_iter(|(peptide, positional)| {
                 peptide
-                    .apply(&mods, &self.static_mods, self.max_variable_mods)
+                    .apply(&mods, &positional, &self.static_mods, self.max_variable_mods)
                     .into_iter()
                     .filter(|peptide| {
                         peptide.monoisotopic >= self.peptide_min_mass

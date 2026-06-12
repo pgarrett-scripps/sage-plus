@@ -1,10 +1,13 @@
 use crate::enzyme::{Digest, EnzymeParameters};
+use crate::peff::{self, PeffMod};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Fasta {
     pub targets: Vec<(Arc<str>, String)>,
+    pub peff_mods: HashMap<Arc<str>, Vec<PeffMod>>,
     decoy_tag: String,
     // Should we ignore decoys in the fasta database
     // and generate them internally?
@@ -12,9 +15,20 @@ pub struct Fasta {
 }
 
 impl Fasta {
-    // Parse a string into a fasta database
+    // Parse a string into a fasta database (auto-detects PEFF input).
     pub fn parse<S: Into<String>>(contents: String, decoy_tag: S, generate_decoys: bool) -> Fasta {
         let decoy_tag = decoy_tag.into();
+
+        if peff::looks_like_peff(&contents) {
+            log::info!("PEFF input detected, parsing per-protein modifications");
+            let (targets, peff_mods) = peff::parse(&contents, &decoy_tag, generate_decoys);
+            return Fasta {
+                targets,
+                peff_mods,
+                decoy_tag,
+                generate_decoys,
+            };
+        }
 
         let mut targets = Vec::new();
         let mut last_id = "";
@@ -50,6 +64,7 @@ impl Fasta {
 
         Fasta {
             targets,
+            peff_mods: HashMap::new(),
             decoy_tag,
             generate_decoys,
         }
@@ -81,10 +96,25 @@ impl Fasta {
     pub fn iter_chunks(&self, chunk_size: usize) -> impl Iterator<Item = Self> + '_ {
         self.targets
             .chunks(chunk_size)
-            .map(move |target_chunk| Self {
-                targets: target_chunk.to_vec(),
-                decoy_tag: self.decoy_tag.clone(),
-                generate_decoys: self.generate_decoys,
+            .map(move |target_chunk| {
+                let peff_mods = if self.peff_mods.is_empty() {
+                    HashMap::new()
+                } else {
+                    target_chunk
+                        .iter()
+                        .filter_map(|(acc, _)| {
+                            self.peff_mods
+                                .get(acc)
+                                .map(|m| (acc.clone(), m.clone()))
+                        })
+                        .collect()
+                };
+                Self {
+                    targets: target_chunk.to_vec(),
+                    peff_mods,
+                    decoy_tag: self.decoy_tag.clone(),
+                    generate_decoys: self.generate_decoys,
+                }
             })
     }
 }

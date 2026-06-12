@@ -19,6 +19,9 @@ pub struct Digest {
     pub sequence: String,
     /// Protein accession
     pub protein: Arc<str>,
+    /// 0-based start offset of the cleaved peptide in its protein.
+    /// Used to translate PEFF protein-position mods into peptide-local positions.
+    pub protein_start: u32,
     /// Missed cleavages
     pub missed_cleavages: u8,
     /// Is this an N-terminal peptide of the protein?
@@ -27,7 +30,9 @@ pub struct Digest {
 
 pub struct DigestGroup {
     pub reference: Digest,
-    pub proteins: Vec<Arc<str>>,
+    /// All proteins that contain this exact cleaved sequence at their stored
+    /// start offset. Each tuple is `(protein_accession, protein_start)`.
+    pub proteins: Vec<(Arc<str>, u32)>,
 }
 
 pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
@@ -47,13 +52,17 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             && digest.position == curr_group.reference.position
             && digest.sequence == curr_group.reference.sequence
         {
-            curr_group.proteins.push(digest.protein);
+            curr_group
+                .proteins
+                .push((digest.protein, digest.protein_start));
         } else {
             curr_group.proteins.sort_unstable();
             groups.push(curr_group);
+            let protein = digest.protein.clone();
+            let protein_start = digest.protein_start;
             curr_group = DigestGroup {
-                reference: digest.clone(),
-                proteins: vec![digest.protein],
+                reference: digest,
+                proteins: vec![(protein, protein_start)],
             };
         }
     }
@@ -88,6 +97,7 @@ impl Digest {
             decoy: true,
             semi_enzymatic: self.semi_enzymatic,
             protein: self.protein.clone(),
+            protein_start: self.protein_start,
             sequence: sequence.into_iter().collect(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
@@ -341,6 +351,7 @@ impl EnzymeParameters {
                     semi_enzymatic: site.semi_enzymatic,
                     position,
                     protein: protein.clone(),
+                    protein_start: start as u32,
                 });
             }
         }
@@ -365,6 +376,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
             Digest {
                 decoy: false,
@@ -373,6 +385,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
         ];
 
@@ -388,6 +401,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
             Digest {
                 decoy: false,
@@ -396,6 +410,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Internal,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
         ];
 
