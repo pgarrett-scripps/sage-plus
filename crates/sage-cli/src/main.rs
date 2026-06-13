@@ -1,6 +1,7 @@
 use clap::{value_parser, Arg, Command, ValueHint};
 use rayon::ThreadPoolBuilder;
 use sage_cli::input::Input;
+use sage_cli::memory;
 use sage_cli::runner::Runner;
 
 fn main() -> anyhow::Result<()> {
@@ -78,6 +79,12 @@ fn main() -> anyhow::Result<()> {
                 .help("Write percolator-compatible `.pin` output files"),
         )
         .arg(
+            Arg::new("localize")
+                .long("localize")
+                .action(clap::ArgAction::SetTrue)
+                .help("Compute PTM site localization and write site-level reports"),
+        )
+        .arg(
             Arg::new("write-report")
                 .long("write-report")
                 .action(clap::ArgAction::SetTrue)
@@ -94,6 +101,17 @@ fn main() -> anyhow::Result<()> {
                 .long("stack-size")
                 .value_parser(value_parser!(u32).range(1..))
                 .help("Set Rayon worker thread stack size in MiB (default: 2 MiB)")
+                .value_hint(ValueHint::Other),
+        )
+        .arg(
+            Arg::new("max-memory")
+                .long("max-memory")
+                .value_parser(value_parser!(f64))
+                .help(
+                    "Abort if Sage's memory use exceeds this many GiB, to keep the \
+                     system responsive (default: 90% of total RAM; 0 disables). \
+                     Also settable via SAGE_MAX_MEMORY_GB.",
+                )
                 .value_hint(ValueHint::Other),
         )
         .help_template(
@@ -114,6 +132,14 @@ fn main() -> anyhow::Result<()> {
         .stack_size(stack_size_bytes)
         .build_global()
         .expect("configure Rayon pool");
+
+    // Start the memory watchdog before any heavy allocation so a runaway search
+    // is terminated cleanly instead of freezing the host.
+    let max_memory_gib = matches.get_one::<f64>("max-memory").copied();
+    match memory::resolve_limit_bytes(max_memory_gib) {
+        Some(limit) => memory::spawn_memory_guard(limit),
+        None => log::info!("memory guard disabled"),
+    }
 
     let parallel = matches
         .get_one::<u16>("batch-size")

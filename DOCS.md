@@ -85,6 +85,9 @@ Options:
           Write parquet files instead of tab-separated files
       --write-pin
           Write percolator-compatible `.pin` output files
+      --max-memory <GiB>
+          Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
+          (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
   -h, --help
           Print help information
   -V, --version
@@ -120,6 +123,27 @@ Running Sage will produce several output files (located in either the current di
 - MS2 and MS3 quantitation results will be stored as a tab-separated file (`tmt.tsv`, `lfq.tsv`) if `quant.tmt` or `quant.lfq` options are used in the parameter file
 
 If `--parquet` is passed as a command line argument, `results.sage.parquet` (and optionally, `lfq.parquet`) will be written. These have a similar set of columns, but TMT values are stored as a nested array alongside PSM features
+
+#### Memory guard
+
+A search can balloon in memory — most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To prevent a runaway search from exhausting RAM and freezing the host, Sage runs a lightweight background watchdog that terminates the process **cleanly** (exit code 137) if either:
+
+- Sage's own resident memory exceeds a ceiling (default: 90% of total system RAM), or
+- system-wide available memory drops below a small safety floor (max of 1 GiB or 2% of RAM).
+
+The ceiling is set with `--max-memory <GiB>` (or the `SAGE_MAX_MEMORY_GB` environment variable); `--max-memory 0` disables the guard entirely. The watchdog polls a few times per second from a single thread and adds no overhead to the allocation hot path. When it trips it prints how to reduce the search size (e.g. lower `max_variable_mods` / `max_peff_variable_mods`, use a smaller FASTA, narrow tolerances, or enable `prefilter`).
+
+#### Sequence-ambiguity annotation
+
+Every PSM row carries two additional columns, `ambiguity_sequence` and `mass_shift`, that encode which residues are actually supported by fragment-ion evidence (a native port of the [SagePeptideAmbiguityAnnotator](https://github.com/pgarrett-scripps/SagePeptideAmbiguityAnnotator) tool):
+
+- **ambiguity_sequence**: the peptide string in which any run of residues lacking *both* forward (a/b/c) and reverse (x/y/z) ion cleavage evidence is wrapped in `(?...)`. For example `(?LQ)SRPAAPPAPGPGQLTLR` means the leading `L`/`Q` could be reordered without changing the matched peaks. When the experimental precursor mass does not match the peptide's calculated mass (e.g. in an open search), the residual mass is placed using the same coverage:
+  - `...T[+79.96633]...` — localized to a single residue,
+  - `(...)[+mass]` — confined to a region but not a single residue,
+  - a leading `{+mass}` — labile / cannot be localized (forward and reverse coverage overlap).
+- **mass_shift**: the residual `expmass - calcmass` (in Da) that was placed, or `0.0` when the precursor matches within `mass_shift_ppm`.
+
+These are computed for every search; mods are rendered in the same `[+mass]`/`[Name]` notation as the `peptide` column. The threshold used to decide whether a precursor delta mass is a real shift is configurable via the top-level **`mass_shift_ppm`** parameter (default: 50.0). It is deliberately independent of `precursor_tol`, so wide/open searches still surface and place real shifts.
 
 ## Configuration file schema
 
@@ -182,6 +206,7 @@ For additional information about configuration options and output file formats, 
       "]": [111.0]          // Applied to protein C-terminus
     }
     "max_variable_mods": 2, // Optional[int] {default=2} Limit k-combinations of variable modifications
+    "max_peff_variable_mods": 3, // Optional[int] Independent cap for PEFF mods; unset = share max_variable_mods budget
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
     "fasta": "dual.fasta"   // str: mandatory path to FASTA file
@@ -323,6 +348,7 @@ Example:
 #### Variable Modifications
 
 - **max_variable_mods**: Integer. Limit k-combinations of variable modifications (default: 2).
+- **max_peff_variable_mods**: Integer, optional. An independent per-peptide budget for PEFF/positional modifications (the per-protein `\ModResUnimod` annotations from a PEFF file). When **unset**, PEFF mods share the single `max_variable_mods` budget with the global variable mods (legacy behavior). When **set**, the two pools get independent budgets: a peptide may carry up to `max_variable_mods` global variable mods *and* up to `max_peff_variable_mods` PEFF mods simultaneously (subject to one mod per site). For example, `max_variable_mods: 1` with `max_peff_variable_mods: 3` allows broad search of up to 1 global mod per peptide while permitting up to 3 of the specific PEFF-annotated modifications.
 - **variable_mods**: Dictionary with characters as keys and list of floats (or single floats) as values. Represents variable modifications applied to amino acids or termini (default: {}).
   - Example: Apply a variable modification of 15.9949 to methionine, 49.2022 to the C-terminus of the peptide, 42.0 to the N-terminus of the protein, and 111.0 to the C-terminus of the protein.
     ```jsonc
@@ -433,6 +459,27 @@ Note on the settings below:
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
 - **parallel**: Boolean. Parse and search files in parallel. For large numbers of files or low RAM, setting this to false can reduce memory usage at the cost of running slower (default: true).
+- **localize**: Boolean. Compute PTM site localization and write site-level reports (default: false). Can also be enabled with the `--localize` CLI flag. See [PTM Site Localization](#ptm-site-localization).
+- **localize_q_value**: Float. Spectrum q-value cutoff for PSMs included in the PTM site reports (default: 0.01).
+
+## PTM Site Localization
+
+When `localize` is enabled, sage attempts to pinpoint which residue carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
+
+For each FDR-passing target PSM (spectrum q-value ≤ `localize_q_value`), and for each distinct variable-modification delta mass it carries, sage:
+1. recovers the candidate residues from the search's modification specificity rules (e.g. all S/T/Y for Phospho),
+2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
+3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
+4. converts the per-arrangement scores into an AScore-style delta between the two best arrangements and a per-site localization probability (the Andromeda/MaxQuant convention, summing to 1 across candidate sites).
+
+Two TSV reports are written:
+
+- **results.sage.ptm-sites.tsv**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score` (AScore), `candidate_sites`, `site_determining_ions_matched`/`_total`, and `site_probabilities` (a `residue+position:probability` list over all candidate sites).
+- **results.sage.protein-sites.tsv**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, with `num_psms`, `best_localization_probability`, `best_delta_localization_score`, and `best_spectrum_q`.
+
+Notes:
+- All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
+- Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
 
 ## mzML Paths
 
@@ -448,7 +495,7 @@ Note on the settings below:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible output files are: "results.json", "results.sage.tsv", "lfq.tsv", and "tmt.tsv"
+  - Possible output files are: "results.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv"
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

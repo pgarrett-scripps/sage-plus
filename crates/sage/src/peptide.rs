@@ -258,74 +258,99 @@ impl Peptide {
     ///
     /// `positional_mods` is a list of `(peptide_index, mass)` candidates
     /// already translated to peptide-local 0-based positions (e.g. those
-    /// derived from PEFF `\ModResUnimod` annotations). They are merged into
-    /// the same combinatorial pool as `variable_mods` and counted against
-    /// `combinations`. Duplicate `(site, mass)` candidates — including
-    /// duplicates between variable mods and positional mods — are removed
-    /// after rounding the mass to 5 decimal places.
+    /// derived from PEFF `\ModResUnimod` annotations).
+    ///
+    /// `combinations` caps the number of *global* variable mods on a peptide.
+    /// `max_positional_mods` controls the budget for positional/PEFF mods:
+    /// - `None` (default): positional mods share the single `combinations`
+    ///   budget with the global variable mods (legacy behavior). Duplicate
+    ///   `(site, mass)` candidates — including duplicates between the two
+    ///   pools — are removed after rounding the mass to 5 decimal places.
+    /// - `Some(p)`: the two pools get **independent** budgets — up to
+    ///   `combinations` global mods *and* up to `p` positional mods may be
+    ///   placed on the same peptide (the cross product of the per-pool
+    ///   combinations), subject to one-mod-per-site and one-N-/one-C-terminal
+    ///   constraint across the combined selection.
     pub fn apply(
-        mut self,
+        self,
         variable_mods: &[(ModificationSpecificity, f32)],
         positional_mods: &[(u32, f32)],
         static_mods: &HashMap<ModificationSpecificity, f32>,
         combinations: usize,
+        max_positional_mods: Option<usize>,
     ) -> Vec<Peptide> {
         if variable_mods.is_empty() && positional_mods.is_empty() {
+            let mut peptide = self;
             for (target, mass) in static_mods {
-                self.static_mods(*target, *mass);
+                peptide.static_mods(*target, *mass);
             }
-            self.monoisotopic += self.modification_mass();
-            vec![self]
-        } else {
-            let mut mods = Vec::new();
-            for (residue, mass) in variable_mods.iter() {
-                self.push_resi(&mut mods, *residue, *mass);
-            }
-            let seq_len = self.sequence.len() as u32;
-            for (idx, mass) in positional_mods.iter() {
-                if *idx < seq_len {
-                    mods.push((Site::Sequence(*idx), *mass));
+            peptide.monoisotopic += peptide.modification_mass();
+            return vec![peptide];
+        }
+
+        // Build the global variable-mod candidate pool, deduped by (site, mass).
+        let mut global: Vec<(Site, f32)> = Vec::new();
+        for (residue, mass) in variable_mods.iter() {
+            self.push_resi(&mut global, *residue, *mass);
+        }
+        dedup_candidates(&mut global);
+
+        // Build the positional (PEFF) candidate pool, deduped by (site, mass).
+        let seq_len = self.sequence.len() as u32;
+        let mut positional: Vec<(Site, f32)> = positional_mods
+            .iter()
+            .filter(|(idx, _)| *idx < seq_len)
+            .map(|(idx, mass)| (Site::Sequence(*idx), *mass))
+            .collect();
+        dedup_candidates(&mut positional);
+
+        let mut modified = Vec::new();
+        modified.push(self.clone());
+
+        match max_positional_mods {
+            // Legacy: one shared budget over the merged pool.
+            None => {
+                let mut mods = global;
+                mods.extend(positional);
+                dedup_candidates(&mut mods);
+                for n in 1..=combinations {
+                    for combination in mods.iter().combinations(n) {
+                        build_variant(&self, &combination, &mut modified);
+                    }
                 }
             }
-
-            // Dedup `(Site, mass)` candidates with mass rounded to 5 decimal
-            // places. This collapses the case where a user-supplied variable
-            // mod and a PEFF-derived mod resolve to the same site/mass.
-            let mut seen = FnvHashSet::default();
-            mods.retain(|(site, mass)| {
-                let key = (*site, (*mass * 1e5).round() as i64);
-                seen.insert(key)
-            });
-
-            let mut modified = Vec::new();
-            modified.push(self.clone());
-
-            for n in 1..=combinations {
-                'next: for combination in mods.iter().combinations(n).filter(no_duplicates) {
-                    let mut set = FnvHashSet::default();
-                    for (site, _) in &combination {
-                        if !set.insert(*site) {
-                            continue 'next;
+            // Independent budgets: cross product of the two pools' combinations.
+            Some(max_positional) => {
+                for g in 0..=combinations {
+                    for global_combo in global.iter().combinations(g) {
+                        for p in 0..=max_positional {
+                            if g + p == 0 {
+                                continue; // unmodified baseline already added
+                            }
+                            for positional_combo in positional.iter().combinations(p) {
+                                let mut selection = global_combo.clone();
+                                selection.extend(positional_combo.iter().copied());
+                                build_variant(&self, &selection, &mut modified);
+                            }
                         }
                     }
-                    let mut peptide = self.clone();
-                    for (site, mass) in combination {
-                        peptide.apply_site(*site, *mass);
-                    }
-                    modified.push(peptide);
                 }
+                // The same physical variant can be produced from either budget
+                // when a global and a positional candidate resolve to the same
+                // (site, mass); collapse those before applying static mods.
+                dedup_variants(&mut modified);
             }
-
-            // Apply static mods to all peptides
-            for peptide in modified.iter_mut() {
-                for (target, mass) in static_mods {
-                    peptide.static_mods(*target, *mass);
-                }
-                peptide.monoisotopic += peptide.modification_mass();
-            }
-
-            modified
         }
+
+        // Apply static mods to all peptides
+        for peptide in modified.iter_mut() {
+            for (target, mass) in static_mods {
+                peptide.static_mods(*target, *mass);
+            }
+            peptide.monoisotopic += peptide.modification_mass();
+        }
+
+        modified
     }
 
     pub fn reverse(&self) -> Peptide {
@@ -342,18 +367,50 @@ impl Peptide {
     }
 }
 
-fn no_duplicates(combination: &Vec<&(Site, f32)>) -> bool {
+/// Remove duplicate `(Site, mass)` candidates, rounding mass to 5 decimal places
+/// so a user-supplied variable mod and a PEFF-derived mod that resolve to the
+/// same site/mass collapse to one candidate.
+fn dedup_candidates(mods: &mut Vec<(Site, f32)>) {
+    let mut seen = FnvHashSet::default();
+    mods.retain(|(site, mass)| seen.insert((*site, (*mass * 1e5).round() as i64)));
+}
+
+/// Build one modified peptide from a candidate selection, rejecting it if it
+/// reuses a site or carries more than one N-terminal or one C-terminal mod.
+fn build_variant(base: &Peptide, selection: &[&(Site, f32)], out: &mut Vec<Peptide>) {
     let mut n = 0;
     let mut c = 0;
-    for (site, _) in combination {
+    let mut sites = FnvHashSet::default();
+    for (site, _) in selection {
         match site {
             Site::Nterm => n += 1,
             Site::Cterm => c += 1,
             _ => {}
         }
+        if !sites.insert(*site) {
+            return; // two mods on the same site
+        }
     }
+    if n > 1 || c > 1 {
+        return;
+    }
+    let mut peptide = base.clone();
+    for (site, mass) in selection {
+        peptide.apply_site(*site, *mass);
+    }
+    out.push(peptide);
+}
 
-    n <= 1 && c <= 1
+/// Collapse peptides that carry identical variable/positional modifications
+/// (static mods are not yet applied at this point). Fingerprint is the
+/// per-residue modification vector plus terminal mods, rounded to 5 dp.
+fn dedup_variants(modified: &mut Vec<Peptide>) {
+    let round = |m: f32| (m * 1e5).round() as i64;
+    let mut seen = FnvHashSet::default();
+    modified.retain(|p| {
+        let residues: Vec<i64> = p.modifications.iter().map(|m| round(*m)).collect();
+        seen.insert((residues, p.nterm.map(round), p.cterm.map(round)))
+    });
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -455,7 +512,7 @@ mod test {
         let static_mods = HashMap::default();
         peptide
             .clone()
-            .apply(&mods, &[], &static_mods, combo)
+            .apply(&mods, &[], &static_mods, combo, None)
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>()
@@ -702,7 +759,7 @@ mod test {
         let variable_mods = [(Residue(b'C'), 30.0)];
 
         let peptides = peptide
-            .apply(&variable_mods, &[], &static_mods, 2)
+            .apply(&variable_mods, &[], &static_mods, 2, None)
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>();
@@ -771,7 +828,7 @@ mod test {
 
         let result = peptide
             .clone()
-            .apply(&[], &positional, &static_mods, 2)
+            .apply(&[], &positional, &static_mods, 2, None)
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>();
@@ -812,15 +869,99 @@ mod test {
         let variable = [(Residue(b'C'), 57.021_46_f32)];
         let positional = vec![(1u32, 57.021_46_f32)];
 
+        // Both the shared-budget (None) and independent-budget (Some) paths must
+        // collapse the overlapping candidate to a single modified variant.
+        for max_positional in [None, Some(2)] {
+            let result = peptide
+                .clone()
+                .apply(&variable, &positional, &static_mods, 2, max_positional)
+                .into_iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>();
+
+            assert_eq!(result.len(), 2, "{:?} ({:?})", result, max_positional);
+            assert!(result.iter().any(|s| s == "ACDEK"));
+            assert!(result.iter().any(|s| s.contains("AC[+57.02146]DEK")));
+        }
+    }
+
+    #[test]
+    fn peff_global_combine_at_new_site_overlapping_panel() {
+        // Real-data condition the disjoint test misses: the global panel and the
+        // PEFF use the SAME mod (Acetyl on K). PEFF annotates ONE K; the global
+        // mod can land on EVERY K. With independent budgets, the search must
+        // produce a 2-acetyl variant = the PEFF acetyl PLUS a global acetyl at a
+        // *different* (non-PEFF) K. That is exactly the "new site in combination"
+        // mechanism. If this fails, iteration genuinely cannot grow the library.
+        use ModificationSpecificity::Residue;
+        let peptide = build_peptide("KAAKAAK"); // K at indices 0, 3, 6
+        let static_mods = HashMap::default();
+        let acetyl = 42.010_565_f32;
+        let variable = [(Residue(b'K'), acetyl)]; // global Acetyl on every K
+        let positional = vec![(0u32, acetyl)]; // PEFF Acetyl at K index 0 only
+        let ac = |s: &str| s.matches("[+42.0105").count();
+
+        let indep = peptide
+            .clone()
+            .apply(&variable, &positional, &static_mods, 1, Some(3))
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            indep.iter().any(|s| ac(s) == 2),
+            "expected a 2-acetyl variant (PEFF acetyl + global acetyl at a new K): {:?}",
+            indep
+        );
+
+        let shared = peptide
+            .apply(&variable, &positional, &static_mods, 1, None)
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            shared.iter().all(|s| ac(s) <= 1),
+            "shared budget should cap total acetyls at 1: {:?}",
+            shared
+        );
+    }
+
+    #[test]
+    fn independent_global_and_positional_budgets() {
+        use ModificationSpecificity::Residue;
+        // MCMCM: methionines at indices 0, 2, 4 are global Oxidation candidates;
+        // cysteines at indices 1, 3 are PEFF positional candidates.
+        let peptide = build_peptide("MCMCM");
+        let static_mods = HashMap::default();
+        let oxidation = 15.994_915_f32;
+        let carbamido = 57.021_465_f32;
+
+        let variable = [(Residue(b'M'), oxidation)];
+        let positional = vec![(1u32, carbamido), (3u32, carbamido)];
+
+        // 1 global mod allowed, 2 positional mods allowed -> up to 3 total.
         let result = peptide
             .clone()
-            .apply(&variable, &positional, &static_mods, 2)
+            .apply(&variable, &positional, &static_mods, 1, Some(2))
             .into_iter()
             .map(|p| p.to_string())
             .collect::<Vec<_>>();
 
-        assert_eq!(result.len(), 2, "{:?}", result);
-        assert!(result.iter().any(|s| s == "ACDEK"));
-        assert!(result.iter().any(|s| s.contains("AC[+57.02146]DEK")));
+        let count_mass = |s: &str, m: f32| s.matches(&format!("[{:+}]", m)).count();
+
+        // A variant with exactly 1 Oxidation + 2 Carbamidomethyl (3 mods) exists.
+        assert!(
+            result
+                .iter()
+                .any(|s| count_mass(s, oxidation) == 1 && count_mass(s, carbamido) == 2),
+            "expected a 1-global + 2-positional variant, got {:?}",
+            result
+        );
+        // The global budget of 1 is respected: no variant carries 2 Oxidations,
+        // even though three methionines are available.
+        assert!(
+            result.iter().all(|s| count_mass(s, oxidation) <= 1),
+            "global cap of 1 violated: {:?}",
+            result
+        );
     }
 }

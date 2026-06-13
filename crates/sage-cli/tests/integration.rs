@@ -32,6 +32,8 @@ fn integration() -> anyhow::Result<()> {
         report_psms: 1,
         wide_window: false,
         annotate_matches: false,
+        localize: false,
+        mass_shift_ppm: 50.0,
         score_type: ScoreType::SageHyperScore,
     };
 

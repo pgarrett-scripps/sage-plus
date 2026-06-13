@@ -120,6 +120,11 @@ pub struct Builder {
     pub variable_mods: Option<HashMap<String, Vec<MassOrName>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
+    /// Independent cap on the number of PEFF/positional modifications per
+    /// peptide. When unset, PEFF mods share the `max_variable_mods` budget with
+    /// the global variable mods (legacy behavior); when set, the two pools get
+    /// independent budgets.
+    pub max_peff_variable_mods: Option<usize>,
     /// Use this prefix for decoy proteins
     pub decoy_tag: Option<String>,
 
@@ -148,6 +153,7 @@ impl Builder {
             static_mods: validate_mods(self.static_mods),
             variable_mods: validate_var_mods(self.variable_mods),
             max_variable_mods: self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2),
+            max_peff_variable_mods: self.max_peff_variable_mods.map(|x| x.max(1)),
             generate_decoys: self.generate_decoys.unwrap_or(true),
             fasta: self.fasta.expect("A fasta file must be provided!"),
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
@@ -172,6 +178,9 @@ pub struct Parameters {
     pub static_mods: HashMap<ModificationSpecificity, f32>,
     pub variable_mods: HashMap<ModificationSpecificity, Vec<f32>>,
     pub max_variable_mods: usize,
+    /// Independent per-peptide cap for PEFF/positional mods; `None` means PEFF
+    /// mods share the `max_variable_mods` budget (legacy behavior).
+    pub max_peff_variable_mods: Option<usize>,
     pub decoy_tag: String,
     pub generate_decoys: bool,
     pub fasta: String,
@@ -187,8 +196,13 @@ impl Parameters {
             0 => {
                 let enzyme = self.enzyme.clone().into();
                 let total_unmodified_pep_count: usize = fasta.digest(&enzyme).len();
-                let mod_count_estimate =
+                let mut mod_count_estimate =
                     (self.variable_mods.len() + 1) * (1 << self.max_variable_mods);
+                // PEFF/positional mods with an independent budget multiply the
+                // per-peptide variant count; keep the chunk estimate conservative.
+                if let Some(p) = self.max_peff_variable_mods {
+                    mod_count_estimate *= 1 << p;
+                }
                 let chunk_count =
                     mod_count_estimate * total_unmodified_pep_count / MAX_PEPS_PER_CHUNK;
                 if chunk_count == 0 {
@@ -254,7 +268,13 @@ impl Parameters {
             })
             .flat_map_iter(|(peptide, positional)| {
                 peptide
-                    .apply(&mods, &positional, &self.static_mods, self.max_variable_mods)
+                    .apply(
+                        &mods,
+                        &positional,
+                        &self.static_mods,
+                        self.max_variable_mods,
+                        self.max_peff_variable_mods,
+                    )
                     .into_iter()
                     .filter(|peptide| {
                         peptide.monoisotopic >= self.peptide_min_mass
@@ -693,6 +713,7 @@ mod test {
                 .into_iter()
                 .collect(),
             max_variable_mods: 2,
+            max_peff_variable_mods: None,
             decoy_tag: "rev_".into(),
             generate_decoys: false,
             fasta: "none".into(),
@@ -725,6 +746,93 @@ mod test {
         assert_eq!(
             peptides.last().unwrap().proteins,
             vec!["sp|AAAAA".to_string().into()]
+        );
+    }
+
+    #[test]
+    fn peff_independent_mod_budget() {
+        // Single tryptic peptide MSMSTSTK. Methionines at idx 0 and 2 are global
+        // Oxidation candidates; PEFF annotates Phospho at 1-based positions 2,4,6
+        // (the serines at idx 1,3,5). This exercises the full production path:
+        // PEFF parse -> collect_peff_positional_mods -> Peptide::apply.
+        let peff = "# PEFF 1.0\n\
+            >sp|PROT1 \\ModResUnimod=(2,4,6|UNIMOD:21|Phospho)\n\
+            MSMSTSTK\n";
+
+        let fasta = Fasta::parse(peff.into(), "rev_", false);
+        assert!(!fasta.peff_mods.is_empty(), "PEFF mods should be parsed");
+
+        let base = Parameters {
+            bucket_size: 128,
+            enzyme: EnzymeBuilder {
+                missed_cleavages: Some(0),
+                min_len: Some(6),
+                max_len: Some(10),
+                ..Default::default()
+            },
+            peptide_min_mass: 150.0,
+            peptide_max_mass: 5000.0,
+            ion_kinds: vec![Kind::B, Kind::Y],
+            min_ion_index: 2,
+            static_mods: HashMap::default(),
+            variable_mods: [(ModificationSpecificity::Residue(b'M'), vec![15.994915])]
+                .into_iter()
+                .collect(),
+            max_variable_mods: 1,
+            max_peff_variable_mods: Some(3),
+            decoy_tag: "rev_".into(),
+            generate_decoys: false,
+            fasta: "none".into(),
+            prefilter: false,
+            prefilter_chunk_size: 0,
+            prefilter_low_memory: true,
+        };
+
+        // Phospho is registered under its PEFF name; Oxidation sits on M.
+        let phos = |s: &str| s.matches("[Phospho]").count();
+        let ox = |s: &str| s.matches("M[").count();
+
+        // Independent budgets (max_variable_mods=1, max_peff_variable_mods=3).
+        let seqs = base
+            .digest(&fasta)
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            seqs.iter().any(|s| ox(s) == 1 && phos(s) == 3),
+            "expected a 1-Oxidation + 3-Phospho variant, got {:?}",
+            seqs
+        );
+        assert!(
+            seqs.iter().all(|s| ox(s) <= 1),
+            "global cap of 1 violated: {:?}",
+            seqs
+        );
+        assert!(
+            seqs.iter().all(|s| phos(s) <= 3),
+            "PEFF cap of 3 violated: {:?}",
+            seqs
+        );
+
+        // Shared budget (legacy): total mods capped at max_variable_mods (=1).
+        let shared = Parameters {
+            max_peff_variable_mods: None,
+            ..base.clone()
+        };
+        let seqs = shared
+            .digest(&fasta)
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            seqs.iter().all(|s| ox(s) + phos(s) <= 1),
+            "shared budget should cap total mods at 1: {:?}",
+            seqs
+        );
+        assert!(
+            seqs.iter().any(|s| phos(s) == 1),
+            "shared budget should still place a single PEFF mod: {:?}",
+            seqs
         );
     }
 }

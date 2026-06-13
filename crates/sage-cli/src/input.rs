@@ -37,6 +37,15 @@ pub struct Search {
     pub protein_grouping: bool,
     pub protein_grouping_peptide_fdr: f32,
 
+    /// Compute PTM site localization and write site-level reports
+    pub localize: bool,
+    /// Spectrum q-value cutoff for PSMs included in PTM site reports
+    pub localize_q_value: f32,
+
+    /// ppm threshold below which a precursor delta mass is treated as no shift
+    /// for sequence-ambiguity annotation (`ambiguity_sequence` / `mass_shift`)
+    pub mass_shift_ppm: f32,
+
     #[serde(skip_serializing)]
     pub output_directory: Url,
 
@@ -76,6 +85,10 @@ pub struct Input {
     pub bruker_config: Option<BrukerProcessingConfig>,
     pub protein_grouping: Option<bool>,
     pub protein_grouping_peptide_fdr: Option<f32>,
+
+    pub localize: Option<bool>,
+    pub localize_q_value: Option<f32>,
+    pub mass_shift_ppm: Option<f32>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -224,6 +237,12 @@ impl Input {
 
         if let Some(annotate_matches) = matches.get_one::<bool>("annotate-matches").copied() {
             input.annotate_matches = Some(annotate_matches);
+        }
+
+        // Only override the config-file value when the flag is explicitly set,
+        // so `"localize": true` in the config isn't clobbered to false.
+        if matches.get_flag("localize") {
+            input.localize = Some(true);
         }
 
         // avoid to later panic if these parameters are not set (but doesn't check if files exist)
@@ -381,6 +400,11 @@ impl Input {
             write_report: self.write_report.unwrap_or(false),
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
+            localize: self.localize.unwrap_or(false),
+            localize_q_value: self.localize_q_value.unwrap_or(0.01),
+            mass_shift_ppm: self
+                .mass_shift_ppm
+                .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             score_type,
         })
     }

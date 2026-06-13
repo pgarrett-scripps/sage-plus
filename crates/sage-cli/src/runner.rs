@@ -31,6 +31,30 @@ pub struct Runner {
     start: Instant,
 }
 
+/// A single localized modification site for one PSM, used to build the
+/// PTM-site and protein-site reports.
+struct SiteRow {
+    psm_id: usize,
+    filename: String,
+    scannr: String,
+    peptide: String,
+    proteins: String,
+    charge: u8,
+    spectrum_q: f32,
+    peptide_q: f32,
+    modification: String,
+    modification_mass: f32,
+    /// 1-based position within the peptide.
+    position: usize,
+    residue: u8,
+    localization_probability: f32,
+    delta_score: f32,
+    candidate_sites: usize,
+    site_determining_matched: u32,
+    site_determining_total: u32,
+    site_probabilities: String,
+}
+
 #[derive(Default)]
 struct RawSpectrumAccumulator {
     pub ms1: Vec<RawSpectrum>,
@@ -187,6 +211,8 @@ impl Runner {
                     report_psms: self.parameters.report_psms + 1, // Q: Why is 1 being added here? (JSPP: Feb 2024)
                     wide_window: self.parameters.wide_window,
                     annotate_matches: self.parameters.annotate_matches,
+                    localize: false,
+                    mass_shift_ppm: self.parameters.mass_shift_ppm,
                     score_type: self.parameters.score_type,
                 };
 
@@ -515,6 +541,8 @@ impl Runner {
             report_psms: self.parameters.report_psms,
             wide_window: self.parameters.wide_window,
             annotate_matches: self.parameters.annotate_matches,
+            localize: self.parameters.localize,
+            mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
         };
 
@@ -658,6 +686,17 @@ impl Runner {
             }
         }
 
+        // Write PTM site localization reports if requested. These are always
+        // emitted as TSV (independent of the parquet flag for the main report).
+        if self.parameters.localize {
+            self.parameters
+                .output_paths
+                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+            self.parameters
+                .output_paths
+                .push(self.write_protein_sites(&outputs.features, &filenames)?);
+        }
+
         // Write percolator input file if requested
         if self.parameters.write_pin {
             self.parameters
@@ -702,6 +741,8 @@ impl Runner {
 
         let peptide = &self.database[feature.peptide_idx];
         record.push_field(peptide.to_string().as_bytes());
+        record.push_field(feature.ambiguity_sequence.as_bytes());
+        record.push_field(ryu::Buffer::new().format(feature.mass_shift).as_bytes());
         record.push_field(
             peptide
                 .proteins(&self.database.decoy_tag, self.database.generate_decoys)
@@ -852,6 +893,8 @@ impl Runner {
         let csv_headers = vec![
             "psm_id",
             "peptide",
+            "ambiguity_sequence",
+            "mass_shift",
             "proteins",
             "protein_groups",
             "num_proteins",
@@ -937,6 +980,257 @@ impl Runner {
             .flatten()
             .collect::<Vec<_>>()
         {
+            wtr.write_byte_record(&record)?;
+        }
+
+        wtr.flush()?;
+        let bytes = wtr.into_inner()?;
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
+    }
+
+    /// Flatten FDR-passing target PSMs into one [`SiteRow`] per localized
+    /// modification site. Shared by the PSM-site and protein-site reports.
+    fn collect_site_rows(&self, features: &[Feature], filenames: &[String]) -> Vec<SiteRow> {
+        let mut rows = Vec::new();
+        for feature in features {
+            // Only confidently-identified target PSMs.
+            if feature.label != 1 || feature.spectrum_q > self.parameters.localize_q_value {
+                continue;
+            }
+            let localization = match &feature.localization {
+                Some(loc) => loc,
+                None => continue,
+            };
+            let peptide = &self.database[feature.peptide_idx];
+            let peptide_str = peptide.to_string();
+            let proteins =
+                peptide.proteins(&self.database.decoy_tag, self.database.generate_decoys);
+            let filename = filenames
+                .get(feature.file_id)
+                .cloned()
+                .unwrap_or_default();
+
+            for m in &localization.mods {
+                let modification = m
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("{:+}", m.mass));
+                let site_probabilities = m
+                    .all_sites
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{}{}:{:.4}",
+                            s.residue as char,
+                            s.position + 1,
+                            s.probability
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(";");
+
+                for site in &m.best_sites {
+                    rows.push(SiteRow {
+                        psm_id: feature.psm_id,
+                        filename: filename.clone(),
+                        scannr: feature.spec_id.clone(),
+                        peptide: peptide_str.clone(),
+                        proteins: proteins.clone(),
+                        charge: feature.charge,
+                        spectrum_q: feature.spectrum_q,
+                        peptide_q: feature.peptide_q,
+                        modification: modification.clone(),
+                        modification_mass: m.mass,
+                        position: site.position + 1,
+                        residue: site.residue,
+                        localization_probability: site.probability,
+                        delta_score: m.delta_score,
+                        candidate_sites: m.candidate_sites,
+                        site_determining_matched: m.site_determining_matched,
+                        site_determining_total: m.site_determining_ions,
+                        site_probabilities: site_probabilities.clone(),
+                    });
+                }
+            }
+        }
+        rows
+    }
+
+    /// Write a per-PSM-site PTM localization report (one row per localized
+    /// modification site of each FDR-passing PSM).
+    pub fn write_ptm_sites(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> anyhow::Result<Url> {
+        let path = self.make_path("results.sage.ptm-sites.tsv");
+        let rows = self.collect_site_rows(features, filenames);
+
+        let mut wtr = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_writer(vec![]);
+
+        wtr.write_byte_record(&csv::ByteRecord::from(vec![
+            "psm_id",
+            "filename",
+            "scannr",
+            "peptide",
+            "proteins",
+            "charge",
+            "spectrum_q",
+            "peptide_q",
+            "modification",
+            "modification_mass",
+            "position",
+            "residue",
+            "localization_probability",
+            "delta_localization_score",
+            "candidate_sites",
+            "site_determining_ions_matched",
+            "site_determining_ions_total",
+            "site_probabilities",
+        ]))?;
+
+        for row in &rows {
+            let mut record = ByteRecord::new();
+            record.push_field(itoa::Buffer::new().format(row.psm_id).as_bytes());
+            record.push_field(row.filename.as_bytes());
+            record.push_field(row.scannr.as_bytes());
+            record.push_field(row.peptide.as_bytes());
+            record.push_field(row.proteins.as_bytes());
+            record.push_field(itoa::Buffer::new().format(row.charge).as_bytes());
+            record.push_field(ryu::Buffer::new().format(row.spectrum_q).as_bytes());
+            record.push_field(ryu::Buffer::new().format(row.peptide_q).as_bytes());
+            record.push_field(row.modification.as_bytes());
+            record.push_field(ryu::Buffer::new().format(row.modification_mass).as_bytes());
+            record.push_field(itoa::Buffer::new().format(row.position).as_bytes());
+            record.push_field([row.residue].as_slice());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(row.localization_probability)
+                    .as_bytes(),
+            );
+            record.push_field(ryu::Buffer::new().format(row.delta_score).as_bytes());
+            record.push_field(itoa::Buffer::new().format(row.candidate_sites).as_bytes());
+            record.push_field(
+                itoa::Buffer::new()
+                    .format(row.site_determining_matched)
+                    .as_bytes(),
+            );
+            record.push_field(
+                itoa::Buffer::new()
+                    .format(row.site_determining_total)
+                    .as_bytes(),
+            );
+            record.push_field(row.site_probabilities.as_bytes());
+            wtr.write_byte_record(&record)?;
+        }
+
+        wtr.flush()?;
+        let bytes = wtr.into_inner()?;
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
+    }
+
+    /// Write a collapsed protein-site report: the best localization for each
+    /// (protein, modified peptide site) aggregated across all supporting PSMs.
+    pub fn write_protein_sites(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> anyhow::Result<Url> {
+        let path = self.make_path("results.sage.protein-sites.tsv");
+        let rows = self.collect_site_rows(features, filenames);
+
+        // Key on (protein, peptide, position, mod mass). Protein coordinates
+        // are not resolved (the FASTA is consumed during indexing), so a row
+        // represents a localized site on a peptide, attributed to each protein
+        // the peptide maps to.
+        #[derive(Clone)]
+        struct Agg {
+            protein: String,
+            peptide: String,
+            residue: u8,
+            position: usize,
+            modification: String,
+            modification_mass: f32,
+            n_psms: u32,
+            best_probability: f32,
+            best_delta_score: f32,
+            best_spectrum_q: f32,
+        }
+
+        let mut map: HashMap<(String, String, usize, i64), Agg> = HashMap::new();
+        for row in &rows {
+            for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
+                let mass_key = (row.modification_mass * 1e3).round() as i64;
+                let key = (
+                    protein.to_string(),
+                    row.peptide.clone(),
+                    row.position,
+                    mass_key,
+                );
+                let entry = map.entry(key).or_insert_with(|| Agg {
+                    protein: protein.to_string(),
+                    peptide: row.peptide.clone(),
+                    residue: row.residue,
+                    position: row.position,
+                    modification: row.modification.clone(),
+                    modification_mass: row.modification_mass,
+                    n_psms: 0,
+                    best_probability: 0.0,
+                    best_delta_score: f32::MIN,
+                    best_spectrum_q: f32::MAX,
+                });
+                entry.n_psms += 1;
+                entry.best_probability = entry.best_probability.max(row.localization_probability);
+                entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
+                entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
+            }
+        }
+
+        let mut aggregated: Vec<Agg> = map.into_values().collect();
+        aggregated.sort_by(|a, b| {
+            a.protein
+                .cmp(&b.protein)
+                .then_with(|| a.peptide.cmp(&b.peptide))
+                .then_with(|| a.position.cmp(&b.position))
+        });
+
+        let mut wtr = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_writer(vec![]);
+
+        wtr.write_byte_record(&csv::ByteRecord::from(vec![
+            "protein",
+            "peptide",
+            "residue",
+            "position_in_peptide",
+            "modification",
+            "modification_mass",
+            "num_psms",
+            "best_localization_probability",
+            "best_delta_localization_score",
+            "best_spectrum_q",
+        ]))?;
+
+        for agg in &aggregated {
+            let mut record = ByteRecord::new();
+            record.push_field(agg.protein.as_bytes());
+            record.push_field(agg.peptide.as_bytes());
+            record.push_field([agg.residue].as_slice());
+            record.push_field(itoa::Buffer::new().format(agg.position).as_bytes());
+            record.push_field(agg.modification.as_bytes());
+            record.push_field(ryu::Buffer::new().format(agg.modification_mass).as_bytes());
+            record.push_field(itoa::Buffer::new().format(agg.n_psms).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(agg.best_probability)
+                    .as_bytes(),
+            );
+            record.push_field(ryu::Buffer::new().format(agg.best_delta_score).as_bytes());
+            record.push_field(ryu::Buffer::new().format(agg.best_spectrum_q).as_bytes());
             wtr.write_byte_record(&record)?;
         }
 
