@@ -234,6 +234,19 @@ For additional information about configuration options and output file formats, 
   "min_matched_peaks": 6,   // Optional[int] {default=4}: minimum # of matched b+y ions to use for reporting PSMs
   "max_fragment_charge": 1, // Optional[int] {default=null}: maximum fragment ion charge states to consider,
   "report_psms": 1,         // Optional[int] {default=1}: number of PSMs to report for each spectra. Higher values might disrupt PSM rescoring.
+  "percolator": {            // Optional: cross-fitted semi-supervised rescoring; LDA remains the default
+    "enabled": false,
+    "model": "svm",          // "svm" (default) or "perpetual"
+    "budget": 0.3,
+    "svm_c": 1.0,
+    "svm_epochs": 100,
+    "folds": 3,
+    "iterations": 3,
+    "train_fdr": 0.01,
+    "min_positive_psms": 50,
+    "min_decoy_psms": 50,
+    "seed": 42
+  },
   "output_directory": "s3://bucket/prefix" // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
     "local/path.mzML",
@@ -305,6 +318,15 @@ Example:
   "min_ion_index": 2
 }
 ```
+
+### Percolator-style rescoring
+
+Set `percolator.enabled` to `true` to replace LDA scoring with cross-fitted,
+semi-supervised rescoring. `model` can be `svm` (the default linear SVM) or
+`perpetual` (boosted trees). Each training fold fits its own mass-error KDE. If
+training cannot produce enough positive or decoy PSMs, Sage logs a warning and
+falls back to LDA. `svm_c` controls the SVM penalty and `budget` controls tree
+complexity.
 
 ### Modifications
 
