@@ -105,6 +105,7 @@ pub struct LfqOptions {
     pub integration: Option<sage_core::lfq::IntegrationStrategy>,
     pub spectral_angle: Option<f64>,
     pub ppm_tolerance: Option<f32>,
+    pub rt_pct_tolerance: Option<f32>,
     pub mobility_pct_tolerance: Option<f32>,
     pub combine_charge_states: Option<bool>,
     pub peptide_q_value: Option<f32>,
@@ -118,6 +119,10 @@ impl From<LfqOptions> for LfqSettings {
             integration: value.integration.unwrap_or(default.integration),
             spectral_angle: value.spectral_angle.unwrap_or(default.spectral_angle).abs(),
             ppm_tolerance: value.ppm_tolerance.unwrap_or(default.ppm_tolerance).abs(),
+            rt_pct_tolerance: value
+                .rt_pct_tolerance
+                .unwrap_or(default.rt_pct_tolerance)
+                .abs(),
             peptide_q_value: value.peptide_q_value.unwrap_or(default.peptide_q_value),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
@@ -128,6 +133,12 @@ impl From<LfqOptions> for LfqSettings {
         };
         if settings.ppm_tolerance > 20.0 {
             log::warn!("lfq_settings.ppm_tolerance is higher than expected");
+        }
+        if settings.rt_pct_tolerance > 2.0 {
+            log::warn!("lfq_settings.rt_pct_tolerance is higher than expected");
+        }
+        if settings.rt_pct_tolerance < 0.05 {
+            log::warn!("lfq_settings.rt_pct_tolerance is smaller than expected");
         }
         if settings.mobility_pct_tolerance > 4.0 {
             log::warn!("lfq_settings.mobility_pct_tolerance is higher than expected");
@@ -146,6 +157,28 @@ impl From<LfqOptions> for LfqSettings {
         }
 
         settings
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LfqOptions;
+    use sage_core::lfq::LfqSettings;
+
+    #[test]
+    fn parses_lfq_rt_percent_tolerance() {
+        let options: LfqOptions = serde_json::from_str(r#"{"rt_pct_tolerance": 1.25}"#).unwrap();
+        let settings: LfqSettings = options.into();
+
+        assert_eq!(settings.rt_pct_tolerance, 1.25);
+    }
+
+    #[test]
+    fn defaults_lfq_rt_percent_tolerance() {
+        let options: LfqOptions = serde_json::from_str("{}").unwrap();
+        let settings: LfqSettings = options.into();
+
+        assert_eq!(settings.rt_pct_tolerance, 0.5);
     }
 }
 
@@ -325,6 +358,18 @@ impl Input {
                 );
                 std::process::exit(1);
             }
+        }
+
+        if let Some(rt_pct_tolerance) = self
+            .quant
+            .as_ref()
+            .and_then(|quant| quant.lfq_options.as_ref())
+            .and_then(|lfq| lfq.rt_pct_tolerance)
+        {
+            ensure!(
+                rt_pct_tolerance != 0.0,
+                "`lfq_settings.rt_pct_tolerance` must not be zero"
+            );
         }
 
         if !self.predict_rt.unwrap_or(true)

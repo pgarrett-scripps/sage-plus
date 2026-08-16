@@ -10,17 +10,19 @@ use std::collections::HashMap;
 
 /// Minimum normalized spectral angle required to integrate a peak
 // const MIN_SPECTRAL_ANGLE: f64 = 0.70;
-/// Retention time tolerance, in fraction of total run length, to search for
-/// precursor ions
-const RT_TOL: f32 = 0.0050;
 /// Width of gaussian kernel used for smoothing intensities
 const K_WIDTH: usize = 10;
 /// Mass tolerance, in ppm, to seach for precursor ions
 // const PPM_TOL: f32 = 5.0;
-/// Number of equally spaced bins that will be used to integrate ions in (-RT_TOL, +RT_TOL)
+/// Number of equally spaced bins that will be used to integrate ions in the
+/// configured retention-time window
 const GRID_SIZE: usize = 100;
 /// Number of isotopes to search for
 const N_ISOTOPES: usize = 3;
+
+fn default_rt_pct_tolerance() -> f32 {
+    0.5
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PeakScoringStrategy {
@@ -48,6 +50,9 @@ pub struct LfqSettings {
     pub integration: IntegrationStrategy,
     pub spectral_angle: f64,
     pub ppm_tolerance: f32,
+    /// Symmetric retention-time tolerance as a percentage of total run length.
+    #[serde(default = "default_rt_pct_tolerance")]
+    pub rt_pct_tolerance: f32,
     pub mobility_pct_tolerance: f32,
     pub combine_charge_states: bool,
     pub peptide_q_value: f32,
@@ -60,10 +65,17 @@ impl Default for LfqSettings {
             integration: IntegrationStrategy::Sum,
             spectral_angle: 0.70,
             ppm_tolerance: 5.0,
+            rt_pct_tolerance: default_rt_pct_tolerance(),
             mobility_pct_tolerance: 1.0,
             combine_charge_states: true,
             peptide_q_value: 0.01,
         }
+    }
+}
+
+impl LfqSettings {
+    fn rt_tolerance(&self) -> f32 {
+        self.rt_pct_tolerance / 100.0
     }
 }
 
@@ -96,6 +108,7 @@ pub fn build_feature_map(
     precursor_charge: (u8, u8),
     features: &[Feature],
 ) -> FeatureMap {
+    let rt_tol = settings.rt_tolerance();
     let map: DashMap<PeptideIx, PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
     features
         .iter()
@@ -156,7 +169,7 @@ pub fn build_feature_map(
                             .bounds(mass + 11.06);
 
                     let rev = PrecursorRange {
-                        rt: (fwd.rt - RT_TOL * 2.0).max(0.0),
+                        rt: (fwd.rt - rt_tol * 2.0).max(0.0),
                         mass_lo,
                         mass_hi,
                         decoy: true,
@@ -236,10 +249,11 @@ impl FeatureMap {
         if spectra.is_empty() {
             log::warn!("no MS1 spectra found for quantification");
         } else {
+            let rt_tol = self.settings.rt_tolerance();
             spectra.par_iter().for_each(|spectrum| {
                 let a = alignments[spectrum.file_id];
                 let rt = (spectrum.scan_start_time / a.max_rt) * a.slope + a.intercept;
-                let query = self.rt_slice(rt, RT_TOL);
+                let query = self.rt_slice(rt, rt_tol);
 
                 let add_entry = |entry: &PrecursorRange, intensity: f32| {
                     let id = match self.settings.combine_charge_states {
@@ -258,7 +272,7 @@ impl FeatureMap {
                             composition.carbon,
                             composition.sulfur,
                         );
-                        Grid::new(entry, RT_TOL, dist, alignments.len(), GRID_SIZE)
+                        Grid::new(entry, rt_tol, dist, alignments.len(), GRID_SIZE)
                     });
 
                     grid.add_entry(rt, entry.isotope, spectrum.file_id, intensity);
@@ -683,5 +697,21 @@ impl Query<'_> {
             // TODO: replace this magic number with a patameter.
             (precursor.mobility_hi >= mobility) && (precursor.mobility_lo <= mobility)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LfqSettings;
+
+    #[test]
+    fn default_rt_tolerance_preserves_existing_window() {
+        let mut settings = LfqSettings::default();
+
+        assert_eq!(settings.rt_pct_tolerance, 0.5);
+        assert_eq!(settings.rt_tolerance(), 0.005);
+
+        settings.rt_pct_tolerance = 1.25;
+        assert_eq!(settings.rt_tolerance(), 0.0125);
     }
 }
