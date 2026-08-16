@@ -1,3 +1,4 @@
+use crate::memory::MemoryLimits;
 use anyhow::{ensure, Context};
 use clap::ArgMatches;
 use sage_cloudpath::tdf::BrukerProcessingConfig;
@@ -36,6 +37,12 @@ pub struct Search {
     pub bruker_config: BrukerProcessingConfig,
     pub protein_grouping: bool,
     pub protein_grouping_peptide_fdr: f32,
+    /// Maximum resident memory Sage may use, in GiB. `None` or zero disables the limit.
+    pub max_memory_gb: Option<f64>,
+    /// Minimum system memory Sage must leave available, in GiB. `None` or zero disables the limit.
+    pub min_free_memory_gb: Option<f64>,
+    /// Number of input files to load and search at once.
+    pub batch_size: usize,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -78,6 +85,9 @@ pub struct Input {
     pub bruker_config: Option<BrukerProcessingConfig>,
     pub protein_grouping: Option<bool>,
     pub protein_grouping_peptide_fdr: Option<f32>,
+    pub max_memory_gb: Option<f64>,
+    pub min_free_memory_gb: Option<f64>,
+    pub batch_size: Option<usize>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -228,6 +238,9 @@ impl Input {
         if let Some(annotate_matches) = matches.get_one::<bool>("annotate-matches").copied() {
             input.annotate_matches = Some(annotate_matches);
         }
+        if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
+            input.batch_size = Some(batch_size as usize);
+        }
 
         // avoid to later panic if these parameters are not set (but doesn't check if files exist)
 
@@ -287,6 +300,8 @@ impl Input {
     }
 
     pub fn build(mut self) -> anyhow::Result<Search> {
+        let memory_limits = self.memory_limits()?;
+        let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self.database.make_parameters();
 
         Self::check_mass_tolerances(&self.fragment_tol);
@@ -384,15 +399,34 @@ impl Input {
             write_report: self.write_report.unwrap_or(false),
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
+            max_memory_gb: memory_limits.max_gib(),
+            min_free_memory_gb: memory_limits.min_free_gib(),
+            batch_size,
             score_type,
             use_bitmap: self.use_bitmap.unwrap_or(false),
         })
+    }
+
+    /// Validate and convert the configured memory limits.
+    pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
+        MemoryLimits::from_gib(self.max_memory_gb, self.min_free_memory_gb)
+    }
+}
+
+fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
+    match batch_size {
+        Some(batch_size) => {
+            ensure!(batch_size > 0, "`batch_size` must be greater than zero");
+            Ok(batch_size)
+        }
+        None => Ok((num_cpus::get() / 2).max(1)),
     }
 }
 
 #[cfg(test)]
 mod test {
 
+    use super::{resolve_batch_size, Input};
     use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
 
     #[test]
@@ -422,5 +456,30 @@ mod test {
         assert_eq!(c.enzyme.map(|e| e.skip_suffix), Some([false; 26]));
 
         Ok(())
+    }
+
+    #[test]
+    fn deserialize_runtime_memory_settings() -> Result<(), serde_json::Error> {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": {},
+            "precursor_tol": { "ppm": [-10.0, 10.0] },
+            "fragment_tol": { "ppm": [-20.0, 20.0] },
+            "max_memory_gb": 12.5,
+            "min_free_memory_gb": 2.0,
+            "batch_size": 1
+        }))?;
+
+        assert_eq!(input.max_memory_gb, Some(12.5));
+        assert_eq!(input.min_free_memory_gb, Some(2.0));
+        assert_eq!(input.batch_size, Some(1));
+        assert!(input.memory_limits().unwrap().is_enabled());
+        Ok(())
+    }
+
+    #[test]
+    fn batch_size_must_be_positive() {
+        assert!(resolve_batch_size(Some(0)).is_err());
+        assert_eq!(resolve_batch_size(Some(3)).unwrap(), 3);
+        assert!(resolve_batch_size(None).unwrap() >= 1);
     }
 }

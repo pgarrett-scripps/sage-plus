@@ -1,6 +1,7 @@
 use clap::{value_parser, Arg, Command, ValueHint};
 use rayon::ThreadPoolBuilder;
 use sage_cli::input::Input;
+use sage_cli::memory;
 use sage_cli::runner::Runner;
 
 fn main() -> anyhow::Result<()> {
@@ -56,7 +57,9 @@ fn main() -> anyhow::Result<()> {
             Arg::new("batch-size")
                 .long("batch-size")
                 .value_parser(value_parser!(u16).range(1..))
-                .help("Number of files to load and search in parallel (default = # of CPUs/2)")
+                .help(
+                    "Number of files to load and search at once; overrides `batch_size` from the configuration file (default = # of CPUs/2)",
+                )
                 .value_hint(ValueHint::Other),
         )
         .arg(
@@ -115,11 +118,6 @@ fn main() -> anyhow::Result<()> {
         .build_global()
         .expect("configure Rayon pool");
 
-    let parallel = matches
-        .get_one::<u16>("batch-size")
-        .copied()
-        .unwrap_or_else(|| num_cpus::get() as u16 / 2) as usize;
-
     let parquet = matches.get_one::<bool>("parquet").copied().unwrap_or(false);
     let send_telemetry = matches
         .get_one::<bool>("disable-telemetry")
@@ -127,10 +125,12 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or(true);
 
     let input = Input::from_arguments(matches)?;
+    let memory_limits = input.memory_limits()?;
+    memory::spawn_memory_guard(memory_limits)?;
 
-    let runner = input
-        .build()
-        .and_then(|parameters| Runner::new(parameters, parallel))?;
+    let parameters = input.build()?;
+    let parallel = parameters.batch_size;
+    let runner = Runner::new(parameters, parallel)?;
 
     let tel = runner.run(parallel, parquet)?;
 

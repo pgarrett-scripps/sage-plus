@@ -1,5 +1,5 @@
 use crate::bitmap::BitmapIndex;
-use crate::enzyme::{group_digests, Digest, Enzyme, EnzymeParameters, Position};
+use crate::enzyme::{group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
@@ -151,32 +151,281 @@ pub struct Parameters {
     pub prefilter_low_memory: bool,
 }
 
+/// Conservative peak-memory estimates for the major database-build stages.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DatabaseMemoryEstimate {
+    pub unmodified_peptides: u64,
+    pub modified_peptides: u64,
+    pub fragments: u64,
+    pub unmodified_peak_bytes: u64,
+    pub modified_peak_bytes: u64,
+    pub fragment_peak_bytes: u64,
+}
+
 impl Parameters {
-    pub fn auto_calculate_prefilter_chunk_size(&mut self, fasta: &Fasta) {
+    /// Estimate database expansion without retaining digests or modified peptides.
+    ///
+    /// Counts raw enzymatic digests rather than assuming deduplication or mass filtering,
+    /// making this a conservative upper bound for rejecting unsafe searches before the
+    /// variable-modification expansion begins.
+    pub fn estimate_memory(&self, fasta: &Fasta) -> DatabaseMemoryEstimate {
+        const ALLOCATION_OVERHEAD: u64 = 16;
+
+        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
+        let mut estimate = DatabaseMemoryEstimate::default();
+        let mut digest_bytes = 0u64;
+        let mut peptide_bytes = 0u64;
+
+        for (protein, sequence) in &fasta.targets {
+            for digest in enzyme.digest(sequence, protein.clone()) {
+                let sequence_len = digest.sequence.len() as u64;
+                let variants = self
+                    .variable_variant_count(&digest)
+                    .saturating_mul(decoy_multiplier);
+                let fragments_per_variant = sequence_len
+                    .saturating_sub(1)
+                    .saturating_sub(self.min_ion_index as u64)
+                    .saturating_mul(self.ion_kinds.len() as u64);
+
+                estimate.unmodified_peptides = estimate.unmodified_peptides.saturating_add(1);
+                estimate.modified_peptides = estimate.modified_peptides.saturating_add(variants);
+                estimate.fragments = estimate
+                    .fragments
+                    .saturating_add(variants.saturating_mul(fragments_per_variant));
+
+                digest_bytes = digest_bytes.saturating_add(
+                    (std::mem::size_of::<Digest>() as u64)
+                        .saturating_add(sequence_len)
+                        .saturating_add(ALLOCATION_OVERHEAD),
+                );
+
+                // Peptide clones share some Arc allocations, but charging sequence and
+                // protein-reference storage to every variant keeps the estimate safely high.
+                let bytes_per_variant = (std::mem::size_of::<Peptide>() as u64)
+                    .saturating_add(sequence_len)
+                    .saturating_add(sequence_len.saturating_mul(std::mem::size_of::<f32>() as u64))
+                    .saturating_add(std::mem::size_of::<Arc<str>>() as u64)
+                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3));
+                peptide_bytes =
+                    peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
+            }
+        }
+
+        let fragment_bytes = estimate
+            .fragments
+            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
+        let bucket_bytes = self.estimated_bucket_bytes(estimate.fragments);
+        let bitmap_bytes = self.estimated_bitmap_peak_bytes(estimate.modified_peptides);
+
+        estimate.unmodified_peak_bytes = with_estimation_margin(digest_bytes.saturating_mul(2));
+        estimate.modified_peak_bytes =
+            with_estimation_margin(digest_bytes.saturating_add(peptide_bytes));
+        estimate.fragment_peak_bytes = with_estimation_margin(
+            peptide_bytes
+                .saturating_add(fragment_bytes)
+                .saturating_add(bucket_bytes)
+                .saturating_add(bitmap_bytes),
+        );
+        estimate
+    }
+
+    /// Re-estimate the fragment/index stage from the peptides that actually survived
+    /// modification, filtering, prefiltering, and deduplication.
+    pub fn estimate_index_memory(&self, peptides: &[Peptide]) -> DatabaseMemoryEstimate {
+        const ALLOCATION_OVERHEAD: u64 = 16;
+
+        let mut estimate = DatabaseMemoryEstimate {
+            modified_peptides: peptides.len() as u64,
+            ..DatabaseMemoryEstimate::default()
+        };
+        let mut peptide_bytes = 0u64;
+        for peptide in peptides {
+            let sequence_len = peptide.sequence.len() as u64;
+            let fragments = sequence_len
+                .saturating_sub(1)
+                .saturating_sub(self.min_ion_index as u64)
+                .saturating_mul(self.ion_kinds.len() as u64);
+            estimate.fragments = estimate.fragments.saturating_add(fragments);
+            peptide_bytes = peptide_bytes.saturating_add(
+                (std::mem::size_of::<Peptide>() as u64)
+                    .saturating_add(sequence_len)
+                    .saturating_add(
+                        (peptide.modifications.len() as u64)
+                            .saturating_mul(std::mem::size_of::<f32>() as u64),
+                    )
+                    .saturating_add(
+                        (peptide.proteins.len() as u64)
+                            .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
+                    )
+                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3)),
+            );
+        }
+
+        let fragment_bytes = estimate
+            .fragments
+            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
+        estimate.modified_peak_bytes = with_estimation_margin(peptide_bytes);
+        estimate.fragment_peak_bytes = with_estimation_margin(
+            peptide_bytes
+                .saturating_add(fragment_bytes)
+                .saturating_add(self.estimated_bucket_bytes(estimate.fragments))
+                .saturating_add(self.estimated_bitmap_peak_bytes(estimate.modified_peptides)),
+        );
+        estimate
+    }
+
+    /// Estimate modification expansion from the deduplicated, unmodified digest.
+    pub fn estimate_modified_memory(&self, digests: &[DigestGroup]) -> DatabaseMemoryEstimate {
+        const ALLOCATION_OVERHEAD: u64 = 16;
+
+        let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
+        let mut estimate = DatabaseMemoryEstimate {
+            unmodified_peptides: digests.len() as u64,
+            ..DatabaseMemoryEstimate::default()
+        };
+        let mut peptide_bytes = 0u64;
+        for digest in digests {
+            let sequence_len = digest.reference.sequence.len() as u64;
+            let variants = self
+                .variable_variant_count(&digest.reference)
+                .saturating_mul(decoy_multiplier);
+            estimate.modified_peptides = estimate.modified_peptides.saturating_add(variants);
+            estimate.fragments = estimate.fragments.saturating_add(
+                variants.saturating_mul(
+                    sequence_len
+                        .saturating_sub(1)
+                        .saturating_sub(self.min_ion_index as u64)
+                        .saturating_mul(self.ion_kinds.len() as u64),
+                ),
+            );
+
+            let bytes_per_variant = (std::mem::size_of::<Peptide>() as u64)
+                .saturating_add(sequence_len)
+                .saturating_add(sequence_len.saturating_mul(std::mem::size_of::<f32>() as u64))
+                .saturating_add(
+                    (digest.proteins.len() as u64)
+                        .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
+                )
+                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3));
+            peptide_bytes =
+                peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
+        }
+        estimate.modified_peak_bytes = with_estimation_margin(peptide_bytes);
+        estimate
+    }
+
+    fn estimated_bucket_bytes(&self, fragments: u64) -> u64 {
+        let bucket_size = self.bucket_size.max(1) as u64;
+        (fragments.saturating_add(bucket_size - 1) / bucket_size)
+            .saturating_mul(std::mem::size_of::<f32>() as u64)
+    }
+
+    fn estimated_bitmap_peak_bytes(&self, peptides: u64) -> u64 {
+        // BitmapIndex::build currently creates per-peptide temporary Vecs before
+        // flattening them into the retained arrays. Include both to bound peak RSS.
+        let bitmap_words = (self.bitmap_size as u64).saturating_mul(2);
+        let retained = bitmap_words
+            .saturating_mul(std::mem::size_of::<u64>() as u64)
+            .saturating_add(std::mem::size_of::<f32>() as u64)
+            .saturating_add(std::mem::size_of::<PeptideIx>() as u64);
+        let temporary = bitmap_words
+            .saturating_mul(std::mem::size_of::<u64>() as u64)
+            .saturating_add(std::mem::size_of::<(Vec<u64>, Vec<u64>)>() as u64);
+        peptides.saturating_mul(retained.saturating_add(temporary))
+    }
+
+    fn variable_variant_count(&self, digest: &Digest) -> u64 {
+        let sequence = digest.sequence.as_bytes();
+        let mut choices_by_site: HashMap<usize, u64> = HashMap::new();
+        let nterm = sequence.len();
+        let cterm = sequence.len().saturating_add(1);
+
+        for (specificity, masses) in &self.variable_mods {
+            let choices = masses.len() as u64;
+            if choices == 0 {
+                continue;
+            }
+            let mut add_site = |site: usize| {
+                let entry = choices_by_site.entry(site).or_default();
+                *entry = entry.saturating_add(choices);
+            };
+
+            match (*specificity, digest.position) {
+                (ModificationSpecificity::PeptideN(None), _) => add_site(nterm),
+                (ModificationSpecificity::PeptideN(Some(residue)), _)
+                    if sequence.first() == Some(&residue) =>
+                {
+                    add_site(0)
+                }
+                (ModificationSpecificity::PeptideC(None), _) => add_site(cterm),
+                (ModificationSpecificity::PeptideC(Some(residue)), _)
+                    if sequence.last() == Some(&residue) =>
+                {
+                    add_site(sequence.len().saturating_sub(1))
+                }
+                (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full) => {
+                    add_site(nterm)
+                }
+                (
+                    ModificationSpecificity::ProteinN(Some(residue)),
+                    Position::Nterm | Position::Full,
+                ) if sequence.first() == Some(&residue) => add_site(0),
+                (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full) => {
+                    add_site(cterm)
+                }
+                (
+                    ModificationSpecificity::ProteinC(Some(residue)),
+                    Position::Cterm | Position::Full,
+                ) if sequence.last() == Some(&residue) => {
+                    add_site(sequence.len().saturating_sub(1))
+                }
+                (ModificationSpecificity::Residue(residue), _) => {
+                    for (index, candidate) in sequence.iter().enumerate() {
+                        if *candidate == residue {
+                            add_site(index);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let max_mods = self.max_variable_mods.min(choices_by_site.len());
+        let mut counts = vec![0u64; max_mods.saturating_add(1)];
+        counts[0] = 1;
+        for choices in choices_by_site.values().copied() {
+            for count in (1..=max_mods).rev() {
+                counts[count] =
+                    counts[count].saturating_add(counts[count - 1].saturating_mul(choices));
+            }
+        }
+        counts.into_iter().fold(0u64, u64::saturating_add)
+    }
+
+    pub fn auto_calculate_prefilter_chunk_size(
+        &mut self,
+        fasta: &Fasta,
+        estimated_modified_peptides: u64,
+    ) {
         const MAX_PEPS_PER_CHUNK: usize = 2usize.pow(23);
         self.prefilter_chunk_size = match self.prefilter_chunk_size {
             0 => {
-                let enzyme = self.enzyme.clone().into();
-                let total_unmodified_pep_count: usize = fasta.digest(&enzyme).len();
-                let mod_count_estimate =
-                    (self.variable_mods.len() + 1) * (1 << self.max_variable_mods);
-                let chunk_count =
-                    mod_count_estimate * total_unmodified_pep_count / MAX_PEPS_PER_CHUNK;
-                if chunk_count == 0 {
-                    fasta.targets.len()
-                } else {
-                    fasta.targets.len() / chunk_count
-                }
+                let chunk_count = estimated_modified_peptides
+                    .saturating_add(MAX_PEPS_PER_CHUNK as u64 - 1)
+                    / MAX_PEPS_PER_CHUNK as u64;
+                let chunk_count = chunk_count.max(1);
+                ((fasta.targets.len() as u64).saturating_add(chunk_count - 1) / chunk_count).max(1)
+                    as usize
             }
             x => x,
         };
     }
 
-    pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
+    /// Digest and group proteins without applying variable modifications.
+    pub fn digest_unmodified(&self, fasta: &Fasta) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
         let enzyme = self.enzyme.clone().into();
-        // Generate all tryptic peptide sequences, including reversed (decoy)
-        // and missed cleavages, if applicable.
         let digests = fasta.digest(&enzyme);
 
         log::trace!("grouping digests");
@@ -187,7 +436,11 @@ impl Parameters {
             start_num,
             digests.len()
         );
+        digests
+    }
 
+    /// Expand variable modifications and generate decoys from an unmodified digest.
+    pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
         let mods = self
             .variable_mods
             .iter()
@@ -229,6 +482,10 @@ impl Parameters {
         Self::reorder_peptides(&mut target_decoys);
 
         target_decoys
+    }
+
+    pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
+        self.modify_digests(self.digest_unmodified(fasta))
     }
 
     pub fn reorder_peptides(target_decoys: &mut Vec<Peptide>) {
@@ -482,6 +739,12 @@ impl Parameters {
             bitmap_index,
         }
     }
+}
+
+fn with_estimation_margin(bytes: u64) -> u64 {
+    // Parallel collection, allocator size classes, and sorting create overhead that
+    // cannot be derived exactly from item counts. Use a conservative 50% margin.
+    bytes.saturating_add(bytes / 2)
 }
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
@@ -792,5 +1055,40 @@ mod test {
             peptides.last().unwrap().proteins,
             vec!["sp|AAAAA".to_string().into()]
         );
+    }
+
+    #[test]
+    fn estimates_variable_modification_expansion_before_allocation() {
+        let mut builder = Builder::default();
+        builder.enzyme = Some(EnzymeBuilder {
+            cleave_at: Some("$".into()),
+            min_len: Some(1),
+            max_len: Some(50),
+            ..Default::default()
+        });
+        builder.variable_mods = Some(
+            [("S".to_string(), vec![79.9663, 80.0])]
+                .into_iter()
+                .collect(),
+        );
+        builder.max_variable_mods = Some(3);
+        builder.generate_decoys = Some(false);
+        let parameters = builder.make_parameters();
+        let fasta = Fasta::parse(">protein\nSSSSSSSSSS\n".into(), "rev_", false);
+
+        let estimate = parameters.estimate_memory(&fasta);
+
+        // 1 + C(10,1)*2 + C(10,2)*2^2 + C(10,3)*2^3
+        assert_eq!(estimate.unmodified_peptides, 1);
+        assert_eq!(estimate.modified_peptides, 1_161);
+        assert_eq!(estimate.fragments, 1_161 * 14);
+        assert!(estimate.unmodified_peak_bytes > 0);
+        assert!(estimate.modified_peak_bytes > estimate.unmodified_peak_bytes);
+        assert!(estimate.fragment_peak_bytes > estimate.modified_peak_bytes);
+
+        let digests = parameters.digest_unmodified(&fasta);
+        let modification_estimate = parameters.estimate_modified_memory(&digests);
+        assert_eq!(modification_estimate.modified_peptides, 1_161);
+        assert_eq!(parameters.modify_digests(digests).len(), 1_161);
     }
 }

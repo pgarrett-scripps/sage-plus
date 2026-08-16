@@ -276,7 +276,10 @@ impl Peptide {
             let mut modified = Vec::new();
             modified.push(self.clone());
 
-            for n in 1..=combinations {
+            // More modifications than eligible site/mod pairs cannot produce a peptide.
+            // Capping here prevents pathological configuration values from causing an
+            // effectively unbounded empty loop after all real combinations are exhausted.
+            for n in 1..=combinations.min(mods.len()) {
                 'next: for combination in mods.iter().combinations(n).filter(no_duplicates) {
                     let mut set = FnvHashSet::default();
                     for (site, _) in &combination {
@@ -538,7 +541,7 @@ mod test {
         .unwrap();
 
         let expected = vec!["AAAAAAAA"];
-        let peptides = var_mod_sequence(&peptide, &variable_mods, 2);
+        let peptides = var_mod_sequence(&peptide, &variable_mods, usize::MAX);
         assert_eq!(peptides, expected);
     }
 
