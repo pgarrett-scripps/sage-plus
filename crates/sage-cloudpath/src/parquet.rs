@@ -261,6 +261,7 @@ pub fn build_matched_fragment_schema() -> parquet::errors::Result<Type> {
             required int32 fragment_charge;
             required float fragment_mz_experimental;
             required float fragment_mz_calculated;
+            required float neutral_loss;
             required float fragment_intensity;
         }
     "#;
@@ -386,6 +387,22 @@ pub fn serialize_matched_fragments(
 
             col.typed::<FloatType>()
                 .write_batch(&fragment_mz_calculated, None, None)?;
+            col.close()?;
+        }
+
+        if let Some(mut col) = rg.next_column()? {
+            let neutral_losses = features
+                .iter()
+                .flat_map(|f| {
+                    f.fragments
+                        .as_ref()
+                        .map(|fragments| fragments.neutral_losses.iter().copied())
+                })
+                .flatten()
+                .collect::<Vec<_>>();
+
+            col.typed::<FloatType>()
+                .write_batch(&neutral_losses, None, None)?;
             col.close()?;
         }
 

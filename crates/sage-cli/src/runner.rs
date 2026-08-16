@@ -817,6 +817,11 @@ impl Runner {
                 );
                 record.push_field(
                     ryu::Buffer::new()
+                        .format(fragments.neutral_losses[id])
+                        .as_bytes(),
+                );
+                record.push_field(
+                    ryu::Buffer::new()
                         .format(fragments.intensities[id])
                         .as_bytes(),
                 );
@@ -915,6 +920,7 @@ impl Runner {
             "fragment_charge",
             "fragment_mz_calculated",
             "fragment_mz_experimental",
+            "neutral_loss",
             "fragment_intensity",
         ]);
 

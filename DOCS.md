@@ -168,13 +168,19 @@ For additional information about configuration options and output file formats, 
     "peptide_max_mass": 5000.0,     // Optional[float] {default=5000.0}, Maximum monoisotopic mass of peptides to fragment
     "ion_kinds": ["b", "y"],        // Optional[List[str]] {default=["b","y"]} Which fragment ions to generate and search?
     "min_ion_index": 2,     // Optional[int] {default=2}, Do not generate b1/b2/y1/y2 ions for preliminary searching. Does not affect full scoring of PSMs
-    "static_mods": {        // Optional[Dict[char, float]] {default={}}, static modifications
+    "static_mods": {        // Static modification masses or structured objects
       "^": 304.207,         // Apply static modification to N-terminus of peptide
       "K": 304.207,         // Apply static modification to lysine
-      "C": 57.0215          // Apply static modification to cysteine
+      "C": {"mass": 57.0215, "name": "Carbamidomethyl"}
     },
-    "variable_mods": {    // Variable modification masses or objects with mass and optional max_count
-      "M": [15.9949],     // Variable mods are applied *before* static mod
+    "variable_mods": {    // Variable modification masses or structured objects
+      "M": [{             // Variable mods are applied *before* static mod
+        "mass": 15.9949,
+        "max_count": 1,
+        "name": "Oxidation",
+        "neutral_losses": [17.0265],
+        "neutral_loss_mode": "optional"
+      }],
       "K": [{"mass": 42.0106, "max_count": 1}, 14.0157],
       "^Q": [-17.026549],
       "^E": [-18.010565], // Applied to N-terminal glutamic acid
@@ -310,14 +316,14 @@ Example:
 
 #### Static Modifications
 
-- **static_mods**: Dictionary with characters as keys and floats as values. Represents static modifications applied to amino acids or termini (default: {}). Static modifications are applied after variable modifications
+- **static_mods**: Dictionary with characters as keys and bare masses or structured modification objects. Represents static modifications applied to amino acids or termini (default: {}). Static modifications are applied after variable modifications.
   - Example: Apply a static modification of 304.207 to the N-terminus of the peptide and lysine, and 57.0215 to cysteine.
     ```json
     "database": {
       "static_mods": {
         "^": 304.207,
         "K": 304.207,
-        "C": 57.0215
+        "C": {"mass": 57.0215, "name": "Carbamidomethyl"}
       }
     }
     ```
@@ -326,13 +332,21 @@ Example:
 
 - **max_variable_mods**: Integer. Limit the total variable modifications on each peptide (default: 2).
 - **max_combinations**: Integer. Optional hard cap on the total variants generated per input peptide, including the unmodified form. Variants with fewer modifications are retained first. Values below 1 are treated as 1 (default: unlimited).
-- **variable_mods**: Dictionary with characters as keys and lists containing bare masses or objects with a `mass` field and optional `max_count`. A bare mass remains unrestricted except by `max_variable_mods`; `max_count` limits occurrences of that specific modification on one peptide.
+- **static_mods** and **variable_mods** accept existing bare numeric masses or structured objects. Structured objects require `mass` and may contain `name`, `neutral_losses`, and `neutral_loss_mode`; variable modifications may additionally contain `max_count`.
+- **name**: Optional display label. Named peptide modifications render as `[Name]`; unnamed and legacy entries retain numeric mass rendering.
+- **neutral_losses**: Optional list of positive neutral-loss masses. During full scoring, retained and loss forms from the same cleavage and charge are alternatives and contribute at most one match. When multiple applicable modified sites occur in one fragment, their allowed loss choices are combined and duplicate total losses are removed.
+- **neutral_loss_mode**: Either `"optional"` (default) or `"required"`. Optional mode generates the retained fragment plus configured losses. Required mode suppresses the retained form for fragments containing the modification and requires at least one configured neutral loss. Preliminary indexing retains one canonical form per cleavage to avoid favoring modifications with more configured fragment alternatives.
   - Example: Apply a variable modification of 15.9949 to methionine, 49.2022 to the C-terminus of the peptide, 42.0 to the N-terminus of the protein, and 111.0 to the C-terminus of the protein.
     ```jsonc
     "database": {
       "variable_mods": {
-        "M": [15.9949],
-        "K": [{"mass": 42.0106, "max_count": 1}, 14.0157],
+        "M": [{
+          "mass": 15.9949,
+          "name": "Oxidation",
+          "neutral_losses": [17.0265],
+          "neutral_loss_mode": "optional"
+        }],
+        "K": [{"mass": 42.0106, "max_count": 1, "name": "Acetyl"}, 14.0157],
         "^Q": [-17.026549],
         "^E": [-18.010565], // Applied to N-terminal glutamic acid
         "$": [49.2022],     // Applied to peptide C-terminus

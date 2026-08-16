@@ -1,7 +1,9 @@
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fmt::{Display, Write},
     str::FromStr,
+    sync::Arc,
 };
 
 use serde::{
@@ -9,13 +11,269 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
-/// A variable modification with optional per-peptide occurrence limit.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum NeutralLossMode {
+    #[default]
+    Optional,
+    Required,
+}
+
+fn is_optional(mode: &NeutralLossMode) -> bool {
+    *mode == NeutralLossMode::Optional
+}
+
+fn validate_details<E: de::Error>(
+    mass: f32,
+    name: &Option<String>,
+    neutral_losses: &[f32],
+    neutral_loss_mode: NeutralLossMode,
+) -> Result<(), E> {
+    if !mass.is_finite() {
+        return Err(E::custom("modification mass must be finite"));
+    }
+    if matches!(name.as_ref(), Some(name) if name.trim().is_empty()) {
+        return Err(E::custom("modification name must not be empty"));
+    }
+    if neutral_losses
+        .iter()
+        .any(|loss| !loss.is_finite() || *loss <= 0.0)
+    {
+        return Err(E::custom(
+            "neutral loss masses must be finite and greater than zero",
+        ));
+    }
+    if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.is_empty() {
+        return Err(E::custom(
+            "neutral_loss_mode `required` requires at least one neutral loss",
+        ));
+    }
+    Ok(())
+}
+
+/// A structured static modification. Numeric static modifications remain
+/// supported through [`StaticModEntry::Mass`].
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StaticModification {
+    pub mass: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub neutral_losses: Vec<f32>,
+    #[serde(default, skip_serializing_if = "is_optional")]
+    pub neutral_loss_mode: NeutralLossMode,
+}
+
+impl<'de> Deserialize<'de> for StaticModification {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            mass: f32,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            neutral_losses: Vec<f32>,
+            #[serde(default)]
+            neutral_loss_mode: NeutralLossMode,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        validate_details::<D::Error>(
+            raw.mass,
+            &raw.name,
+            &raw.neutral_losses,
+            raw.neutral_loss_mode,
+        )?;
+        Ok(Self {
+            mass: raw.mass,
+            name: raw.name,
+            neutral_losses: raw.neutral_losses,
+            neutral_loss_mode: raw.neutral_loss_mode,
+        })
+    }
+}
+
+/// A variable modification with optional per-peptide occurrence limit and
+/// optional fragment neutral-loss behavior.
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VariableModification {
     pub mass: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub neutral_losses: Vec<f32>,
+    #[serde(default, skip_serializing_if = "is_optional")]
+    pub neutral_loss_mode: NeutralLossMode,
+}
+
+impl<'de> Deserialize<'de> for VariableModification {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Raw {
+            mass: f32,
+            #[serde(default)]
+            max_count: Option<usize>,
+            #[serde(default)]
+            name: Option<String>,
+            #[serde(default)]
+            neutral_losses: Vec<f32>,
+            #[serde(default)]
+            neutral_loss_mode: NeutralLossMode,
+        }
+
+        let raw = Raw::deserialize(deserializer)?;
+        validate_details::<D::Error>(
+            raw.mass,
+            &raw.name,
+            &raw.neutral_losses,
+            raw.neutral_loss_mode,
+        )?;
+        Ok(Self {
+            mass: raw.mass,
+            max_count: raw.max_count,
+            name: raw.name,
+            neutral_losses: raw.neutral_losses,
+            neutral_loss_mode: raw.neutral_loss_mode,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ModificationDefinition {
+    pub mass: f32,
+    pub name: Option<Arc<str>>,
+    pub neutral_losses: Arc<[f32]>,
+    pub neutral_loss_mode: NeutralLossMode,
+}
+
+impl ModificationDefinition {
+    pub fn bare(mass: f32) -> Self {
+        Self {
+            mass,
+            name: None,
+            neutral_losses: Arc::from([]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        }
+    }
+
+    fn detailed(
+        mass: f32,
+        name: &Option<String>,
+        neutral_losses: &[f32],
+        neutral_loss_mode: NeutralLossMode,
+    ) -> Self {
+        Self {
+            mass,
+            name: name.as_deref().map(Arc::from),
+            neutral_losses: Arc::from(neutral_losses),
+            neutral_loss_mode,
+        }
+    }
+}
+
+impl PartialEq for ModificationDefinition {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ModificationDefinition {}
+
+impl PartialOrd for ModificationDefinition {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ModificationDefinition {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.mass
+            .total_cmp(&other.mass)
+            .then_with(|| self.name.cmp(&other.name))
+            .then_with(|| {
+                self.neutral_losses
+                    .iter()
+                    .map(|loss| loss.to_bits())
+                    .cmp(other.neutral_losses.iter().map(|loss| loss.to_bits()))
+            })
+            .then_with(|| self.neutral_loss_mode.cmp(&other.neutral_loss_mode))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(untagged)]
+pub enum StaticModEntry {
+    Mass(f32),
+    Detailed(StaticModification),
+}
+
+impl<'de> Deserialize<'de> for StaticModEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct StaticModEntryVisitor;
+
+        impl<'de> Visitor<'de> for StaticModEntryVisitor {
+            type Value = StaticModEntry;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a modification mass or a structured modification object")
+            }
+
+            fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+                if !value.is_finite() || value.abs() > f32::MAX as f64 {
+                    return Err(E::custom("static modification mass is out of range"));
+                }
+                Ok(StaticModEntry::Mass(value as f32))
+            }
+
+            fn visit_f32<E: de::Error>(self, value: f32) -> Result<Self::Value, E> {
+                self.visit_f64(value as f64)
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                self.visit_f64(value as f64)
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                self.visit_f64(value as f64)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                StaticModification::deserialize(MapAccessDeserializer::new(map))
+                    .map(StaticModEntry::Detailed)
+            }
+        }
+
+        deserializer.deserialize_any(StaticModEntryVisitor)
+    }
+}
+
+impl StaticModEntry {
+    pub fn definition(&self) -> ModificationDefinition {
+        match self {
+            Self::Mass(mass) => ModificationDefinition::bare(*mass),
+            Self::Detailed(modification) => ModificationDefinition::detailed(
+                modification.mass,
+                &modification.name,
+                &modification.neutral_losses,
+                modification.neutral_loss_mode,
+            ),
+        }
+    }
 }
 
 /// A variable modification entry may use the existing bare-mass syntax or the
@@ -50,9 +308,7 @@ impl<'de> Deserialize<'de> for VarModEntry {
             type Value = VarModEntry;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(
-                    "a modification mass or an object containing mass and optional max_count",
-                )
+                formatter.write_str("a modification mass or a structured modification object")
             }
 
             fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
@@ -108,6 +364,18 @@ impl VarModEntry {
         match self {
             VarModEntry::Mass(_) => None,
             VarModEntry::Detailed(modification) => modification.max_count,
+        }
+    }
+
+    pub fn definition(&self) -> ModificationDefinition {
+        match self {
+            Self::Mass(mass) => ModificationDefinition::bare(*mass),
+            Self::Detailed(modification) => ModificationDefinition::detailed(
+                modification.mass,
+                &modification.name,
+                &modification.neutral_losses,
+                modification.neutral_loss_mode,
+            ),
         }
     }
 }
@@ -209,7 +477,9 @@ impl FromStr for ModificationSpecificity {
     }
 }
 
-pub fn validate_mods(input: Option<HashMap<String, f32>>) -> HashMap<ModificationSpecificity, f32> {
+pub fn validate_mods(
+    input: Option<HashMap<String, StaticModEntry>>,
+) -> HashMap<ModificationSpecificity, StaticModEntry> {
     let mut output = HashMap::new();
     if let Some(input) = input {
         for (s, mass) in input {
@@ -296,6 +566,9 @@ mod test {
         let entry = VarModEntry::Detailed(VariableModification {
             mass: 15.9949,
             max_count: Some(1),
+            name: None,
+            neutral_losses: vec![],
+            neutral_loss_mode: NeutralLossMode::Optional,
         });
         assert_eq!(entry.mass(), 15.9949);
         assert_eq!(entry.max_count(), Some(1));
@@ -328,12 +601,68 @@ mod test {
     }
 
     #[test]
+    fn deserialize_named_neutral_loss_modifications() {
+        let entry: VarModEntry = serde_json::from_str(
+            r#"{
+                "mass": 79.9663,
+                "max_count": 2,
+                "name": "Phospho",
+                "neutral_losses": [97.9769],
+                "neutral_loss_mode": "required"
+            }"#,
+        )
+        .unwrap();
+
+        let VarModEntry::Detailed(entry) = &entry else {
+            panic!("expected structured modification")
+        };
+        assert_eq!(entry.name.as_deref(), Some("Phospho"));
+        assert_eq!(entry.neutral_losses, vec![97.9769]);
+        assert_eq!(entry.neutral_loss_mode, NeutralLossMode::Required);
+
+        let round_trip: VarModEntry =
+            serde_json::from_value(serde_json::to_value(entry).unwrap()).unwrap();
+        assert_eq!(round_trip, VarModEntry::Detailed(entry.clone()));
+    }
+
+    #[test]
+    fn static_mods_accept_numeric_and_structured_entries() {
+        let numeric: StaticModEntry = serde_json::from_str("57.0215").unwrap();
+        assert!((numeric.definition().mass - 57.0215).abs() < 1e-4);
+
+        let detailed: StaticModEntry = serde_json::from_str(
+            r#"{
+                "mass": 57.0215,
+                "name": "Carbamidomethyl",
+                "neutral_losses": [18.0106]
+            }"#,
+        )
+        .unwrap();
+        let definition = detailed.definition();
+        assert_eq!(definition.name.as_deref(), Some("Carbamidomethyl"));
+        assert_eq!(&*definition.neutral_losses, &[18.0106]);
+        assert_eq!(definition.neutral_loss_mode, NeutralLossMode::Optional);
+    }
+
+    #[test]
+    fn reject_invalid_neutral_loss_configuration() {
+        for json in [
+            r#"{"mass": 79.9663, "name": ""}"#,
+            r#"{"mass": 79.9663, "neutral_losses": [0.0]}"#,
+            r#"{"mass": 79.9663, "neutral_losses": [-18.0]}"#,
+            r#"{"mass": 79.9663, "neutral_loss_mode": "required"}"#,
+            r#"{"mass": 79.9663, "neutral_loss_mode": "sometimes"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<VarModEntry>(json).is_err(),
+                "accepted invalid configuration: {json}"
+            );
+        }
+    }
+
+    #[test]
     fn reject_unsupported_var_mod_shapes_and_fields() {
         assert!(serde_json::from_str::<Vec<VarModEntry>>(r#"[[42.0106, 1]]"#).is_err());
-        assert!(serde_json::from_str::<Vec<VarModEntry>>(
-            r#"[{"mass": 42.0106, "max_count": 1, "name": "Acetyl"}]"#
-        )
-        .is_err());
         assert!(serde_json::from_str::<Vec<VarModEntry>>(
             r#"[{"mass": 42.0106, "max_counts": 1}]"#
         )
@@ -352,6 +681,9 @@ mod test {
                 VarModEntry::Detailed(VariableModification {
                     mass: 15.9949,
                     max_count: Some(1),
+                    name: None,
+                    neutral_losses: vec![],
+                    neutral_loss_mode: NeutralLossMode::Optional,
                 }),
             ],
         );
@@ -360,6 +692,9 @@ mod test {
             vec![VarModEntry::Detailed(VariableModification {
                 mass: 57.0215,
                 max_count: Some(2),
+                name: None,
+                neutral_losses: vec![],
+                neutral_loss_mode: NeutralLossMode::Optional,
             })],
         );
         let result = validate_var_mods(Some(raw));

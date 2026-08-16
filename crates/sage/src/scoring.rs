@@ -1,6 +1,6 @@
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::heap::bounded_min_heapify;
-use crate::ion_series::{IonSeries, Kind};
+use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::spectrum::{Precursor, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
@@ -159,6 +159,9 @@ pub struct Fragments {
     pub intensities: Vec<f32>,
     pub mz_calculated: Vec<f32>,
     pub mz_experimental: Vec<f32>,
+    /// Neutral loss applied to the matched theoretical fragment; zero is the
+    /// retained (no-loss) variant.
+    pub neutral_losses: Vec<f32>,
 }
 
 static PSM_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -602,7 +605,8 @@ impl<'db> Scorer<'db> {
             .db
             .ion_kinds
             .iter()
-            .flat_map(|kind| IonSeries::new(peptide, *kind));
+            .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
+            .flat_map(|group| group.variants);
 
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, psm.charge);
 
@@ -702,29 +706,39 @@ impl<'db> Scorer<'db> {
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)
         // so we need to completely re-score this candidate
-        let fragments = self
+        let fragment_groups = self
             .db
             .ion_kinds
             .iter()
-            .flat_map(|kind| IonSeries::new(peptide, *kind).enumerate());
+            .flat_map(|kind| IonGroupSeries::new(peptide, *kind));
 
         let mut b_run = Run::default();
         let mut y_run = Run::default();
 
         let mut fragments_details = Fragments::default();
 
-        for (idx, frag) in fragments {
+        for group in fragment_groups {
             for charge in 1..max_fragment_charge {
-                // Experimental peaks are multipled by charge, therefore theoretical are divided
-                let mz = frag.monoisotopic_mass / charge as f32;
+                // Neutral-loss forms are alternatives for the same cleavage
+                // and charge. Select at most one, so extra configured variants
+                // cannot inflate matched-ion counts or hyperscore factorials.
+                let best = group
+                    .variants
+                    .iter()
+                    .filter_map(|variant| {
+                        let mz = variant.monoisotopic_mass / charge as f32;
+                        crate::spectrum::select_most_intense_peak(
+                            &query.masses,
+                            &query.intensities,
+                            mz,
+                            self.fragment_tol,
+                            None,
+                        )
+                        .map(|peak_idx| (variant, mz, peak_idx))
+                    })
+                    .max_by(|a, b| query.intensities[a.2].total_cmp(&query.intensities[b.2]));
 
-                if let Some(peak_idx) = crate::spectrum::select_most_intense_peak(
-                    &query.masses,
-                    &query.intensities,
-                    mz,
-                    self.fragment_tol,
-                    None,
-                ) {
+                if let Some((frag, mz, peak_idx)) = best {
                     let peak_mass = query.masses[peak_idx];
                     let peak_intensity = query.intensities[peak_idx];
                     let fragment_charge = query.charges[peak_idx].max(charge);
@@ -739,20 +753,21 @@ impl<'db> Scorer<'db> {
                         Kind::A | Kind::B | Kind::C => {
                             score.matched_b += 1;
                             score.summed_b += peak_intensity;
-                            b_run.matched(idx);
+                            b_run.matched(group.series_index);
                         }
                         Kind::X | Kind::Y | Kind::Z => {
                             score.matched_y += 1;
                             score.summed_y += peak_intensity;
-                            y_run.matched(idx);
+                            y_run.matched(group.series_index);
                         }
                     }
 
                     if self.annotate_matches {
                         let idx = match frag.kind {
-                            Kind::A | Kind::B | Kind::C => idx as i32 + 1,
+                            Kind::A | Kind::B | Kind::C => group.series_index as i32 + 1,
                             Kind::X | Kind::Y | Kind::Z => {
-                                peptide.sequence.len().saturating_sub(1) as i32 - idx as i32
+                                peptide.sequence.len().saturating_sub(1) as i32
+                                    - group.series_index as i32
                             }
                         };
                         fragments_details.kinds.push(frag.kind);
@@ -761,6 +776,9 @@ impl<'db> Scorer<'db> {
                         fragments_details.mz_calculated.push(calc_mz);
                         fragments_details.fragment_ordinals.push(idx);
                         fragments_details.intensities.push(peak_intensity);
+                        fragments_details
+                            .neutral_losses
+                            .push(frag.neutral_loss.unwrap_or(0.0));
                     }
                 }
             }
@@ -808,6 +826,10 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enzyme::Digest;
+    use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
+    use crate::peptide::Peptide;
+    use std::{collections::HashMap, sync::Arc};
 
     #[test]
     fn longest_series() {
@@ -840,5 +862,83 @@ mod tests {
         assert_eq!(max_fragment_charge(Some(1), 3), 2);
         assert_eq!(max_fragment_charge(Some(2), 4), 3);
         assert_eq!(max_fragment_charge(Some(4), 1), 2);
+    }
+
+    #[test]
+    fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: Some(Arc::from("TestMod")),
+            neutral_losses: Arc::from([10.0]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        });
+        let peptide = Peptide::try_from(Digest {
+            sequence: "AMK".into(),
+            ..Default::default()
+        })
+        .unwrap()
+        .apply(
+            &[(
+                ModificationSpecificity::Residue(b'M'),
+                modification,
+                Some(1),
+            )],
+            &HashMap::default(),
+            1,
+            None,
+        )
+        .into_iter()
+        .find(|peptide| peptide.to_string().contains("TestMod"))
+        .unwrap();
+
+        let group = IonGroupSeries::new(&peptide, Kind::B).nth(1).unwrap();
+        assert_eq!(group.variants.len(), 2);
+        let mut variants = group.variants;
+        variants.sort_by(|a, b| a.monoisotopic_mass.total_cmp(&b.monoisotopic_mass));
+
+        let db = IndexedDatabase {
+            peptides: vec![peptide],
+            ion_kinds: vec![Kind::B],
+            ..Default::default()
+        };
+        let scorer = Scorer {
+            db: &db,
+            precursor_tol: Tolerance::Da(-0.01, 0.01),
+            fragment_tol: Tolerance::Da(-0.01, 0.01),
+            min_matched_peaks: 1,
+            min_isotope_err: 0,
+            max_isotope_err: 0,
+            min_precursor_charge: 2,
+            max_precursor_charge: 2,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera: false,
+            report_psms: 1,
+            wide_window: false,
+            annotate_matches: true,
+            score_type: ScoreType::SageHyperScore,
+        };
+        let query = ProcessedSpectrum {
+            masses: variants
+                .iter()
+                .map(|variant| variant.monoisotopic_mass)
+                .collect(),
+            intensities: vec![100.0, 10.0],
+            charges: vec![1, 1],
+            total_ion_current: 110.0,
+            ..Default::default()
+        };
+        let pre_score = PreScore {
+            peptide: PeptideIx(0),
+            precursor_charge: 2,
+            ..Default::default()
+        };
+
+        let (score, fragments) = scorer.score_candidate(&query, &pre_score);
+        assert_eq!(score.matched_b, 1);
+        assert_eq!(score.summed_b, 100.0);
+        let fragments = fragments.unwrap();
+        assert_eq!(fragments.fragment_ordinals.len(), 1);
+        assert_eq!(fragments.neutral_losses, vec![10.0]);
     }
 }
