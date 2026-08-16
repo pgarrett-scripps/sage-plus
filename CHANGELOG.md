@@ -17,8 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - TSV must have a header row with a required `sequence` column; optional `protein` and `decoy` columns are also supported.
   - Sequences are used as-is — no variable or static modifications are applied from config.
   - Decoys are still generated automatically by reversal when `generate_decoys: true`.
-  - If both `database.fasta` and `database.peptides` are provided, peptides from both sources are merged and deduplicated before building the index.
-  - Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.
+- If both `database.fasta` and `database.peptides` are provided, peptides from both sources are merged and deduplicated before building the index.
+- Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.
+- Per-modification occurrence limits using `{"mass": <mass>, "max_count": <limit>}` entries in `database.variable_mods`; existing bare-mass entries remain supported.
+- `database.max_combinations` to cap the number of peptide variants (including the unmodified form) generated from variable modifications, preferring variants with fewer modifications.
 
 ## [v0.15.0]
 ### Added
