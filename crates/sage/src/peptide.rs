@@ -649,7 +649,7 @@ mod test {
         .unwrap();
 
         let expected = vec!["AAAAAAAA"];
-        let peptides = var_mod_sequence(&peptide, &variable_mods, 2);
+        let peptides = var_mod_sequence(&peptide, &variable_mods, usize::MAX);
         assert_eq!(peptides, expected);
     }
 

@@ -247,7 +247,10 @@ For additional information about configuration options and output file formats, 
     "min_decoy_psms": 50,
     "seed": 42
   },
-  "output_directory": "s3://bucket/prefix" // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
+  "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its resident memory reaches this many GiB; 0 disables
+  "min_free_memory_gb": 2,  // Optional[float] {default=null}: stop Sage if system-available memory falls to this many GiB; 0 disables
+  "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
+  "output_directory": "s3://bucket/prefix", // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
     "local/path.mzML",
     "s3://bucket/PXD0000001/foo.mzML.gz"
@@ -458,7 +461,11 @@ Note on the settings below:
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
-- **parallel**: Boolean. Parse and search files in parallel. For large numbers of files or low RAM, setting this to false can reduce memory usage at the cost of running slower (default: true).
+- **max_memory_gb**: Number. Abort the search if Sage's resident memory reaches this many GiB. Zero disables this limit (default: disabled).
+- **min_free_memory_gb**: Number. Abort the search if system-available memory falls to this many GiB, preserving capacity for the operating system and other applications. Zero disables this limit (default: disabled).
+- **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
+
+When either memory limit is enabled, Sage estimates the unmodified digest, variable-modification expansion, and fragment/index sizes before allocating them. Unsafe database searches return an error before expansion begins. Estimates are conservative and are backed by a runtime memory monitor for allocations outside database construction.
 
 ## mzML Paths
 

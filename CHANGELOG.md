@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- Optional `max_memory_gb` and `min_free_memory_gb` safeguards that preflight unmodified peptides, variable-modification expansion, and fragment indexes, then monitor the running process to stop Sage before configured limits are crossed.
+- A top-level `batch_size` configuration option; the existing `--batch-size` command-line option takes precedence.
 - **Bitmap-based preliminary search** (`use_bitmap: true`): an alternative to the bucketed binary-search preliminary scoring stage.
   - Theoretical fragment ions (forward: A/B/C series; reverse: X/Y/Z series) are encoded as packed bitsets per peptide, stored alongside a sorted precursor-mass array for fast range lookup.
   - Experimental spectra are encoded at query time using the fragment tolerance window; bins spanning a tolerance boundary are all set, so bin-edge fragments are never missed.

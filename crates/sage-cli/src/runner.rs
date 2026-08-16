@@ -1,4 +1,5 @@
 use super::input::Search;
+use super::memory::MemoryLimits;
 use super::output::SageResults;
 use super::telemetry;
 use anyhow::Context;
@@ -140,6 +141,8 @@ impl Runner {
         let mut parameters = parameters.clone();
         parameters.database.use_bitmap = parameters.use_bitmap;
         let start = Instant::now();
+        let limits =
+            MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
             let fasta_url = sage_cloudpath::to_url(&parameters.database.fasta)?;
@@ -155,12 +158,62 @@ impl Runner {
                 )
             })?;
 
+            let needs_estimate = limits.is_enabled()
+                || (parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0);
+            if needs_estimate {
+                let full_estimate = parameters.database.estimate_memory(&fasta);
+                if parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0 {
+                    parameters.database.auto_calculate_prefilter_chunk_size(
+                        &fasta,
+                        full_estimate.modified_peptides,
+                    );
+                }
+
+                if limits.is_enabled() {
+                    info!(
+                        "database preflight: {} unmodified peptides ({:.2} GiB peak), up to {} modified peptides ({:.2} GiB peak), up to {} fragments ({:.2} GiB index peak)",
+                        full_estimate.unmodified_peptides,
+                        full_estimate.unmodified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                        full_estimate.modified_peptides,
+                        full_estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                        full_estimate.fragments,
+                        full_estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                    );
+                    limits.check_estimate(
+                        "unmodified-peptide",
+                        full_estimate.unmodified_peak_bytes,
+                    )?;
+
+                    if parameters.database.prefilter {
+                        let mut modified_peak = 0u64;
+                        let mut fragment_peak = 0u64;
+                        for chunk in fasta.iter_chunks(parameters.database.prefilter_chunk_size) {
+                            let estimate = parameters.database.estimate_memory(&chunk);
+                            modified_peak = modified_peak.max(estimate.modified_peak_bytes);
+                            fragment_peak = fragment_peak.max(estimate.fragment_peak_bytes);
+                        }
+                        limits.check_estimate("modified-peptide", modified_peak)?;
+                        limits.check_estimate("fragment-index", fragment_peak)?;
+                    }
+                }
+            }
+
             match parameters.database.prefilter {
-                false => parameters.database.digest(&fasta),
+                false => {
+                    let digests = parameters.database.digest_unmodified(&fasta);
+                    if limits.is_enabled() {
+                        let estimate = parameters.database.estimate_modified_memory(&digests);
+                        info!(
+                            "modification preflight: {} unmodified peptides may expand to {} modified peptides ({:.2} GiB additional peak)",
+                            estimate.unmodified_peptides,
+                            estimate.modified_peptides,
+                            estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+                        );
+                        limits.check_estimate("modified-peptide", estimate.modified_peak_bytes)?;
+                    }
+                    parameters.database.modify_digests(digests)
+                }
                 true => {
-                    parameters
-                        .database
-                        .auto_calculate_prefilter_chunk_size(&fasta);
                     if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
                         parameters.database.digest(&fasta)
                     } else {
@@ -192,6 +245,21 @@ impl Runner {
 
         // Merge, deduplicate, and build the index.
         Parameters::reorder_peptides(&mut all_peptides);
+        if limits.is_enabled() {
+            let estimate = parameters.database.estimate_index_memory(&all_peptides);
+            info!(
+                "final database preflight: {} peptides, {} fragments, estimated {:.2} GiB peak",
+                estimate.modified_peptides,
+                estimate.fragments,
+                estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+            );
+            limits.check_estimate(
+                "final fragment-index",
+                estimate
+                    .fragment_peak_bytes
+                    .saturating_sub(estimate.modified_peak_bytes),
+            )?;
+        }
         let database = parameters
             .database
             .clone()
