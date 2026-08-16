@@ -198,6 +198,7 @@ For additional information about configuration options and output file formats, 
       "integration": "Sum",   // Optional["Sum" | "Apex"], use sum of MS1 traces in peak, or MS1 intensity at peak apex
       "spectral_angle": 0.7,  // Optional[float] {default = 0.7}, normalized spectral angle cutoff for calling an MS1 peak
       "ppm_tolerance": 5.0,    // Optional[float] {default = 5.0}, tolerance (in p.p.m.) for DICE window around calculated precursor mass
+      "rt_pct_tolerance": 0.5, // Optional[float] {default = 0.5}, symmetric match-between-runs RT tolerance as percent of total gradient length
       // Optional[bool] {default = true}. Combine all charge states for quantification. Setting this to false
       // quantifies each peptide-charge precursor in `precursor_charge` range (see below) separately
       "combine_charge_states": true
@@ -367,6 +368,7 @@ The quant section is optional and should be specified only if TMT or LFQ is used
   - **integration**: String. The method used for integrating peak intensities, either "Sum" or "Max" (default: "Sum").
   - **spectral_angle**: Float. Threshold for the spectral angle similarity measure, ranging from 0 to 1 (default: 0.7).
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
+  - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
 
 Example: 
 ```json
@@ -381,7 +383,8 @@ Example:
       "peak_scoring": "Hybrid",
       "integration": "Sum",
       "spectral_angle": 0.7,
-      "ppm_tolerance": 5.0
+      "ppm_tolerance": 5.0,
+      "rt_pct_tolerance": 0.5
     }
   }
 ```
