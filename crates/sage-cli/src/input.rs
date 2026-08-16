@@ -16,15 +16,16 @@ use serde::{Deserialize, Serialize};
 pub struct PtmLocalizationSettings {
     /// Compute PTM site localization and write site-level reports.
     pub enabled: bool,
-    /// Spectrum q-value cutoff for PSMs included in PTM site reports.
-    pub q_value: f32,
+    /// Identification q-value cutoff for PSMs included in PTM site reports.
+    #[serde(alias = "q_value")]
+    pub psm_q_value: f32,
 }
 
 impl Default for PtmLocalizationSettings {
     fn default() -> Self {
         Self {
             enabled: false,
-            q_value: 0.01,
+            psm_q_value: 0.01,
         }
     }
 }
@@ -388,8 +389,9 @@ impl Input {
 
         let ptm_localization = self.ptm_localization.unwrap_or_default();
         ensure!(
-            ptm_localization.q_value.is_finite() && (0.0..=1.0).contains(&ptm_localization.q_value),
-            "ptm_localization.q_value must be between 0 and 1"
+            ptm_localization.psm_q_value.is_finite()
+                && (0.0..=1.0).contains(&ptm_localization.psm_q_value),
+            "ptm_localization.psm_q_value must be between 0 and 1"
         );
 
         Ok(Search {
@@ -438,15 +440,19 @@ mod test {
     fn deserialize_ptm_localization_settings() -> Result<(), serde_json::Error> {
         let configured: PtmLocalizationSettings = serde_json::from_value(serde_json::json!({
             "enabled": true,
-            "q_value": 0.025
+            "psm_q_value": 0.025
         }))?;
         assert!(configured.enabled);
-        assert_eq!(configured.q_value, 0.025);
+        assert_eq!(configured.psm_q_value, 0.025);
 
         let partial: PtmLocalizationSettings =
             serde_json::from_value(serde_json::json!({ "enabled": true }))?;
         assert!(partial.enabled);
-        assert_eq!(partial.q_value, 0.01);
+        assert_eq!(partial.psm_q_value, 0.01);
+
+        let legacy_name: PtmLocalizationSettings =
+            serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;
+        assert_eq!(legacy_name.psm_q_value, 0.02);
         Ok(())
     }
 

@@ -686,15 +686,14 @@ impl Runner {
             }
         }
 
-        // Write PTM site localization reports if requested. These are always
-        // emitted as TSV (independent of the parquet flag for the main report).
+        // PTM site reports follow the selected main output format.
         if self.parameters.ptm_localization.enabled {
             self.parameters
                 .output_paths
-                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+                .push(self.write_ptm_sites(&outputs.features, &filenames, parquet)?);
             self.parameters
                 .output_paths
-                .push(self.write_protein_sites(&outputs.features, &filenames)?);
+                .push(self.write_protein_sites(&outputs.features, &filenames, parquet)?);
         }
 
         // Write percolator input file if requested
@@ -995,7 +994,9 @@ impl Runner {
         let mut rows = Vec::new();
         for feature in features {
             // Only confidently-identified target PSMs.
-            if feature.label != 1 || feature.spectrum_q > self.parameters.ptm_localization.q_value {
+            if feature.label != 1
+                || feature.spectrum_q > self.parameters.ptm_localization.psm_q_value
+            {
                 continue;
             }
             let localization = match &feature.localization {
@@ -1063,9 +1064,42 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
+        parquet: bool,
     ) -> anyhow::Result<Url> {
-        let path = self.make_path("results.sage.ptm-sites.tsv");
         let rows = self.collect_site_rows(features, filenames);
+
+        if parquet {
+            use sage_cloudpath::parquet::PtmSiteRecord;
+            let records = rows
+                .iter()
+                .map(|row| PtmSiteRecord {
+                    psm_id: row.psm_id as i64,
+                    filename: row.filename.clone(),
+                    scannr: row.scannr.clone(),
+                    peptide: row.peptide.clone(),
+                    proteins: row.proteins.clone(),
+                    charge: row.charge as i32,
+                    spectrum_q: row.spectrum_q,
+                    peptide_q: row.peptide_q,
+                    modification: row.modification.clone(),
+                    modification_mass: row.modification_mass,
+                    position: row.position as i32,
+                    residue: (row.residue as char).to_string(),
+                    localization_probability: row.localization_probability,
+                    delta_localization_score: row.delta_score,
+                    candidate_sites: row.candidate_sites as i32,
+                    site_determining_ions_matched: row.site_determining_matched as i32,
+                    site_determining_ions_total: row.site_determining_total as i32,
+                    site_probabilities: row.site_probabilities.clone(),
+                })
+                .collect::<Vec<_>>();
+            let path = self.make_path("results.sage.ptm-sites.parquet");
+            let bytes = sage_cloudpath::parquet::serialize_ptm_sites(&records)?;
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            return Ok(path);
+        }
+
+        let path = self.make_path("results.sage.ptm-sites.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
@@ -1139,8 +1173,8 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
+        parquet: bool,
     ) -> anyhow::Result<Url> {
-        let path = self.make_path("results.sage.protein-sites.tsv");
         let rows = self.collect_site_rows(features, filenames);
 
         // Key on (protein, peptide, position, mod mass). Protein coordinates
@@ -1197,6 +1231,31 @@ impl Runner {
                 .then_with(|| a.peptide.cmp(&b.peptide))
                 .then_with(|| a.position.cmp(&b.position))
         });
+
+        if parquet {
+            use sage_cloudpath::parquet::ProteinSiteRecord;
+            let records = aggregated
+                .iter()
+                .map(|agg| ProteinSiteRecord {
+                    protein: agg.protein.clone(),
+                    peptide: agg.peptide.clone(),
+                    residue: (agg.residue as char).to_string(),
+                    position_in_peptide: agg.position as i32,
+                    modification: agg.modification.clone(),
+                    modification_mass: agg.modification_mass,
+                    num_psms: agg.n_psms as i32,
+                    best_localization_probability: agg.best_probability,
+                    best_delta_localization_score: agg.best_delta_score,
+                    best_spectrum_q: agg.best_spectrum_q,
+                })
+                .collect::<Vec<_>>();
+            let path = self.make_path("results.sage.protein-sites.parquet");
+            let bytes = sage_cloudpath::parquet::serialize_protein_sites(&records)?;
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            return Ok(path);
+        }
+
+        let path = self.make_path("results.sage.protein-sites.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
