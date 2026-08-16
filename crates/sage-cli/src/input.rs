@@ -7,6 +7,7 @@ use sage_core::{
     database::{Builder, Parameters},
     lfq::LfqSettings,
     mass::Tolerance,
+    ml::percolator::PercolatorSettings,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,7 @@ pub struct Search {
     pub bruker_config: BrukerProcessingConfig,
     pub protein_grouping: bool,
     pub protein_grouping_peptide_fdr: f32,
+    pub percolator: PercolatorSettings,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -76,6 +78,7 @@ pub struct Input {
     pub bruker_config: Option<BrukerProcessingConfig>,
     pub protein_grouping: Option<bool>,
     pub protein_grouping_peptide_fdr: Option<f32>,
+    pub percolator: Option<PercolatorSettings>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -381,6 +384,7 @@ impl Input {
             write_report: self.write_report.unwrap_or(false),
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
+            percolator: self.percolator.unwrap_or_default(),
             score_type,
         })
     }

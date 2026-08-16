@@ -28,7 +28,7 @@ pub fn spectrum_q_value(scores: &mut [Feature]) -> usize {
     for score in scores.iter_mut().rev() {
         q_min = q_min.min(score.spectrum_q);
         score.spectrum_q = q_min;
-        if q_min <= 0.01 {
+        if q_min <= 0.01 && score.label != -1 {
             passing += 1;
         }
     }
