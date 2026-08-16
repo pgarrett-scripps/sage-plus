@@ -541,7 +541,7 @@ impl Runner {
             report_psms: self.parameters.report_psms,
             wide_window: self.parameters.wide_window,
             annotate_matches: self.parameters.annotate_matches,
-            localize: self.parameters.localize,
+            localize: self.parameters.ptm_localization.enabled,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
         };
@@ -688,7 +688,7 @@ impl Runner {
 
         // Write PTM site localization reports if requested. These are always
         // emitted as TSV (independent of the parquet flag for the main report).
-        if self.parameters.localize {
+        if self.parameters.ptm_localization.enabled {
             self.parameters
                 .output_paths
                 .push(self.write_ptm_sites(&outputs.features, &filenames)?);
@@ -995,7 +995,7 @@ impl Runner {
         let mut rows = Vec::new();
         for feature in features {
             // Only confidently-identified target PSMs.
-            if feature.label != 1 || feature.spectrum_q > self.parameters.localize_q_value {
+            if feature.label != 1 || feature.spectrum_q > self.parameters.ptm_localization.q_value {
                 continue;
             }
             let localization = match &feature.localization {

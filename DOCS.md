@@ -459,14 +459,24 @@ Note on the settings below:
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
 - **parallel**: Boolean. Parse and search files in parallel. For large numbers of files or low RAM, setting this to false can reduce memory usage at the cost of running slower (default: true).
-- **localize**: Boolean. Compute PTM site localization and write site-level reports (default: false). Can also be enabled with the `--localize` CLI flag. See [PTM Site Localization](#ptm-site-localization).
-- **localize_q_value**: Float. Spectrum q-value cutoff for PSMs included in the PTM site reports (default: 0.01).
+- **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
+  - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
+  - **q_value**: Float from 0 through 1. Spectrum q-value cutoff for PSMs included in the site reports (default: 0.01).
 
 ## PTM Site Localization
 
-When `localize` is enabled, sage attempts to pinpoint which residue carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
+When `ptm_localization.enabled` is true, sage attempts to pinpoint which residue carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
 
-For each FDR-passing target PSM (spectrum q-value ≤ `localize_q_value`), and for each distinct variable-modification delta mass it carries, sage:
+Example configuration:
+
+```json
+"ptm_localization": {
+  "enabled": true,
+  "q_value": 0.01
+}
+```
+
+For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.q_value`), and for each distinct variable-modification delta mass it carries, sage:
 1. recovers the candidate residues from the search's modification specificity rules (e.g. all S/T/Y for Phospho),
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
@@ -476,6 +486,13 @@ Two TSV reports are written:
 
 - **results.sage.ptm-sites.tsv**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score` (AScore), `candidate_sites`, `site_determining_ions_matched`/`_total`, and `site_probabilities` (a `residue+position:probability` list over all candidate sites).
 - **results.sage.protein-sites.tsv**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, with `num_psms`, `best_localization_probability`, `best_delta_localization_score`, and `best_spectrum_q`.
+
+For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
+
+```text
+psm_id  peptide            modification  position  residue  localization_probability  delta_localization_score  site_probabilities
+42      AAS[+79.966]AATAA  Phospho       3         S        0.982                     18.7                      S3:0.982;T6:0.018
+```
 
 Notes:
 - All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
