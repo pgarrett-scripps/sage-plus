@@ -70,7 +70,7 @@ impl<'p> Iterator for IonSeries<'p> {
             return None;
         }
         let r = self.peptide.sequence[self.idx];
-        let m = self.peptide.modifications[self.idx];
+        let m = self.peptide.modification_at(self.idx);
 
         self.cumulative_mass += match self.kind {
             Kind::A | Kind::B | Kind::C => monoisotopic(r) + m,

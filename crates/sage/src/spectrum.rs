@@ -283,6 +283,10 @@ fn sort_columns_by_mass(
         return (masses, intensities, charges, mobilities);
     }
 
+    if masses.windows(2).all(|window| window[0] <= window[1]) {
+        return (masses, intensities, charges, mobilities);
+    }
+
     let has_mobility = !mobilities.is_empty();
     let mut order = (0..masses.len()).collect::<Vec<_>>();
     order.sort_by(|&a, &b| masses[a].total_cmp(&masses[b]));
@@ -418,7 +422,7 @@ impl SpectrumProcessor {
         }
     }
 
-    pub fn process(&self, spectrum: RawSpectrum) -> ProcessedSpectrum {
+    pub fn process(&self, mut spectrum: RawSpectrum) -> ProcessedSpectrum {
         debug_assert_eq!(spectrum.mz.len(), spectrum.intensity.len());
         if let Some(mobilities) = spectrum.mobility.as_ref() {
             debug_assert_eq!(spectrum.mz.len(), mobilities.len());
@@ -426,26 +430,44 @@ impl SpectrumProcessor {
 
         let (masses, intensities, charges, mobilities) =
             if spectrum.ms_level == 1 && spectrum.mobility.is_some() {
-                let raw_mobilities = spectrum.mobility.as_ref().expect("checked above");
-                let masses = spectrum
-                    .mz
-                    .iter()
-                    .map(|mass| mass - PROTON)
-                    .collect::<Vec<_>>();
-                let intensities = spectrum.intensity.clone();
+                let mut masses = spectrum.mz;
+                masses.iter_mut().for_each(|mass| *mass -= PROTON);
+                let intensities = spectrum.intensity;
                 let charges = vec![1; masses.len()];
-                let mobilities = raw_mobilities.clone();
+                let mobilities = spectrum.mobility.take().expect("checked above");
                 sort_columns_by_mass(masses, intensities, charges, mobilities)
             } else {
                 let (masses, intensities, charges) = match spectrum.ms_level {
-                    2 => self.process_ms2(self.deisotope, &spectrum),
+                    2 if self.deisotope => self.process_ms2(true, &spectrum),
+                    2 => {
+                        if spectrum.representation != Representation::Centroid {
+                            panic!(
+                                "Scan {} contains profile data! Please convert to centroid",
+                                spectrum.id
+                            );
+                        }
+                        let mut masses = spectrum.mz;
+                        masses.iter_mut().for_each(|mass| *mass -= PROTON);
+                        let intensities = spectrum.intensity;
+                        let charges = vec![1; masses.len()];
+                        if masses.len() <= self.take_top_n {
+                            (masses, intensities, charges)
+                        } else {
+                            let mut indices = (0..masses.len()).collect::<Vec<_>>();
+                            retain_top_n_by_intensity(
+                                &mut indices,
+                                &masses,
+                                &intensities,
+                                self.take_top_n,
+                                false,
+                            );
+                            select_columns(indices, &masses, &intensities, &charges)
+                        }
+                    }
                     _ => {
-                        let masses = spectrum
-                            .mz
-                            .iter()
-                            .map(|mass| (mass - PROTON) * 1.0)
-                            .collect::<Vec<_>>();
-                        let intensities = spectrum.intensity.clone();
+                        let mut masses = spectrum.mz;
+                        masses.iter_mut().for_each(|mass| *mass -= PROTON);
+                        let intensities = spectrum.intensity;
                         let charges = vec![1; masses.len()];
                         (masses, intensities, charges)
                     }
@@ -687,6 +709,24 @@ mod test {
     }
 
     #[test]
+    fn sorted_ms1_reuses_raw_peak_allocations() {
+        let processor = SpectrumProcessor::new(10, false, 0.0);
+        let spectrum = RawSpectrum {
+            ms_level: 1,
+            mz: vec![100.0, 101.0, 102.0],
+            intensity: vec![10.0, 20.0, 30.0],
+            ..RawSpectrum::default()
+        };
+        let mass_ptr = spectrum.mz.as_ptr();
+        let intensity_ptr = spectrum.intensity.as_ptr();
+
+        let processed = processor.process(spectrum);
+
+        assert_eq!(processed.masses.as_ptr(), mass_ptr);
+        assert_eq!(processed.intensities.as_ptr(), intensity_ptr);
+    }
+
+    #[test]
     fn process_ms1_with_mobility_sorts_all_columns_by_mass() {
         let processor = SpectrumProcessor::new(10, false, 0.0);
         let spectrum = RawSpectrum {
@@ -731,6 +771,25 @@ mod test {
         assert_eq!(processed.intensities, vec![10.0, 20.0, 30.0]);
         assert_eq!(processed.charges, vec![1, 1, 1]);
         assert_eq!(processed.peak_mz(1), 101.0);
+    }
+
+    #[test]
+    fn sorted_ms2_without_deisotoping_reuses_raw_peak_allocations() {
+        let processor = SpectrumProcessor::new(10, false, 0.0);
+        let spectrum = RawSpectrum {
+            ms_level: 2,
+            representation: Representation::Centroid,
+            mz: vec![100.0, 101.0, 102.0],
+            intensity: vec![10.0, 20.0, 30.0],
+            ..RawSpectrum::default()
+        };
+        let mass_ptr = spectrum.mz.as_ptr();
+        let intensity_ptr = spectrum.intensity.as_ptr();
+
+        let processed = processor.process(spectrum);
+
+        assert_eq!(processed.masses.as_ptr(), mass_ptr);
+        assert_eq!(processed.intensities.as_ptr(), intensity_ptr);
     }
 
     #[test]

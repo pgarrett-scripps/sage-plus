@@ -4,6 +4,7 @@ use crate::ion_series::{IonSeries, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::spectrum::{Precursor, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::ops::AddAssign;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -162,6 +163,11 @@ pub struct Fragments {
 }
 
 static PSM_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+thread_local! {
+    /// Reuse dense candidate-counting storage on each Rayon worker.
+    static PRE_SCORE_SCRATCH: RefCell<Vec<PreScore>> = const { RefCell::new(Vec::new()) };
+}
 
 fn increment_psm_counter() -> usize {
     PSM_COUNTER.fetch_add(1, Ordering::Relaxed)
@@ -352,38 +358,49 @@ impl<'db> Scorer<'db> {
         );
 
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
-        // Allocate space for all potential candidates - many potential candidates
         let potential = candidates.pre_idx_hi - candidates.pre_idx_lo + 1;
-        let mut hits = InitialHits {
-            matched_peaks: 0,
-            scored_candidates: 0,
-            preliminary: vec![PreScore::default(); potential],
-        };
 
-        for peak_mass in query.masses.iter() {
-            for charge in 1..max_fragment_charge {
-                let mass = peak_mass * charge as f32;
-                for frag in candidates.page_search(mass) {
-                    let idx = frag.peptide_index.0 as usize - candidates.pre_idx_lo;
-                    let sc = &mut hits.preliminary[idx];
-                    if sc.matched == 0 {
-                        hits.scored_candidates += 1;
-                        sc.precursor_charge = precursor_charge;
-                        sc.peptide = frag.peptide_index;
-                        sc.isotope_error = isotope_error;
+        PRE_SCORE_SCRATCH.with(|scratch| {
+            let mut preliminary = scratch.borrow_mut();
+            preliminary.resize(potential, PreScore::default());
+            preliminary.fill(PreScore::default());
+            let mut matched_peaks = 0;
+            let mut scored_candidates = 0;
+
+            for peak_mass in query.masses.iter() {
+                for charge in 1..max_fragment_charge {
+                    let mass = peak_mass * charge as f32;
+                    for frag in candidates.page_search(mass) {
+                        let idx = frag.peptide_index.0 as usize - candidates.pre_idx_lo;
+                        let sc = &mut preliminary[idx];
+                        if sc.matched == 0 {
+                            scored_candidates += 1;
+                            sc.precursor_charge = precursor_charge;
+                            sc.peptide = frag.peptide_index;
+                            sc.isotope_error = isotope_error;
+                        }
+
+                        sc.matched += 1;
+                        matched_peaks += 1;
                     }
-
-                    sc.matched += 1;
-                    hits.matched_peaks += 1;
                 }
             }
-        }
-        if hits.matched_peaks == 0 {
-            return hits;
-        }
 
-        self.trim_hits(&mut hits);
-        hits
+            if matched_peaks == 0 {
+                return InitialHits::default();
+            }
+
+            let k = 50.clamp(
+                (self.report_psms * 2).min(preliminary.len()),
+                preliminary.len(),
+            );
+            bounded_min_heapify(&mut preliminary, k);
+            InitialHits {
+                matched_peaks,
+                scored_candidates,
+                preliminary: preliminary[..k].to_vec(),
+            }
+        })
     }
 
     fn matched_peaks(
@@ -415,7 +432,7 @@ impl<'db> Scorer<'db> {
                 precursor_mass,
                 precursor_charge,
                 precursor_tol,
-                0,
+                self.min_isotope_err,
             )
         }
     }
@@ -444,33 +461,44 @@ impl<'db> Scorer<'db> {
         }
 
         let potential = end - start;
-        let mut hits = InitialHits {
-            matched_peaks: 0,
-            scored_candidates: 0,
-            preliminary: vec![PreScore::default(); potential],
-        };
 
-        for i in start..end {
-            let (fwd, rev) = bm.score_peptide(exp_bitmap, i);
-            let total = fwd + rev;
-            if total > 0 {
-                let idx = i - start;
-                let sc = &mut hits.preliminary[idx];
-                sc.matched = total;
-                sc.peptide = bm.peptide_indices[i];
-                sc.precursor_charge = precursor_charge;
-                sc.isotope_error = isotope_error;
-                hits.scored_candidates += 1;
-                hits.matched_peaks += total as usize;
+        PRE_SCORE_SCRATCH.with(|scratch| {
+            let mut preliminary = scratch.borrow_mut();
+            preliminary.resize(potential, PreScore::default());
+            preliminary.fill(PreScore::default());
+            let mut matched_peaks = 0;
+            let mut scored_candidates = 0;
+
+            for i in start..end {
+                let (fwd, rev) = bm.score_peptide(exp_bitmap, i);
+                let total = fwd + rev;
+                if total > 0 {
+                    let idx = i - start;
+                    let sc = &mut preliminary[idx];
+                    sc.matched = total;
+                    sc.peptide = bm.peptide_indices[i];
+                    sc.precursor_charge = precursor_charge;
+                    sc.isotope_error = isotope_error;
+                    scored_candidates += 1;
+                    matched_peaks += total as usize;
+                }
             }
-        }
 
-        if hits.matched_peaks == 0 {
-            return hits;
-        }
+            if matched_peaks == 0 {
+                return InitialHits::default();
+            }
 
-        self.trim_hits(&mut hits);
-        hits
+            let k = 50.clamp(
+                (self.report_psms * 2).min(preliminary.len()),
+                preliminary.len(),
+            );
+            bounded_min_heapify(&mut preliminary, k);
+            InitialHits {
+                matched_peaks,
+                scored_candidates,
+                preliminary: preliminary[..k].to_vec(),
+            }
+        })
     }
 
     /// Bitmap preliminary search for one (precursor_mass, precursor_charge),
@@ -504,7 +532,7 @@ impl<'db> Scorer<'db> {
                 precursor_mass,
                 precursor_charge,
                 precursor_tol,
-                0,
+                self.min_isotope_err,
             )
         }
     }
@@ -515,6 +543,10 @@ impl<'db> Scorer<'db> {
     /// **Requires deisotoped peaks**: each `peak.mass` must be the neutral
     /// monoisotopic mass M = (mz − H) × z as resolved by deisotoping.
     fn initial_hits_bitmap(&self, query: &ProcessedSpectrum, precursor: &Precursor) -> InitialHits {
+        assert!(
+            self.db.peptides.is_empty() || !self.db.bitmap_index.precursor_masses.is_empty(),
+            "bitmap scoring requested for a database built without the bitmap index; set Parameters::use_bitmap before building"
+        );
         let exp_bitmap = self
             .db
             .bitmap_index
@@ -760,7 +792,7 @@ impl<'db> Scorer<'db> {
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, psm.charge);
 
         // Remove MS2 peaks matched by previous match
-        let mut to_remove = Vec::new();
+        let mut to_remove = vec![false; query.masses.len()];
         for frag in fragments {
             for charge in 1..max_fragment_charge {
                 // Experimental peaks are multipled by charge, therefore theoretical are divided
@@ -771,11 +803,7 @@ impl<'db> Scorer<'db> {
                     self.fragment_tol,
                     None,
                 ) {
-                    to_remove.push((
-                        query.masses[peak_idx],
-                        query.intensities[peak_idx],
-                        query.charges[peak_idx],
-                    ));
+                    to_remove[peak_idx] = true;
                 }
             }
         }
@@ -785,13 +813,8 @@ impl<'db> Scorer<'db> {
         let mut charges = Vec::with_capacity(query.charges.len());
         let mut mobilities = Vec::with_capacity(query.mobilities.len());
 
-        for idx in 0..query.masses.len() {
-            let peak = (
-                query.masses[idx],
-                query.intensities[idx],
-                query.charges[idx],
-            );
-            if !to_remove.contains(&peak) {
+        for (idx, removed) in to_remove.iter().enumerate() {
+            if !removed {
                 masses.push(query.masses[idx]);
                 intensities.push(query.intensities[idx]);
                 charges.push(query.charges[idx]);
@@ -961,6 +984,9 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::database::Builder;
+    use crate::enzyme::Digest;
+    use std::sync::Arc;
 
     #[test]
     fn longest_series() {
@@ -993,5 +1019,66 @@ mod tests {
         assert_eq!(max_fragment_charge(Some(1), 3), 2);
         assert_eq!(max_fragment_charge(Some(2), 4), 3);
         assert_eq!(max_fragment_charge(Some(4), 1), 2);
+    }
+
+    #[test]
+    fn equal_nonzero_isotope_bounds_are_honored() {
+        let peptide = crate::peptide::Peptide::try_from(Digest {
+            sequence: "PEPTIDER".into(),
+            protein: Arc::from("protein"),
+            ..Digest::default()
+        })
+        .unwrap();
+        let fragment_masses = [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| IonSeries::new(&peptide, kind))
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+
+        for use_bitmap in [false, true] {
+            let mut parameters = Builder::default().make_parameters();
+            parameters.use_bitmap = use_bitmap;
+            let database = parameters.build_from_peptides(vec![peptide.clone()]);
+            let precursor_charge = 2;
+            let precursor = Precursor {
+                mz: (peptide.monoisotopic + NEUTRON) / precursor_charge as f32 + PROTON,
+                charge: Some(precursor_charge),
+                ..Precursor::default()
+            };
+            let mut query = ProcessedSpectrum {
+                level: 2,
+                id: "isotope-test".into(),
+                precursors: vec![precursor],
+                masses: fragment_masses.clone(),
+                intensities: vec![1.0; fragment_masses.len()],
+                charges: vec![1; fragment_masses.len()],
+                total_ion_current: fragment_masses.len() as f32,
+                ..ProcessedSpectrum::default()
+            };
+            query.masses.sort_by(f32::total_cmp);
+
+            let scorer = Scorer {
+                db: &database,
+                precursor_tol: Tolerance::Da(-0.01, 0.01),
+                fragment_tol: Tolerance::Da(-0.01, 0.01),
+                min_matched_peaks: 1,
+                min_isotope_err: 1,
+                max_isotope_err: 1,
+                min_precursor_charge: 2,
+                max_precursor_charge: 2,
+                override_precursor_charge: false,
+                max_fragment_charge: Some(1),
+                chimera: false,
+                report_psms: 1,
+                wide_window: false,
+                annotate_matches: false,
+                score_type: ScoreType::SageHyperScore,
+                use_bitmap,
+            };
+
+            let features = scorer.score(&query);
+            assert_eq!(features.len(), 1, "use_bitmap={use_bitmap}");
+            assert_eq!(features[0].isotope_error, NEUTRON);
+        }
     }
 }

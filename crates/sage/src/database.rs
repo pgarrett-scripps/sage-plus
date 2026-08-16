@@ -129,6 +129,7 @@ impl Builder {
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
             prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
+            use_bitmap: false,
         }
     }
 
@@ -157,6 +158,10 @@ pub struct Parameters {
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
     pub prefilter_low_memory: bool,
+    /// Select the bitmap preliminary-search index instead of the fragment index.
+    /// The CLI copies its top-level `use_bitmap` option here before construction.
+    #[serde(skip)]
+    pub use_bitmap: bool,
 }
 
 impl Parameters {
@@ -416,32 +421,36 @@ impl Parameters {
         // Note that multiple charge states are actually handled by
         // [`SpectrumProcessor`] or during scoring - all theoretical
         // fragments are monoisotopic/uncharged
-        let mut fragments = target_decoys
-            .par_iter()
-            .enumerate()
-            .flat_map_iter(|(idx, peptide)| {
-                // Generate both B and Y ions, then filter down to make sure that
-                // theoretical fragments are within the search space
-                self.ion_kinds
-                    .iter()
-                    .flat_map(|kind| IonSeries::new(peptide, *kind).enumerate())
-                    .filter(|(ion_idx, ion)| {
-                        // Don't store b1, b2, y1, y2 ions for preliminary scoring
+        let mut fragments = if self.use_bitmap {
+            Vec::new()
+        } else {
+            target_decoys
+                .par_iter()
+                .enumerate()
+                .flat_map_iter(|(idx, peptide)| {
+                    // Generate both B and Y ions, then filter down to make sure that
+                    // theoretical fragments are within the search space
+                    self.ion_kinds
+                        .iter()
+                        .flat_map(|kind| IonSeries::new(peptide, *kind).enumerate())
+                        .filter(|(ion_idx, ion)| {
+                            // Don't store b1, b2, y1, y2 ions for preliminary scoring
 
-                        match ion.kind {
-                            Kind::A | Kind::B | Kind::C => (ion_idx + 1) > self.min_ion_index,
-                            Kind::X | Kind::Y | Kind::Z => {
-                                peptide.sequence.len().saturating_sub(1) - ion_idx
-                                    > self.min_ion_index
+                            match ion.kind {
+                                Kind::A | Kind::B | Kind::C => (ion_idx + 1) > self.min_ion_index,
+                                Kind::X | Kind::Y | Kind::Z => {
+                                    peptide.sequence.len().saturating_sub(1) - ion_idx
+                                        > self.min_ion_index
+                                }
                             }
-                        }
-                    })
-                    .map(move |(_, ion)| Theoretical {
-                        peptide_index: PeptideIx(idx as u32),
-                        fragment_mz: ion.monoisotopic_mass,
-                    })
-            })
-            .collect::<Vec<_>>();
+                        })
+                        .map(move |(_, ion)| Theoretical {
+                            peptide_index: PeptideIx(idx as u32),
+                            fragment_mz: ion.monoisotopic_mass,
+                        })
+                })
+                .collect::<Vec<_>>()
+        };
         log::trace!("finalizing index");
 
         // Sort all of our theoretical fragments by m/z, from low to high
@@ -500,13 +509,17 @@ impl Parameters {
             })
             .collect::<Vec<(ModificationSpecificity, f32)>>();
 
-        let bitmap_index = BitmapIndex::build(
-            &target_decoys,
-            &self.ion_kinds,
-            self.bitmap_size,
-            self.peptide_min_mass,
-            self.peptide_max_mass,
-        );
+        let bitmap_index = if self.use_bitmap {
+            BitmapIndex::build(
+                &target_decoys,
+                &self.ion_kinds,
+                self.bitmap_size,
+                self.peptide_min_mass,
+                self.peptide_max_mass,
+            )
+        } else {
+            BitmapIndex::default()
+        };
 
         IndexedDatabase {
             peptides: target_decoys,
@@ -848,6 +861,7 @@ mod test {
             prefilter: false,
             prefilter_chunk_size: 0,
             prefilter_low_memory: true,
+            use_bitmap: false,
         };
 
         let peptides = params.digest(&fasta);
@@ -875,5 +889,31 @@ mod test {
             peptides.last().unwrap().proteins,
             vec!["sp|AAAAA".to_string().into()]
         );
+    }
+
+    #[test]
+    fn builds_only_selected_search_index() {
+        let peptide = Peptide::try_from(Digest {
+            sequence: "PEPTIDER".into(),
+            protein: Arc::from("protein"),
+            ..Digest::default()
+        })
+        .unwrap();
+
+        let parameters = Builder::default().make_parameters();
+        let fragment_database = parameters
+            .clone()
+            .build_from_peptides(vec![peptide.clone()]);
+        assert!(!fragment_database.fragments.is_empty());
+        assert!(fragment_database.bitmap_index.forward_bitmaps.is_empty());
+        assert!(fragment_database.bitmap_index.reverse_bitmaps.is_empty());
+
+        let mut parameters = parameters;
+        parameters.use_bitmap = true;
+        let bitmap_database = parameters.build_from_peptides(vec![peptide]);
+        assert!(bitmap_database.fragments.is_empty());
+        assert!(bitmap_database.min_value.is_empty());
+        assert!(!bitmap_database.bitmap_index.forward_bitmaps.is_empty());
+        assert!(!bitmap_database.bitmap_index.reverse_bitmaps.is_empty());
     }
 }

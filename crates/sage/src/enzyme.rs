@@ -31,6 +31,9 @@ pub struct DigestGroup {
 }
 
 pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
+    if digests.is_empty() {
+        return Vec::new();
+    }
     let mut groups = Vec::new();
     digests.sort_unstable_by(|a, b| {
         a.position
@@ -38,9 +41,12 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             .then(a.decoy.cmp(&b.decoy))
             .then(a.sequence.cmp(&b.sequence))
     });
+    let mut digests = digests.into_iter();
+    let first = digests.next().expect("checked non-empty above");
+    let first_protein = first.protein.clone();
     let mut curr_group = DigestGroup {
-        reference: digests[0].clone(),
-        proteins: Vec::new(),
+        reference: first,
+        proteins: vec![first_protein],
     };
     for digest in digests {
         if digest.decoy == curr_group.reference.decoy
@@ -51,9 +57,10 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
         } else {
             curr_group.proteins.sort_unstable();
             groups.push(curr_group);
+            let protein = digest.protein.clone();
             curr_group = DigestGroup {
-                reference: digest.clone(),
-                proteins: vec![digest.protein],
+                reference: digest,
+                proteins: vec![protein],
             };
         }
     }
@@ -99,9 +106,7 @@ impl PartialEq for Digest {
     }
 }
 
-impl Eq for Digest {
-    fn assert_receiver_is_total_eq(&self) {}
-}
+impl Eq for Digest {}
 
 impl std::hash::Hash for Digest {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
