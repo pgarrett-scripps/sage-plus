@@ -153,8 +153,14 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
 }
 
 pub fn picked_protein(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
+    // Critical: All non-proteotypic, non-unique, or shared peptides are discarded
+    // else the assumptions of picked protein FDR are invalid. Shared peptides are
+    // still reported, albeit with protein FDR = 1.0
     let mut map: FnvHashMap<_, Competition<String>> = FnvHashMap::default();
-    for feat in features.iter() {
+    for feat in features
+        .iter()
+        .filter(|x| db[x.peptide_idx].proteins.len() == 1)
+    {
         let decoy = db[feat.peptide_idx].decoy;
         let entry = map.entry(&db[feat.peptide_idx].proteins).or_default();
         let proteins = db[feat.peptide_idx].proteins(&db.decoy_tag, db.generate_decoys);
@@ -172,10 +178,49 @@ pub fn picked_protein(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
 
     let (scores, passing) = Competition::assign_q_value(map, 0.01);
 
-    features.par_iter_mut().for_each(|feat| {
-        let proteins = db[feat.peptide_idx].proteins(&db.decoy_tag, db.generate_decoys);
-        feat.protein_q = scores[&proteins];
-    });
+    features
+        .par_iter_mut()
+        .filter(|x| db[x.peptide_idx].proteins.len() == 1)
+        .for_each(|feat| {
+            let proteins = db[feat.peptide_idx].proteins(&db.decoy_tag, db.generate_decoys);
+            feat.protein_q = scores[&proteins];
+        });
+
+    passing
+}
+
+pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
+    // Critical: All non-proteotypic, non-unique, or shared peptides are discarded
+    // else the assumptions of picked group FDR are invalid. Shared peptides are
+    // still reported, albeit with protein group FDR = 1.0
+    let mut map: FnvHashMap<_, Competition<String>> = FnvHashMap::default();
+    for feat in features
+        .iter()
+        .filter(|x| x.num_protein_groups == 1 && x.protein_groups.is_some())
+    {
+        let decoy = db[feat.peptide_idx].decoy;
+        let entry = map.entry(feat.protein_groups.clone()).or_default();
+        match decoy {
+            true => {
+                entry.reverse = entry.reverse.max(feat.discriminant_score);
+                entry.reverse_ix = feat.protein_groups.clone();
+            }
+            false => {
+                entry.forward = entry.forward.max(feat.discriminant_score);
+                entry.foward_ix = feat.protein_groups.clone();
+            }
+        }
+    }
+
+    let (scores, passing) = Competition::assign_q_value(map, 0.01);
+
+    features
+        .par_iter_mut()
+        .filter(|x| x.num_protein_groups == 1 && x.protein_groups.is_some())
+        .for_each(|feat| {
+            let protein_groups = feat.protein_groups.as_deref().unwrap().to_string();
+            feat.protein_group_q = scores[&protein_groups];
+        });
 
     passing
 }

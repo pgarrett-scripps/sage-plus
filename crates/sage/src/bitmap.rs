@@ -1,8 +1,7 @@
+use crate::database::PeptideIx;
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
 use crate::peptide::Peptide;
-use crate::spectrum::Peak;
-use crate::database::PeptideIx;
 use rayon::prelude::*;
 
 /// Bitmap-based preliminary search index.
@@ -77,9 +76,7 @@ impl BitmapIndex {
                     };
                     for ion in IonSeries::new(peptide, kind) {
                         let mass = ion.monoisotopic_mass;
-                        if let Some(bin) =
-                            mass_to_bin(mass, min_mass, max_mass, total_bins)
-                        {
+                        if let Some(bin) = mass_to_bin(mass, min_mass, max_mass, total_bins) {
                             set_bit(target, bin);
                         }
                     }
@@ -123,12 +120,12 @@ impl BitmapIndex {
     /// (M = (mz − H) × z, already resolved by deisotoping).  The tolerance
     /// window `[lo, hi]` is converted to a bin range; all bins in that range
     /// are set to 1, handling the bin-edge case automatically.
-    pub fn experimental_bitmap(&self, peaks: &[Peak], tol: Tolerance) -> Vec<u64> {
+    pub fn experimental_bitmap(&self, masses: &[f32], tol: Tolerance) -> Vec<u64> {
         let mut bitmap = vec![0u64; self.bitmap_size];
         let total_bins = self.total_bins();
 
-        for peak in peaks {
-            let (lo, hi) = tol.bounds(peak.mass);
+        for &mass in masses {
+            let (lo, hi) = tol.bounds(mass);
             let bin_lo = mass_to_bin_clamped(lo, self.min_mass, self.max_mass, total_bins);
             let bin_hi = mass_to_bin_clamped(hi, self.min_mass, self.max_mass, total_bins);
             for bin in bin_lo..=bin_hi {
@@ -141,14 +138,16 @@ impl BitmapIndex {
     /// Score `exp_bitmap` against the theoretical bitmap for peptide `i`
     /// (both forward and reverse), returning `(matched_forward, matched_reverse)`.
     #[inline]
-    pub fn score_peptide(
-        &self,
-        exp_bitmap: &[u64],
-        i: usize,
-    ) -> (u16, u16) {
+    pub fn score_peptide(&self, exp_bitmap: &[u64], i: usize) -> (u16, u16) {
         let offset = i * self.bitmap_size;
-        let fwd = bitmap_score(exp_bitmap, &self.forward_bitmaps[offset..offset + self.bitmap_size]);
-        let rev = bitmap_score(exp_bitmap, &self.reverse_bitmaps[offset..offset + self.bitmap_size]);
+        let fwd = bitmap_score(
+            exp_bitmap,
+            &self.forward_bitmaps[offset..offset + self.bitmap_size],
+        );
+        let rev = bitmap_score(
+            exp_bitmap,
+            &self.reverse_bitmaps[offset..offset + self.bitmap_size],
+        );
         (fwd as u16, rev as u16)
     }
 
@@ -258,12 +257,9 @@ mod tests {
         };
 
         // Peak at mass=10.0; tolerance ±0.6 Da → bins 9, 10
-        let peaks = vec![Peak {
-            mass: 10.0,
-            intensity: 1.0,
-        }];
+        let masses = vec![10.0];
         let tol = Tolerance::Da(-0.6, 0.6);
-        let bm = index.experimental_bitmap(&peaks, tol);
+        let bm = index.experimental_bitmap(&masses, tol);
 
         // bin 9 = word 0, bit 9; bin 10 = word 0, bit 10
         assert!(bm[0] & (1u64 << 9) != 0);

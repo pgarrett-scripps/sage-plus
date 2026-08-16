@@ -4,7 +4,7 @@ use sage_core::{
     spectrum::{Precursor, RawSpectrum, Representation},
 };
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
+use std::{cmp::Ordering, path::Path};
 use timsrust::converters::{ConvertableDomain, Scan2ImConverter, Tof2MzConverter};
 use timsrust::readers::SpectrumReader;
 use timsrust::readers::SpectrumReaderConfig as TimsrustSpectrumConfig;
@@ -34,14 +34,14 @@ pub struct BrukerProcessingConfig {
 impl TdfReader {
     pub fn parse(
         &self,
-        path_name: impl AsRef<str>,
+        path_name: impl AsRef<Path>,
         file_id: usize,
         config: BrukerProcessingConfig,
         requires_ms1: bool,
     ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
         let spectrum_reader = timsrust::readers::SpectrumReader::build()
             .with_path(path_name.as_ref())
-            .with_config(config.ms2.clone())
+            .with_config(config.ms2)
             .finalize()?;
         let mut spectra = self.read_msn_spectra(file_id, &spectrum_reader)?;
         if requires_ms1 {
@@ -54,7 +54,7 @@ impl TdfReader {
 
     fn read_ms1_spectra(
         &self,
-        path_name: impl AsRef<str>,
+        path_name: impl AsRef<Path>,
         file_id: usize,
         config: BrukerMS1CentoidingConfig,
     ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
@@ -284,8 +284,7 @@ impl PeakBuffer {
                 let im = ims_converter.convert(i as f64) as f32;
                 Some((im, lo, hi))
             })
-            .map(|(im, lo, hi)| (lo..hi).map(move |_| im))
-            .flatten();
+            .flat_map(|(im, lo, hi)| (lo..hi).map(move |_| im));
         ims_iter
     }
 
@@ -389,7 +388,6 @@ impl PeakBuffer {
 
         self.agg_buff
             .drain(..)
-            .into_iter()
             .map(|x| (x.mz, (x.intensity, x.im)))
             .unzip()
     }

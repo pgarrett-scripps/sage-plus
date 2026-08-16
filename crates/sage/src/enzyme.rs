@@ -61,18 +61,13 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
     groups
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Default)]
 pub enum Position {
     Nterm,
     Cterm,
     Full,
+    #[default]
     Internal,
-}
-
-impl Default for Position {
-    fn default() -> Self {
-        Self::Internal
-    }
 }
 
 impl Digest {
@@ -199,7 +194,11 @@ impl Enzyme {
                 true => mat.end(),
                 false => mat.start(),
             };
-            if sequence.as_bytes().get(right).map_or(false, |b| self.skip_suffix[(b - b'A') as usize]) {
+            if sequence
+                .as_bytes()
+                .get(right)
+                .map_or(false, |b| self.skip_suffix[(b - b'A') as usize])
+            {
                 continue;
             }
             sites.push(DigestSite {
@@ -239,11 +238,7 @@ impl EnzymeParameters {
         }
     }
 
-    fn missed_cleavage_sites(
-        &self,
-        sites: &mut Vec<DigestSite>,
-        missed_cleavages: u8,
-    ) -> Vec<DigestSite> {
+    fn missed_cleavage_sites(&self, sites: &mut Vec<DigestSite>, missed_cleavages: u8) {
         let mut missed_cleavage_sites = Vec::new();
         for cleavage in 1..=(1 + missed_cleavages) {
             // Generate missed cleavages
@@ -258,7 +253,6 @@ impl EnzymeParameters {
             }
         }
         sites.append(&mut missed_cleavage_sites);
-        sites.to_vec()
     }
 
     fn is_semi_enzymatic(&self) -> bool {
@@ -268,9 +262,9 @@ impl EnzymeParameters {
         }
     }
 
-    fn semi_enzymatic_sites(&self, sites: &mut Vec<DigestSite>) -> Vec<DigestSite> {
+    fn semi_enzymatic_sites(&self, sites: &mut Vec<DigestSite>) {
         let mut semi_enzymatic_sites = Vec::new();
-        for site in sites.iter_mut() {
+        for site in sites.iter() {
             let start = site.site.start;
             let end = site.site.end;
             for cut_site in start..end {
@@ -290,7 +284,6 @@ impl EnzymeParameters {
             }
         }
         sites.append(&mut semi_enzymatic_sites);
-        sites.to_vec()
     }
 
     pub fn digest(&self, sequence: &str, protein: Arc<str>) -> Vec<Digest> {
@@ -304,15 +297,13 @@ impl EnzymeParameters {
             _ => self.missed_cleavages,
         };
 
-        let mut sites = match missed_cleavages {
-            0 => sites,
-            _ => self.missed_cleavage_sites(&mut sites, missed_cleavages),
-        };
+        if missed_cleavages > 0 {
+            self.missed_cleavage_sites(&mut sites, missed_cleavages);
+        }
 
-        let mut sites = match self.is_semi_enzymatic() {
-            false => sites,
-            true => self.semi_enzymatic_sites(&mut sites),
-        };
+        if self.is_semi_enzymatic() {
+            self.semi_enzymatic_sites(&mut sites);
+        }
 
         // Keep a set of peptides that have been digested from this sequence
         // - handles cases where the same peptide occurs multiple times in a protein

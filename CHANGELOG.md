@@ -20,16 +20,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - If both `database.fasta` and `database.peptides` are provided, peptides from both sources are merged and deduplicated before building the index.
   - Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.
 
-## [v0.15.0-alpha]
+## [v0.15.0]
 ### Added
+- IDPicker-based protein grouping with picked group FDR control (`protein_grouping` setting, enabled by default). Proteins are grouped using a bipartite graph greedy set cover approach, and protein group-level q-values are reported via target-decoy competition. New output columns: `protein_groups`, `num_protein_groups`, `protein_group_q`.
+- `protein_grouping_peptide_fdr` parameter to control the peptide FDR threshold used for confident peptides during protein grouping (default: 0.01)
 - Initial support for LFQ on data with ion mobility.
 - Speedup on the generation of databases when large number of peptides are redundant.
 - Initial support for searching diaPASEF data
 - `override_precursor_charge` setting that forces multiple charge states to be searched
+- Cross-cloud storage support: Replaced AWS SDK with the `object_store` crate. Sage now natively supports reading/writing from Amazon S3, Google Cloud Storage, and Azure Blob Storage using `s3://`, `gs://`, and `az://` URL schemes.
+- HTML QC report generation (`--write-report`)
+- `lfq_settings.peptide_q_value` parameter for controlling which peptides are quantified
+- Stack size configuration for Rayon threads
+- Allow zero or multiple amino-acids as cleavage restrictions
+- CITATION.cff file
+
+### Fixed
+- Handle negative mass errors for .pin files
+- Extract precursor m/z from 'isolation window target m/z' if missing
+- Selected ion m/z of 0.0 was overwriting precursor.mz
+- C/N-term mixup in modification handling
+- Bruker `.tdf` filename handling (use parent directory name)
+- Performance optimizations on prefiltering
+- Picked protein FDR now correctly uses only proteotypic peptides for competition
+
 ### Breaking Changes
 - `precursor_ppm` field reports the non-absoluted average mass error, rather than the absoluted average mass error.
 - Don't deisotope reporter ion regions if MS2-based TMT/iTRAQ is used
 - Removed `fragment_min_mz` and `fragment_max_mz` parameters. These were decreasing the accuracy of preliminary scoring estimation when attempting to annotate multiply-charged, high-m/z ions.
+- `sage-cloudpath` no longer exposes the `CloudPath` type. All paths are represented as URLs (`url::Url`). Local paths are converted to `file://` URLs internally.
 
 ## [v0.14.7]
 ### Added

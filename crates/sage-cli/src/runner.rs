@@ -5,7 +5,7 @@ use anyhow::Context;
 use csv::ByteRecord;
 use log::info;
 use rayon::prelude::*;
-use sage_cloudpath::{CloudPath, FileFormat};
+use sage_cloudpath::{FileFormat, Url};
 use sage_core::database::{IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
 use sage_core::ion_series::Kind;
@@ -14,7 +14,7 @@ use sage_core::mass::Tolerance;
 use sage_core::peptide::Peptide;
 use sage_core::scoring::Fragments;
 use sage_core::scoring::{Feature, Scorer};
-use sage_core::spectrum::{MS1Spectra, ProcessedSpectrum, RawSpectrum, SpectrumProcessor};
+use sage_core::spectrum::{ProcessedSpectrum, RawSpectrum, SpectrumProcessor};
 use sage_core::tmt::TmtQuant;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -88,11 +88,11 @@ impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
         let mut parameters = parameters.clone();
         let start = Instant::now();
-
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
+            let fasta_url = sage_cloudpath::to_url(&parameters.database.fasta)?;
             let fasta = sage_cloudpath::util::read_fasta(
-                &parameters.database.fasta,
+                &fasta_url,
                 &parameters.database.decoy_tag,
                 parameters.database.generate_decoys,
             )
@@ -140,7 +140,10 @@ impl Runner {
 
         // Merge, deduplicate, and build the index.
         Parameters::reorder_peptides(&mut all_peptides);
-        let database = parameters.database.clone().build_from_peptides(all_peptides);
+        let database = parameters
+            .database
+            .clone()
+            .build_from_peptides(all_peptides);
 
         info!(
             "generated {} fragments, {} peptides in {:#?}",
@@ -156,7 +159,7 @@ impl Runner {
     }
 
     pub fn prefilter_peptides(self, parallel: usize, fasta: Fasta) -> Vec<Peptide> {
-        let spectra: Option<Vec<ProcessedSpectrum<_>>> =
+        let spectra: Option<Vec<ProcessedSpectrum>> =
             match parallel >= self.parameters.mzml_paths.len() {
                 true => Some(
                     self.read_processed_spectra(&self.parameters.mzml_paths, 0, 0)
@@ -214,9 +217,7 @@ impl Runner {
                     .collect::<Vec<_>>();
 
                 match &spectra {
-                    Some(spectra) => {
-                        self.peptide_filter_processed_spectra(&scorer, &spectra, &keep)
-                    }
+                    Some(spectra) => self.peptide_filter_processed_spectra(&scorer, spectra, &keep),
                     None => self
                         .parameters
                         .mzml_paths
@@ -260,7 +261,7 @@ impl Runner {
     fn peptide_filter_processed_spectra(
         &self,
         scorer: &Scorer,
-        spectra: &Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
+        spectra: &[ProcessedSpectrum],
         keep: &[std::sync::atomic::AtomicBool],
     ) {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -269,7 +270,7 @@ impl Runner {
 
         spectra
             .par_iter()
-            .filter(|spec| spec.peaks.len() >= self.parameters.min_peaks && spec.level == 2)
+            .filter(|spec| spec.masses.len() >= self.parameters.min_peaks && spec.level == 2)
             .for_each(|spectrum| {
                 let prev = counter.fetch_add(1, Ordering::Relaxed);
                 if prev > 0 && prev % 10_000 == 0 {
@@ -310,16 +311,17 @@ impl Runner {
 
     // Create a path for `file_name` in the specified output directory, if it exists,
     // otherwise, write to current directory
-    fn make_path<S: AsRef<str>>(&self, file_name: S) -> CloudPath {
-        let mut path = self.parameters.output_directory.clone();
-        path.push(file_name);
-        path
+    fn make_path<S: AsRef<str>>(&self, file_name: S) -> Url {
+        self.parameters
+            .output_directory
+            .join(file_name.as_ref())
+            .expect("valid path segment")
     }
 
     fn search_processed_spectra(
         &self,
         scorer: &Scorer,
-        msn_spectra: &Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
+        msn_spectra: &[ProcessedSpectrum],
     ) -> Vec<Feature> {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let counter = AtomicUsize::new(0);
@@ -327,7 +329,7 @@ impl Runner {
 
         let features: Vec<_> = msn_spectra
             .par_iter()
-            .filter(|spec| spec.peaks.len() >= self.parameters.min_peaks && spec.level == 2)
+            .filter(|spec| spec.masses.len() >= self.parameters.min_peaks && spec.level == 2)
             .map(|x| {
                 let prev = counter.fetch_add(1, Ordering::Relaxed);
                 if prev > 0 && prev % 10_000 == 0 {
@@ -350,8 +352,8 @@ impl Runner {
 
     fn complete_features(
         &self,
-        msn_spectra: Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
-        ms1_spectra: MS1Spectra,
+        msn_spectra: Vec<ProcessedSpectrum>,
+        ms1_spectra: Vec<ProcessedSpectrum>,
         features: Vec<Feature>,
     ) -> SageResults {
         let quant = self
@@ -382,7 +384,7 @@ impl Runner {
     fn process_chunk(
         &self,
         scorer: &Scorer,
-        chunk: &[String],
+        chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
     ) -> SageResults {
@@ -393,13 +395,10 @@ impl Runner {
 
     fn read_processed_spectra(
         &self,
-        chunk: &[String],
+        chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
-    ) -> (
-        MS1Spectra,
-        Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
-    ) {
+    ) -> (Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>) {
         // Read all of the spectra at once - this can help prevent memory over-consumption issues
         info!(
             "processing files {} .. {} ",
@@ -442,7 +441,7 @@ impl Runner {
                 path,
                 file_id,
                 sn,
-                self.parameters.bruker_config.clone(),
+                self.parameters.bruker_config,
                 self.requires_ms1(),
             );
 
@@ -480,26 +479,17 @@ impl Runner {
             .map(|s| sp.process(s))
             .collect::<Vec<_>>();
 
-        // If all the MS1 spectra contain IMS, then we can process them
-        // we use the IMS! otherwise we dont.
-        // Note: Empty iterators return true.
-        let all_contain_ims = spectra.ms1.iter().all(|x| x.mobility.is_some());
-        let ms1_empty = spectra.ms1.is_empty();
-        let ms1_spectra = if ms1_empty {
+        let has_ims = spectra.ms1.iter().any(|x| x.mobility.is_some());
+        let ms1_spectra = if spectra.ms1.is_empty() {
             log::trace!("no MS1 spectra found");
-            MS1Spectra::Empty
-        } else if all_contain_ims {
-            log::trace!("Processing MS1 spectra with IMS");
-            let spectra = spectra
-                .ms1
-                .into_iter()
-                .map(|x| sp.process_with_mobility(x))
-                .collect();
-            MS1Spectra::WithMobility(spectra)
+            Vec::new()
         } else {
-            log::trace!("Processing MS1 spectra without IMS");
-            let spectra = spectra.ms1.into_iter().map(|s| sp.process(s)).collect();
-            MS1Spectra::NoMobility(spectra)
+            if has_ims {
+                log::trace!("Processing MS1 spectra with IMS columns");
+            } else {
+                log::trace!("Processing MS1 spectra without IMS");
+            }
+            spectra.ms1.into_par_iter().map(|s| sp.process(s)).collect()
         };
 
         let io_time = Instant::now() - start;
@@ -562,17 +552,30 @@ impl Runner {
 
         let q_spectrum = self.spectrum_fdr(&mut outputs.features);
         let q_peptide = sage_core::fdr::picked_peptide(&self.database, &mut outputs.features);
+        // Protein FDR is based exclusively on proteotypic (unique, non-shared) peptides. Shared peptides
+        // are reported with protein FDR = 1.0
         let q_protein = sage_core::fdr::picked_protein(&self.database, &mut outputs.features);
+        // Conducts "IDPicker-based protein grouping at 1% peptide FDR"
+        sage_core::protein_grouping::generate_protein_groups(
+            &self.database,
+            &mut outputs.features,
+            self.parameters.protein_grouping,
+            Some(self.parameters.protein_grouping_peptide_fdr),
+        );
+        // Uses the "Picked Group FDR" approach to compute protein group FDR for the IDPicker groups,
+        // including rescued subset grouping (rsG). Shared peptides (between different groups)
+        // are reported with protein group FDR = 1.0
+        let q_protein_group =
+            sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
 
         let filenames = self
             .parameters
             .mzml_paths
             .iter()
-            .map(|s| {
-                s.parse::<CloudPath>()
-                    .ok()
-                    .and_then(|c| c.filename().map(|s| s.to_string()))
-                    .unwrap_or_else(|| s.clone())
+            .map(|url| {
+                sage_cloudpath::filename(url)
+                    .unwrap_or_else(|| url.as_str())
+                    .to_string()
             })
             .collect::<Vec<_>>();
 
@@ -600,7 +603,14 @@ impl Runner {
             q_spectrum
         );
         log::info!("discovered {} target peptides at 1% FDR", q_peptide);
-        log::info!("discovered {} target proteins at 1% FDR", q_protein);
+        log::info!(
+            "discovered {} target proteins (supported by proteotypic peptides only) at 1% FDR",
+            q_protein
+        );
+        log::info!(
+            "discovered {} target protein groups (supported by proteotypic peptides only) at 1% FDR",
+            q_protein_group
+        );
         log::trace!("writing outputs");
 
         // Write either a single parquet file, or multiple tsv files
@@ -615,15 +625,15 @@ impl Runner {
             )?;
 
             let path = self.make_path("results.sage.parquet");
-            path.write_bytes_sync(bytes)?;
-            self.parameters.output_paths.push(path.to_string());
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
 
             if self.parameters.annotate_matches {
                 let bytes =
                     sage_cloudpath::parquet::serialize_matched_fragments(&outputs.features)?;
                 let path = self.make_path("matched_fragments.sage.parquet");
-                path.write_bytes_sync(bytes)?;
-                self.parameters.output_paths.push(path.to_string());
+                sage_cloudpath::write_bytes_sync(&path, bytes)?;
+                self.parameters.output_paths.push(path);
             }
 
             if let Some(areas) = &areas {
@@ -631,8 +641,8 @@ impl Runner {
                     sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
 
                 let path = self.make_path("lfq.parquet");
-                path.write_bytes_sync(bytes)?;
-                self.parameters.output_paths.push(path.to_string());
+                sage_cloudpath::write_bytes_sync(&path, bytes)?;
+                self.parameters.output_paths.push(path);
             }
         } else {
             self.parameters
@@ -674,11 +684,11 @@ impl Runner {
         }
 
         let path = self.make_path("results.json");
-        self.parameters.output_paths.push(path.to_string());
         println!("{}", serde_json::to_string_pretty(&self.parameters)?);
 
         let bytes = serde_json::to_vec_pretty(&self.parameters)?;
-        path.write_bytes_sync(bytes)?;
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
 
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
@@ -706,9 +716,15 @@ impl Runner {
                 .proteins(&self.database.decoy_tag, self.database.generate_decoys)
                 .as_bytes(),
         );
+        record.push_field(feature.protein_groups.as_deref().unwrap_or("").as_bytes());
         record.push_field(
             itoa::Buffer::new()
                 .format(peptide.proteins.len())
+                .as_bytes(),
+        );
+        record.push_field(
+            itoa::Buffer::new()
+                .format(feature.num_protein_groups)
                 .as_bytes(),
         );
         record.push_field(filenames[feature.file_id].as_bytes());
@@ -774,6 +790,11 @@ impl Runner {
         record.push_field(ryu::Buffer::new().format(feature.spectrum_q).as_bytes());
         record.push_field(ryu::Buffer::new().format(feature.peptide_q).as_bytes());
         record.push_field(ryu::Buffer::new().format(feature.protein_q).as_bytes());
+        record.push_field(
+            ryu::Buffer::new()
+                .format(feature.protein_group_q)
+                .as_bytes(),
+        );
         record.push_field(ryu::Buffer::new().format(feature.ms2_intensity).as_bytes());
         record
     }
@@ -830,7 +851,7 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Url> {
         let path = self.make_path("results.sage.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
@@ -841,7 +862,9 @@ impl Runner {
             "psm_id",
             "peptide",
             "proteins",
+            "protein_groups",
             "num_proteins",
+            "num_protein_groups",
             "filename",
             "scannr",
             "rank",
@@ -877,6 +900,7 @@ impl Runner {
             "spectrum_q",
             "peptide_q",
             "protein_q",
+            "protein_group_q",
             "ms2_intensity",
         ];
 
@@ -893,11 +917,11 @@ impl Runner {
 
         wtr.flush()?;
         let bytes = wtr.into_inner()?;
-        path.write_bytes_sync(bytes)?;
-        Ok(path.to_string())
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
     }
 
-    pub fn write_fragments(&self, features: &[Feature]) -> anyhow::Result<String> {
+    pub fn write_fragments(&self, features: &[Feature]) -> anyhow::Result<Url> {
         let path = self.make_path("matched_fragments.sage.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
@@ -927,8 +951,8 @@ impl Runner {
 
         wtr.flush()?;
         let bytes = wtr.into_inner()?;
-        path.write_bytes_sync(bytes)?;
-        Ok(path.to_string())
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
     }
 
     fn serialize_pin(
@@ -1067,7 +1091,7 @@ impl Runner {
         record
     }
 
-    pub fn write_pin(&self, features: &[Feature], filenames: &[String]) -> anyhow::Result<String> {
+    pub fn write_pin(&self, features: &[Feature], filenames: &[String]) -> anyhow::Result<Url> {
         let path = self.make_path("results.sage.pin");
 
         let mut wtr = csv::WriterBuilder::new()
@@ -1129,11 +1153,11 @@ impl Runner {
 
         wtr.flush()?;
         let bytes = wtr.into_inner()?;
-        path.write_bytes_sync(bytes)?;
-        Ok(path.to_string())
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
     }
 
-    pub fn write_tmt(&self, quant: &[TmtQuant], filenames: &[String]) -> anyhow::Result<String> {
+    pub fn write_tmt(&self, quant: &[TmtQuant], filenames: &[String]) -> anyhow::Result<Url> {
         let path = self.make_path("tmt.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
@@ -1171,15 +1195,15 @@ impl Runner {
         wtr.flush()?;
 
         let bytes = wtr.into_inner()?;
-        path.write_bytes_sync(bytes)?;
-        Ok(path.to_string())
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
     }
 
     pub fn write_lfq(
         &self,
         areas: HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>,
         filenames: &[String],
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Url> {
         let path = self.make_path("lfq.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
@@ -1231,8 +1255,8 @@ impl Runner {
         wtr.flush()?;
 
         let bytes = wtr.into_inner()?;
-        path.write_bytes_sync(bytes)?;
-        Ok(path.to_string())
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(path)
     }
 
     fn write_report(
@@ -1240,7 +1264,7 @@ impl Runner {
         features: &[Feature],
         areas: Option<HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>>,
         filenames: &[String],
-    ) -> anyhow::Result<String> {
+    ) -> anyhow::Result<Url> {
         let path = self.make_path("results.sage.report.html");
 
         let global_q_value_filter = 0.01;
@@ -1275,7 +1299,7 @@ impl Runner {
                         .filter(|f| {
                             f.label == 1
                                 && f.spectrum_q <= global_q_value_filter
-                                && filenames[f.file_id] == filename.to_string()
+                                && filenames[f.file_id] == *filename
                         })
                         .count()
                 })
@@ -1288,7 +1312,7 @@ impl Runner {
                 for feature in features.iter().filter(|f| {
                     f.label == 1
                         && f.peptide_q <= global_q_value_filter
-                        && filenames[f.file_id] == filename.to_string()
+                        && filenames[f.file_id] == *filename
                 }) {
                     peptides.insert(self.database[feature.peptide_idx].to_string());
                 }
@@ -1302,7 +1326,7 @@ impl Runner {
                 for feature in features.iter().filter(|f| {
                     f.label == 1
                         && f.protein_q <= global_q_value_filter
-                        && filenames[f.file_id] == filename.to_string()
+                        && filenames[f.file_id] == *filename
                 }) {
                     proteins.insert(
                         self.database[feature.peptide_idx]
@@ -1323,7 +1347,7 @@ impl Runner {
                                 && f.spectrum_q <= global_q_value_filter
                                 && f.peptide_q <= global_q_value_filter
                                 && f.protein_q <= global_q_value_filter
-                                && filenames[f.file_id] == filename.to_string()
+                                && filenames[f.file_id] == *filename
                         })
                         .map(|f| f.ms2_intensity)
                         .sum()
@@ -1353,7 +1377,7 @@ impl Runner {
                 .map(|filename| {
                     let mut accuracies = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1363,7 +1387,7 @@ impl Runner {
                     let mid = accuracies.len() / 2;
 
                     if accuracies.is_empty() {
-                        return std::f32::NAN;
+                        return f32::NAN;
                     }
 
                     if accuracies.len() % 2 == 0 {
@@ -1384,7 +1408,7 @@ impl Runner {
                 .map(|filename| {
                     let mut accuracies = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1394,7 +1418,7 @@ impl Runner {
                     let mid = accuracies.len() / 2;
 
                     if accuracies.is_empty() {
-                        return std::f32::NAN;
+                        return f32::NAN;
                     }
 
                     if accuracies.len() % 2 == 0 {
@@ -1415,7 +1439,7 @@ impl Runner {
                 .map(|filename| {
                     let mut deviations = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1425,7 +1449,7 @@ impl Runner {
                     let mid = deviations.len() / 2;
 
                     if deviations.is_empty() {
-                        return std::f32::NAN;
+                        return f32::NAN;
                     }
 
                     if deviations.len() % 2 == 0 {
@@ -1446,7 +1470,7 @@ impl Runner {
                 .map(|filename| {
                     let mut deviations = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1456,7 +1480,7 @@ impl Runner {
                     let mid = deviations.len() / 2;
 
                     if deviations.is_empty() {
-                        return std::f32::NAN;
+                        return f32::NAN;
                     }
 
                     if deviations.len() % 2 == 0 {
@@ -1477,7 +1501,7 @@ impl Runner {
                 .map(|filename| {
                     let mut lengths = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1493,7 +1517,7 @@ impl Runner {
                 .map(|filename| {
                     let mut charges = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1509,7 +1533,7 @@ impl Runner {
                 .map(|filename| {
                     let mut peaks = Vec::new();
                     for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == filename.to_string()
+                        filenames[f.file_id] == *filename
                             && f.label == 1
                             && f.spectrum_q <= global_q_value_filter
                     }) {
@@ -1791,9 +1815,9 @@ impl Runner {
             report.add_section(config_section);
         }
 
-        // Save the report to HTML file
-        report.save_to_file(&path.to_string())?;
+        let bytes = report.to_string().into_bytes();
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
 
-        Ok(path.to_string())
+        Ok(path)
     }
 }

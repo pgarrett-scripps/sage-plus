@@ -1,12 +1,8 @@
 //! TMT quantification
 #![allow(clippy::excessive_precision)]
-#![allow(unused_imports)]
-use crate::database::binary_search_slice;
-use crate::ion_series::{IonSeries, Kind};
-use crate::mass::{Tolerance, H2O, NH3, PROTON};
-use crate::peptide::Peptide;
-use crate::scoring::{Feature, Scorer};
-use crate::spectrum::{self, Peak, Precursor, ProcessedSpectrum};
+use crate::mass::{Tolerance, PROTON};
+use crate::scoring::Feature;
+use crate::spectrum::{self, ProcessedSpectrum};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -68,108 +64,6 @@ pub struct Purity {
     pub incorrect_precursors: usize,
 }
 
-/// Calculate SPS purity stats - which SPS precursor ions actually correspond
-/// to theoretical b/y ions, and percentage of total SPS precursor MS2 intensity
-/// that is explained by theoretical b/y ions
-// fn purity_of_match(
-//     precursors: &[Precursor],
-//     ms2: &ProcessedSpectrum,
-//     theoretical_peaks: &[Peak],
-//     max_charge: u8,
-//     fragment_tolerance: Tolerance,
-// ) -> Purity {
-//     let mut explained_intensity = 0.0;
-//     let mut interference = 0.0;
-//     let mut correct_precursors = 0;
-//     let mut incorrect_precursors = 0;
-
-//     for precursor in precursors {
-//         // Spurious SPS precursor introduced by MSConvert
-//         // https://github.com/ProteoWizard/pwiz/issues/2202
-//         if precursor.scan.unwrap_or(0) != ms2.scan {
-//             continue;
-//         }
-
-//         // This is really a m/z window, we haven't performed charge state deconvolution!
-//         // Select a window of MS2 peaks that have been sampled for MS3
-//         let isolation_tolerance = precursor
-//             .isolation_window
-//             .unwrap_or_else(|| Tolerance::Da(-0.5, 0.5));
-//         let isolation_window = isolation_tolerance.bounds(precursor.mz - PROTON);
-
-//         let (idx_lo, idx_hi) = binary_search_slice(
-//             &ms2.peaks,
-//             |peak, key| peak.mass.total_cmp(key),
-//             isolation_window.0,
-//             isolation_window.1,
-//         );
-
-//         // Create slice surrounding SPS peaks selected
-//         let window = &ms2.peaks[idx_lo..idx_hi];
-//         interference += window
-//             .iter()
-//             .filter(|peak| peak.mass >= isolation_window.0 && peak.mass <= isolation_window.1)
-//             .map(|peak| peak.intensity)
-//             .sum::<f32>();
-
-//         // Pick the most intense peak within the isolation window, and decide whether it is
-//         // assignable to the best candidate peptide
-//         let assigned_to_candidate = if let Some(best_peak) =
-//             spectrum::select_closest_peak(window, precursor.mz - PROTON, isolation_tolerance)
-//         {
-//             let mut correct = false;
-//             'outer: for charge in 1..max_charge {
-//                 for loss in [0.0, NH3, H2O] {
-//                     let mass = best_peak.mass * charge as f32 + loss;
-//                     if spectrum::select_closest_peak(theoretical_peaks, mass, fragment_tolerance)
-//                         .is_some()
-//                     {
-//                         correct = true;
-//                         interference -= best_peak.intensity;
-//                         explained_intensity += best_peak.intensity;
-
-//                         break 'outer;
-//                     }
-//                 }
-//             }
-//             correct
-//         } else {
-//             false
-//         };
-
-//         if assigned_to_candidate {
-//             correct_precursors += 1;
-//         } else {
-//             incorrect_precursors += 1;
-//         }
-//     }
-
-//     Purity {
-//         ratio: explained_intensity / (explained_intensity + interference),
-//         correct_precursors,
-//         incorrect_precursors,
-//     }
-// }
-
-// fn mk_theoretical(peptide: &Peptide) -> Vec<Peak> {
-//     let mut theoretical_peaks = IonSeries::new(peptide, Kind::B)
-//         .map(|ion| Peak {
-//             mass: ion.monoisotopic_mass,
-//             intensity: 0.0,
-//         })
-//         .collect::<Vec<_>>();
-
-//     if let Some(crate::mass::Residue::Mod('K', _)) = peptide.sequence.last() {
-//         theoretical_peaks.extend(IonSeries::new(peptide, Kind::Y).map(|ion| Peak {
-//             mass: ion.monoisotopic_mass,
-//             intensity: 0.0,
-//         }));
-//     }
-
-//     theoretical_peaks.sort_unstable_by(|a, b| a.mass.total_cmp(&b.mass));
-//     theoretical_peaks
-// }
-
 #[derive(Debug)]
 pub struct Quant<'ms3> {
     /// Top hit for this MS3 spectrum
@@ -181,24 +75,32 @@ pub struct Quant<'ms3> {
     /// SPS precursor purity for the chimeric hit
     pub chimera_purity: Option<Purity>,
     /// Quanitified TMT reporter ion intensities
-    pub intensities: Vec<Option<&'ms3 Peak>>,
+    pub intensities: Vec<Option<f32>>,
     /// MS3 spectrum
-    pub spectrum: &'ms3 ProcessedSpectrum<Peak>,
+    pub spectrum: &'ms3 ProcessedSpectrum,
 }
 
 /// Return a vector containing the peaks closest to the m/zs defined in
 /// `labels`, within a given tolerance window.
 /// This function is MS-level agnostic, so it can be used for either MS2 or MS3
 /// quant.
-pub fn find_reporter_ions<'a>(
-    peaks: &'a [Peak],
+pub fn find_reporter_ions(
+    masses: &[f32],
+    intensities: &[f32],
     labels: &[f32],
     label_tolerance: Tolerance,
-) -> Vec<Option<&'a Peak>> {
+) -> Vec<Option<f32>> {
     labels
         .iter()
         .map(|&label| {
-            spectrum::select_most_intense_peak(peaks, label, label_tolerance, Some(-PROTON))
+            spectrum::select_most_intense_peak(
+                masses,
+                intensities,
+                label,
+                label_tolerance,
+                Some(-PROTON),
+            )
+            .map(|idx| intensities[idx])
         })
         .collect()
 }
@@ -221,8 +123,7 @@ const TMT18PLEX: [f32; 18] = [
 /// Search MS/MS and quantify isobaric tag intensities from an SPS-MS3 spectrum
 ///
 /// * `scorer`: used for searching/scoring precursor MS2 spectrum
-/// * `spectra`: a slice (generally entire mzML) of spectra, that can be searched
-///     for precursor spectra
+/// * `spectra`: a slice (generally entire mzML) of spectra, that can be searched for precursor spectra
 /// * `ms3`: The MS3 spectrum to search and quantify
 /// * `isobaric_labels`: specify label m/zs to be used
 /// * `isobaric_tolerance`: specify label tolerance
@@ -300,12 +201,12 @@ pub struct TmtQuant {
 /// Quantify isobaric tags from an MS2 or MS3 spectrum
 ///
 /// * `spectra`: a slice (generally entire mzML) of spectra, that can be searched
-///     for precursor spectra
+///   for precursor spectra
 /// * `isobaric_labels`: specify label m/zs to be used
 /// * `isobaric_tolerance`: specify label tolerance
 /// * `level`: MSn level to extract isobaric peaks from
 pub fn quantify(
-    spectra: &[ProcessedSpectrum<Peak>],
+    spectra: &[ProcessedSpectrum],
     isobaric_labels: &Isobaric,
     isobaric_tolerance: Tolerance,
     level: u8,
@@ -325,12 +226,13 @@ pub fn quantify(
             };
 
             let peaks = find_reporter_ions(
-                &spectrum.peaks,
+                &spectrum.masses,
+                &spectrum.intensities,
                 isobaric_labels.reporter_masses(),
                 isobaric_tolerance,
             )
             .into_iter()
-            .map(|peak| peak.map(|p| p.intensity).unwrap_or_default())
+            .map(|peak| peak.unwrap_or_default())
             .collect();
 
             Some(TmtQuant {

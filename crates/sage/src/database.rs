@@ -343,9 +343,9 @@ impl Parameters {
 
         // Build target sequence set for decoy deduplication.
         let targets: DashSet<Vec<u8>, FnvBuildHasher> = DashSet::default();
-        raw.iter()
-            .filter(|p| !p.decoy)
-            .for_each(|p| { targets.insert(p.sequence.to_vec()); });
+        raw.iter().filter(|p| !p.decoy).for_each(|p| {
+            targets.insert(p.sequence.to_vec());
+        });
 
         // Emit targets (+ generated decoys) into the final list.
         let mut result: Vec<Peptide> = raw
@@ -665,32 +665,20 @@ impl IndexedQuery<'_> {
 /// # Invariants
 ///
 /// * `slice[left] <= low || left == 0`
-/// * `slice[right] <= high && (slice[right+1] > high || right == slice.len())`
+/// * `slice[right] > high || right == slice.len()`
 /// * `0 <= left <= right <= slice.len()`
 #[inline]
 pub fn binary_search_slice<T, F, S>(slice: &[T], key: F, low: S, high: S) -> (usize, usize)
 where
     F: Fn(&T, &S) -> Ordering,
 {
-    let left_idx = match slice.binary_search_by(|a| key(a, &low)) {
-        Ok(idx) | Err(idx) => {
-            let mut idx = idx.saturating_sub(1);
-            while idx > 0 && key(&slice[idx], &low) != Ordering::Less {
-                idx -= 1;
-            }
-            idx
-        }
-    };
+    let left_idx = slice
+        .partition_point(|a| key(a, &low) == Ordering::Less)
+        .saturating_sub(1);
 
-    let right_idx = match slice[left_idx..].binary_search_by(|a| key(a, &high)) {
-        Ok(idx) | Err(idx) => {
-            let mut idx = idx + left_idx;
-            while idx < slice.len() && key(&slice[idx], &high) != Ordering::Greater {
-                idx = idx.saturating_add(1);
-            }
-            idx.min(slice.len())
-        }
-    };
+    let right_idx =
+        slice[left_idx..].partition_point(|a| key(a, &high) != Ordering::Greater) + left_idx;
+
     (left_idx, right_idx)
 }
 

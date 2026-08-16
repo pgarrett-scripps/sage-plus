@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context};
 use clap::ArgMatches;
-use sage_cloudpath::{tdf::BrukerProcessingConfig, CloudPath};
+use sage_cloudpath::tdf::BrukerProcessingConfig;
+use sage_cloudpath::Url;
 use sage_core::scoring::ScoreType;
 use sage_core::{
     database::{Builder, Parameters},
@@ -30,12 +31,14 @@ pub struct Search {
     pub min_matched_peaks: u16,
     pub report_psms: usize,
     pub predict_rt: bool,
-    pub mzml_paths: Vec<String>,
-    pub output_paths: Vec<String>,
+    pub mzml_paths: Vec<Url>,
+    pub output_paths: Vec<Url>,
     pub bruker_config: BrukerProcessingConfig,
+    pub protein_grouping: bool,
+    pub protein_grouping_peptide_fdr: f32,
 
     #[serde(skip_serializing)]
-    pub output_directory: CloudPath,
+    pub output_directory: Url,
 
     #[serde(skip_serializing)]
     pub write_pin: bool,
@@ -73,6 +76,8 @@ pub struct Input {
     pub output_directory: Option<String>,
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
+    pub protein_grouping: Option<bool>,
+    pub protein_grouping_peptide_fdr: Option<f32>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -313,17 +318,41 @@ impl Input {
             self.predict_rt = Some(true);
         }
 
-        let mzml_paths = self.mzml_paths.expect("'mzml_paths' must be provided!");
+        let mzml_paths = self
+            .mzml_paths
+            .expect("'mzml_paths' must be provided!")
+            .iter()
+            .map(|s| sage_cloudpath::to_url(s))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let output_directory = match self.output_directory {
             Some(path) => {
-                let path = path.parse::<CloudPath>()?;
-                if let CloudPath::Local(p) = &path {
-                    std::fs::create_dir_all(p)?;
+                match sage_cloudpath::try_parse_url(&path) {
+                    Some(mut url) => {
+                        // Valid URL, might still be a local directory that doesn't exist
+                        if url.scheme() == "file" {
+                            let path = url.to_file_path().expect("url scheme is file");
+                            std::fs::create_dir_all(path)?;
+                        }
+
+                        if !url.path().ends_with("/") {
+                            url.set_path(&format!("{}/", url.path()));
+                        }
+                        url
+                    }
+                    None => {
+                        // Treat as a local path (covers Windows `C:\...` which
+                        // otherwise parses as a URL with scheme `c`).
+                        let path = std::path::Path::new(&path);
+                        std::fs::create_dir_all(path)?;
+                        Url::from_directory_path(path.canonicalize()?).expect("valid path")
+                    }
                 }
-                path
             }
-            None => CloudPath::Local(std::env::current_dir()?),
+            None => {
+                let dir = std::env::current_dir()?;
+                Url::from_directory_path(dir).expect("valid path")
+            }
         };
 
         let score_type = self.score_type.unwrap_or(ScoreType::SageHyperScore);
@@ -353,6 +382,8 @@ impl Input {
             write_pin: self.write_pin.unwrap_or(false),
             bruker_config: self.bruker_config.unwrap_or_default(),
             write_report: self.write_report.unwrap_or(false),
+            protein_grouping: self.protein_grouping.unwrap_or(true),
+            protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
             score_type,
             use_bitmap: self.use_bitmap.unwrap_or(false),
         })
@@ -361,7 +392,6 @@ impl Input {
 
 #[cfg(test)]
 mod test {
-
 
     use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
 
