@@ -1,5 +1,5 @@
 use crate::database::PeptideIx;
-use crate::ion_series::{IonSeries, Kind};
+use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
 use crate::peptide::Peptide;
 use rayon::prelude::*;
@@ -77,10 +77,15 @@ impl BitmapIndex {
                         Kind::A | Kind::B | Kind::C => &mut *fwd,
                         Kind::X | Kind::Y | Kind::Z => &mut *rev,
                     };
-                    for ion in IonSeries::new(peptide, kind) {
-                        let mass = ion.monoisotopic_mass;
-                        if let Some(bin) = mass_to_bin(mass, min_mass, max_mass, total_bins) {
-                            set_bit(target, bin);
+                    for group in IonGroupSeries::new(peptide, kind) {
+                        // Match the standard preliminary index: one canonical
+                        // variant per cleavage, with full scoring evaluating
+                        // all retained and neutral-loss alternatives.
+                        if let Some(ion) = group.variants.first() {
+                            let mass = ion.monoisotopic_mass;
+                            if let Some(bin) = mass_to_bin(mass, min_mass, max_mass, total_bins) {
+                                set_bit(target, bin);
+                            }
                         }
                     }
                 }
@@ -213,6 +218,10 @@ pub fn bitmap_score(exp: &[u64], theo: &[u64]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enzyme::Digest;
+    use crate::ion_series::IonSeries;
+    use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
+    use std::{collections::HashMap, sync::Arc};
 
     #[test]
     fn test_mass_to_bin() {
@@ -261,5 +270,49 @@ mod tests {
         assert!(bm[0] & (1u64 << 10) != 0);
         // bin 8 should NOT be set
         assert!(bm[0] & (1u64 << 8) == 0);
+    }
+
+    #[test]
+    fn required_neutral_loss_is_used_by_bitmap_index() {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: None,
+            neutral_losses: Arc::from([10.0]),
+            neutral_loss_mode: NeutralLossMode::Required,
+        });
+        let peptide = Peptide::try_from(Digest {
+            sequence: "AMK".into(),
+            ..Digest::default()
+        })
+        .unwrap()
+        .apply(
+            &[(
+                ModificationSpecificity::Residue(b'M'),
+                modification,
+                Some(1),
+            )],
+            &HashMap::default(),
+            1,
+            None,
+        )
+        .into_iter()
+        .find(|peptide| peptide.modification_at(1) != 0.0)
+        .unwrap();
+
+        let retained = IonSeries::new(&peptide, Kind::B)
+            .nth(1)
+            .unwrap()
+            .monoisotopic_mass;
+        let loss = IonGroupSeries::new(&peptide, Kind::B)
+            .nth(1)
+            .unwrap()
+            .variants[0]
+            .monoisotopic_mass;
+        let index = BitmapIndex::build(&[peptide], &[Kind::B], 1024, 0.0, 1000.0);
+
+        let loss_bitmap = index.experimental_bitmap(&[loss], Tolerance::Da(0.0, 0.0));
+        assert_eq!(index.score_peptide(&loss_bitmap, 0).0, 1);
+        let retained_bitmap = index.experimental_bitmap(&[retained], Tolerance::Da(0.0, 0.0));
+        assert_eq!(index.score_peptide(&retained_bitmap, 0).0, 0);
     }
 }

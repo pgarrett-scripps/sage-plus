@@ -1,10 +1,13 @@
 use crate::bitmap::BitmapIndex;
 use crate::enzyme::{group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position};
 use crate::fasta::Fasta;
-use crate::ion_series::{IonSeries, Kind};
+use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
-use crate::modification::{validate_mods, validate_var_mods, ModificationSpecificity, VarModEntry};
-use crate::peptide::Peptide;
+use crate::modification::{
+    validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity,
+    StaticModEntry, VarModEntry,
+};
+use crate::peptide::{AppliedModification, Peptide};
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
 use rayon::prelude::*;
@@ -77,11 +80,12 @@ pub struct Builder {
     /// Minimum ion index to be generated: 1 will remove b1/y1 ions
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
-    /// Static modifications to add to matching amino acids
-    pub static_mods: Option<HashMap<String, f32>>,
+    /// Static modifications to add to matching amino acids. Entries may use
+    /// the existing bare mass or a structured modification object.
+    pub static_mods: Option<HashMap<String, StaticModEntry>>,
     /// Variable modifications to add to matching amino acids.
-    /// Each entry is either a bare mass (`15.9949`) or an object with `mass` and
-    /// optional `max_count` fields (`{"mass": 15.9949, "max_count": 1}`).
+    /// Each entry is either a bare mass (`15.9949`) or a structured object with
+    /// mass, limits, display name, and optional neutral-loss behavior.
     pub variable_mods: Option<HashMap<String, Vec<VarModEntry>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
@@ -147,7 +151,7 @@ pub struct Parameters {
     pub peptide_max_mass: f32,
     pub ion_kinds: Vec<Kind>,
     pub min_ion_index: usize,
-    pub static_mods: HashMap<ModificationSpecificity, f32>,
+    pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
     pub variable_mods: HashMap<ModificationSpecificity, Vec<VarModEntry>>,
     pub max_variable_mods: usize,
     pub max_combinations: Option<usize>,
@@ -179,19 +183,39 @@ impl Parameters {
     /// Flatten variable modifications into a stable order. This matters when
     /// `max_combinations` truncates variants: equivalent configurations must
     /// retain the same variants regardless of randomized `HashMap` iteration.
-    fn variable_modifications(&self) -> Vec<(ModificationSpecificity, f32, Option<usize>)> {
+    fn variable_modifications(
+        &self,
+    ) -> Vec<(
+        ModificationSpecificity,
+        Arc<ModificationDefinition>,
+        Option<usize>,
+    )> {
         let mut mods = self
             .variable_mods
             .iter()
             .flat_map(|(specificity, entries)| {
                 entries.iter().enumerate().map(|(entry_order, entry)| {
-                    (*specificity, entry_order, entry.mass(), entry.max_count())
+                    (
+                        *specificity,
+                        entry_order,
+                        Arc::new(entry.definition()),
+                        entry.max_count(),
+                    )
                 })
             })
             .collect::<Vec<_>>();
         mods.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
         mods.into_iter()
-            .map(|(specificity, _, mass, max_count)| (specificity, mass, max_count))
+            .map(|(specificity, _, modification, max_count)| (specificity, modification, max_count))
+            .collect()
+    }
+
+    fn static_modifications(
+        &self,
+    ) -> HashMap<ModificationSpecificity, Arc<ModificationDefinition>> {
+        self.static_mods
+            .iter()
+            .map(|(specificity, entry)| (*specificity, Arc::new(entry.definition())))
             .collect()
     }
 
@@ -344,10 +368,13 @@ impl Parameters {
                 .saturating_add(sequence_len)
                 .saturating_add(sequence_len.saturating_mul(std::mem::size_of::<f32>() as u64))
                 .saturating_add(
+                    sequence_len.saturating_mul(std::mem::size_of::<AppliedModification>() as u64),
+                )
+                .saturating_add(
                     (digest.proteins.len() as u64)
                         .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
                 )
-                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3));
+                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4));
             peptide_bytes =
                 peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
         }
@@ -490,6 +517,7 @@ impl Parameters {
     /// Expand variable modifications and generate decoys from an unmodified digest.
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
         let mods = self.variable_modifications();
+        let static_mods = self.static_modifications();
 
         let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
         digests
@@ -508,7 +536,7 @@ impl Parameters {
                 peptide
                     .apply(
                         &mods,
-                        &self.static_mods,
+                        &static_mods,
                         self.max_variable_mods,
                         self.max_combinations,
                     )
@@ -553,6 +581,7 @@ impl Parameters {
                 && remove.modifications == keep.modifications
                 && remove.nterm == keep.nterm
                 && remove.cterm == keep.cterm
+                && remove.applied_modifications == keep.applied_modifications
             {
                 keep.proteins.extend(remove.proteins.iter().cloned());
                 // When merging peptides from different Fastas,
@@ -697,21 +726,29 @@ impl Parameters {
                     // theoretical fragments are within the search space
                     self.ion_kinds
                         .iter()
-                        .flat_map(|kind| IonSeries::new(peptide, *kind).enumerate())
-                        .filter(|(ion_idx, ion)| {
+                        .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
+                        .filter(|group| {
                             // Don't store b1, b2, y1, y2 ions for preliminary scoring
 
-                            match ion.kind {
-                                Kind::A | Kind::B | Kind::C => (ion_idx + 1) > self.min_ion_index,
+                            match group.kind {
+                                Kind::A | Kind::B | Kind::C => {
+                                    (group.series_index + 1) > self.min_ion_index
+                                }
                                 Kind::X | Kind::Y | Kind::Z => {
-                                    peptide.sequence.len().saturating_sub(1) - ion_idx
+                                    peptide.sequence.len().saturating_sub(1) - group.series_index
                                         > self.min_ion_index
                                 }
                             }
                         })
-                        .map(move |(_, ion)| Theoretical {
-                            peptide_index: PeptideIx(idx as u32),
-                            fragment_mz: ion.monoisotopic_mass,
+                        // Keep one canonical form per cleavage in the preliminary
+                        // index. Full rescoring evaluates every neutral-loss
+                        // alternative as a group; indexing all alternatives here
+                        // would bias candidate selection toward configured mods.
+                        .filter_map(move |group| {
+                            group.variants.into_iter().next().map(|ion| Theoretical {
+                                peptide_index: PeptideIx(idx as u32),
+                                fragment_mz: ion.monoisotopic_mass,
+                            })
                         })
                 })
                 .collect::<Vec<_>>()
@@ -1040,10 +1077,22 @@ mod test {
     fn structured_variable_mod_config_round_trips() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "fasta": "none",
+            "static_mods": {
+                "C": {
+                    "mass": 57.0215,
+                    "name": "Carbamidomethyl"
+                }
+            },
             "variable_mods": {
                 "M": [15.9949],
                 "K": [
-                    {"mass": 42.0106, "max_count": 1},
+                    {
+                        "mass": 42.0106,
+                        "max_count": 1,
+                        "name": "Acetyl",
+                        "neutral_losses": [17.0265],
+                        "neutral_loss_mode": "required"
+                    },
                     {"mass": 14.0157}
                 ]
             },
@@ -1059,22 +1108,27 @@ mod test {
         let mods = params.variable_modifications();
         assert_eq!(mods.len(), 3);
         assert_eq!(mods[0].0, ModificationSpecificity::Residue(b'K'));
-        assert!((mods[0].1 - 42.0106).abs() < 1e-4);
+        assert!((mods[0].1.mass - 42.0106).abs() < 1e-4);
         assert_eq!(mods[0].2, Some(1));
+        assert_eq!(mods[0].1.name.as_deref(), Some("Acetyl"));
+        assert_eq!(&*mods[0].1.neutral_losses, &[17.0265]);
         assert_eq!(mods[1].0, ModificationSpecificity::Residue(b'K'));
-        assert!((mods[1].1 - 14.0157).abs() < 1e-4);
+        assert!((mods[1].1.mass - 14.0157).abs() < 1e-4);
         assert_eq!(mods[1].2, None);
         assert_eq!(mods[2].0, ModificationSpecificity::Residue(b'M'));
-        assert!((mods[2].1 - 15.9949).abs() < 1e-4);
+        assert!((mods[2].1.mass - 15.9949).abs() < 1e-4);
         assert_eq!(mods[2].2, None);
 
         let serialized = serde_json::to_value(params).unwrap();
         let k_entries = &serialized["variable_mods"]["K"];
         assert!(k_entries[0].is_object());
         assert_eq!(k_entries[0]["max_count"], 1);
+        assert_eq!(k_entries[0]["name"], "Acetyl");
+        assert_eq!(k_entries[0]["neutral_loss_mode"], "required");
         assert!(k_entries[1].is_object());
         assert!(k_entries[1].get("max_count").is_none());
         assert!(serialized["variable_mods"]["M"][0].is_number());
+        assert_eq!(serialized["static_mods"]["C"]["name"], "Carbamidomethyl");
     }
 
     #[test]

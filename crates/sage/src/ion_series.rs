@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::mass::monoisotopic;
-use crate::peptide::Peptide;
+use crate::modification::NeutralLossMode;
+use crate::peptide::{Peptide, Site};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -21,6 +22,109 @@ pub struct Ion {
     pub kind: Kind,
     /// Neutral fragment mass (no charge)
     pub monoisotopic_mass: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct IonVariant {
+    pub kind: Kind,
+    pub monoisotopic_mass: f32,
+    /// Total neutral loss represented by this fragment variant. `None` is the
+    /// retained (no-loss) form.
+    pub neutral_loss: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct IonGroup {
+    pub kind: Kind,
+    /// Zero-based series index used by scoring and minimum-ion filtering.
+    pub series_index: usize,
+    pub variants: Vec<IonVariant>,
+}
+
+/// Generate groups of mutually alternative fragment forms for each peptide
+/// cleavage. A group contains the retained ion when every applicable
+/// modification has optional loss behavior, plus the configured neutral-loss
+/// combinations. Required losses remove the retained option for fragments
+/// containing that modification.
+pub struct IonGroupSeries<'p> {
+    peptide: &'p Peptide,
+    base: IonSeries<'p>,
+    series_index: usize,
+}
+
+impl<'p> IonGroupSeries<'p> {
+    pub fn new(peptide: &'p Peptide, kind: Kind) -> Self {
+        Self {
+            peptide,
+            base: IonSeries::new(peptide, kind),
+            series_index: 0,
+        }
+    }
+
+    fn contains_site(&self, site: Site, series_index: usize) -> bool {
+        match (self.base.kind, site) {
+            (Kind::A | Kind::B | Kind::C, Site::Nterm) => true,
+            (Kind::A | Kind::B | Kind::C, Site::Cterm) => false,
+            (Kind::A | Kind::B | Kind::C, Site::Sequence(index)) => index as usize <= series_index,
+            (Kind::X | Kind::Y | Kind::Z, Site::Nterm) => false,
+            (Kind::X | Kind::Y | Kind::Z, Site::Cterm) => true,
+            (Kind::X | Kind::Y | Kind::Z, Site::Sequence(index)) => index as usize > series_index,
+        }
+    }
+
+    fn losses(&self, series_index: usize) -> Vec<f32> {
+        let mut totals = vec![0.0f32];
+        for applied in self.peptide.applied_modifications.iter().filter(|applied| {
+            self.contains_site(applied.site, series_index)
+                && !applied.modification.neutral_losses.is_empty()
+        }) {
+            let mut options = Vec::with_capacity(applied.modification.neutral_losses.len() + 1);
+            if applied.modification.neutral_loss_mode == NeutralLossMode::Optional {
+                options.push(0.0);
+            }
+            options.extend(applied.modification.neutral_losses.iter().copied());
+
+            let mut next = Vec::with_capacity(totals.len().saturating_mul(options.len()));
+            for total in &totals {
+                for option in &options {
+                    next.push(total + option);
+                }
+            }
+            next.sort_unstable_by(f32::total_cmp);
+            next.dedup_by(|a, b| (*a - *b).abs() < 1e-5);
+            totals = next;
+        }
+        totals
+    }
+}
+
+impl Iterator for IonGroupSeries<'_> {
+    type Item = IonGroup;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let ion = self.base.next()?;
+        let series_index = self.series_index;
+        self.series_index += 1;
+
+        let variants = self
+            .losses(series_index)
+            .into_iter()
+            .filter_map(|loss| {
+                let mass = ion.monoisotopic_mass - loss;
+                (mass > 0.0).then_some(IonVariant {
+                    kind: ion.kind,
+                    monoisotopic_mass: mass,
+                    neutral_loss: (loss > 0.0).then_some(loss),
+                })
+            })
+            .collect();
+
+        Some(IonGroup {
+            kind: ion.kind,
+            series_index,
+            variants,
+        })
+    }
 }
 
 /// Generate B/Y ions for a candidate peptide under a given charge state
@@ -88,9 +192,10 @@ impl<'p> Iterator for IonSeries<'p> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::modification::ModificationSpecificity;
+    use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
     use crate::peptide::Peptide;
     use crate::{enzyme::Digest, mass::PROTON};
+    use std::{collections::HashMap, sync::Arc};
 
     fn peptide(s: &str) -> Peptide {
         Peptide::try_from(Digest {
@@ -98,6 +203,29 @@ mod test {
             ..Default::default()
         })
         .unwrap()
+    }
+
+    fn peptide_with_loss(mode: NeutralLossMode) -> Peptide {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: Some(Arc::from("TestMod")),
+            neutral_losses: Arc::from([10.0]),
+            neutral_loss_mode: mode,
+        });
+        peptide("AMK")
+            .apply(
+                &[(
+                    ModificationSpecificity::Residue(b'M'),
+                    modification,
+                    Some(1),
+                )],
+                &HashMap::default(),
+                1,
+                None,
+            )
+            .into_iter()
+            .find(|peptide| peptide.to_string().contains("TestMod"))
+            .unwrap()
     }
 
     fn check_within<I: Iterator<Item = Ion>>(iter: I, expected_mz: &[f32]) {
@@ -329,5 +457,103 @@ mod test {
 
         check_within(ions!(&peptide, Kind::B, 1.0), &expected_b);
         check_within(ions!(&peptide, Kind::Y, 1.0), &expected_y);
+    }
+
+    #[test]
+    fn optional_neutral_loss_keeps_retained_fragment() {
+        let peptide = peptide_with_loss(NeutralLossMode::Optional);
+        let groups = IonGroupSeries::new(&peptide, Kind::B).collect::<Vec<_>>();
+
+        assert_eq!(groups[0].variants.len(), 1); // b1 does not contain M
+        assert_eq!(groups[1].variants.len(), 2); // b2 contains M
+        let retained = IonSeries::new(&peptide, Kind::B).nth(1).unwrap();
+        assert!(groups[1].variants.iter().any(|variant| {
+            variant.neutral_loss.is_none()
+                && (variant.monoisotopic_mass - retained.monoisotopic_mass).abs() < 1e-5
+        }));
+        assert!(groups[1].variants.iter().any(|variant| {
+            variant.neutral_loss == Some(10.0)
+                && (variant.monoisotopic_mass - (retained.monoisotopic_mass - 10.0)).abs() < 1e-5
+        }));
+    }
+
+    #[test]
+    fn required_neutral_loss_suppresses_retained_fragment() {
+        let peptide = peptide_with_loss(NeutralLossMode::Required);
+        let b = IonGroupSeries::new(&peptide, Kind::B).collect::<Vec<_>>();
+        let y = IonGroupSeries::new(&peptide, Kind::Y).collect::<Vec<_>>();
+
+        assert_eq!(b[0].variants.len(), 1); // b1 does not contain M
+        assert_eq!(b[1].variants.len(), 1);
+        assert_eq!(b[1].variants[0].neutral_loss, Some(10.0));
+        assert_eq!(y[0].variants.len(), 1);
+        assert_eq!(y[0].variants[0].neutral_loss, Some(10.0));
+        assert_eq!(y[1].variants.len(), 1); // y1 does not contain M
+        assert_eq!(y[1].variants[0].neutral_loss, None);
+    }
+
+    #[test]
+    fn neutral_losses_combine_across_multiple_modified_sites() {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: Some(Arc::from("TestMod")),
+            neutral_losses: Arc::from([10.0]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        });
+        let peptide = peptide("MMK")
+            .apply(
+                &[(
+                    ModificationSpecificity::Residue(b'M'),
+                    modification,
+                    Some(2),
+                )],
+                &HashMap::default(),
+                2,
+                None,
+            )
+            .into_iter()
+            .find(|peptide| peptide.to_string().matches("TestMod").count() == 2)
+            .unwrap();
+
+        let b2 = IonGroupSeries::new(&peptide, Kind::B).nth(1).unwrap();
+        let losses = b2
+            .variants
+            .iter()
+            .map(|variant| variant.neutral_loss.unwrap_or(0.0))
+            .collect::<Vec<_>>();
+        assert_eq!(losses, vec![0.0, 10.0, 20.0]);
+    }
+
+    #[test]
+    fn terminal_required_losses_affect_only_containing_series() {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: Some(Arc::from("TerminalMod")),
+            neutral_losses: Arc::from([10.0]),
+            neutral_loss_mode: NeutralLossMode::Required,
+        });
+        let peptide = peptide("AMK")
+            .apply(
+                &[(
+                    ModificationSpecificity::PeptideN(None),
+                    modification,
+                    Some(1),
+                )],
+                &HashMap::default(),
+                1,
+                None,
+            )
+            .into_iter()
+            .find(|peptide| peptide.to_string().contains("TerminalMod"))
+            .unwrap();
+
+        assert!(IonGroupSeries::new(&peptide, Kind::B).all(|group| group
+            .variants
+            .iter()
+            .all(|variant| variant.neutral_loss == Some(10.0))));
+        assert!(IonGroupSeries::new(&peptide, Kind::Y).all(|group| group
+            .variants
+            .iter()
+            .all(|variant| variant.neutral_loss.is_none())));
     }
 }

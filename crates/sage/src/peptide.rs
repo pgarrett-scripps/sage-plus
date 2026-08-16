@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
-use crate::modification::ModificationSpecificity;
+use crate::modification::{ModificationDefinition, ModificationSpecificity};
 use crate::{
     enzyme::{Digest, DigestGroup, Position},
     mass::{monoisotopic, H2O},
@@ -16,6 +16,9 @@ pub struct Peptide {
     /// Per-residue modification masses. An empty vector represents an
     /// unmodified peptide and is expanded lazily when a modification is applied.
     pub modifications: Vec<f32>,
+    /// Identity and fragmentation metadata for applied modifications. Masses
+    /// remain in the fields above for compatibility and fast mass arithmetic.
+    pub applied_modifications: Arc<Vec<AppliedModification>>,
     /// Modification on peptide C-terminus
     pub nterm: Option<f32>,
     /// Modification on peptide C-terminus
@@ -30,6 +33,22 @@ pub struct Peptide {
     pub position: Position,
 
     pub proteins: Vec<Arc<str>>,
+}
+
+pub trait ModificationSource {
+    fn definition(&self) -> Arc<ModificationDefinition>;
+}
+
+impl ModificationSource for f32 {
+    fn definition(&self) -> Arc<ModificationDefinition> {
+        Arc::new(ModificationDefinition::bare(*self))
+    }
+}
+
+impl ModificationSource for Arc<ModificationDefinition> {
+    fn definition(&self) -> Arc<ModificationDefinition> {
+        self.clone()
+    }
 }
 
 impl Peptide {
@@ -62,6 +81,7 @@ impl Peptide {
                     .partial_cmp(&other.cterm)
                     .unwrap_or(Ordering::Equal)
             })
+            .then_with(|| self.applied_modifications.cmp(&other.applied_modifications))
     }
 }
 
@@ -76,6 +96,7 @@ impl Debug for Peptide {
             )
             .field("nterm", &self.nterm)
             .field("cterm", &self.cterm)
+            .field("applied_modifications", &self.applied_modifications)
             .field("monoisotopic", &self.monoisotopic)
             .field("missed_cleavages", &self.missed_cleavages)
             .field("position", &self.position)
@@ -145,25 +166,39 @@ impl Peptide {
             + self.cterm.unwrap_or(0.0)
     }
 
+    fn finalize_modifications(&mut self) {
+        Arc::make_mut(&mut self.applied_modifications).sort_unstable();
+        self.monoisotopic += self.modification_mass();
+    }
+
     /// Apply all variable mods in `sites` to self
-    fn apply_site(&mut self, site: Site, mass: f32) {
+    fn apply_site(&mut self, site: Site, modification: Arc<ModificationDefinition>) {
+        let mass = modification.mass;
+        let mut applied = false;
         match site {
             Site::Nterm => {
                 if self.nterm.is_none() {
                     self.nterm = self.nterm.or(Some(0.0)).map(|x| x + mass);
+                    applied = true;
                 }
             }
             Site::Cterm => {
                 if self.cterm.is_none() {
                     self.cterm = self.cterm.or(Some(0.0)).map(|x| x + mass);
+                    applied = true;
                 }
             }
             Site::Sequence(index) => {
                 self.ensure_dense_modifications();
                 if self.modifications[index as usize] == 0.0 {
                     self.modifications[index as usize] += mass;
+                    applied = true;
                 }
             }
+        }
+        if applied {
+            Arc::make_mut(&mut self.applied_modifications)
+                .push(AppliedModification { site, modification });
         }
     }
 
@@ -229,48 +264,64 @@ impl Peptide {
         }
     }
 
-    fn static_mods(&mut self, target: ModificationSpecificity, mass: f32) {
+    fn static_mods<M: ModificationSource>(
+        &mut self,
+        target: ModificationSpecificity,
+        modification: &M,
+    ) {
+        let modification = modification.definition();
         match (target, self.position) {
-            (ModificationSpecificity::PeptideN(None), _) => self.apply_site(Site::Nterm, mass),
+            (ModificationSpecificity::PeptideN(None), _) => {
+                self.apply_site(Site::Nterm, modification)
+            }
             (ModificationSpecificity::PeptideN(Some(resi)), _)
                 if resi == *self.sequence.first().unwrap_or(&0) =>
             {
-                self.apply_site(Site::Sequence(0), mass)
+                self.apply_site(Site::Sequence(0), modification)
             }
-            (ModificationSpecificity::PeptideC(None), _) => self.apply_site(Site::Cterm, mass),
+            (ModificationSpecificity::PeptideC(None), _) => {
+                self.apply_site(Site::Cterm, modification)
+            }
             (ModificationSpecificity::PeptideC(Some(resi)), _)
                 if resi == *self.sequence.last().unwrap_or(&0) =>
             {
                 self.apply_site(
                     Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    mass,
+                    modification,
                 )
             }
             (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full) => {
-                self.apply_site(Site::Nterm, mass)
+                self.apply_site(Site::Nterm, modification)
             }
             (ModificationSpecificity::ProteinN(Some(resi)), Position::Nterm | Position::Full)
                 if resi == *self.sequence.first().unwrap_or(&0) =>
             {
-                self.apply_site(Site::Sequence(0), mass)
+                self.apply_site(Site::Sequence(0), modification)
             }
             (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full) => {
-                self.apply_site(Site::Cterm, mass)
+                self.apply_site(Site::Cterm, modification)
             }
             (ModificationSpecificity::ProteinC(Some(resi)), Position::Cterm | Position::Full)
                 if resi == *self.sequence.last().unwrap_or(&0) =>
             {
                 self.apply_site(
                     Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    mass,
+                    modification,
                 )
             }
             (ModificationSpecificity::Residue(resi), _) if self.sequence.contains(&resi) => {
                 self.ensure_dense_modifications();
-                for (idx, residue) in self.sequence.iter().enumerate() {
-                    if resi == *residue && self.modifications[idx] == 0.0 {
-                        self.modifications[idx] = mass;
-                    }
+                let sites = self
+                    .sequence
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, residue)| {
+                        (resi == *residue && self.modifications[idx] == 0.0)
+                            .then_some(Site::Sequence(idx as u32))
+                    })
+                    .collect::<Vec<_>>();
+                for site in sites {
+                    self.apply_site(site, modification.clone());
                 }
             }
             _ => {}
@@ -278,26 +329,26 @@ impl Peptide {
     }
 
     /// Apply variable modifications, then static modifications to a peptide.
-    /// `variable_mods` entries are `(specificity, mass, per_mod_limit)`.
+    /// `variable_mods` entries are `(specificity, definition, per_mod_limit)`.
     /// `max_combinations` caps total variants (unmodified + modified); fewer-PTM
     /// variants are always generated first so they are preferred when truncating.
-    pub fn apply(
+    pub fn apply<M: ModificationSource>(
         mut self,
-        variable_mods: &[(ModificationSpecificity, f32, Option<usize>)],
-        static_mods: &HashMap<ModificationSpecificity, f32>,
+        variable_mods: &[(ModificationSpecificity, M, Option<usize>)],
+        static_mods: &HashMap<ModificationSpecificity, M>,
         combinations: usize,
         max_combinations: Option<usize>,
     ) -> Vec<Peptide> {
         if variable_mods.is_empty() {
-            for (target, mass) in static_mods {
-                self.static_mods(*target, *mass);
+            for (target, modification) in static_mods {
+                self.static_mods(*target, modification);
             }
-            self.monoisotopic += self.modification_mass();
+            self.finalize_modifications();
             vec![self]
         } else {
             let mut mods: Vec<(Site, f32, usize)> = Vec::new();
-            for (mod_idx, (residue, mass, _limit)) in variable_mods.iter().enumerate() {
-                self.push_resi(&mut mods, *residue, *mass, mod_idx);
+            for (mod_idx, (residue, modification, _limit)) in variable_mods.iter().enumerate() {
+                self.push_resi(&mut mods, *residue, modification.definition().mass, mod_idx);
             }
 
             let mut modified = Vec::new();
@@ -323,10 +374,10 @@ impl Peptide {
 
             // Apply static mods to all peptides
             for peptide in modified.iter_mut() {
-                for (target, mass) in static_mods {
-                    peptide.static_mods(*target, *mass);
+                for (target, modification) in static_mods {
+                    peptide.static_mods(*target, modification);
                 }
-                peptide.monoisotopic += peptide.modification_mass();
+                peptide.finalize_modifications();
             }
 
             modified
@@ -344,15 +395,37 @@ impl Peptide {
             if !pep.modifications.is_empty() {
                 pep.modifications[1..n].reverse();
             }
+            for applied in Arc::make_mut(&mut pep.applied_modifications) {
+                if let Site::Sequence(index) = &mut applied.site {
+                    let original = *index as usize;
+                    if (1..n).contains(&original) {
+                        *index = (n - original) as u32;
+                    }
+                }
+            }
+            Arc::make_mut(&mut pep.applied_modifications).sort_unstable();
         }
         pep
     }
+
+    fn fmt_mod(&self, f: &mut std::fmt::Formatter<'_>, site: Site, mass: f32) -> std::fmt::Result {
+        if let Some(name) = self
+            .applied_modifications
+            .iter()
+            .find(|applied| applied.site == site)
+            .and_then(|applied| applied.modification.name.as_deref())
+        {
+            write!(f, "[{name}]")
+        } else {
+            write!(f, "[{mass:+}]")
+        }
+    }
 }
 
-fn enumerate_modifications(
+fn enumerate_modifications<M: ModificationSource>(
     peptide: &Peptide,
     modifications: &[(Site, f32, usize)],
-    variable_mods: &[(ModificationSpecificity, f32, Option<usize>)],
+    variable_mods: &[(ModificationSpecificity, M, Option<usize>)],
     start: usize,
     remaining: usize,
     occupied: &mut FnvHashSet<Site>,
@@ -367,7 +440,7 @@ fn enumerate_modifications(
             let mod_idx = modification.2;
             if variable_mods[mod_idx]
                 .2
-                .is_some_and(|limit| mod_counts[mod_idx] >= limit)
+                .map_or(false, |limit| mod_counts[mod_idx] >= limit)
             {
                 occupied.remove(&modification.0);
                 continue;
@@ -376,15 +449,15 @@ fn enumerate_modifications(
             mod_counts[mod_idx] += 1;
             selected.push(modification);
             if remaining == 1 {
-                if max_combinations.is_some_and(|cap| output.len() >= cap) {
+                if max_combinations.map_or(false, |cap| output.len() >= cap) {
                     selected.pop();
                     mod_counts[mod_idx] -= 1;
                     occupied.remove(&modification.0);
                     return false;
                 }
                 let mut modified = peptide.clone();
-                for (site, mass, _) in selected.iter().copied() {
-                    modified.apply_site(site, mass);
+                for (site, _, selected_mod_idx) in selected.iter().copied() {
+                    modified.apply_site(site, variable_mods[selected_mod_idx].1.definition());
                 }
                 output.push(modified);
             } else if !enumerate_modifications(
@@ -414,10 +487,16 @@ fn enumerate_modifications(
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum Site {
+pub enum Site {
     Nterm,
     Cterm,
     Sequence(u32),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AppliedModification {
+    pub site: Site,
+    pub modification: Arc<ModificationDefinition>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -459,6 +538,7 @@ impl TryFrom<Digest> for Peptide {
             // An empty vector is the compact representation for an unmodified peptide.
             // It is expanded lazily only when a modification is applied.
             modifications: Vec::new(),
+            applied_modifications: Arc::default(),
             sequence: Arc::from(value.sequence.into_bytes().into_boxed_slice()),
             monoisotopic: mass,
             nterm: None,
@@ -473,18 +553,21 @@ impl TryFrom<Digest> for Peptide {
 impl std::fmt::Display for Peptide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(m) = self.nterm {
-            write!(f, "[{:+}]-", m)?;
+            self.fmt_mod(f, Site::Nterm, m)?;
+            write!(f, "-")?;
         }
-        for (idx, c) in self.sequence.iter().enumerate() {
-            let modification = self.modification_at(idx);
+        for (index, c) in self.sequence.iter().enumerate() {
+            let modification = self.modification_at(index);
             if modification != 0.0 {
-                write!(f, "{}[{:+}]", *c as char, modification)?;
+                write!(f, "{}", *c as char)?;
+                self.fmt_mod(f, Site::Sequence(index as u32), modification)?;
             } else {
                 write!(f, "{}", *c as char)?;
             }
         }
         if let Some(m) = self.cterm {
-            write!(f, "-[{:+}]", m)?;
+            write!(f, "-")?;
+            self.fmt_mod(f, Site::Cterm, m)?;
         }
         Ok(())
     }
@@ -493,6 +576,7 @@ impl std::fmt::Display for Peptide {
 #[cfg(test)]
 mod test {
     use crate::enzyme::{Digest, Enzyme, EnzymeParameters};
+    use crate::modification::NeutralLossMode;
 
     use super::*;
 
@@ -519,6 +603,20 @@ mod test {
             })
             .unwrap();
         assert_eq!(modified.modifications.len(), modified.sequence.len());
+    }
+
+    fn detailed_mod(
+        mass: f32,
+        name: &str,
+        neutral_losses: &[f32],
+        neutral_loss_mode: NeutralLossMode,
+    ) -> Arc<ModificationDefinition> {
+        Arc::new(ModificationDefinition {
+            mass,
+            name: Some(Arc::from(name)),
+            neutral_losses: Arc::from(neutral_losses),
+            neutral_loss_mode,
+        })
     }
 
     fn var_mod_sequence(
@@ -1061,5 +1159,58 @@ mod test {
         assert_eq!(peptides, vec!["GCMGCMG", "GCM[+16]GCMG", "GCMGCM[+16]G"]);
         // Double-mod must not appear — it would require cap > 3
         assert!(!peptides.contains(&"GCM[+16]GCM[+16]G".to_string()));
+    }
+
+    #[test]
+    fn names_follow_exact_modification_identity_and_decoy_position() {
+        use ModificationSpecificity::*;
+        let peptide = Peptide::try_from(Digest {
+            sequence: "AMMAK".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let mods = [
+            (
+                Residue(b'M'),
+                detailed_mod(15.9949, "Oxidation", &[], NeutralLossMode::Optional),
+                Some(1),
+            ),
+            (
+                Residue(b'M'),
+                detailed_mod(15.9949, "AlternateName", &[], NeutralLossMode::Optional),
+                Some(1),
+            ),
+        ];
+        let peptides = peptide.apply(&mods, &HashMap::default(), 1, None);
+        let rendered = peptides.iter().map(ToString::to_string).collect::<Vec<_>>();
+
+        assert!(rendered.contains(&"AM[Oxidation]MAK".to_string()));
+        assert!(rendered.contains(&"AM[AlternateName]MAK".to_string()));
+        assert_ne!(
+            peptides[1].applied_modifications,
+            peptides[3].applied_modifications
+        );
+
+        let named = peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "AM[Oxidation]MAK")
+            .unwrap();
+        assert!(named.reverse().to_string().contains("[Oxidation]"));
+    }
+
+    #[test]
+    fn static_modification_names_are_rendered() {
+        let peptide = Peptide::try_from(Digest {
+            sequence: "ACK".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let static_mods = HashMap::from([(
+            ModificationSpecificity::Residue(b'C'),
+            detailed_mod(57.0215, "Carbamidomethyl", &[], NeutralLossMode::Optional),
+        )]);
+
+        let peptides = peptide.apply(&[], &static_mods, 0, None);
+        assert_eq!(peptides[0].to_string(), "AC[Carbamidomethyl]K");
     }
 }

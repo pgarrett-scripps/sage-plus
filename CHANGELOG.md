@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.
 - Per-modification occurrence limits using `{"mass": <mass>, "max_count": <limit>}` entries in `database.variable_mods`; existing bare-mass entries remain supported.
 - `database.max_combinations` to cap the number of peptide variants (including the unmodified form) generated from variable modifications, preferring variants with fewer modifications.
+- Optional names for structured static and variable modifications; named modifications are preserved on exact peptide sites and rendered in peptide output.
+- Neutral-loss fragment variants for structured modifications, with `neutral_loss_mode` controlling whether retained fragments are optional or suppressed.
+- Neutral-loss annotations in matched-fragment TSV and Parquet output.
 
 ## [v0.15.0]
 ### Added
