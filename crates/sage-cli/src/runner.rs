@@ -55,6 +55,10 @@ struct SiteRow {
     site_probabilities: String,
 }
 
+fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
+    feature.label == 1 && feature.spectrum_q <= psm_q_value
+}
+
 #[derive(Default)]
 struct RawSpectrumAccumulator {
     pub ms1: Vec<RawSpectrum>,
@@ -211,7 +215,6 @@ impl Runner {
                     report_psms: self.parameters.report_psms + 1, // Q: Why is 1 being added here? (JSPP: Feb 2024)
                     wide_window: self.parameters.wide_window,
                     annotate_matches: self.parameters.annotate_matches,
-                    localize: false,
                     mass_shift_ppm: self.parameters.mass_shift_ppm,
                     score_type: self.parameters.score_type,
                 };
@@ -408,6 +411,24 @@ impl Runner {
         MS1Spectra,
         Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
     ) {
+        self.read_processed_spectra_with_ms1(
+            chunk,
+            chunk_idx,
+            batch_size,
+            self.requires_ms1(),
+        )
+    }
+
+    fn read_processed_spectra_with_ms1(
+        &self,
+        chunk: &[Url],
+        chunk_idx: usize,
+        batch_size: usize,
+        requires_ms1: bool,
+    ) -> (
+        MS1Spectra,
+        Vec<ProcessedSpectrum<sage_core::spectrum::Peak>>,
+    ) {
         // Read all of the spectra at once - this can help prevent memory over-consumption issues
         info!(
             "processing files {} .. {} ",
@@ -451,7 +472,7 @@ impl Runner {
                 file_id,
                 sn,
                 self.parameters.bruker_config,
-                self.requires_ms1(),
+                requires_ms1,
             );
 
             match res {
@@ -516,6 +537,85 @@ impl Runner {
         (ms1_spectra, msn_spectra)
     }
 
+    /// Re-read MS2 spectra and localize only target PSMs that passed the
+    /// configured identification q-value. This keeps localization out of the
+    /// search hot path without retaining every processed spectrum in memory.
+    fn localize_features(&self, features: &mut [Feature], batch_size: usize) {
+        let mut feature_indices: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
+        for (idx, feature) in features.iter().enumerate() {
+            if passes_localization_filter(
+                feature,
+                self.parameters.ptm_localization.psm_q_value,
+            ) && sage_core::ptm::has_localizable_modification(
+                &self.database[feature.peptide_idx],
+                &self.database.potential_mods,
+            ) {
+                feature_indices
+                    .entry(feature.file_id)
+                    .or_default()
+                    .entry(feature.spec_id.clone())
+                    .or_default()
+                    .push(idx);
+            }
+        }
+
+        if feature_indices.is_empty() {
+            log::info!("- PTM localization: no passing target PSMs");
+            return;
+        }
+
+        let start = Instant::now();
+        let mut localized = 0usize;
+        for (chunk_idx, chunk) in self.parameters.mzml_paths.chunks(batch_size).enumerate() {
+            let first_file_id = chunk_idx * batch_size;
+            if !(first_file_id..first_file_id + chunk.len())
+                .any(|file_id| feature_indices.contains_key(&file_id))
+            {
+                continue;
+            }
+            let spectra = self
+                .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)
+                .1;
+            let results = spectra
+                .par_iter()
+                .map(|spectrum| {
+                    feature_indices
+                        .get(&spectrum.file_id)
+                        .and_then(|file| file.get(spectrum.id.as_str()))
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|&idx| {
+                            let feature = &features[idx];
+                            let peptide = &self.database[feature.peptide_idx];
+                            let localization = sage_core::ptm::localize(
+                                peptide,
+                                spectrum,
+                                &self.database.ion_kinds,
+                                &self.database.potential_mods,
+                                self.parameters.fragment_tol,
+                                self.parameters.max_fragment_charge,
+                                feature.charge,
+                            );
+                            (!localization.mods.is_empty()).then_some((idx, localization))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .flatten()
+                .collect::<Vec<_>>();
+
+            localized += results.len();
+            for (idx, localization) in results {
+                features[idx].localization = Some(localization);
+            }
+        }
+
+        log::info!(
+            "- PTM localization: {} PSMs in {} ms",
+            localized,
+            start.elapsed().as_millis()
+        );
+    }
+
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
         self.parameters
             .mzml_paths
@@ -541,7 +641,6 @@ impl Runner {
             report_psms: self.parameters.report_psms,
             wide_window: self.parameters.wide_window,
             annotate_matches: self.parameters.annotate_matches,
-            localize: self.parameters.ptm_localization.enabled,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
         };
@@ -586,6 +685,10 @@ impl Runner {
         // are reported with protein group FDR = 1.0
         let q_protein_group =
             sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
+
+        if self.parameters.ptm_localization.enabled {
+            self.localize_features(&mut outputs.features, parallel);
+        }
 
         let filenames = self
             .parameters
@@ -994,9 +1097,10 @@ impl Runner {
         let mut rows = Vec::new();
         for feature in features {
             // Only confidently-identified target PSMs.
-            if feature.label != 1
-                || feature.spectrum_q > self.parameters.ptm_localization.psm_q_value
-            {
+            if !passes_localization_filter(
+                feature,
+                self.parameters.ptm_localization.psm_q_value,
+            ) {
                 continue;
             }
             let localization = match &feature.localization {
@@ -2163,5 +2267,33 @@ impl Runner {
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
 
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::passes_localization_filter;
+    use sage_core::scoring::Feature;
+
+    #[test]
+    fn localization_filter_requires_passing_target_psm() {
+        let passing = Feature {
+            label: 1,
+            spectrum_q: 0.01,
+            ..Default::default()
+        };
+        assert!(passes_localization_filter(&passing, 0.01));
+
+        let failing = Feature {
+            spectrum_q: 0.011,
+            ..passing.clone()
+        };
+        assert!(!passes_localization_filter(&failing, 0.01));
+
+        let decoy = Feature {
+            label: -1,
+            ..passing
+        };
+        assert!(!passes_localization_filter(&decoy, 0.01));
     }
 }

@@ -123,6 +123,25 @@ pub fn localize(
     Localization { mods }
 }
 
+/// Return whether a peptide carries at least one residue-specific variable
+/// modification that the localizer can move between candidate sites.
+pub fn has_localizable_modification(
+    peptide: &Peptide,
+    potential_mods: &[(ModificationSpecificity, f32)],
+) -> bool {
+    residue_specificities(potential_mods)
+        .iter()
+        .any(|(mass, residues)| {
+            peptide
+                .sequence
+                .iter()
+                .zip(peptide.modifications.iter())
+                .any(|(residue, modification)| {
+                    residues.contains(residue) && (modification - mass).abs() < MASS_EPS
+                })
+        })
+}
+
 /// Collapse the `(specificity, mass)` list into `(mass, residues)` groups,
 /// unioning e.g. `Residue(S)`, `Residue(T)`, `Residue(Y)` that share the
 /// phospho delta mass.
@@ -605,6 +624,14 @@ mod test {
             2,
         );
         assert!(loc.mods.is_empty());
+        assert!(!has_localizable_modification(&pep, &potential));
+        assert!(has_localizable_modification(&truth_with_phospho(), &potential));
+    }
+
+    fn truth_with_phospho() -> Peptide {
+        let mut peptide = peptide("AASAATAA");
+        peptide.modifications[2] = PHOSPHO;
+        peptide
     }
 
     #[test]

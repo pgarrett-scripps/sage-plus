@@ -461,7 +461,7 @@ Note on the settings below:
 - **parallel**: Boolean. Parse and search files in parallel. For large numbers of files or low RAM, setting this to false can reduce memory usage at the cost of running slower (default: true).
 - **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
-  - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs included in the site reports (default: 0.01). This filters which identified PSMs are reported; it is not a PTM localization probability or false-localization-rate threshold.
+  - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
 
 ## PTM Site Localization
 
@@ -498,6 +498,7 @@ psm_id  peptide            modification  position  residue  localization_probabi
 
 Notes:
 - All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
+- Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality only. Filter `localization_probability` or `delta_localization_score` separately when selecting confidently localized sites.
 - Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
 

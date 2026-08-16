@@ -250,8 +250,6 @@ pub struct Scorer<'db> {
     // the precursor tolerance window based on MS2 isolation window and charge
     pub wide_window: bool,
     pub annotate_matches: bool,
-    /// Compute PTM site localization for reported PSMs
-    pub localize: bool,
     /// A precursor delta mass (`expmass - calcmass`) within this many ppm of the
     /// calculated mass is treated as no shift for sequence-ambiguity annotation.
     pub mass_shift_ppm: f32,
@@ -577,25 +575,6 @@ impl<'db> Scorer<'db> {
                 mass_shift,
             );
 
-            let localization = if self.localize {
-                let loc = crate::ptm::localize(
-                    peptide,
-                    query,
-                    &self.db.ion_kinds,
-                    &self.db.potential_mods,
-                    self.fragment_tol,
-                    self.max_fragment_charge,
-                    score.precursor_charge,
-                );
-                if loc.mods.is_empty() {
-                    None
-                } else {
-                    Some(loc)
-                }
-            } else {
-                None
-            };
-
             // let (num_proteins, proteins) = self.db.assign_proteins(peptide);
 
             features.push(Feature {
@@ -658,7 +637,7 @@ impl<'db> Scorer<'db> {
                 ambiguity_sequence: ambiguity.sequence,
                 mass_shift: ambiguity.mass_shift,
                 protein_group_q: 1.0,
-                localization,
+                localization: None,
             })
         }
     }
