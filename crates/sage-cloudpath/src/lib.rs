@@ -2,6 +2,8 @@ use async_compression::tokio::bufread::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use futures::TryStreamExt;
 use object_store::{ObjectStore, ObjectStoreExt};
+use std::io::Write;
+use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 
 pub use url::Url;
@@ -69,6 +71,45 @@ fn parse_url(url: &Url) -> Result<(Box<dyn ObjectStore>, object_store::path::Pat
         std::env::vars().map(|(k, v)| (k.to_ascii_lowercase(), v)),
     )
     .map_err(Error::ObjectStore)
+}
+
+/// A bounded-memory synchronous writer backed by object-store multipart uploads.
+///
+/// CSV generation in the CLI is synchronous. This adapter buffers writes and
+/// drives the asynchronous object-store writer on an internal current-thread
+/// runtime, switching to multipart upload once its 10 MiB buffer is full.
+pub struct CloudWriter {
+    runtime: tokio::runtime::Runtime,
+    writer: object_store::buffered::BufWriter,
+}
+
+impl CloudWriter {
+    pub fn new(url: &Url) -> Result<Self, Error> {
+        let (store, path) = parse_url(url)?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let store: Arc<dyn ObjectStore> = Arc::from(store);
+        Ok(Self {
+            runtime,
+            writer: object_store::buffered::BufWriter::new(store, path),
+        })
+    }
+
+    pub fn finish(mut self) -> Result<(), Error> {
+        self.runtime.block_on(self.writer.shutdown())?;
+        Ok(())
+    }
+}
+
+impl Write for CloudWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.runtime.block_on(self.writer.write(buf))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.runtime.block_on(self.writer.flush())
+    }
 }
 
 /// Open a streaming reader for the given URL.
@@ -239,5 +280,13 @@ mod test {
             &Url::parse("s3://bucket/file.mzML.gzip").unwrap()
         ));
         assert!(!gzip_heuristic(&Url::parse("file:///file.mzML").unwrap()));
+    }
+
+    #[test]
+    fn cloud_writer_completes_multipart_upload() {
+        let url = Url::parse("memory:///multipart-output.tsv").unwrap();
+        let mut writer = CloudWriter::new(&url).unwrap();
+        writer.write_all(&vec![b'x'; 11 * 1024 * 1024]).unwrap();
+        writer.finish().unwrap();
     }
 }

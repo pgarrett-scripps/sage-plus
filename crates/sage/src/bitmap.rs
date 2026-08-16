@@ -63,16 +63,19 @@ impl BitmapIndex {
         let n = peptides.len();
         let total_bins = bitmap_size * 64;
 
-        // Build bitmaps in parallel — each peptide gets its own (forward, reverse) pair.
-        let bitmaps: Vec<(Vec<u64>, Vec<u64>)> = peptides
-            .par_iter()
-            .map(|peptide| {
-                let mut fwd = vec![0u64; bitmap_size];
-                let mut rev = vec![0u64; bitmap_size];
+        // Populate the final contiguous arrays directly. Each parallel worker owns
+        // one disjoint pair of chunks, avoiding two allocations and a copy per peptide.
+        let mut forward_bitmaps = vec![0u64; n * bitmap_size];
+        let mut reverse_bitmaps = vec![0u64; n * bitmap_size];
+        forward_bitmaps
+            .par_chunks_mut(bitmap_size)
+            .zip(reverse_bitmaps.par_chunks_mut(bitmap_size))
+            .zip(peptides.par_iter())
+            .for_each(|((fwd, rev), peptide)| {
                 for &kind in ion_kinds {
                     let target = match kind {
-                        Kind::A | Kind::B | Kind::C => &mut fwd,
-                        Kind::X | Kind::Y | Kind::Z => &mut rev,
+                        Kind::A | Kind::B | Kind::C => &mut *fwd,
+                        Kind::X | Kind::Y | Kind::Z => &mut *rev,
                     };
                     for ion in IonSeries::new(peptide, kind) {
                         let mass = ion.monoisotopic_mass;
@@ -81,21 +84,13 @@ impl BitmapIndex {
                         }
                     }
                 }
-                (fwd, rev)
-            })
+            });
+
+        let precursor_masses = peptides
+            .iter()
+            .map(|peptide| peptide.monoisotopic)
             .collect();
-
-        let mut precursor_masses = Vec::with_capacity(n);
-        let mut peptide_indices = Vec::with_capacity(n);
-        let mut forward_bitmaps = Vec::with_capacity(n * bitmap_size);
-        let mut reverse_bitmaps = Vec::with_capacity(n * bitmap_size);
-
-        for (idx, (fwd, rev)) in bitmaps.into_iter().enumerate() {
-            precursor_masses.push(peptides[idx].monoisotopic);
-            peptide_indices.push(PeptideIx(idx as u32));
-            forward_bitmaps.extend_from_slice(&fwd);
-            reverse_bitmaps.extend_from_slice(&rev);
-        }
+        let peptide_indices = (0..n).map(|idx| PeptideIx(idx as u32)).collect();
 
         BitmapIndex {
             precursor_masses,

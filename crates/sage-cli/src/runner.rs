@@ -14,9 +14,10 @@ use sage_core::mass::Tolerance;
 use sage_core::peptide::Peptide;
 use sage_core::scoring::Fragments;
 use sage_core::scoring::{Feature, Scorer};
-use sage_core::spectrum::{ProcessedSpectrum, RawSpectrum, SpectrumProcessor};
+use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
 use sage_core::tmt::TmtQuant;
 use std::collections::{HashMap, HashSet};
+use std::io::{BufWriter, Write};
 use std::time::Instant;
 // HTML report specific imports
 use maud::{html, PreEscaped};
@@ -25,6 +26,64 @@ use report_builder::{
     Report, ReportSection,
 };
 
+enum OutputTarget {
+    Local(BufWriter<std::fs::File>),
+    Remote(Box<BufWriter<sage_cloudpath::CloudWriter>>),
+}
+
+impl OutputTarget {
+    fn new(path: &Url) -> anyhow::Result<Self> {
+        if let Ok(local_path) = path.to_file_path() {
+            if let Some(parent) = local_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            Ok(Self::Local(BufWriter::new(std::fs::File::create(
+                local_path,
+            )?)))
+        } else {
+            Ok(Self::Remote(Box::new(BufWriter::with_capacity(
+                1024 * 1024,
+                sage_cloudpath::CloudWriter::new(path)?,
+            ))))
+        }
+    }
+
+    fn finish(mut self, _path: &Url) -> anyhow::Result<()> {
+        self.flush()?;
+        if let Self::Remote(writer) = self {
+            (*writer)
+                .into_inner()
+                .map_err(|error| error.into_error())?
+                .finish()?;
+        }
+        Ok(())
+    }
+}
+
+impl Write for OutputTarget {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Local(writer) => writer.write(buf),
+            Self::Remote(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Local(writer) => writer.flush(),
+            Self::Remote(writer) => writer.flush(),
+        }
+    }
+}
+
+fn finish_csv_writer(mut writer: csv::Writer<OutputTarget>, path: &Url) -> anyhow::Result<()> {
+    writer.flush()?;
+    let output = writer
+        .into_inner()
+        .map_err(|error| anyhow::anyhow!("failed to flush CSV output: {}", error.error()))?;
+    output.finish(path)
+}
+
 pub struct Runner {
     pub database: IndexedDatabase,
     pub parameters: Search,
@@ -32,14 +91,14 @@ pub struct Runner {
 }
 
 #[derive(Default)]
-struct RawSpectrumAccumulator {
-    pub ms1: Vec<RawSpectrum>,
-    pub msn: Vec<RawSpectrum>,
+struct SpectrumAccumulator {
+    pub ms1: Vec<ProcessedSpectrum>,
+    pub msn: Vec<ProcessedSpectrum>,
 }
 
-impl RawSpectrumAccumulator {
-    pub fn fold_op(mut self, rhs: RawSpectrum) -> Self {
-        if rhs.ms_level == 1 {
+impl SpectrumAccumulator {
+    pub fn fold_op(mut self, rhs: ProcessedSpectrum) -> Self {
+        if rhs.level == 1 {
             self.ms1.push(rhs);
         } else {
             self.msn.push(rhs);
@@ -54,39 +113,32 @@ impl RawSpectrumAccumulator {
     }
 }
 
-impl FromParallelIterator<RawSpectrum> for RawSpectrumAccumulator {
+impl FromParallelIterator<ProcessedSpectrum> for SpectrumAccumulator {
     fn from_par_iter<I>(par_iter: I) -> Self
     where
-        I: IntoParallelIterator<Item = RawSpectrum>,
+        I: IntoParallelIterator<Item = ProcessedSpectrum>,
     {
         par_iter
             .into_par_iter()
-            .fold(
-                RawSpectrumAccumulator::default,
-                RawSpectrumAccumulator::fold_op,
-            )
-            .reduce(
-                RawSpectrumAccumulator::default,
-                RawSpectrumAccumulator::reduce,
-            )
+            .fold(SpectrumAccumulator::default, SpectrumAccumulator::fold_op)
+            .reduce(SpectrumAccumulator::default, SpectrumAccumulator::reduce)
     }
 }
 
-impl FromIterator<RawSpectrum> for RawSpectrumAccumulator {
+impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = RawSpectrum>,
+        I: IntoIterator<Item = ProcessedSpectrum>,
     {
-        iter.into_iter().fold(
-            RawSpectrumAccumulator::default(),
-            RawSpectrumAccumulator::fold_op,
-        )
+        iter.into_iter()
+            .fold(SpectrumAccumulator::default(), SpectrumAccumulator::fold_op)
     }
 }
 
 impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
         let mut parameters = parameters.clone();
+        parameters.database.use_bitmap = parameters.use_bitmap;
         let start = Instant::now();
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
@@ -448,7 +500,9 @@ impl Runner {
             match res {
                 Ok(s) => {
                     log::trace!("- {}: read {} spectra", path, s.len());
-                    Ok(s)
+                    Ok(s.into_par_iter()
+                        .map(|spectrum| sp.process(spectrum))
+                        .collect::<SpectrumAccumulator>())
                 }
                 Err(e) => {
                     log::error!("- {}: {}", path, e);
@@ -457,45 +511,35 @@ impl Runner {
             }
         };
 
-        let spectra: RawSpectrumAccumulator = if file_serial_read {
+        let spectra: SpectrumAccumulator = if file_serial_read {
             chunk
                 .iter()
                 .enumerate()
                 .flat_map(inner_closure)
-                .flatten()
-                .collect()
+                .fold(SpectrumAccumulator::default(), SpectrumAccumulator::reduce)
         } else {
             chunk
                 .par_iter()
                 .enumerate()
                 .flat_map(inner_closure)
-                .flatten()
-                .collect()
+                .reduce(SpectrumAccumulator::default, SpectrumAccumulator::reduce)
         };
 
-        let msn_spectra = spectra
-            .msn
-            .into_par_iter()
-            .map(|s| sp.process(s))
-            .collect::<Vec<_>>();
-
-        let has_ims = spectra.ms1.iter().any(|x| x.mobility.is_some());
-        let ms1_spectra = if spectra.ms1.is_empty() {
+        let has_ims = spectra.ms1.iter().any(|x| !x.mobilities.is_empty());
+        if spectra.ms1.is_empty() {
             log::trace!("no MS1 spectra found");
-            Vec::new()
         } else {
             if has_ims {
                 log::trace!("Processing MS1 spectra with IMS columns");
             } else {
                 log::trace!("Processing MS1 spectra without IMS");
             }
-            spectra.ms1.into_par_iter().map(|s| sp.process(s)).collect()
-        };
+        }
 
         let io_time = Instant::now() - start;
         info!("- file IO: {:8} ms", io_time.as_millis());
 
-        (ms1_spectra, msn_spectra)
+        (spectra.ms1, spectra.msn)
     }
 
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
@@ -660,7 +704,7 @@ impl Runner {
                     .output_paths
                     .push(self.write_tmt(&outputs.quant, &filenames)?);
             }
-            if let Some(areas) = areas.clone() {
+            if let Some(areas) = &areas {
                 self.parameters
                     .output_paths
                     .push(self.write_lfq(areas, &filenames)?);
@@ -856,7 +900,7 @@ impl Runner {
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(vec![]);
+            .from_writer(OutputTarget::new(&path)?);
 
         let csv_headers = vec![
             "psm_id",
@@ -907,17 +951,17 @@ impl Runner {
         let headers = csv::ByteRecord::from(csv_headers);
 
         wtr.write_byte_record(&headers)?;
-        for record in features
-            .into_par_iter()
-            .map(|feat| self.serialize_feature(feat, filenames))
-            .collect::<Vec<_>>()
-        {
-            wtr.write_byte_record(&record)?;
+        for chunk in features.chunks(1024) {
+            for record in chunk
+                .par_iter()
+                .map(|feat| self.serialize_feature(feat, filenames))
+                .collect::<Vec<_>>()
+            {
+                wtr.write_byte_record(&record)?;
+            }
         }
 
-        wtr.flush()?;
-        let bytes = wtr.into_inner()?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        finish_csv_writer(wtr, &path)?;
         Ok(path)
     }
 
@@ -926,7 +970,7 @@ impl Runner {
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(vec![]);
+            .from_writer(OutputTarget::new(&path)?);
 
         let headers = csv::ByteRecord::from(vec![
             "psm_id",
@@ -940,18 +984,18 @@ impl Runner {
 
         wtr.write_byte_record(&headers)?;
 
-        for record in features
-            .into_par_iter()
-            .map(|feat| self.serialize_fragments(feat.psm_id, &feat.fragments))
-            .flatten()
-            .collect::<Vec<_>>()
-        {
-            wtr.write_byte_record(&record)?;
+        for chunk in features.chunks(1024) {
+            for record in chunk
+                .par_iter()
+                .map(|feat| self.serialize_fragments(feat.psm_id, &feat.fragments))
+                .flatten()
+                .collect::<Vec<_>>()
+            {
+                wtr.write_byte_record(&record)?;
+            }
         }
 
-        wtr.flush()?;
-        let bytes = wtr.into_inner()?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        finish_csv_writer(wtr, &path)?;
         Ok(path)
     }
 
@@ -1096,7 +1140,7 @@ impl Runner {
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(vec![]);
+            .from_writer(OutputTarget::new(&path)?);
 
         let headers = csv::ByteRecord::from(vec![
             "SpecId",
@@ -1143,17 +1187,17 @@ impl Runner {
         let re = regex::Regex::new(r"scan=(\d+)").expect("This is valid regex");
 
         wtr.write_byte_record(&headers)?;
-        for record in features
-            .into_par_iter()
-            .map(|feat| self.serialize_pin(&re, feat, filenames))
-            .collect::<Vec<_>>()
-        {
-            wtr.write_byte_record(&record)?;
+        for chunk in features.chunks(1024) {
+            for record in chunk
+                .par_iter()
+                .map(|feat| self.serialize_pin(&re, feat, filenames))
+                .collect::<Vec<_>>()
+            {
+                wtr.write_byte_record(&record)?;
+            }
         }
 
-        wtr.flush()?;
-        let bytes = wtr.into_inner()?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        finish_csv_writer(wtr, &path)?;
         Ok(path)
     }
 
@@ -1162,7 +1206,7 @@ impl Runner {
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(vec![]);
+            .from_writer(OutputTarget::new(&path)?);
         let mut headers = csv::ByteRecord::from(vec!["filename", "scannr", "ion_injection_time"]);
         headers.extend(
             self.parameters
@@ -1175,40 +1219,38 @@ impl Runner {
 
         wtr.write_byte_record(&headers)?;
 
-        let records = quant
-            .into_par_iter()
-            .map(|q| {
-                let mut record = csv::ByteRecord::new();
-                record.push_field(filenames[q.file_id].as_bytes());
-                record.push_field(q.spec_id.as_bytes());
-                record.push_field(ryu::Buffer::new().format(q.ion_injection_time).as_bytes());
-                for peak in &q.peaks {
-                    record.push_field(ryu::Buffer::new().format(*peak).as_bytes());
-                }
-                record
-            })
-            .collect::<Vec<csv::ByteRecord>>();
-
-        for record in records {
-            wtr.write_record(&record)?;
+        for chunk in quant.chunks(1024) {
+            for record in chunk
+                .par_iter()
+                .map(|q| {
+                    let mut record = csv::ByteRecord::new();
+                    record.push_field(filenames[q.file_id].as_bytes());
+                    record.push_field(q.spec_id.as_bytes());
+                    record.push_field(ryu::Buffer::new().format(q.ion_injection_time).as_bytes());
+                    for peak in &q.peaks {
+                        record.push_field(ryu::Buffer::new().format(*peak).as_bytes());
+                    }
+                    record
+                })
+                .collect::<Vec<csv::ByteRecord>>()
+            {
+                wtr.write_record(&record)?;
+            }
         }
-        wtr.flush()?;
-
-        let bytes = wtr.into_inner()?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        finish_csv_writer(wtr, &path)?;
         Ok(path)
     }
 
     pub fn write_lfq(
         &self,
-        areas: HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>,
+        areas: &HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>,
         filenames: &[String],
     ) -> anyhow::Result<Url> {
         let path = self.make_path("lfq.tsv");
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(b'\t')
-            .from_writer(vec![]);
+            .from_writer(OutputTarget::new(&path)?);
         let mut headers = csv::ByteRecord::from(vec![
             "peptide",
             "charge",
@@ -1221,41 +1263,31 @@ impl Runner {
 
         wtr.write_byte_record(&headers)?;
 
-        let records = areas
-            .into_par_iter()
-            .filter_map(|((id, decoy), (peak, data))| {
-                if decoy {
-                    return None;
-                };
-                let mut record = csv::ByteRecord::new();
-                let (peptide_ix, charge) = match id {
-                    PrecursorId::Combined(x) => (x, None),
-                    PrecursorId::Charged((x, charge)) => (x, Some(charge as i32)),
-                };
-                record.push_field(self.database[peptide_ix].to_string().as_bytes());
-                record.push_field(itoa::Buffer::new().format(charge.unwrap_or(-1)).as_bytes());
-                record.push_field(
-                    self.database[peptide_ix]
-                        .proteins(&self.database.decoy_tag, self.database.generate_decoys)
-                        .as_bytes(),
-                );
-                record.push_field(ryu::Buffer::new().format(peak.q_value).as_bytes());
-                record.push_field(ryu::Buffer::new().format(peak.score).as_bytes());
-                record.push_field(ryu::Buffer::new().format(peak.spectral_angle).as_bytes());
-                for x in data {
-                    record.push_field(ryu::Buffer::new().format(x).as_bytes());
-                }
-                Some(record)
-            })
-            .collect::<Vec<csv::ByteRecord>>();
-
-        for record in records {
+        for ((id, decoy), (peak, data)) in areas {
+            if *decoy {
+                continue;
+            }
+            let mut record = csv::ByteRecord::new();
+            let (peptide_ix, charge) = match id {
+                PrecursorId::Combined(x) => (*x, None),
+                PrecursorId::Charged((x, charge)) => (*x, Some(*charge as i32)),
+            };
+            record.push_field(self.database[peptide_ix].to_string().as_bytes());
+            record.push_field(itoa::Buffer::new().format(charge.unwrap_or(-1)).as_bytes());
+            record.push_field(
+                self.database[peptide_ix]
+                    .proteins(&self.database.decoy_tag, self.database.generate_decoys)
+                    .as_bytes(),
+            );
+            record.push_field(ryu::Buffer::new().format(peak.q_value).as_bytes());
+            record.push_field(ryu::Buffer::new().format(peak.score).as_bytes());
+            record.push_field(ryu::Buffer::new().format(peak.spectral_angle).as_bytes());
+            for x in data {
+                record.push_field(ryu::Buffer::new().format(*x).as_bytes());
+            }
             wtr.write_record(&record)?;
         }
-        wtr.flush()?;
-
-        let bytes = wtr.into_inner()?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        finish_csv_writer(wtr, &path)?;
         Ok(path)
     }
 
