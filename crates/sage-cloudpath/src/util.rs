@@ -155,6 +155,16 @@ pub fn read_text<S: AsRef<str>>(path: S) -> Result<String, Error> {
     })
 }
 
+pub fn read_bytes<S: AsRef<str>>(path: S) -> Result<Vec<u8>, Error> {
+    read_and_execute(path, |mut bf| async move {
+        let mut contents = Vec::new();
+        bf.read_to_end(&mut contents)
+            .await
+            .map_err(crate::Error::IO)?;
+        Ok(contents)
+    })
+}
+
 pub fn read_fasta<S>(
     url: &Url,
     decoy_tag: S,

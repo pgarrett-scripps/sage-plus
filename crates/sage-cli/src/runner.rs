@@ -23,6 +23,7 @@ use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
 use sage_core::tmt::TmtQuant;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
+use std::sync::Arc;
 use std::time::Instant;
 // HTML report specific imports
 use maud::{html, PreEscaped};
@@ -178,7 +179,9 @@ pub struct ModificationRunStats {
     pub static_definitions: usize,
     pub variable_definitions: usize,
     pub max_variable_mods: usize,
+    pub max_total_variable_mods: usize,
     pub max_combinations: Option<usize>,
+    pub ptm_library_sites: usize,
 }
 
 /// A single localized modification site for one PSM, used to build the
@@ -188,6 +191,7 @@ struct SiteRow {
     filename: String,
     scannr: String,
     peptide: String,
+    peptide_sequence: String,
     proteins: String,
     charge: u8,
     spectrum_q: f32,
@@ -274,6 +278,18 @@ impl Runner {
     ) -> anyhow::Result<Self> {
         let mut parameters = parameters.clone();
         parameters.database.use_bitmap = parameters.use_bitmap;
+        if let Some(settings) = parameters.database.ptm_library.clone() {
+            let bytes = sage_cloudpath::util::read_bytes(&settings.path)
+                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+            let library = sage_cloudpath::parquet::deserialize_ptm_library(bytes)
+                .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
+            parameters
+                .database
+                .validate_ptm_library(&library)
+                .map_err(anyhow::Error::msg)?;
+            info!("loaded {} unique PTM library sites", library.len());
+            parameters.database.loaded_ptm_library = Some(Arc::new(library));
+        }
         let start = Instant::now();
         cancellation.check()?;
         events.emit(EventKind::DatabaseStarted);
@@ -293,6 +309,49 @@ impl Runner {
                     parameters.database.fasta
                 )
             })?;
+
+            if let (Some(settings), Some(library)) = (
+                parameters.database.ptm_library.as_ref(),
+                parameters.database.loaded_ptm_library.as_deref(),
+            ) {
+                let proteins = fasta
+                    .targets
+                    .iter()
+                    .map(|(accession, sequence)| (accession.as_ref(), sequence.as_bytes()))
+                    .collect::<HashMap<_, _>>();
+                let mut invalid = Vec::new();
+                for site in library.iter() {
+                    match proteins.get(site.protein.as_ref()) {
+                        None => invalid.push(format!(
+                            "{}:{} references a protein absent from the FASTA",
+                            site.protein,
+                            site.position + 1
+                        )),
+                        Some(sequence)
+                            if sequence.get(site.position as usize) != Some(&site.residue) =>
+                        {
+                            invalid.push(format!(
+                                "{}:{} expects residue {}",
+                                site.protein,
+                                site.position + 1,
+                                site.residue as char
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+                if !invalid.is_empty() {
+                    let message = format!(
+                        "{} PTM library sites did not match the FASTA; first issue: {}",
+                        invalid.len(),
+                        invalid[0]
+                    );
+                    if settings.strict {
+                        anyhow::bail!(message);
+                    }
+                    log::warn!("{message}");
+                }
+            }
 
             let needs_estimate = limits.is_enabled()
                 || (parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0);
@@ -380,6 +439,9 @@ impl Runner {
                 }
             }
         } else {
+            if parameters.database.loaded_ptm_library.is_some() {
+                anyhow::bail!("database.ptm_library requires database.fasta");
+            }
             vec![]
         };
 
@@ -1295,6 +1357,9 @@ impl Runner {
                 &filenames,
                 parquet,
             )?);
+            if let Some(path) = self.write_ptm_library(&outputs.features, &filenames)? {
+                self.parameters.output_paths.push(path);
+            }
         }
 
         // Write percolator input file if requested
@@ -1412,7 +1477,14 @@ impl Runner {
                     .map(Vec::len)
                     .sum(),
                 max_variable_mods: self.parameters.database.max_variable_mods,
+                max_total_variable_mods: self.parameters.database.max_total_variable_mods,
                 max_combinations: self.parameters.database.max_combinations,
+                ptm_library_sites: self
+                    .parameters
+                    .database
+                    .loaded_ptm_library
+                    .as_deref()
+                    .map_or(0, |library| library.len()),
             },
             output_paths,
         };
@@ -1749,6 +1821,7 @@ impl Runner {
                         filename: filename.clone(),
                         scannr: feature.spec_id.clone(),
                         peptide: peptide_str.clone(),
+                        peptide_sequence: String::from_utf8_lossy(&peptide.sequence).into_owned(),
                         proteins: proteins.clone(),
                         charge: feature.charge,
                         spectrum_q: feature.spectrum_q,
@@ -2029,6 +2102,87 @@ impl Runner {
         let bytes = wtr.into_inner()?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
+    }
+
+    /// Emit a compact, reusable protein-coordinate site library from passing
+    /// localized PSMs. Only names defined by this search's `variable_mods` are
+    /// included, so every emitted row can be resolved by the same config.
+    fn write_ptm_library(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> anyhow::Result<Option<Url>> {
+        if self.parameters.database.fasta.is_empty() {
+            return Ok(None);
+        }
+
+        let known_names = self
+            .parameters
+            .database
+            .variable_mods
+            .values()
+            .flatten()
+            .filter_map(|entry| entry.definition().name.map(|name| name.to_string()))
+            .collect::<HashSet<_>>();
+        let fasta_url = sage_cloudpath::to_url(&self.parameters.database.fasta)?;
+        let fasta = sage_cloudpath::util::read_fasta(
+            &fasta_url,
+            &self.parameters.database.decoy_tag,
+            self.parameters.database.generate_decoys,
+        )?;
+        let proteins = fasta
+            .targets
+            .iter()
+            .map(|(accession, sequence)| (accession.as_ref(), sequence.as_str()))
+            .collect::<HashMap<_, _>>();
+
+        let mut sites = HashSet::new();
+        let mut skipped_unnamed = 0usize;
+        for row in self.collect_site_rows(features, filenames) {
+            if !known_names.contains(&row.modification) {
+                skipped_unnamed += 1;
+                continue;
+            }
+            let peptide_position = row.position - 1;
+            for protein in row
+                .proteins
+                .split(';')
+                .filter(|protein| !protein.is_empty())
+            {
+                let Some(sequence) = proteins.get(protein) else {
+                    continue;
+                };
+                for (start, _) in sequence.match_indices(&row.peptide_sequence) {
+                    let protein_position = start + peptide_position;
+                    if sequence.as_bytes().get(protein_position) == Some(&row.residue) {
+                        sites.insert(sage_core::ptm_library::PtmLibrarySite {
+                            protein: Arc::from(protein),
+                            position: protein_position as u32,
+                            residue: row.residue,
+                            modification: Arc::from(row.modification.as_str()),
+                        });
+                    }
+                }
+            }
+        }
+        if skipped_unnamed > 0 {
+            log::warn!(
+                "skipped {} localized sites without a matching configured modification name",
+                skipped_unnamed
+            );
+        }
+
+        let mut sites = sites.into_iter().collect::<Vec<_>>();
+        sites.sort_unstable_by(|a, b| {
+            a.protein
+                .cmp(&b.protein)
+                .then_with(|| a.position.cmp(&b.position))
+                .then_with(|| a.modification.cmp(&b.modification))
+        });
+        let path = self.make_path("results.sage.ptm-library.parquet");
+        let bytes = sage_cloudpath::parquet::serialize_ptm_library(&sites)?;
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        Ok(Some(path))
     }
 
     fn serialize_pin(
@@ -2338,7 +2492,9 @@ impl Runner {
         let mut report = Report::new(
             "Sage",
             &self.parameters.version,
-            Some("https://github.com/pgarrett-scripps/sage-plus/blob/main/figures/logo.png?raw=true"),
+            Some(
+                "https://github.com/pgarrett-scripps/sage-plus/blob/main/figures/logo.png?raw=true",
+            ),
             "Sage Report",
         );
 

@@ -259,7 +259,9 @@ impl State {
                     "static_mods": database.get("static_mods"),
                     "variable_mods": database.get("variable_mods"),
                     "max_variable_mods": database.get("max_variable_mods"),
-                    "max_combinations": database.get("max_combinations")
+                    "max_total_variable_mods": database.get("max_total_variable_mods"),
+                    "max_combinations": database.get("max_combinations"),
+                    "ptm_library": database.get("ptm_library")
                 }))
         });
         Ok(ConfigInspection {
@@ -275,6 +277,14 @@ impl State {
         let min_free_memory_gb = input.min_free_memory_gb;
         let mut parameters = input.database.make_parameters();
         parameters.use_bitmap = input.use_bitmap.unwrap_or(false);
+        if let Some(settings) = parameters.ptm_library.as_ref() {
+            let bytes = sage_cloudpath::util::read_bytes(&settings.path)?;
+            let library = sage_cloudpath::parquet::deserialize_ptm_library(bytes)?;
+            parameters
+                .validate_ptm_library(&library)
+                .map_err(anyhow::Error::msg)?;
+            parameters.loaded_ptm_library = Some(Arc::new(library));
+        }
         let mut totals = [0u64; 6];
 
         if !parameters.fasta.is_empty() {

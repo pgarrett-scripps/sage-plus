@@ -4,16 +4,17 @@ use crate::fasta::Fasta;
 use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
 use crate::modification::{
-    validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity,
+    validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity, SiteMode,
     StaticModEntry, VarModEntry,
 };
-use crate::peptide::{AppliedModification, Peptide};
+use crate::peptide::{AppliedModification, LibrarySite, Peptide, VariableRule};
+use crate::ptm_library::PtmLibrary;
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -93,6 +94,11 @@ pub struct Builder {
     /// including its unmodified form. Values below 1 are normalized to 1.
     /// Variants with fewer PTMs are preferred (generated first).
     pub max_combinations: Option<usize>,
+    /// Maximum number of variable modifications after exhaustive and
+    /// library-supported placements are combined.
+    pub max_total_variable_mods: Option<usize>,
+    /// Optional site library. Modification definitions remain in `variable_mods`.
+    pub ptm_library: Option<PtmLibrarySettings>,
     /// Use this prefix for decoy proteins
     pub decoy_tag: Option<String>,
 
@@ -114,6 +120,12 @@ pub struct Builder {
 impl Builder {
     pub fn make_parameters(self) -> Parameters {
         let bucket_size = self.bucket_size.unwrap_or(8192).next_power_of_two();
+        let max_variable_mods = self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2);
+        let max_total_variable_mods = self
+            .max_total_variable_mods
+            .map(|x| x.max(1))
+            .unwrap_or(max_variable_mods)
+            .max(max_variable_mods);
         Parameters {
             bucket_size,
             bitmap_size: self.bitmap_size.unwrap_or(30),
@@ -125,8 +137,10 @@ impl Builder {
             enzyme: self.enzyme.unwrap_or_default(),
             static_mods: validate_mods(self.static_mods),
             variable_mods: validate_var_mods(self.variable_mods),
-            max_variable_mods: self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2),
+            max_variable_mods,
             max_combinations: self.max_combinations.map(|x| x.max(1)),
+            max_total_variable_mods,
+            ptm_library: self.ptm_library,
             generate_decoys: self.generate_decoys.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
             peptides: self.peptides,
@@ -134,6 +148,7 @@ impl Builder {
             prefilter: self.prefilter.unwrap_or(false),
             prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
             use_bitmap: false,
+            loaded_ptm_library: None,
         }
     }
 
@@ -155,6 +170,8 @@ pub struct Parameters {
     pub variable_mods: HashMap<ModificationSpecificity, Vec<VarModEntry>>,
     pub max_variable_mods: usize,
     pub max_combinations: Option<usize>,
+    pub max_total_variable_mods: usize,
+    pub ptm_library: Option<PtmLibrarySettings>,
     pub decoy_tag: String,
     pub generate_decoys: bool,
     pub fasta: String,
@@ -166,6 +183,20 @@ pub struct Parameters {
     /// The CLI copies its top-level `use_bitmap` option here before construction.
     #[serde(skip)]
     pub use_bitmap: bool,
+    #[serde(skip)]
+    pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct PtmLibrarySettings {
+    pub path: String,
+    #[serde(default = "default_true")]
+    pub strict: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Conservative peak-memory estimates for the major database-build stages.
@@ -183,13 +214,7 @@ impl Parameters {
     /// Flatten variable modifications into a stable order. This matters when
     /// `max_combinations` truncates variants: equivalent configurations must
     /// retain the same variants regardless of randomized `HashMap` iteration.
-    fn variable_modifications(
-        &self,
-    ) -> Vec<(
-        ModificationSpecificity,
-        Arc<ModificationDefinition>,
-        Option<usize>,
-    )> {
+    fn variable_modifications(&self) -> Vec<VariableRule> {
         let mut mods = self
             .variable_mods
             .iter()
@@ -200,14 +225,98 @@ impl Parameters {
                         entry_order,
                         Arc::new(entry.definition()),
                         entry.max_count(),
+                        entry.site_mode(),
                     )
                 })
             })
             .collect::<Vec<_>>();
         mods.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        let mut named_groups: HashMap<Arc<str>, usize> = HashMap::new();
+        let mut next_group = 0usize;
         mods.into_iter()
-            .map(|(specificity, _, modification, max_count)| (specificity, modification, max_count))
+            .map(|(specificity, _, modification, max_count, site_mode)| {
+                let count_group = if let Some(name) = modification.name.clone() {
+                    *named_groups.entry(name).or_insert_with(|| {
+                        let group = next_group;
+                        next_group += 1;
+                        group
+                    })
+                } else {
+                    let group = next_group;
+                    next_group += 1;
+                    group
+                };
+                VariableRule {
+                    specificity,
+                    modification,
+                    max_count,
+                    site_mode,
+                    count_group,
+                }
+            })
             .collect()
+    }
+
+    pub fn validate_ptm_library(&self, library: &PtmLibrary) -> Result<(), String> {
+        if self.max_total_variable_mods < self.max_variable_mods {
+            return Err(
+                "database.max_total_variable_mods must be at least database.max_variable_mods"
+                    .into(),
+            );
+        }
+
+        let rules = self.variable_modifications();
+        let mut definitions: HashMap<&str, (&ModificationDefinition, Option<usize>, SiteMode)> =
+            HashMap::new();
+        for rule in &rules {
+            if self.ptm_library.is_some() && rule.max_count.is_none() {
+                return Err(
+                    "all variable modifications require `max_count` when database.ptm_library is configured"
+                        .into(),
+                );
+            }
+            if rule.site_mode != SiteMode::Exhaustive
+                && (rule.modification.name.is_none() || rule.max_count.is_none())
+            {
+                return Err(
+                    "variable modifications using `library` or `both` require `name` and `max_count`"
+                        .into(),
+                );
+            }
+            if let Some(name) = rule.modification.name.as_deref() {
+                if let Some((definition, max_count, site_mode)) = definitions.get(name) {
+                    if *definition != rule.modification.as_ref()
+                        || *max_count != rule.max_count
+                        || *site_mode != rule.site_mode
+                    {
+                        return Err(format!(
+                            "variable modification `{name}` has inconsistent definitions across specificities"
+                        ));
+                    }
+                } else {
+                    definitions.insert(name, (&rule.modification, rule.max_count, rule.site_mode));
+                }
+            }
+        }
+
+        for site in library.iter() {
+            match definitions.get(site.modification.as_ref()) {
+                None => {
+                    return Err(format!(
+                        "PTM library references undefined modification `{}`",
+                        site.modification
+                    ))
+                }
+                Some((_, _, SiteMode::Exhaustive)) => {
+                    return Err(format!(
+                        "PTM library modification `{}` must use site_mode `library` or `both`",
+                        site.modification
+                    ))
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     fn static_modifications(
@@ -351,9 +460,21 @@ impl Parameters {
         let mut peptide_bytes = 0u64;
         for digest in digests {
             let sequence_len = digest.reference.sequence.len() as u64;
-            let variants = self
-                .variable_variant_count(&digest.reference)
-                .saturating_mul(decoy_multiplier);
+            let variants = if self.loaded_ptm_library.is_some() {
+                digest
+                    .origins
+                    .iter()
+                    .map(|origin| {
+                        let mut reference = digest.reference.clone();
+                        reference.protein = origin.protein.clone();
+                        reference.protein_start = origin.start;
+                        self.variable_variant_count(&reference)
+                    })
+                    .fold(0u64, u64::saturating_add)
+            } else {
+                self.variable_variant_count(&digest.reference)
+            }
+            .saturating_mul(decoy_multiplier);
             estimate.modified_peptides = estimate.modified_peptides.saturating_add(variants);
             estimate.fragments = estimate.fragments.saturating_add(
                 variants.saturating_mul(
@@ -371,7 +492,7 @@ impl Parameters {
                     sequence_len.saturating_mul(std::mem::size_of::<AppliedModification>() as u64),
                 )
                 .saturating_add(
-                    (digest.proteins.len() as u64)
+                    (digest.origins.len() as u64)
                         .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
                 )
                 .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4));
@@ -410,21 +531,51 @@ impl Parameters {
 
     fn variable_variant_count(&self, digest: &Digest) -> u64 {
         let sequence = digest.sequence.as_bytes();
-        let mut choices_by_site: HashMap<usize, u64> = HashMap::new();
+        let rules = self.variable_modifications();
+        let library_sites = self
+            .loaded_ptm_library
+            .as_deref()
+            .map(|library| {
+                let start = digest.protein_start;
+                let end = start.saturating_add(sequence.len() as u32);
+                library
+                    .sites_for(&digest.protein)
+                    .iter()
+                    .filter(|site| (start..end).contains(&site.position))
+                    .filter(|site| {
+                        sequence.get((site.position - start) as usize) == Some(&site.residue)
+                    })
+                    .map(|site| ((site.position - start) as usize, site.modification.clone()))
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
+        let mut candidates: HashMap<(usize, usize), bool> = HashMap::new();
         let nterm = sequence.len();
         let cterm = sequence.len().saturating_add(1);
 
-        for (specificity, masses) in &self.variable_mods {
-            let choices = masses.len() as u64;
-            if choices == 0 {
-                continue;
-            }
+        for rule in &rules {
             let mut add_site = |site: usize| {
-                let entry = choices_by_site.entry(site).or_default();
-                *entry = entry.saturating_add(choices);
+                let library_position = if site == nterm {
+                    0
+                } else if site == cterm {
+                    sequence.len().saturating_sub(1)
+                } else {
+                    site
+                };
+                let supported = rule.site_mode != SiteMode::Exhaustive
+                    && rule.modification.name.as_ref().is_some_and(|name| {
+                        !sequence.is_empty()
+                            && library_sites.contains(&(library_position, name.clone()))
+                    });
+                if rule.site_mode != SiteMode::Library || supported {
+                    candidates
+                        .entry((site, rule.count_group))
+                        .and_modify(|library| *library |= supported)
+                        .or_insert(supported);
+                }
             };
 
-            match (*specificity, digest.position) {
+            match (rule.specificity, digest.position) {
                 (ModificationSpecificity::PeptideN(None), _) => add_site(nterm),
                 (ModificationSpecificity::PeptideN(Some(residue)), _)
                     if sequence.first() == Some(&residue) =>
@@ -464,16 +615,36 @@ impl Parameters {
             }
         }
 
-        let max_mods = self.max_variable_mods.min(choices_by_site.len());
-        let mut counts = vec![0u64; max_mods.saturating_add(1)];
-        counts[0] = 1;
-        for choices in choices_by_site.values().copied() {
-            for count in (1..=max_mods).rev() {
-                counts[count] =
-                    counts[count].saturating_add(counts[count - 1].saturating_mul(choices));
+        let mut choices_by_site: HashMap<usize, (u64, u64)> = HashMap::new();
+        for ((site, _), library_supported) in candidates {
+            let choices = choices_by_site.entry(site).or_default();
+            if library_supported {
+                choices.0 += 1;
+            } else {
+                choices.1 += 1;
             }
         }
-        let variants = counts.into_iter().fold(0u64, u64::saturating_add);
+
+        let max_total = self.max_total_variable_mods.min(choices_by_site.len());
+        let max_exhaustive = self.max_variable_mods.min(max_total);
+        let mut counts = vec![vec![0u64; max_exhaustive + 1]; max_total + 1];
+        counts[0][0] = 1;
+        for (library_choices, exhaustive_choices) in choices_by_site.values().copied() {
+            let mut next = counts.clone();
+            for total in 0..max_total {
+                for exhaustive in 0..=max_exhaustive {
+                    let current = counts[total][exhaustive];
+                    next[total + 1][exhaustive] = next[total + 1][exhaustive]
+                        .saturating_add(current.saturating_mul(library_choices));
+                    if exhaustive < max_exhaustive {
+                        next[total + 1][exhaustive + 1] = next[total + 1][exhaustive + 1]
+                            .saturating_add(current.saturating_mul(exhaustive_choices));
+                    }
+                }
+            }
+            counts = next;
+        }
+        let variants = counts.into_iter().flatten().fold(0u64, u64::saturating_add);
         self.max_combinations
             .map_or(variants, |cap| variants.min(cap as u64))
     }
@@ -518,6 +689,7 @@ impl Parameters {
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
         let mods = self.variable_modifications();
         let static_mods = self.static_modifications();
+        let library = self.loaded_ptm_library.as_deref();
 
         let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
         digests
@@ -530,29 +702,73 @@ impl Parameters {
         log::trace!("modifying peptides");
         let mut target_decoys = digests
             .into_par_iter()
-            .map(Peptide::try_from)
-            .filter_map(Result::ok)
-            .flat_map_iter(|peptide| {
-                peptide
-                    .apply(
-                        &mods,
-                        &static_mods,
-                        self.max_variable_mods,
-                        self.max_combinations,
-                    )
-                    .into_iter()
-                    .filter(|peptide| {
-                        peptide.monoisotopic >= self.peptide_min_mass
-                            && peptide.monoisotopic <= self.peptide_max_mass
-                    })
-                    .flat_map(|peptide| {
-                        if self.generate_decoys {
-                            vec![peptide.reverse(), peptide].into_iter()
-                        } else {
-                            vec![peptide].into_iter()
-                        }
-                    })
-                    .filter(|peptide| !peptide.decoy || !targets.contains(&(peptide.sequence[..])))
+            .flat_map_iter(|group| {
+                let expand = |peptide: Peptide, library_sites: &[LibrarySite]| {
+                    peptide
+                        .apply_rules(
+                            &mods,
+                            library_sites,
+                            &static_mods,
+                            self.max_variable_mods,
+                            self.max_total_variable_mods,
+                            self.max_combinations,
+                        )
+                        .into_iter()
+                        .filter(|peptide| {
+                            peptide.monoisotopic >= self.peptide_min_mass
+                                && peptide.monoisotopic <= self.peptide_max_mass
+                        })
+                        .flat_map(|peptide| {
+                            if self.generate_decoys {
+                                vec![peptide.reverse(), peptide].into_iter()
+                            } else {
+                                vec![peptide].into_iter()
+                            }
+                        })
+                        .filter(|peptide| {
+                            !peptide.decoy || !targets.contains(&(peptide.sequence[..]))
+                        })
+                        .collect::<Vec<_>>()
+                };
+
+                match library {
+                    None => Peptide::try_from(group)
+                        .map(|peptide| expand(peptide, &[]))
+                        .unwrap_or_default(),
+                    Some(library) => {
+                        let reference = group.reference;
+                        group
+                            .origins
+                            .into_iter()
+                            .flat_map(|origin| {
+                                let mut digest = reference.clone();
+                                digest.protein = origin.protein.clone();
+                                digest.protein_start = origin.start;
+                                let Ok(mut peptide) = Peptide::try_from(digest) else {
+                                    return Vec::new();
+                                };
+                                peptide.proteins = vec![origin.protein.clone()];
+                                let start = origin.start;
+                                let end = start.saturating_add(peptide.sequence.len() as u32);
+                                let library_sites = library
+                                    .sites_for(&origin.protein)
+                                    .iter()
+                                    .filter(|site| (start..end).contains(&site.position))
+                                    .filter_map(|site| {
+                                        let position = site.position - start;
+                                        (peptide.sequence.get(position as usize)
+                                            == Some(&site.residue))
+                                        .then(|| LibrarySite {
+                                            position,
+                                            modification: site.modification.clone(),
+                                        })
+                                    })
+                                    .collect::<Vec<_>>();
+                                expand(peptide, &library_sites)
+                            })
+                            .collect()
+                    }
+                }
             })
             .collect::<Vec<_>>();
 
@@ -657,6 +873,7 @@ impl Parameters {
                     semi_enzymatic: false,
                     sequence: seq,
                     protein,
+                    protein_start: 0,
                     missed_cleavages: 0,
                     position: Position::Full,
                 };
@@ -1119,17 +1336,17 @@ mod test {
 
         let mods = params.variable_modifications();
         assert_eq!(mods.len(), 3);
-        assert_eq!(mods[0].0, ModificationSpecificity::Residue(b'K'));
-        assert!((mods[0].1.mass - 42.0106).abs() < 1e-4);
-        assert_eq!(mods[0].2, Some(1));
-        assert_eq!(mods[0].1.name.as_deref(), Some("Acetyl"));
-        assert_eq!(&*mods[0].1.neutral_losses, &[17.0265]);
-        assert_eq!(mods[1].0, ModificationSpecificity::Residue(b'K'));
-        assert!((mods[1].1.mass - 14.0157).abs() < 1e-4);
-        assert_eq!(mods[1].2, None);
-        assert_eq!(mods[2].0, ModificationSpecificity::Residue(b'M'));
-        assert!((mods[2].1.mass - 15.9949).abs() < 1e-4);
-        assert_eq!(mods[2].2, None);
+        assert_eq!(mods[0].specificity, ModificationSpecificity::Residue(b'K'));
+        assert!((mods[0].modification.mass - 42.0106).abs() < 1e-4);
+        assert_eq!(mods[0].max_count, Some(1));
+        assert_eq!(mods[0].modification.name.as_deref(), Some("Acetyl"));
+        assert_eq!(&*mods[0].modification.neutral_losses, &[17.0265]);
+        assert_eq!(mods[1].specificity, ModificationSpecificity::Residue(b'K'));
+        assert!((mods[1].modification.mass - 14.0157).abs() < 1e-4);
+        assert_eq!(mods[1].max_count, None);
+        assert_eq!(mods[2].specificity, ModificationSpecificity::Residue(b'M'));
+        assert!((mods[2].modification.mass - 15.9949).abs() < 1e-4);
+        assert_eq!(mods[2].max_count, None);
 
         let serialized = serde_json::to_value(params).unwrap();
         let k_entries = &serialized["variable_mods"]["K"];
@@ -1141,6 +1358,35 @@ mod test {
         assert!(k_entries[1].get("max_count").is_none());
         assert!(serialized["variable_mods"]["M"][0].is_number());
         assert_eq!(serialized["static_mods"]["C"]["name"], "Carbamidomethyl");
+    }
+
+    #[test]
+    fn ptm_library_configuration_round_trips() {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "variable_mods": {
+                "S": [{
+                    "mass": 79.96633,
+                    "name": "Phospho",
+                    "max_count": 2,
+                    "site_mode": "both",
+                    "neutral_losses": [97.9769]
+                }]
+            },
+            "max_variable_mods": 1,
+            "max_total_variable_mods": 3,
+            "max_combinations": 1000,
+            "ptm_library": {"path": "sites.parquet", "strict": true}
+        }))
+        .unwrap();
+        let params = builder.make_parameters();
+        params.validate_ptm_library(&PtmLibrary::default()).unwrap();
+        assert_eq!(params.max_variable_mods, 1);
+        assert_eq!(params.max_total_variable_mods, 3);
+        assert_eq!(params.variable_modifications()[0].site_mode, SiteMode::Both);
+
+        let serialized = serde_json::to_value(params).unwrap();
+        assert_eq!(serialized["ptm_library"]["path"], "sites.parquet");
+        assert_eq!(serialized["variable_mods"]["S"][0]["site_mode"], "both");
     }
 
     #[test]
@@ -1190,7 +1436,9 @@ mod test {
             .into_iter()
             .collect(),
             max_variable_mods: 2,
+            max_total_variable_mods: 2,
             max_combinations: None,
+            ptm_library: None,
             decoy_tag: "rev_".into(),
             generate_decoys: false,
             fasta: "none".into(),
@@ -1198,6 +1446,7 @@ mod test {
             prefilter: false,
             prefilter_chunk_size: 0,
             prefilter_low_memory: true,
+            loaded_ptm_library: None,
             use_bitmap: false,
         };
 
@@ -1290,5 +1539,112 @@ mod test {
         let modification_estimate = parameters.estimate_modified_memory(&digests);
         assert_eq!(modification_estimate.modified_peptides, 1_161);
         assert_eq!(parameters.modify_digests(digests).len(), 1_161);
+    }
+
+    #[test]
+    fn protein_site_library_adds_targeted_combinations() {
+        use crate::modification::{NeutralLossMode, SiteMode, VariableModification};
+        use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+
+        let builder = Builder {
+            enzyme: Some(EnzymeBuilder {
+                min_len: Some(1),
+                max_len: Some(20),
+                ..Default::default()
+            }),
+            peptide_min_mass: Some(0.0),
+            generate_decoys: Some(false),
+            max_variable_mods: Some(1),
+            max_total_variable_mods: Some(2),
+            variable_mods: Some(HashMap::from([(
+                "S".into(),
+                vec![VarModEntry::Detailed(VariableModification {
+                    mass: 79.96633,
+                    max_count: Some(2),
+                    name: Some("Phospho".into()),
+                    neutral_losses: vec![97.9769],
+                    neutral_loss_mode: NeutralLossMode::Optional,
+                    site_mode: SiteMode::Both,
+                })],
+            )])),
+            ..Default::default()
+        };
+        let mut parameters = builder.make_parameters();
+        parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
+            PtmLibrarySite {
+                protein: Arc::from("P1"),
+                position: 1,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+            PtmLibrarySite {
+                protein: Arc::from("P1"),
+                position: 2,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+        ])));
+        let fasta = Fasta::parse(">P1\nMSSK\n".into(), "rev_", false);
+
+        let peptides = parameters.digest(&fasta);
+        assert!(peptides.iter().any(|peptide| {
+            peptide.modification_at(1) != 0.0 && peptide.modification_at(2) != 0.0
+        }));
+    }
+
+    #[test]
+    fn library_sites_from_different_proteins_are_not_combined() {
+        use crate::modification::{NeutralLossMode, SiteMode, VariableModification};
+        use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+
+        let builder = Builder {
+            enzyme: Some(EnzymeBuilder {
+                min_len: Some(1),
+                max_len: Some(20),
+                ..Default::default()
+            }),
+            peptide_min_mass: Some(0.0),
+            generate_decoys: Some(false),
+            max_variable_mods: Some(1),
+            max_total_variable_mods: Some(2),
+            variable_mods: Some(HashMap::from([(
+                "S".into(),
+                vec![VarModEntry::Detailed(VariableModification {
+                    mass: 79.96633,
+                    max_count: Some(2),
+                    name: Some("Phospho".into()),
+                    neutral_losses: vec![],
+                    neutral_loss_mode: NeutralLossMode::Optional,
+                    site_mode: SiteMode::Library,
+                })],
+            )])),
+            ..Default::default()
+        };
+        let mut parameters = builder.make_parameters();
+        parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
+            PtmLibrarySite {
+                protein: Arc::from("P1"),
+                position: 1,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+            PtmLibrarySite {
+                protein: Arc::from("P2"),
+                position: 2,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+        ])));
+        let fasta = Fasta::parse(">P1\nMSSK\n>P2\nMSSK\n".into(), "rev_", false);
+
+        let peptides = parameters.digest(&fasta);
+        assert!(!peptides.iter().any(|peptide| {
+            peptide.modification_at(1) != 0.0 && peptide.modification_at(2) != 0.0
+        }));
+        let first_site = peptides
+            .iter()
+            .find(|peptide| peptide.modification_at(1) != 0.0)
+            .unwrap();
+        assert_eq!(first_site.proteins.as_slice(), &[Arc::from("P1")]);
     }
 }
