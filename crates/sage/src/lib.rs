@@ -1,5 +1,6 @@
 pub mod ambiguity;
 pub mod bitmap;
+pub mod cleavage;
 pub mod database;
 pub mod enzyme;
 pub mod fasta;

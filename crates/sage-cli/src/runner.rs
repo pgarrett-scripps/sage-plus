@@ -5,9 +5,10 @@ use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
 use csv::ByteRecord;
-use log::info;
+use log::{info, warn};
 use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
+use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
 use sage_core::database::{IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
 use sage_core::ion_series::Kind;
@@ -315,6 +316,48 @@ impl Runner {
                     parameters.database.fasta
                 )
             })?;
+            let custom_cleavages = if let Some(path) =
+                parameters.database.custom_cleavage_sites.as_deref()
+            {
+                let library = if path.to_ascii_lowercase().ends_with(".parquet") {
+                    let content = sage_cloudpath::util::read_bytes(path).with_context(|| {
+                        format!("Failed to read custom cleavage-site file `{path}`")
+                    })?;
+                    sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)
+                        .with_context(|| {
+                            format!("Failed to parse custom cleavage-site file `{path}`")
+                        })?
+                } else {
+                    let content = sage_cloudpath::util::read_text(path).with_context(|| {
+                        format!("Failed to read custom cleavage-site file `{path}`")
+                    })?;
+                    CustomCleavageLibrary::from_tsv(&content).with_context(|| {
+                        format!("Failed to parse custom cleavage-site file `{path}`")
+                    })?
+                };
+                let validated = library.validate(&fasta).with_context(|| {
+                    format!("Failed to validate custom cleavage-site file `{path}`")
+                })?;
+                info!(
+                    "custom cleavage sites: {} matched, {} unmatched",
+                    validated.matched_sites, validated.unmatched_sites
+                );
+                if validated.unmatched_sites > 0 {
+                    warn!(
+                        "{} custom cleavage sites refer to proteins absent from the FASTA",
+                        validated.unmatched_sites
+                    );
+                }
+                if validated.sites_without_context > 0 {
+                    warn!(
+                        "{} custom cleavage sites have no sequence context and were validated by coordinate only",
+                        validated.sites_without_context
+                    );
+                }
+                Some(validated)
+            } else {
+                None
+            };
 
             if let (Some(settings), Some(library)) = (
                 parameters.database.ptm_library.as_ref(),
@@ -362,7 +405,9 @@ impl Runner {
             let needs_estimate = limits.is_enabled()
                 || (parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0);
             if needs_estimate {
-                let full_estimate = parameters.database.estimate_memory(&fasta);
+                let full_estimate = parameters
+                    .database
+                    .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                 events.emit(EventKind::DatabaseEstimated {
                     unmodified_peptides: full_estimate.unmodified_peptides,
                     modified_peptides: full_estimate.modified_peptides,
@@ -398,7 +443,11 @@ impl Runner {
                         let mut modified_peak = 0u64;
                         let mut fragment_peak = 0u64;
                         for chunk in fasta.iter_chunks(parameters.database.prefilter_chunk_size) {
-                            let estimate = parameters.database.estimate_memory(&chunk);
+                            let estimate =
+                                parameters.database.estimate_memory_with_custom_cleavages(
+                                    &chunk,
+                                    custom_cleavages.as_ref(),
+                                );
                             modified_peak = modified_peak.max(estimate.modified_peak_bytes);
                             fragment_peak = fragment_peak.max(estimate.fragment_peak_bytes);
                         }
@@ -410,7 +459,9 @@ impl Runner {
 
             match parameters.database.prefilter {
                 false => {
-                    let digests = parameters.database.digest_unmodified(&fasta);
+                    let digests = parameters
+                        .database
+                        .digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                     if limits.is_enabled() {
                         let estimate = parameters.database.estimate_modified_memory(&digests);
                         info!(
@@ -425,7 +476,9 @@ impl Runner {
                 }
                 true => {
                     if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
-                        parameters.database.digest(&fasta)
+                        parameters
+                            .database
+                            .digest_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
                     } else {
                         info!(
                             "using {} db chunks of size {}",
@@ -440,7 +493,7 @@ impl Runner {
                             events: events.clone(),
                             cancellation: cancellation.clone(),
                         };
-                        mini_runner.prefilter_peptides(parallel, fasta)
+                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)
                     }
                 }
             }
@@ -502,7 +555,12 @@ impl Runner {
         })
     }
 
-    pub fn prefilter_peptides(self, parallel: usize, fasta: Fasta) -> Vec<Peptide> {
+    pub fn prefilter_peptides(
+        self,
+        parallel: usize,
+        fasta: Fasta,
+        custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
+    ) -> Vec<Peptide> {
         let spectra: Option<Vec<ProcessedSpectrum>> =
             match parallel >= self.parameters.mzml_paths.len() {
                 true => Some(
@@ -526,7 +584,9 @@ impl Runner {
             .flat_map(|(chunk_id, fasta_chunk)| {
                 let start = Instant::now();
                 info!("pre-filtering fasta chunk {}", chunk_id,);
-                let mut db = db_params.clone().build(fasta_chunk);
+                let mut db = db_params
+                    .clone()
+                    .build_with_custom_cleavages(fasta_chunk, custom_cleavages.as_ref());
 
                 info!(
                     "generated {} fragments, {} peptides in {}ms",

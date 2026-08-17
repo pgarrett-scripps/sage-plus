@@ -1,3 +1,4 @@
+use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -56,11 +57,22 @@ impl Fasta {
     }
 
     pub fn digest(&self, enzyme: &EnzymeParameters) -> Vec<Digest> {
+        self.digest_with_custom_cleavages(enzyme, None)
+    }
+
+    pub fn digest_with_custom_cleavages(
+        &self,
+        enzyme: &EnzymeParameters,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> Vec<Digest> {
         self.targets
             .par_iter()
             .flat_map_iter(|(protein, sequence)| {
+                let boundaries = custom_cleavages
+                    .map(|library| library.boundaries_for(protein))
+                    .unwrap_or_default();
                 enzyme
-                    .digest(sequence, protein.clone())
+                    .digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
                     .into_iter()
                     .filter_map(|mut digest| {
                         if protein.contains(&self.decoy_tag) {

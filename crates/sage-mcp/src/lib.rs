@@ -300,7 +300,22 @@ impl State {
                 &parameters.decoy_tag,
                 parameters.generate_decoys,
             )?;
-            add_estimate(&mut totals, parameters.estimate_memory(&fasta));
+            let custom_cleavages = if let Some(path) = parameters.custom_cleavage_sites.as_deref() {
+                let library = if path.to_ascii_lowercase().ends_with(".parquet") {
+                    let content = sage_cloudpath::util::read_bytes(path)?;
+                    sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)?
+                } else {
+                    let content = sage_cloudpath::util::read_text(path)?;
+                    sage_core::cleavage::CustomCleavageLibrary::from_tsv(&content)?
+                };
+                Some(library.validate(&fasta)?)
+            } else {
+                None
+            };
+            add_estimate(
+                &mut totals,
+                parameters.estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref()),
+            );
         }
         if let Some(peptides_path) = parameters.peptides.as_deref() {
             let content = sage_cloudpath::util::read_text(peptides_path)?;
