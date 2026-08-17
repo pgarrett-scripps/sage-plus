@@ -432,7 +432,11 @@ fn mass_matches(observed: Option<f32>, expected: f32) -> bool {
         .unwrap_or(false)
 }
 
-fn variable_mod_count(peptide: &Peptide, specificity: ModificationSpecificity, mass: f32) -> f64 {
+pub(crate) fn variable_mod_count(
+    peptide: &Peptide,
+    specificity: ModificationSpecificity,
+    mass: f32,
+) -> f64 {
     let first = peptide.sequence.first().copied();
     let last = peptide.sequence.last().copied();
     let first_mass = peptide.modifications.first().copied();
@@ -613,7 +617,7 @@ fn apply_ptm_offsets(
     );
 }
 
-fn peptide_fold(sequence: &[u8], folds: usize, seed: u64) -> usize {
+pub(crate) fn peptide_fold(sequence: &[u8], folds: usize, seed: u64) -> usize {
     // FNV-1a keeps identical sequences together, including peptide records that
     // differ only by a modification the current embedding does not represent.
     let mut hash = 0xcbf2_9ce4_8422_2325u64 ^ seed;
