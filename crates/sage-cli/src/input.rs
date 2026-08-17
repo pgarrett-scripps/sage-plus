@@ -9,6 +9,7 @@ use sage_core::{
     lfq::LfqSettings,
     mass::Tolerance,
     ml::percolator::PercolatorSettings,
+    ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
     tmt::Isobaric,
 };
@@ -57,6 +58,8 @@ pub struct Search {
     pub report_psms: usize,
     pub predict_rt: bool,
     pub retention_time_model: RetentionTimeSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention_time_alignment: Option<AlignmentMethod>,
     pub mzml_paths: Vec<Url>,
     pub output_paths: Vec<Url>,
     pub bruker_config: BrukerProcessingConfig,
@@ -113,6 +116,7 @@ pub struct Input {
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
     pub retention_time_model: Option<RetentionTimeSettings>,
+    pub retention_time_alignment: Option<AlignmentMethod>,
     pub output_directory: Option<String>,
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
@@ -377,7 +381,7 @@ impl Input {
         }
     }
 
-    pub fn build(mut self) -> anyhow::Result<Search> {
+    pub fn build(self) -> anyhow::Result<Search> {
         let memory_limits = self.memory_limits()?;
         let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self.database.make_parameters();
@@ -413,16 +417,6 @@ impl Input {
                 "`lfq_settings.rt_pct_tolerance` must not be zero"
             );
         }
-
-        if !self.predict_rt.unwrap_or(true)
-            && self.quant.as_ref().and_then(|q| q.lfq).unwrap_or(false)
-        {
-            log::warn!(
-                "`predict_rt: false` and `lfq: true` are incompatible. Setting `predict_rt: true`"
-            );
-            self.predict_rt = Some(true);
-        }
-
         let mzml_paths = self
             .mzml_paths
             .expect("'mzml_paths' must be provided!")
@@ -496,6 +490,7 @@ impl Input {
             wide_window: self.wide_window.unwrap_or(false),
             predict_rt: self.predict_rt.unwrap_or(true),
             retention_time_model: self.retention_time_model.unwrap_or_default(),
+            retention_time_alignment: self.retention_time_alignment,
             output_paths: Vec::new(),
             write_pin: self.write_pin.unwrap_or(false),
             bruker_config: self.bruker_config.unwrap_or_default(),
@@ -538,6 +533,7 @@ mod test {
     use sage_core::{
         database::EnzymeBuilder,
         enzyme::EnzymeParameters,
+        ml::retention_alignment::AlignmentMethod,
         ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
     };
 
@@ -632,5 +628,12 @@ mod test {
         assert!(resolve_batch_size(Some(0)).is_err());
         assert_eq!(resolve_batch_size(Some(3)).unwrap(), 3);
         assert!(resolve_batch_size(None).unwrap() >= 1);
+    }
+
+    #[test]
+    fn deserialize_nonlinear_retention_time_alignment() -> Result<(), serde_json::Error> {
+        let method: AlignmentMethod = serde_json::from_value(serde_json::json!("nonlinear"))?;
+        assert_eq!(method, AlignmentMethod::Nonlinear);
+        Ok(())
     }
 }

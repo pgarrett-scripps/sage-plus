@@ -251,8 +251,7 @@ impl FeatureMap {
         } else {
             let rt_tol = self.settings.rt_tolerance();
             spectra.par_iter().for_each(|spectrum| {
-                let a = alignments[spectrum.file_id];
-                let rt = (spectrum.scan_start_time / a.max_rt) * a.slope + a.intercept;
+                let rt = alignments[spectrum.file_id].transform(spectrum.scan_start_time);
                 let query = self.rt_slice(rt, rt_tol);
 
                 let add_entry = |entry: &PrecursorRange, intensity: f32| {

@@ -918,31 +918,37 @@ impl Runner {
         let mut outputs = self.batch_files(&scorer, parallel);
 
         // Establish provisional q-values from the search-only Poisson feature,
-        // then use confident PSMs to align mass errors before final FDR fitting.
+        // then use confident PSMs for mass-error and retention-time alignment
+        // before final FDR fitting.
         outputs
             .features
             .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
         sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
         self.align_mass_errors(&mut outputs.features);
 
-        let alignments = if self.parameters.predict_rt {
-            // Poisson probability is usually the best single feature for refining FDR.
-            // Take our set of 1% FDR filtered PSMs, and use them to train a linear
-            // regression model for predicting retention time
-            let alignments = sage_core::ml::retention_alignment::global_alignment(
+        let needs_alignment = self.parameters.predict_rt
+            || self.parameters.quant.lfq
+            || self.parameters.retention_time_alignment.is_some();
+        let alignments = if needs_alignment {
+            // Alignment landmarks are observed target PSMs passing 1% spectrum FDR.
+            let alignments = sage_core::ml::retention_alignment::global_alignment_with_method(
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),
+                self.parameters.retention_time_alignment.unwrap_or_default(),
             );
+            Some(alignments)
+        } else {
+            None
+        };
+
+        if self.parameters.predict_rt {
             let _ = sage_core::ml::retention_model::predict(
                 &self.database,
                 &mut outputs.features,
                 &self.parameters.retention_time_model,
             );
             let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
-            Some(alignments)
-        } else {
-            None
-        };
+        }
 
         let (q_spectrum, percolator_succeeded) = self.spectrum_fdr(&mut outputs.features);
         let q_peptide = if percolator_succeeded {
