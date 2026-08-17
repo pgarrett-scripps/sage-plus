@@ -50,6 +50,21 @@ If you use Sage in a scientific publication, please cite the following paper:
 - Built-in support for reading gzipped-mzML files
 - Support for reading/writing directly from [AWS S3](https://sage-docs.vercel.app/docs/configuration/aws), Google Cloud, or Azure.
 
+### Enriched linear retention-time model
+
+Linear regression with the original feature set remains the default retention-time model. Enriched sequence features and additive variable-PTM offsets can be enabled with:
+
+```json
+"retention_time_model": {
+  "features": "additive_ptm",
+  "folds": 3,
+  "seed": 42,
+  "ptm_regularization": 25.0
+}
+```
+
+The `additive_ptm` feature set uses exact N1/C1 residue indicators, position-binned hydrophobicity and residue-property fractions. It then learns cross-validated, regularized offsets for each configured variable modification plus residue/terminal identity. Static modifications are excluded. Use `"features": "physicochemical"` for enriched linear features with generic modification descriptors.
+
 ## Interoperability
 
 Sage is well-integrated into the open-source proteomics ecosystem. The following projects support analyzing results from Sage (typically in addition to other tools), or redistribute Sage binaries for use in their pipelines. 

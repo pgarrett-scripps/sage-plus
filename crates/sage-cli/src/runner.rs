@@ -523,7 +523,11 @@ impl Runner {
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),
             );
-            let _ = sage_core::ml::retention_model::predict(&self.database, &mut outputs.features);
+            let _ = sage_core::ml::retention_model::predict(
+                &self.database,
+                &mut outputs.features,
+                &self.parameters.retention_time_model,
+            );
             let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
             Some(alignments)
         } else {

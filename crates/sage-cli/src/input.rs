@@ -7,6 +7,7 @@ use sage_core::{
     database::{Builder, Parameters},
     lfq::LfqSettings,
     mass::Tolerance,
+    ml::retention_model::RetentionTimeSettings,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,7 @@ pub struct Search {
     pub min_matched_peaks: u16,
     pub report_psms: usize,
     pub predict_rt: bool,
+    pub retention_time_model: RetentionTimeSettings,
     pub mzml_paths: Vec<Url>,
     pub output_paths: Vec<Url>,
     pub bruker_config: BrukerProcessingConfig,
@@ -71,6 +73,7 @@ pub struct Input {
     pub deisotope: Option<bool>,
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
+    pub retention_time_model: Option<RetentionTimeSettings>,
     pub output_directory: Option<String>,
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
@@ -375,6 +378,7 @@ impl Input {
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
             predict_rt: self.predict_rt.unwrap_or(true),
+            retention_time_model: self.retention_time_model.unwrap_or_default(),
             output_paths: Vec::new(),
             write_pin: self.write_pin.unwrap_or(false),
             bruker_config: self.bruker_config.unwrap_or_default(),
