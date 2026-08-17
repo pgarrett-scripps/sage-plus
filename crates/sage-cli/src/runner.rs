@@ -450,31 +450,8 @@ impl Runner {
         );
     }
 
-    fn spectrum_fdr(&self, features: &mut Vec<Feature>) -> (usize, bool) {
-        let percolator_succeeded = self.parameters.percolator.enabled
-            && match sage_core::ml::percolator::score_psms(
-                features,
-                &self.parameters.percolator,
-                self.parameters.precursor_tol,
-            ) {
-                Ok(()) => {
-                    log::info!(
-                        "- Percolator-style {:?} PSM rescoring completed",
-                        self.parameters.percolator.model
-                    );
-                    true
-                }
-                Err(error) => {
-                    log::warn!("Percolator-style rescoring failed ({error}); falling back to LDA");
-                    false
-                }
-            };
-
-        if !percolator_succeeded
-            && sage_core::ml::linear_discriminant::score_psms(
-                features,
-                self.parameters.precursor_tol,
-            )
+    fn spectrum_fdr(&self, features: &mut Vec<Feature>) -> usize {
+        if sage_core::ml::linear_discriminant::score_psms(features, self.parameters.precursor_tol)
             .is_none()
         {
             log::warn!("linear model fitting failed, falling back to heuristic discriminant score");
@@ -483,17 +460,7 @@ impl Runner {
             });
         }
         features.par_sort_unstable_by(|a, b| b.discriminant_score.total_cmp(&a.discriminant_score));
-        if percolator_succeeded {
-            // Rescoring can rerank multiple candidates from one spectrum. Keep
-            // exactly one target-or-decoy winner before confidence estimation
-            // and downstream picked-peptide/protein calculations.
-            let mut spectra = HashSet::new();
-            features.retain(|feature| spectra.insert((feature.file_id, feature.spec_id.clone())));
-        }
-        (
-            sage_core::ml::qvalue::spectrum_q_value(features),
-            percolator_succeeded,
-        )
+        sage_core::ml::qvalue::spectrum_q_value(features)
     }
 
     /// Align systematic precursor and fragment mass errors per raw file before
@@ -961,19 +928,11 @@ impl Runner {
             );
         }
 
-        let (q_spectrum, percolator_succeeded) = self.spectrum_fdr(&mut outputs.features);
-        let q_peptide = if percolator_succeeded {
-            sage_core::fdr::picked_peptide_tdc(&self.database, &mut outputs.features)
-        } else {
-            sage_core::fdr::picked_peptide(&self.database, &mut outputs.features)
-        };
+        let q_spectrum = self.spectrum_fdr(&mut outputs.features);
+        let q_peptide = sage_core::fdr::picked_peptide(&self.database, &mut outputs.features);
         // Protein FDR is based exclusively on proteotypic (unique, non-shared) peptides. Shared peptides
         // are reported with protein FDR = 1.0
-        let q_protein = if percolator_succeeded {
-            sage_core::fdr::picked_protein_tdc(&self.database, &mut outputs.features)
-        } else {
-            sage_core::fdr::picked_protein(&self.database, &mut outputs.features)
-        };
+        let q_protein = sage_core::fdr::picked_protein(&self.database, &mut outputs.features);
         // Conducts "IDPicker-based protein grouping at 1% peptide FDR"
         sage_core::protein_grouping::generate_protein_groups(
             &self.database,
@@ -984,11 +943,8 @@ impl Runner {
         // Uses the "Picked Group FDR" approach to compute protein group FDR for the IDPicker groups,
         // including rescued subset grouping (rsG). Shared peptides (between different groups)
         // are reported with protein group FDR = 1.0
-        let q_protein_group = if percolator_succeeded {
-            sage_core::fdr::picked_protein_group_tdc(&self.database, &mut outputs.features)
-        } else {
-            sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features)
-        };
+        let q_protein_group =
+            sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
 
         if self.parameters.ptm_localization.enabled {
             self.localize_features(&mut outputs.features, parallel);

@@ -15,7 +15,6 @@ dashmap = { version = "5.4.0", features = ["rayon"] }
 fnv = "1.0"
 itertools = "0.10"
 log = "0.4.0"
-perpetual = "=3.0.0-rc.2"
 rayon = "1.5"
 regex = "1.6"
 serde = { version="1.0", features = ["derive"] }

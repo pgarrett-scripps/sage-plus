@@ -59,14 +59,13 @@ impl<Ix: Default + Send> Competition<Ix> {
     fn assign_q_value<K, B>(
         scores: HashMap<K, Self, B>,
         threshold: f32,
-        smooth: bool,
     ) -> (HashMap<Ix, f32, B>, usize)
     where
         K: Eq + std::hash::Hash + Send,
         Ix: Eq + std::hash::Hash,
         B: BuildHasher + Default + Send,
     {
-        let estimator = smooth.then(|| Self::fit_kde(&scores));
+        let estimator = Self::fit_kde(&scores);
         let mut scores = scores
             .into_par_iter()
             .flat_map(|(_, comp)| {
@@ -87,41 +86,17 @@ impl<Ix: Default + Send> Competition<Ix> {
 
         scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
 
-        let mut decoy = 1.0f32;
-        let mut target = 0.0f32;
-        if let Some(estimator) = estimator {
-            for score in scores.iter_mut() {
-                let pep = estimator.posterior_error(score.score as f64) as f32;
+        let mut decoy = 1.0;
+        let mut target = 0.0;
+        for score in scores.iter_mut() {
+            let pep = estimator.posterior_error(score.score as f64) as f32;
 
-                // Cumulative sum of PEP ~ # of decoys
-                decoy += pep;
-                if !score.decoy {
-                    target += 1.0;
-                }
-                score.q = decoy / target;
+            // Cumulative sum of PEP ~ # of decoys
+            decoy += pep;
+            if !score.decoy {
+                target += 1.0;
             }
-        } else {
-            // Tree scores are discrete. Count complete tie groups before
-            // assigning FDR so target/decoy ordering within a leaf is neutral.
-            let mut start = 0;
-            while start < scores.len() {
-                let mut end = start + 1;
-                while end < scores.len() && scores[end].score == scores[start].score {
-                    end += 1;
-                }
-                for score in &scores[start..end] {
-                    if score.decoy {
-                        decoy += 1.0;
-                    } else {
-                        target += 1.0;
-                    }
-                }
-                let fdr = decoy / target;
-                for score in &mut scores[start..end] {
-                    score.q = fdr;
-                }
-                start = end;
-            }
+            score.q = decoy / target;
         }
         // Q-value is the minimum q-value at any given score threshold
         // `q = q[::-1].cummin()[::-1] in python`
@@ -145,7 +120,7 @@ impl<Ix: Default + Send> Competition<Ix> {
     }
 }
 
-fn picked_peptide_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: bool) -> usize {
+pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     let mut map: FnvHashMap<String, Competition<PeptideIx>> = FnvHashMap::default();
     for feat in features.iter() {
         let peptide = &db[feat.peptide_idx];
@@ -168,7 +143,7 @@ fn picked_peptide_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: b
         }
     }
 
-    let (scores, passing) = Competition::assign_q_value(map, 0.01, smooth);
+    let (scores, passing) = Competition::assign_q_value(map, 0.01);
 
     features.par_iter_mut().for_each(|feat| {
         feat.peptide_q = scores[&feat.peptide_idx];
@@ -177,15 +152,7 @@ fn picked_peptide_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: b
     passing
 }
 
-pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_peptide_impl(db, features, true)
-}
-
-pub fn picked_peptide_tdc(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_peptide_impl(db, features, false)
-}
-
-fn picked_protein_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: bool) -> usize {
+pub fn picked_protein(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     // Critical: All non-proteotypic, non-unique, or shared peptides are discarded
     // else the assumptions of picked protein FDR are invalid. Shared peptides are
     // still reported, albeit with protein FDR = 1.0
@@ -209,7 +176,7 @@ fn picked_protein_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: b
         }
     }
 
-    let (scores, passing) = Competition::assign_q_value(map, 0.01, smooth);
+    let (scores, passing) = Competition::assign_q_value(map, 0.01);
 
     features
         .par_iter_mut()
@@ -222,19 +189,7 @@ fn picked_protein_impl(db: &IndexedDatabase, features: &mut [Feature], smooth: b
     passing
 }
 
-pub fn picked_protein(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_protein_impl(db, features, true)
-}
-
-pub fn picked_protein_tdc(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_protein_impl(db, features, false)
-}
-
-fn picked_protein_group_impl(
-    db: &IndexedDatabase,
-    features: &mut [Feature],
-    smooth: bool,
-) -> usize {
+pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     // Critical: All non-proteotypic, non-unique, or shared peptides are discarded
     // else the assumptions of picked group FDR are invalid. Shared peptides are
     // still reported, albeit with protein group FDR = 1.0
@@ -257,7 +212,7 @@ fn picked_protein_group_impl(
         }
     }
 
-    let (scores, passing) = Competition::assign_q_value(map, 0.01, smooth);
+    let (scores, passing) = Competition::assign_q_value(map, 0.01);
 
     features
         .par_iter_mut()
@@ -268,14 +223,6 @@ fn picked_protein_group_impl(
         });
 
     passing
-}
-
-pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_protein_group_impl(db, features, true)
-}
-
-pub fn picked_protein_group_tdc(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    picked_protein_group_impl(db, features, false)
 }
 
 pub fn picked_precursor(
@@ -337,36 +284,4 @@ pub fn picked_precursor(
         peak.q_value = scores[ix];
     });
     passing
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn direct_fdr_assigns_equal_q_values_to_tied_tree_scores() {
-        let mut competitions: FnvHashMap<usize, Competition<usize>> = FnvHashMap::default();
-        for ix in 0..200 {
-            competitions.insert(
-                ix,
-                Competition {
-                    forward: 10.0,
-                    foward_ix: Some(ix),
-                    ..Competition::default()
-                },
-            );
-        }
-        competitions.insert(
-            200,
-            Competition {
-                reverse: 10.0,
-                reverse_ix: Some(200),
-                ..Competition::default()
-            },
-        );
-
-        let (scores, passing) = Competition::assign_q_value(competitions, 0.01, false);
-        assert_eq!(passing, 200);
-        assert!(scores.values().all(|q| (*q - 0.01).abs() < f32::EPSILON));
-    }
 }

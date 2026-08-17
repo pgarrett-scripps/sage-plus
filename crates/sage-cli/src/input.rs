@@ -9,7 +9,6 @@ use sage_core::{
     lfq::LfqSettings,
     mass::Tolerance,
     ml::mobility_model::IonMobilitySettings,
-    ml::percolator::PercolatorSettings,
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
     tmt::Isobaric,
@@ -67,7 +66,6 @@ pub struct Search {
     pub bruker_config: BrukerProcessingConfig,
     pub protein_grouping: bool,
     pub protein_grouping_peptide_fdr: f32,
-    pub percolator: PercolatorSettings,
     /// Maximum resident memory Sage may use, in GiB. `None` or zero disables the limit.
     pub max_memory_gb: Option<f64>,
     /// Minimum system memory Sage must leave available, in GiB. `None` or zero disables the limit.
@@ -125,7 +123,6 @@ pub struct Input {
     pub bruker_config: Option<BrukerProcessingConfig>,
     pub protein_grouping: Option<bool>,
     pub protein_grouping_peptide_fdr: Option<f32>,
-    pub percolator: Option<PercolatorSettings>,
     pub max_memory_gb: Option<f64>,
     pub min_free_memory_gb: Option<f64>,
     pub batch_size: Option<usize>,
@@ -501,7 +498,6 @@ impl Input {
             write_report: self.write_report.unwrap_or(false),
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
-            percolator: self.percolator.unwrap_or_default(),
             max_memory_gb: memory_limits.max_gib(),
             min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
