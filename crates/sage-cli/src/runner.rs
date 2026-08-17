@@ -11,6 +11,9 @@ use sage_core::fasta::Fasta;
 use sage_core::ion_series::Kind;
 use sage_core::lfq::{Peak, PrecursorId};
 use sage_core::mass::Tolerance;
+use sage_core::mass_calibration::{
+    align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+};
 use sage_core::peptide::Peptide;
 use sage_core::scoring::Fragments;
 use sage_core::scoring::{Feature, Scorer};
@@ -309,6 +312,97 @@ impl Runner {
         sage_core::ml::qvalue::spectrum_q_value(features)
     }
 
+    /// Align systematic precursor and fragment mass errors per raw file before
+    /// fitting the final FDR model. Models are trained only on provisional 1%
+    /// spectrum-q rank-1 targets and are then applied equally to targets and
+    /// decoys. Raw output errors remain unchanged.
+    fn align_mass_errors(&self, features: &mut [Feature]) {
+        features.par_iter_mut().for_each(|feature| {
+            feature.aligned_delta_mass = feature.delta_mass;
+            feature.aligned_average_ppm = feature.average_ppm;
+        });
+
+        let fit_options = FitOptions {
+            // A line is useful even for modest drift; reject it only when its
+            // held-in robust residual is worse than the static center.
+            min_linear_improvement: 0.0,
+            ..FitOptions::default()
+        };
+
+        for file_id in 0..self.parameters.mzml_paths.len() {
+            let calibration_psms = features
+                .iter()
+                .filter(|feature| {
+                    feature.file_id == file_id
+                        && feature.rank == 1
+                        && feature.label == 1
+                        && feature.spectrum_q <= 0.01
+                })
+                .collect::<Vec<_>>();
+
+            let precursor_points = calibration_psms
+                .iter()
+                .map(|feature| CalibrationPoint {
+                    rt_minutes: feature.rt,
+                    error_ppm: feature.delta_mass,
+                })
+                .collect::<Vec<_>>();
+            let fragment_points = calibration_psms
+                .iter()
+                .map(|feature| CalibrationPoint {
+                    rt_minutes: feature.rt,
+                    error_ppm: feature.signed_fragment_ppm,
+                })
+                .collect::<Vec<_>>();
+
+            let precursor_fit = matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _))
+                .then(|| fit_mass_calibration(&precursor_points, fit_options))
+                .flatten();
+            let fragment_fit = fit_mass_calibration(&fragment_points, fit_options);
+
+            if let Some(fit) = precursor_fit {
+                log::info!(
+                    "- file {} precursor mass alignment: {:?}, offset={:.3} ppm, slope={:.4} ppm/min, n={}",
+                    file_id,
+                    fit.model.kind,
+                    fit.model.intercept_ppm,
+                    fit.model.slope_ppm_per_min,
+                    fit.inliers,
+                );
+            }
+            if let Some(fit) = fragment_fit {
+                log::info!(
+                    "- file {} fragment mass alignment: {:?}, offset={:.3} ppm, slope={:.4} ppm/min, n={}",
+                    file_id,
+                    fit.model.kind,
+                    fit.model.intercept_ppm,
+                    fit.model.slope_ppm_per_min,
+                    fit.inliers,
+                );
+            }
+
+            features
+                .iter_mut()
+                .filter(|feature| feature.file_id == file_id)
+                .for_each(|feature| {
+                    if let Some(fit) = precursor_fit {
+                        feature.aligned_delta_mass =
+                            feature.delta_mass - fit.model.predict_ppm(feature.rt);
+                    }
+                    if let Some(fit) = fragment_fit {
+                        let predicted = fit.model.predict_ppm(feature.rt);
+                        // Preserve the within-PSM absolute-error spread while
+                        // translating its signed center to the fitted baseline.
+                        feature.aligned_average_ppm = align_fragment_error(
+                            feature.average_ppm,
+                            feature.signed_fragment_ppm,
+                            predicted,
+                        );
+                    }
+                });
+        }
+    }
+
     // Create a path for `file_name` in the specified output directory, if it exists,
     // otherwise, write to current directory
     fn make_path<S: AsRef<str>>(&self, file_name: S) -> Url {
@@ -530,15 +624,18 @@ impl Runner {
         //Collect all results into a single container
         let mut outputs = self.batch_files(&scorer, parallel);
 
+        // Establish provisional q-values from the search-only Poisson feature,
+        // then use confident PSMs to align mass errors before final FDR fitting.
+        outputs
+            .features
+            .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
+        sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+        self.align_mass_errors(&mut outputs.features);
+
         let alignments = if self.parameters.predict_rt {
             // Poisson probability is usually the best single feature for refining FDR.
             // Take our set of 1% FDR filtered PSMs, and use them to train a linear
             // regression model for predicting retention time
-            outputs
-                .features
-                .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
-            sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
-
             let alignments = sage_core::ml::retention_alignment::global_alignment(
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),

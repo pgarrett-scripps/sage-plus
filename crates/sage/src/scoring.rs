@@ -25,6 +25,7 @@ struct Score {
     longest_y: usize,
     hyperscore: f64,
     ppm_difference: f32,
+    signed_ppm_difference: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -108,6 +109,15 @@ pub struct Feature {
     pub isotope_error: f32,
     /// Average ppm delta mass for matched fragments
     pub average_ppm: f32,
+    /// Signed, intensity-weighted fragment error (observed - theoretical).
+    #[serde(skip_serializing)]
+    pub signed_fragment_ppm: f32,
+    /// Precursor mass error after per-file retention-time alignment.
+    #[serde(skip_serializing)]
+    pub aligned_delta_mass: f32,
+    /// Fragment mass error after per-file retention-time alignment.
+    #[serde(skip_serializing)]
+    pub aligned_average_ppm: f32,
     /// X!Tandem hyperscore
     pub hyperscore: f64,
     /// Difference between hyperscore of this candidate, and the next best candidate
@@ -706,8 +716,11 @@ impl<'db> Scorer<'db> {
                     .inverse_ion_mobility
                     .unwrap_or(0.0),
                 delta_mass,
+                aligned_delta_mass: delta_mass,
                 isotope_error,
                 average_ppm: score.ppm_difference,
+                signed_fragment_ppm: score.signed_ppm_difference,
+                aligned_average_ppm: score.ppm_difference,
                 hyperscore: score.hyperscore,
                 delta_next: score.hyperscore - next,
                 delta_best: best - score.hyperscore,
@@ -884,6 +897,8 @@ impl<'db> Scorer<'db> {
 
                     score.ppm_difference +=
                         peak_intensity * (mz - peak_mass).abs() * 2E6 / (mz + peak_mass);
+                    score.signed_ppm_difference +=
+                        peak_intensity * (peak_mass - mz) * 2E6 / (mz + peak_mass);
 
                     let exp_mz = query.peak_mz(peak_idx);
                     let calc_mz = frag.monoisotopic_mass / fragment_charge as f32 + PROTON;
@@ -923,6 +938,7 @@ impl<'db> Scorer<'db> {
         score.longest_b = b_run.longest;
         score.longest_y = y_run.longest;
         score.ppm_difference /= score.summed_b + score.summed_y;
+        score.signed_ppm_difference /= score.summed_b + score.summed_y;
 
         if self.annotate_matches {
             (score, Some(fragments_details))

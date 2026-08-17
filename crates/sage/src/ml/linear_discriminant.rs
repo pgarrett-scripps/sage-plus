@@ -25,7 +25,7 @@ const FEATURE_NAMES: [&str; FEATURES] = [
     "ln1p(delta_best)",
     "delta_mass_model",
     "isotope_error",
-    "average_ppm",
+    "aligned_fragment_ppm",
     "ln1p(-poisson)",
     "ln1p(matched_intensity_pct)",
     "ln1p(matched_peaks)",
@@ -138,7 +138,7 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()
         .collect::<Vec<_>>();
 
     let mass_error = match precursor_tol {
-        Tolerance::Ppm(_, _) => |feat: &Feature| feat.delta_mass as f64,
+        Tolerance::Ppm(_, _) => |feat: &Feature| feat.aligned_delta_mass as f64,
         Tolerance::Pct(_, _) => unreachable!("Pct tolerance should never be used on mz"),
         Tolerance::Da(_, _) => |feat: &Feature| (feat.expmass - feat.calcmass) as f64,
     };
@@ -176,7 +176,7 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()
             (perc.delta_best).ln_1p(),
             mass_model.posterior_error(mass_error(perc)),
             (perc.isotope_error as f64),
-            (perc.average_ppm as f64),
+            (perc.aligned_average_ppm as f64),
             (poisson),
             (perc.matched_intensity_pct as f64).ln_1p(),
             (perc.matched_peaks as f64),
