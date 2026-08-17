@@ -154,6 +154,21 @@ accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a s
 `RunSummary` alongside telemetry. This application layer is intended to be shared by future
 protocol servers and user interfaces.
 
+### MCP server for AI clients
+
+The `sage-mcp` binary exposes the runner to MCP-compatible coding agents and assistants over
+local standard input/output. Build it with `cargo build --release -p sage-mcp`, then configure
+the client to launch it with a directory that contains every allowed configuration and input:
+
+```shell
+sage-mcp --root /path/to/allowed/data
+```
+
+The server provides tools to validate configurations, start approved background searches,
+list jobs, inspect status and events, and cancel searches. Searches require `approved: true`,
+remote URLs are disabled, local inputs cannot escape `--root`, and outputs are written beneath
+`ROOT/.sage/jobs`. See `crates/sage-mcp/README.md` for client configuration and tool details.
+
 ## Configuration file schema
 
 ### Notes

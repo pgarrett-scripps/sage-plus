@@ -8,5 +8,6 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY target/x86_64-unknown-linux-gnu/release/sage /app/sage
+COPY target/x86_64-unknown-linux-gnu/release/sage-mcp /app/sage-mcp
 
 ENV PATH="/app:$PATH"

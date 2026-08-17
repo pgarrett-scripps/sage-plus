@@ -11,20 +11,26 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: ["1.88.0", "1.97.1"]
 
     steps:
     - uses: actions/checkout@v3
+    - name: Install Rust ${{ matrix.rust }}
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --workspace --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --workspace --verbose
     - name: Run VAT1_HUMAN search
-      run: cargo run tests/config.json
+      run: cargo run -p sage-cli --bin sage -- tests/config.json
     - name: Run with CLI args
       run: |
-        cargo run -- \
+        cargo run -p sage-cli --bin sage -- \
           -f tests/Q99536.fasta \
           -o foo \
           --annotate-matches \
