@@ -67,6 +67,15 @@ pub struct ModLocalization {
     pub site_determining_matched: u32,
     /// AScore: best arrangement score minus the second-best (0 if unambiguous).
     pub delta_score: f32,
+    /// Absolute score difference from target/decoy arrangement competition.
+    pub target_decoy_score: f32,
+    /// Whether an impossible-site decoy arrangement won the competition.
+    pub decoy_winner: bool,
+    /// Whether a balanced target/decoy competition could be constructed.
+    pub competition_eligible: bool,
+    /// Dataset-level false-localization-rate q-value, assigned after all PSMs
+    /// have been localized.
+    pub localization_q_value: f32,
     /// The `k` highest-probability sites, sorted by position. These are the
     /// "localized" positions reported in the site table.
     pub best_sites: Vec<SiteScore>,
@@ -221,6 +230,10 @@ fn localize_mass(
             site_determining_ions: 0,
             site_determining_matched: 0,
             delta_score: 0.0,
+            target_decoy_score: 0.0,
+            decoy_winner: true,
+            competition_eligible: false,
+            localization_q_value: 1.0,
             best_sites: placed
                 .iter()
                 .map(|&p| SiteScore {
@@ -244,6 +257,16 @@ fn localize_mass(
     // the success probability of the binomial site-determining-ion model.
     let p_random = random_match_probability(spectrum, peptide.monoisotopic, fragment_tol);
 
+    // Use the same number of impossible-site decoy candidates as valid target
+    // candidates. Equal target/decoy search spaces make direct competition and
+    // dataset-level FLR counting interpretable without a size correction.
+    let decoy_candidates = balanced_decoy_candidates(peptide, residues, total_c);
+    let mut scoring_candidates = candidates.clone();
+    if let Some(decoys) = &decoy_candidates {
+        scoring_candidates.extend(decoys.iter().copied());
+        scoring_candidates.sort_unstable();
+    }
+
     // Score every arrangement.
     struct Arrangement {
         sites: Vec<usize>,
@@ -259,7 +282,7 @@ fn localize_mass(
             &variant,
             spectrum,
             ion_kinds,
-            &candidates,
+            &scoring_candidates,
             k,
             fragment_tol,
             max_charge,
@@ -282,6 +305,36 @@ fn localize_mass(
         0.0
     };
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
+    let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
+
+    let best_decoy_score = decoy_candidates.as_ref().and_then(|decoys| {
+        decoys
+            .iter()
+            .copied()
+            .combinations(k)
+            .map(|combo| {
+                let variant = build_variant(peptide, mass, &candidates, &combo);
+                let (matched, trials) = score_arrangement(
+                    &variant,
+                    spectrum,
+                    ion_kinds,
+                    &scoring_candidates,
+                    k,
+                    fragment_tol,
+                    max_charge,
+                );
+                let pvalue = binomial_tail(matched, trials, p_random);
+                -10.0 * pvalue.log10()
+            })
+            .max_by(|a, b| a.total_cmp(b))
+    });
+    let (target_decoy_score, decoy_winner) = match best_decoy_score {
+        Some(decoy_score) => (
+            (best_target_score - decoy_score).abs() as f32,
+            decoy_score >= best_target_score,
+        ),
+        None => (0.0, true),
+    };
 
     // Per-arrangement posterior weights via a numerically stable softmax over
     // `score / 10 * ln(10)` (equivalent to normalizing 10^(score/10) = 1/pvalue).
@@ -339,9 +392,81 @@ fn localize_mass(
         site_determining_ions: total_trials,
         site_determining_matched: best_matched,
         delta_score,
+        target_decoy_score,
+        decoy_winner,
+        competition_eligible: decoy_candidates.is_some(),
+        localization_q_value: 1.0,
         best_sites,
         all_sites,
     })
+}
+
+/// Select evenly distributed, unmodified residues that are impossible target
+/// sites. Returning the same number as target candidates balances the two
+/// arrangement search spaces.
+fn balanced_decoy_candidates(
+    peptide: &Peptide,
+    target_residues: &[u8],
+    target_count: usize,
+) -> Option<Vec<usize>> {
+    let pool = peptide
+        .sequence
+        .iter()
+        .enumerate()
+        .filter(|(idx, residue)| {
+            !target_residues.contains(residue) && peptide.modification_at(*idx) == 0.0
+        })
+        .map(|(idx, _)| idx)
+        .collect::<Vec<_>>();
+    if pool.len() < target_count || target_count == 0 {
+        return None;
+    }
+    Some(
+        (0..target_count)
+            .map(|i| pool[(2 * i + 1) * pool.len() / (2 * target_count)])
+            .collect(),
+    )
+}
+
+/// Convert target/decoy localization competitions into monotonic q-values.
+/// Input is `(competition_score, decoy_winner)` in caller order.
+pub fn target_decoy_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
+    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
+
+    let mut targets = 0usize;
+    let mut decoys = 0usize;
+    let mut prefix_fdr = vec![1.0f32; order.len()];
+    let mut start = 0usize;
+    while start < order.len() {
+        let score = evidence[order[start]].0;
+        let mut end = start + 1;
+        while end < order.len() && evidence[order[end]].0 == score {
+            end += 1;
+        }
+        for &idx in &order[start..end] {
+            if evidence[idx].1 {
+                decoys += 1;
+            } else {
+                targets += 1;
+            }
+        }
+        let fdr = ((decoys + 1) as f32 / targets.max(1) as f32).min(1.0);
+        prefix_fdr[start..end].fill(fdr);
+        start = end;
+    }
+
+    let mut minimum = 1.0f32;
+    for fdr in prefix_fdr.iter_mut().rev() {
+        minimum = minimum.min(*fdr);
+        *fdr = minimum;
+    }
+
+    let mut q_values = vec![1.0; evidence.len()];
+    for (rank, &original) in order.iter().enumerate() {
+        q_values[original] = prefix_fdr[rank];
+    }
+    q_values
 }
 
 /// Clone `peptide` and relocate the target `mass`: clear it from every
@@ -541,6 +666,13 @@ mod test {
     }
 
     #[test]
+    fn target_decoy_q_values_are_monotonic() {
+        let evidence = [(100.0, false), (90.0, false), (80.0, true), (70.0, false)];
+        let q = target_decoy_q_values(&evidence);
+        assert_eq!(q, vec![0.5, 0.5, 2.0 / 3.0, 2.0 / 3.0]);
+    }
+
+    #[test]
     fn site_determining_rule() {
         // 2 candidates, 1 mod: a prefix containing exactly one candidate is
         // determining; containing zero or both is not.
@@ -593,6 +725,8 @@ mod test {
         assert!((total - 1.0).abs() < 1e-3, "sum was {}", total);
         // The correct localization should be favored over the alternative.
         assert!(m.delta_score > 0.0, "delta_score was {}", m.delta_score);
+        assert!(!m.decoy_winner);
+        assert!(m.target_decoy_score > 0.0);
     }
 
     #[test]

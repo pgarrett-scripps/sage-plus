@@ -109,6 +109,8 @@ struct SiteRow {
     residue: u8,
     localization_probability: f32,
     delta_score: f32,
+    target_decoy_score: f32,
+    localization_q_value: f32,
     candidate_sites: usize,
     site_determining_matched: u32,
     site_determining_total: u32,
@@ -753,6 +755,34 @@ impl Runner {
             }
         }
 
+        let localization_indices = features
+            .iter()
+            .enumerate()
+            .flat_map(|(feature_idx, feature)| {
+                feature.localization.iter().flat_map(move |localization| {
+                    localization
+                        .mods
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, modification)| modification.competition_eligible)
+                        .map(move |(mod_idx, _)| (feature_idx, mod_idx))
+                })
+            })
+            .collect::<Vec<_>>();
+        let evidence = localization_indices
+            .iter()
+            .map(|&(feature_idx, mod_idx)| {
+                let modification =
+                    &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
+                (modification.target_decoy_score, modification.decoy_winner)
+            })
+            .collect::<Vec<_>>();
+        let q_values = sage_core::ptm::target_decoy_q_values(&evidence);
+        for ((feature_idx, mod_idx), q_value) in localization_indices.into_iter().zip(q_values) {
+            features[feature_idx].localization.as_mut().unwrap().mods[mod_idx]
+                .localization_q_value = q_value;
+        }
+
         log::info!(
             "- PTM localization: {} PSMs in {} ms",
             localized,
@@ -1281,6 +1311,12 @@ impl Runner {
             let filename = filenames.get(feature.file_id).cloned().unwrap_or_default();
 
             for m in &localization.mods {
+                if m.decoy_winner
+                    || m.localization_q_value
+                        > self.parameters.ptm_localization.localization_q_value
+                {
+                    continue;
+                }
                 let modification = m.label.clone().unwrap_or_else(|| format!("{:+}", m.mass));
                 let site_probabilities = m
                     .all_sites
@@ -1312,6 +1348,8 @@ impl Runner {
                         residue: site.residue,
                         localization_probability: site.probability,
                         delta_score: m.delta_score,
+                        target_decoy_score: m.target_decoy_score,
+                        localization_q_value: m.localization_q_value,
                         candidate_sites: m.candidate_sites,
                         site_determining_matched: m.site_determining_matched,
                         site_determining_total: m.site_determining_ions,
@@ -1352,6 +1390,8 @@ impl Runner {
                     residue: (row.residue as char).to_string(),
                     localization_probability: row.localization_probability,
                     delta_localization_score: row.delta_score,
+                    target_decoy_score: row.target_decoy_score,
+                    localization_q_value: row.localization_q_value,
                     candidate_sites: row.candidate_sites as i32,
                     site_determining_ions_matched: row.site_determining_matched as i32,
                     site_determining_ions_total: row.site_determining_total as i32,
@@ -1385,6 +1425,8 @@ impl Runner {
             "residue",
             "localization_probability",
             "delta_localization_score",
+            "target_decoy_score",
+            "localization_q_value",
             "candidate_sites",
             "site_determining_ions_matched",
             "site_determining_ions_total",
@@ -1411,6 +1453,12 @@ impl Runner {
                     .as_bytes(),
             );
             record.push_field(ryu::Buffer::new().format(row.delta_score).as_bytes());
+            record.push_field(ryu::Buffer::new().format(row.target_decoy_score).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(row.localization_q_value)
+                    .as_bytes(),
+            );
             record.push_field(itoa::Buffer::new().format(row.candidate_sites).as_bytes());
             record.push_field(
                 itoa::Buffer::new()
@@ -1457,6 +1505,7 @@ impl Runner {
             n_psms: u32,
             best_probability: f32,
             best_delta_score: f32,
+            best_localization_q_value: f32,
             best_spectrum_q: f32,
         }
 
@@ -1480,11 +1529,15 @@ impl Runner {
                     n_psms: 0,
                     best_probability: 0.0,
                     best_delta_score: f32::MIN,
+                    best_localization_q_value: 1.0,
                     best_spectrum_q: f32::MAX,
                 });
                 entry.n_psms += 1;
                 entry.best_probability = entry.best_probability.max(row.localization_probability);
                 entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
+                entry.best_localization_q_value = entry
+                    .best_localization_q_value
+                    .min(row.localization_q_value);
                 entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
             }
         }
@@ -1511,6 +1564,7 @@ impl Runner {
                     num_psms: agg.n_psms as i32,
                     best_localization_probability: agg.best_probability,
                     best_delta_localization_score: agg.best_delta_score,
+                    best_localization_q_value: agg.best_localization_q_value,
                     best_spectrum_q: agg.best_spectrum_q,
                 })
                 .collect::<Vec<_>>();
@@ -1536,6 +1590,7 @@ impl Runner {
             "num_psms",
             "best_localization_probability",
             "best_delta_localization_score",
+            "best_localization_q_value",
             "best_spectrum_q",
         ]))?;
 
@@ -1550,6 +1605,11 @@ impl Runner {
             record.push_field(itoa::Buffer::new().format(agg.n_psms).as_bytes());
             record.push_field(ryu::Buffer::new().format(agg.best_probability).as_bytes());
             record.push_field(ryu::Buffer::new().format(agg.best_delta_score).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(agg.best_localization_q_value)
+                    .as_bytes(),
+            );
             record.push_field(ryu::Buffer::new().format(agg.best_spectrum_q).as_bytes());
             wtr.write_byte_record(&record)?;
         }

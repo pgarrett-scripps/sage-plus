@@ -511,6 +511,7 @@ When either memory limit is enabled, Sage estimates the unmodified digest, varia
 - **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
   - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
+  - **localization_q_value**: Float from 0 through 1. Arrangement-level false localization rate cutoff for reported PTM localizations (default: 0.01).
 
 ## PTM Site Localization
 
@@ -521,7 +522,8 @@ Example configuration:
 ```json
 "ptm_localization": {
   "enabled": true,
-  "psm_q_value": 0.01
+  "psm_q_value": 0.01,
+  "localization_q_value": 0.01
 }
 ```
 
@@ -529,26 +531,29 @@ For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_va
 1. recovers the candidate residues from the search's modification specificity rules (e.g. all S/T/Y for Phospho),
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
-4. converts the per-arrangement scores into an AScore-style delta between the two best arrangements and a per-site localization probability (the Andromeda/MaxQuant convention, summing to 1 across candidate sites).
+4. scores a balanced set of impossible-site decoy arrangements alongside the valid target arrangements,
+5. converts target/decoy competition scores across the dataset into monotonic localization q-values, and
+6. reports target arrangements at or below `ptm_localization.localization_q_value`, together with an AScore-style delta and per-site localization probabilities.
 
-The initial implementation has one AScore-inspired, site-determining-ion strategy. It is intentionally not presented as a configurable strategy yet: a strategy name should select a genuinely different, validated statistical model rather than act as an alias for the same calculation. The nested `ptm_localization` object leaves room for a future `strategy` field when another method (for example, a dataset-trained target/decoy model with false-localization-rate estimation) is implemented.
+The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 
 Two site reports are written. They use TSV by default and Parquet when `--parquet` is selected:
 
-- **results.sage.ptm-sites.tsv** or **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score` (AScore), `candidate_sites`, `site_determining_ions_matched`/`_total`, and `site_probabilities` (a `residue+position:probability` list over all candidate sites).
-- **results.sage.protein-sites.tsv** or **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, with `num_psms`, `best_localization_probability`, `best_delta_localization_score`, and `best_spectrum_q`.
+- **results.sage.ptm-sites.tsv** or **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, and `site_probabilities`.
+- **results.sage.protein-sites.tsv** or **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, including `best_localization_q_value`.
 
 For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
 
 ```text
-psm_id  peptide            modification  position  residue  localization_probability  delta_localization_score  site_probabilities
-42      AAS[+79.966]AATAA  Phospho       3         S        0.982                     18.7                      S3:0.982;T6:0.018
+psm_id  peptide            modification  position  residue  localization_probability  localization_q_value  site_probabilities
+42      AAS[+79.966]AATAA  Phospho       3         S        0.982                     0.008                 S3:0.982;T6:0.018
 ```
 
 Notes:
 - All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
-- `ptm_localization.psm_q_value` controls identification quality only. Filter `localization_probability` or `delta_localization_score` separately when selecting confidently localized sites.
+- `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
+- A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
 - Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
 
 ## Spectrum Paths
