@@ -21,7 +21,7 @@ This integration build adds the following features on top of upstream Sage:
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
-- A structured runner API with JSONL events, validation-only mode, cancellation, and run summaries.
+- A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
 - A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, and result queries.
 
 Most additions are opt-in; existing Sage defaults are retained where practical. See [DOCS.md](DOCS.md) for configuration and output details.

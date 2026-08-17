@@ -484,6 +484,42 @@ impl State {
         }))
     }
 
+    fn analyze(&self, job_id: &str) -> anyhow::Result<serde_json::Value> {
+        let record = self.job(job_id)?;
+        ensure!(
+            record.status == JobStatus::Completed,
+            "run analysis is available only for completed jobs"
+        );
+        let summary_path = Path::new(&record.output_directory).join("run-summary.json");
+        let summary = if summary_path.is_file() {
+            serde_json::from_slice::<RunSummary>(&fs::read(&summary_path)?)?
+        } else {
+            record.summary.context("completed job has no run summary")?
+        };
+
+        let mut observations = Vec::new();
+        if summary.psms_at_one_percent_fdr == 0 {
+            observations.push("No target PSMs passed 1% FDR.");
+        }
+        if summary.files == 0 {
+            observations.push("The run did not report any processed spectra files.");
+        }
+        Ok(serde_json::json!({
+            "job_id": record.job_id,
+            "summary_path": summary_path.to_string_lossy(),
+            "summary": summary,
+            "derived_statistics": {
+                "psms_per_file": ratio(summary.psms_at_one_percent_fdr, summary.files),
+                "peptides_per_file": ratio(summary.peptides_at_one_percent_fdr, summary.files),
+                "psms_per_identified_peptide": ratio(summary.psms_at_one_percent_fdr, summary.peptides_at_one_percent_fdr),
+                "identified_database_peptides_percent": percent(summary.peptides_at_one_percent_fdr, summary.peptides_in_database),
+                "psms_per_second": ratio(summary.psms_at_one_percent_fdr, summary.runtime_secs as usize),
+                "proteins_per_protein_group": ratio(summary.proteins_at_one_percent_fdr, summary.protein_groups_at_one_percent_fdr)
+            },
+            "observations": observations
+        }))
+    }
+
     fn query_results(&self, args: QueryResultsArgs) -> anyhow::Result<ResultQuery> {
         let record = self.job(&args.job_id)?;
         ensure!(
@@ -593,6 +629,14 @@ fn add_estimate(totals: &mut [u64; 6], estimate: sage_core::database::DatabaseMe
     totals[3] = totals[3].saturating_add(estimate.unmodified_peak_bytes);
     totals[4] = totals[4].saturating_add(estimate.modified_peak_bytes);
     totals[5] = totals[5].saturating_add(estimate.fragment_peak_bytes);
+}
+
+fn ratio(numerator: usize, denominator: usize) -> Option<f64> {
+    (denominator != 0).then(|| numerator as f64 / denominator as f64)
+}
+
+fn percent(numerator: usize, denominator: usize) -> Option<f64> {
+    ratio(numerator, denominator).map(|value| value * 100.0)
 }
 
 fn now() -> u64 {
@@ -758,7 +802,7 @@ impl SageMcp {
     )]
     fn get_capabilities(&self) -> Result<CallToolResult, McpError> {
         tool_result(Ok(serde_json::json!({
-            "workflow": ["inspect_config", "estimate_search", "start_search", "get_job_events", "summarize_run", "query_results"],
+            "workflow": ["inspect_config", "estimate_search", "start_search", "get_job_events", "summarize_run", "analyze_run", "query_results"],
             "execution": {
                 "requires_explicit_approval": true,
                 "remote_urls_allowed": false,
@@ -868,6 +912,17 @@ impl SageMcp {
     ) -> Result<CallToolResult, McpError> {
         let state = self.state.clone();
         tool_result(blocking(move || state.summarize(&args.job_id)).await)
+    }
+
+    #[tool(
+        description = "Analyze a completed Sage run using its portable run-summary.json artifact and return basic identification and throughput statistics"
+    )]
+    async fn analyze_run(
+        &self,
+        Parameters(args): Parameters<JobIdArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        let state = self.state.clone();
+        tool_result(blocking(move || state.analyze(&args.job_id)).await)
     }
 
     #[tool(

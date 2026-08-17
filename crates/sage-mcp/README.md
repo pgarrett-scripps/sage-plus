@@ -49,7 +49,12 @@ Tools:
 - `cancel_search`
 - `get_job_events`
 - `summarize_run`
+- `analyze_run`
 - `query_results`
+
+Every successful Sage run writes `run-summary.json` into its output directory, whether or not
+MCP is used. `analyze_run` reads that portable artifact and reports basic per-file throughput,
+database identification rate, PSM-to-peptide ratio, and protein-group statistics.
 
 `query_results` reads at most 200 matching rows and scans at most one million rows from TSV
 outputs. It supports PSMs, localized PTM sites, and collapsed protein sites, with optional

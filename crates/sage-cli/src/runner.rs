@@ -99,6 +99,8 @@ pub struct Runner {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunSummary {
+    #[serde(default = "run_summary_schema_version")]
+    pub schema_version: u32,
     pub runtime_secs: u64,
     pub files: usize,
     pub peptides_in_database: usize,
@@ -108,6 +110,10 @@ pub struct RunSummary {
     pub proteins_at_one_percent_fdr: usize,
     pub protein_groups_at_one_percent_fdr: usize,
     pub output_paths: Vec<String>,
+}
+
+const fn run_summary_schema_version() -> u32 {
+    1
 }
 
 /// A single localized modification site for one PSM, used to build the
@@ -1240,17 +1246,20 @@ impl Runner {
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
 
-        for path in &self.parameters.output_paths {
-            self.events.emit(EventKind::OutputWritten {
-                path: path.to_string(),
-            });
-        }
-
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
         info!("cite: \"Sage: An Open-Source Tool for Fast Proteomics Searching and Quantification at Scale\" https://doi.org/10.1021/acs.jproteome.3c00486");
 
+        let summary_path = self.make_path("run-summary.json");
+        let mut output_paths = self
+            .parameters
+            .output_paths
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        output_paths.push(summary_path.to_string());
         let summary = RunSummary {
+            schema_version: 1,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1259,13 +1268,17 @@ impl Runner {
             peptides_at_one_percent_fdr: q_peptide,
             proteins_at_one_percent_fdr: q_protein,
             protein_groups_at_one_percent_fdr: q_protein_group,
-            output_paths: self
-                .parameters
-                .output_paths
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
+            output_paths,
         };
+        sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
+        self.parameters.output_paths.push(summary_path);
+
+        for path in &self.parameters.output_paths {
+            self.events.emit(EventKind::OutputWritten {
+                path: path.to_string(),
+            });
+        }
+
         let telemetry = telemetry::Telemetry::new(
             self.parameters,
             self.database.peptides.len(),

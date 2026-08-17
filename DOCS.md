@@ -122,7 +122,7 @@ sage config.json s3://my-bucket/YYYY-MM-DD_expt_A_fraction_1.mzML.gz
 ```
 
 Running Sage will produce several output files (located in either the current directory, or `output_directory` if that option is specified):
-- Record of search parameters (`results.json`) will be created that details input/output paths and all search parameters used for the search
+- A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results will be stored as a tab-separated file (`results.sage.tsv`) file - this is a tab-separated file, which can be opened in Excel/Pandas/etc
 - MS2 and MS3 quantitation results will be stored as a tab-separated file (`tmt.tsv`, `lfq.tsv`) if `quant.tmt` or `quant.lfq` options are used in the parameter file
 
@@ -190,7 +190,7 @@ sage-mcp --root /path/to/allowed/data
 
 The server can inspect and validate configurations, estimate database expansion and memory,
 start approved background searches, monitor or cancel jobs, summarize completed runs, and make
-bounded queries over TSV PSM and PTM-site results. Searches require `approved: true`, remote URLs
+basic analysis from the portable run summary, and bounded queries over TSV PSM and PTM-site results. Searches require `approved: true`, remote URLs
 are disabled, local inputs cannot escape `--root`, and outputs are written beneath
 `ROOT/.sage/jobs`. See `crates/sage-mcp/README.md` for client configuration and tool details.
 
@@ -601,7 +601,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible output files are: "results.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead.
+  - Possible output files are: "results.json", "run-summary.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead. `run-summary.json` is always written after a successful run and contains runtime, database size, 1% FDR counts, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

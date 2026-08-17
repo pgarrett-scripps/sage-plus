@@ -32,6 +32,7 @@ async fn exposes_sage_tools_over_stdio() -> anyhow::Result<()> {
     assert!(names.contains(&"get_job_status"));
     assert!(names.contains(&"cancel_search"));
     assert!(names.contains(&"summarize_run"));
+    assert!(names.contains(&"analyze_run"));
     assert!(names.contains(&"query_results"));
 
     let result = client
@@ -165,6 +166,17 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         summary.structured_content.as_ref().unwrap()["status"],
         "completed"
     );
+
+    let analysis = client
+        .call_tool(
+            CallToolRequestParams::new("analyze_run")
+                .with_arguments(arguments(serde_json::json!({ "job_id": job_id }))),
+        )
+        .await?;
+    assert_eq!(analysis.is_error, Some(false));
+    let analysis = analysis.structured_content.as_ref().unwrap();
+    assert_eq!(analysis["summary"]["schema_version"], 1);
+    assert!(std::path::Path::new(analysis["summary_path"].as_str().unwrap()).is_file());
 
     let query = client
         .call_tool(
