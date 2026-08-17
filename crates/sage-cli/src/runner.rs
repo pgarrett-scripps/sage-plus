@@ -97,7 +97,7 @@ pub struct Runner {
     cancellation: CancellationToken,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RunSummary {
     pub runtime_secs: u64,
     pub files: usize,

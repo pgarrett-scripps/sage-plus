@@ -38,6 +38,7 @@ jobs:
           mkdir -p "$staging"
           cp {README.md,LICENSE} "$staging/"
           cp "target/${{ matrix.target }}/release/sage" "$staging/"
+          cp "target/${{ matrix.target }}/release/sage-mcp" "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> $GITHUB_ENV
 
@@ -81,6 +82,7 @@ jobs:
           mkdir -p "$staging"
           cp {README.md,DOCS.md,LICENSE} "$staging/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$staging/"
+          cp "target/${{ matrix.target }}/release/sage-mcp.exe" "$staging/"
           7z a "$staging.zip" "$staging"
           echo "ASSET=$staging.zip" >> $GITHUB_ENV
 
@@ -127,6 +129,7 @@ jobs:
           mkdir -p "$staging"
           cp {README.md,LICENSE} "$staging/"
           cp "target/${{ matrix.target }}/release/sage" "$staging/"
+          cp "target/${{ matrix.target }}/release/sage-mcp" "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           echo "ASSET=$staging.tar.gz" >> $GITHUB_ENV
 

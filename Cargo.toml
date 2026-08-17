@@ -3,6 +3,7 @@ members = [
     "crates/sage",
     "crates/sage-cli",
     "crates/sage-cloudpath",
+    "crates/sage-mcp",
 ]
 
 resolver = "2"

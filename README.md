@@ -21,6 +21,8 @@ This integration build adds the following features on top of upstream Sage:
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
+- A structured runner API with JSONL events, validation-only mode, cancellation, and run summaries.
+- A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, and result queries.
 
 Most additions are opt-in; existing Sage defaults are retained where practical. See [DOCS.md](DOCS.md) for configuration and output details.
 
@@ -64,6 +66,7 @@ If you use Sage in a scientific publication, please cite the following paper:
 - FDR calculation using target-decoy competition and picked-peptide & picked-protein approaches
 - Percolator/Mokapot [compatible output](https://sage-docs.vercel.app/docs/configuration#env)
 - Configuration by [JSON file](https://sage-docs.vercel.app/docs/configuration#file)
+- Model Context Protocol server for validated, agent-operated searches
 - Built-in support for reading gzipped mzML and local Thermo Fisher RAW files
 - Support for reading/writing directly from [AWS S3](https://sage-docs.vercel.app/docs/configuration/aws), Google Cloud, or Azure.
 

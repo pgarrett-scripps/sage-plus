@@ -1,0 +1,29 @@
+[package]
+name = "sage-mcp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Model Context Protocol server for Sage proteomics searches"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "sage-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+csv = "1"
+rmcp = { version = "3.1.2", features = ["server", "transport-io"] }
+sage-cli = { path = "../sage-cli" }
+sage-cloudpath = { path = "../sage-cloudpath" }
+sage-core = { path = "../sage" }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+rmcp = { version = "3.1.2", features = ["client", "transport-child-process"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
