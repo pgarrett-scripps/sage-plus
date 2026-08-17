@@ -7,6 +7,21 @@
 
 For more information please read [the online documentation!](https://sage-docs.vercel.app/docs)
 
+## Sage Plus additions
+
+This integration build adds the following features on top of upstream Sage:
+
+- Faster, lower-memory searching with compact peptide/spectrum storage and optional bitmap preliminary scoring.
+- Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
+- Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
+- Cross-fitted Percolator-style rescoring, while retaining LDA as the default.
+- Configurable LFQ match-between-runs retention-time tolerance.
+- PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
+- Enriched linear retention-time features with regularized, cross-validated variable-PTM offsets.
+- Direct reading of local Thermo Fisher RAW files.
+
+Most additions are opt-in; existing Sage defaults are retained where practical. See [DOCS.md](DOCS.md) for configuration and output details.
+
 
 # Introduction
  
