@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
-use crate::modification::{ModificationDefinition, ModificationSpecificity};
+use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteMode};
 use crate::{
     enzyme::{Digest, DigestGroup, Position},
     mass::{monoisotopic, H2O},
@@ -37,6 +37,29 @@ pub struct Peptide {
 
 pub trait ModificationSource {
     fn definition(&self) -> Arc<ModificationDefinition>;
+}
+
+#[derive(Clone)]
+pub(crate) struct VariableRule {
+    pub specificity: ModificationSpecificity,
+    pub modification: Arc<ModificationDefinition>,
+    pub max_count: Option<usize>,
+    pub site_mode: SiteMode,
+    /// Rules with the same named modification share one occurrence counter.
+    pub count_group: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct LibrarySite {
+    pub position: u32,
+    pub modification: Arc<str>,
+}
+
+#[derive(Copy, Clone)]
+struct ModificationCandidate {
+    site: Site,
+    rule: usize,
+    library_supported: bool,
 }
 
 impl ModificationSource for f32 {
@@ -333,10 +356,50 @@ impl Peptide {
     /// `max_combinations` caps total variants (unmodified + modified); fewer-PTM
     /// variants are always generated first so they are preferred when truncating.
     pub fn apply<M: ModificationSource>(
-        mut self,
+        self,
         variable_mods: &[(ModificationSpecificity, M, Option<usize>)],
         static_mods: &HashMap<ModificationSpecificity, M>,
         combinations: usize,
+        max_combinations: Option<usize>,
+    ) -> Vec<Peptide> {
+        let rules = variable_mods
+            .iter()
+            .enumerate()
+            .map(
+                |(count_group, (specificity, modification, max_count))| VariableRule {
+                    specificity: *specificity,
+                    modification: modification.definition(),
+                    max_count: *max_count,
+                    site_mode: SiteMode::Exhaustive,
+                    count_group,
+                },
+            )
+            .collect::<Vec<_>>();
+        let static_mods = static_mods
+            .iter()
+            .map(|(specificity, modification)| (*specificity, modification.definition()))
+            .collect();
+        self.apply_rules(
+            &rules,
+            &[],
+            &static_mods,
+            combinations,
+            combinations,
+            max_combinations,
+        )
+    }
+
+    /// Apply config-defined and library-supported variable modifications in a
+    /// single enumeration. Library-supported placements do not consume the
+    /// exhaustive budget, but all placements consume the total budget and the
+    /// named modification's shared `max_count`.
+    pub(crate) fn apply_rules(
+        mut self,
+        variable_mods: &[VariableRule],
+        library_sites: &[LibrarySite],
+        static_mods: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+        max_exhaustive_mods: usize,
+        max_total_mods: usize,
         max_combinations: Option<usize>,
     ) -> Vec<Peptide> {
         if variable_mods.is_empty() {
@@ -346,22 +409,82 @@ impl Peptide {
             self.finalize_modifications();
             vec![self]
         } else {
-            let mut mods: Vec<(Site, f32, usize)> = Vec::new();
-            for (mod_idx, (residue, modification, _limit)) in variable_mods.iter().enumerate() {
-                self.push_resi(&mut mods, *residue, modification.definition().mass, mod_idx);
+            let mut candidates: Vec<ModificationCandidate> = Vec::new();
+            for (rule_idx, rule) in variable_mods.iter().enumerate() {
+                let mut compatible = Vec::new();
+                self.push_resi(
+                    &mut compatible,
+                    rule.specificity,
+                    rule.modification.mass,
+                    rule_idx,
+                );
+                for (site, _, _) in compatible {
+                    let library_supported = match (site, rule.modification.name.as_deref()) {
+                        (Site::Sequence(position), Some(name))
+                            if rule.site_mode != SiteMode::Exhaustive =>
+                        {
+                            library_sites.iter().any(|library| {
+                                library.position == position
+                                    && library.modification.as_ref() == name
+                            })
+                        }
+                        (Site::Nterm, Some(name)) if rule.site_mode != SiteMode::Exhaustive => {
+                            library_sites.iter().any(|library| {
+                                library.position == 0 && library.modification.as_ref() == name
+                            })
+                        }
+                        (Site::Cterm, Some(name)) if rule.site_mode != SiteMode::Exhaustive => {
+                            let position = self.sequence.len().saturating_sub(1) as u32;
+                            library_sites.iter().any(|library| {
+                                library.position == position
+                                    && library.modification.as_ref() == name
+                            })
+                        }
+                        _ => false,
+                    };
+                    if rule.site_mode != SiteMode::Library || library_supported {
+                        candidates.push(ModificationCandidate {
+                            site,
+                            rule: rule_idx,
+                            library_supported,
+                        });
+                    }
+                }
+            }
+
+            // Multiple specificity entries can describe the same named
+            // modification at one site. Collapse them and preserve library
+            // support if either route supplies it.
+            let mut mods: Vec<ModificationCandidate> = Vec::with_capacity(candidates.len());
+            let mut candidate_indices: HashMap<(Site, usize), usize> = HashMap::new();
+            for candidate in candidates {
+                let key = (candidate.site, variable_mods[candidate.rule].count_group);
+                if let Some(index) = candidate_indices.get(&key).copied() {
+                    mods[index].library_supported |= candidate.library_supported;
+                } else {
+                    candidate_indices.insert(key, mods.len());
+                    mods.push(candidate);
+                }
             }
 
             let mut modified = Vec::new();
             modified.push(self.clone());
-            let mut mod_counts = vec![0usize; variable_mods.len()];
+            let group_count = variable_mods
+                .iter()
+                .map(|rule| rule.count_group)
+                .max()
+                .map_or(0, |group| group + 1);
+            let mut mod_counts = vec![0usize; group_count];
             let mut occupied = FnvHashSet::default();
-            for n in 1..=combinations.min(mods.len()) {
+            for n in 1..=max_total_mods.min(mods.len()) {
                 if !enumerate_modifications(
                     &self,
                     &mods,
                     variable_mods,
                     0,
                     n,
+                    0,
+                    max_exhaustive_mods,
                     &mut occupied,
                     &mut Vec::with_capacity(n),
                     &mut mod_counts,
@@ -422,42 +545,50 @@ impl Peptide {
     }
 }
 
-fn enumerate_modifications<M: ModificationSource>(
+fn enumerate_modifications(
     peptide: &Peptide,
-    modifications: &[(Site, f32, usize)],
-    variable_mods: &[(ModificationSpecificity, M, Option<usize>)],
+    modifications: &[ModificationCandidate],
+    variable_mods: &[VariableRule],
     start: usize,
     remaining: usize,
+    exhaustive_count: usize,
+    max_exhaustive_mods: usize,
     occupied: &mut FnvHashSet<Site>,
-    selected: &mut Vec<(Site, f32, usize)>,
+    selected: &mut Vec<ModificationCandidate>,
     mod_counts: &mut [usize],
     output: &mut Vec<Peptide>,
     max_combinations: Option<usize>,
 ) -> bool {
     for idx in start..modifications.len() {
         let modification = modifications[idx];
-        if occupied.insert(modification.0) {
-            let mod_idx = modification.2;
-            if variable_mods[mod_idx]
-                .2
-                .map_or(false, |limit| mod_counts[mod_idx] >= limit)
+        if occupied.insert(modification.site) {
+            let rule = &variable_mods[modification.rule];
+            let group = rule.count_group;
+            let next_exhaustive = exhaustive_count + usize::from(!modification.library_supported);
+            if next_exhaustive > max_exhaustive_mods
+                || rule
+                    .max_count
+                    .is_some_and(|limit| mod_counts[group] >= limit)
             {
-                occupied.remove(&modification.0);
+                occupied.remove(&modification.site);
                 continue;
             }
 
-            mod_counts[mod_idx] += 1;
+            mod_counts[group] += 1;
             selected.push(modification);
             if remaining == 1 {
-                if max_combinations.map_or(false, |cap| output.len() >= cap) {
+                if max_combinations.is_some_and(|cap| output.len() >= cap) {
                     selected.pop();
-                    mod_counts[mod_idx] -= 1;
-                    occupied.remove(&modification.0);
+                    mod_counts[group] -= 1;
+                    occupied.remove(&modification.site);
                     return false;
                 }
                 let mut modified = peptide.clone();
-                for (site, _, selected_mod_idx) in selected.iter().copied() {
-                    modified.apply_site(site, variable_mods[selected_mod_idx].1.definition());
+                for selected in selected.iter().copied() {
+                    modified.apply_site(
+                        selected.site,
+                        variable_mods[selected.rule].modification.clone(),
+                    );
                 }
                 output.push(modified);
             } else if !enumerate_modifications(
@@ -466,6 +597,8 @@ fn enumerate_modifications<M: ModificationSource>(
                 variable_mods,
                 idx + 1,
                 remaining - 1,
+                next_exhaustive,
+                max_exhaustive_mods,
                 occupied,
                 selected,
                 mod_counts,
@@ -473,13 +606,13 @@ fn enumerate_modifications<M: ModificationSource>(
                 max_combinations,
             ) {
                 selected.pop();
-                mod_counts[mod_idx] -= 1;
-                occupied.remove(&modification.0);
+                mod_counts[group] -= 1;
+                occupied.remove(&modification.site);
                 return false;
             }
             selected.pop();
-            mod_counts[mod_idx] -= 1;
-            occupied.remove(&modification.0);
+            mod_counts[group] -= 1;
+            occupied.remove(&modification.site);
         }
     }
 
@@ -509,7 +642,13 @@ impl TryFrom<DigestGroup> for Peptide {
 
     fn try_from(value: DigestGroup) -> Result<Self, Self::Error> {
         let mut pep = Peptide::try_from(value.reference)?;
-        pep.proteins = value.proteins;
+        pep.proteins = value
+            .origins
+            .into_iter()
+            .map(|origin| origin.protein)
+            .collect();
+        pep.proteins.sort_unstable();
+        pep.proteins.dedup();
         Ok(pep)
     }
 }
@@ -1196,6 +1335,105 @@ mod test {
             .find(|peptide| peptide.to_string() == "AM[Oxidation]MAK")
             .unwrap();
         assert!(named.reverse().to_string().contains("[Oxidation]"));
+    }
+
+    #[test]
+    fn library_and_exhaustive_candidates_are_enumerated_together() {
+        let peptide = Peptide::try_from(Digest {
+            sequence: "MSS".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let phospho = Arc::new(ModificationDefinition {
+            mass: 79.96633,
+            name: Some(Arc::from("Phospho")),
+            neutral_losses: Arc::from([]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        });
+        let oxidation = Arc::new(ModificationDefinition {
+            mass: 15.9949,
+            name: Some(Arc::from("Oxidation")),
+            neutral_losses: Arc::from([]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        });
+        let rules = vec![
+            VariableRule {
+                specificity: ModificationSpecificity::Residue(b'S'),
+                modification: phospho,
+                max_count: Some(2),
+                site_mode: SiteMode::Both,
+                count_group: 0,
+            },
+            VariableRule {
+                specificity: ModificationSpecificity::Residue(b'M'),
+                modification: oxidation,
+                max_count: Some(1),
+                site_mode: SiteMode::Both,
+                count_group: 1,
+            },
+        ];
+        let library = vec![
+            LibrarySite {
+                position: 1,
+                modification: Arc::from("Phospho"),
+            },
+            LibrarySite {
+                position: 2,
+                modification: Arc::from("Phospho"),
+            },
+        ];
+
+        let variants = peptide.apply_rules(&rules, &library, &HashMap::new(), 1, 3, None);
+
+        assert!(variants.iter().any(|peptide| {
+            peptide.modification_at(0) != 0.0
+                && peptide.modification_at(1) != 0.0
+                && peptide.modification_at(2) != 0.0
+        }));
+        assert!(!variants.iter().any(|peptide| {
+            peptide.modification_at(0) != 0.0
+                && peptide.modification_at(1) == 0.0
+                && peptide.modification_at(2) == 0.0
+                && peptide.applied_modifications.len() > 1
+        }));
+    }
+
+    #[test]
+    fn named_max_count_is_shared_across_residue_rules() {
+        let peptide = Peptide::try_from(Digest {
+            sequence: "ST".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let phospho = Arc::new(ModificationDefinition {
+            mass: 79.96633,
+            name: Some(Arc::from("Phospho")),
+            neutral_losses: Arc::from([]),
+            neutral_loss_mode: NeutralLossMode::Optional,
+        });
+        let rules = (*b"ST").map(|residue| VariableRule {
+            specificity: ModificationSpecificity::Residue(residue),
+            modification: phospho.clone(),
+            max_count: Some(1),
+            site_mode: SiteMode::Library,
+            count_group: 0,
+        });
+        let library = vec![
+            LibrarySite {
+                position: 0,
+                modification: Arc::from("Phospho"),
+            },
+            LibrarySite {
+                position: 1,
+                modification: Arc::from("Phospho"),
+            },
+        ];
+
+        let variants = peptide.apply_rules(&rules, &library, &HashMap::new(), 0, 2, None);
+        assert_eq!(variants.len(), 3);
+        assert!(variants
+            .iter()
+            .all(|peptide| peptide.applied_modifications.len() <= 1));
     }
 
     #[test]

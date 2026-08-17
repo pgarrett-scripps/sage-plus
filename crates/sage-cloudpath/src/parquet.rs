@@ -22,8 +22,153 @@ use parquet::{
 use sage_core::database::IndexedDatabase;
 use sage_core::ion_series::Kind;
 use sage_core::lfq::{Peak, PrecursorId};
+use sage_core::ptm_library::{PtmLibrary, PtmLibrarySite};
 use sage_core::scoring::Feature;
 use sage_core::tmt::TmtQuant;
+
+/// Read a compact PTM site library. Required columns are `protein`,
+/// `position` (one-based), `residue`, and `modification`. Additional evidence
+/// columns are intentionally ignored by database construction.
+pub fn deserialize_ptm_library(bytes: Vec<u8>) -> parquet::errors::Result<PtmLibrary> {
+    use parquet::errors::ParquetError;
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    use parquet::record::Field;
+    use std::sync::Arc;
+
+    fn text(field: &Field, column: &str) -> parquet::errors::Result<String> {
+        match field {
+            Field::Str(value) => Ok(value.clone()),
+            _ => Err(ParquetError::General(format!(
+                "PTM library column `{column}` must be a UTF-8 string"
+            ))),
+        }
+    }
+
+    fn position(field: &Field) -> parquet::errors::Result<u32> {
+        let value = match field {
+            Field::Int(value) => i64::from(*value),
+            Field::Long(value) => *value,
+            Field::UInt(value) => i64::from(*value),
+            _ => {
+                return Err(ParquetError::General(
+                    "PTM library column `position` must be an integer".into(),
+                ))
+            }
+        };
+        u32::try_from(value)
+            .ok()
+            .filter(|value| *value > 0)
+            .map(|value| value - 1)
+            .ok_or_else(|| {
+                ParquetError::General(
+                    "PTM library positions must be positive, one-based integers".into(),
+                )
+            })
+    }
+
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let mut sites = Vec::new();
+    for (row_index, row) in reader.get_row_iter(None)?.enumerate() {
+        let row = row?;
+        let columns = row
+            .get_column_iter()
+            .map(|(name, field)| (name.as_str(), field))
+            .collect::<HashMap<_, _>>();
+        let required = |name: &str| {
+            columns.get(name).copied().ok_or_else(|| {
+                ParquetError::General(format!("PTM library is missing required column `{name}`"))
+            })
+        };
+        let protein = text(required("protein")?, "protein")?;
+        let modification = text(required("modification")?, "modification")?;
+        let residue = text(required("residue")?, "residue")?;
+        let residue = residue.as_bytes();
+        if protein.is_empty() || modification.is_empty() || residue.len() != 1 {
+            return Err(ParquetError::General(format!(
+                "invalid PTM library values in row {}",
+                row_index + 1
+            )));
+        }
+        sites.push(PtmLibrarySite {
+            protein: Arc::from(protein),
+            position: position(required("position")?)?,
+            residue: residue[0],
+            modification: Arc::from(modification),
+        });
+    }
+    Ok(PtmLibrary::new(sites))
+}
+
+fn ptm_library_schema() -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(
+        r#"
+        message schema {
+            required byte_array protein (utf8);
+            required int32 position;
+            required byte_array residue (utf8);
+            required byte_array modification (utf8);
+        }
+        "#,
+    )
+}
+
+pub fn serialize_ptm_library(sites: &[PtmLibrarySite]) -> parquet::errors::Result<Vec<u8>> {
+    if sites.iter().any(|site| site.position >= i32::MAX as u32) {
+        return Err(parquet::errors::ParquetError::General(
+            "PTM library position exceeds the int32 schema limit".into(),
+        ));
+    }
+    let schema = ptm_library_schema()?;
+    let options = WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .build();
+    let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
+    for sites in sites.chunks(65536) {
+        let mut rg = writer.next_row_group()?;
+        if let Some(mut column) = rg.next_column()? {
+            let values = sites
+                .iter()
+                .map(|site| site.protein.as_ref().into())
+                .collect::<Vec<ByteArray>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            column.close()?;
+        }
+        if let Some(mut column) = rg.next_column()? {
+            let values = sites
+                .iter()
+                .map(|site| (site.position + 1) as i32)
+                .collect::<Vec<_>>();
+            column
+                .typed::<Int32Type>()
+                .write_batch(&values, None, None)?;
+            column.close()?;
+        }
+        if let Some(mut column) = rg.next_column()? {
+            let values = sites
+                .iter()
+                .map(|site| vec![site.residue].into())
+                .collect::<Vec<ByteArray>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            column.close()?;
+        }
+        if let Some(mut column) = rg.next_column()? {
+            let values = sites
+                .iter()
+                .map(|site| site.modification.as_ref().into())
+                .collect::<Vec<ByteArray>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            column.close()?;
+        }
+        rg.close()?;
+    }
+    writer.into_inner().map(|bytes| bytes.to_vec())
+}
 
 pub struct PtmSiteRecord {
     pub psm_id: i64,
@@ -948,6 +1093,29 @@ pub fn serialize_lfq<H: BuildHasher>(
 mod ptm_tests {
     use super::*;
     use parquet::file::reader::{FileReader, SerializedFileReader};
+    use std::sync::Arc;
+
+    #[test]
+    fn ptm_library_round_trip() {
+        let sites = vec![
+            PtmLibrarySite {
+                protein: Arc::from("P12345"),
+                position: 41,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+            PtmLibrarySite {
+                protein: Arc::from("P12345"),
+                position: 41,
+                residue: b'S',
+                modification: Arc::from("Phospho"),
+            },
+        ];
+        let encoded = serialize_ptm_library(&sites).unwrap();
+        let decoded = deserialize_ptm_library(encoded).unwrap();
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded.sites_for("P12345")[0], sites[0]);
+    }
 
     #[test]
     fn serialize_ptm_site_reports() {

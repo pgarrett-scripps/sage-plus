@@ -262,6 +262,7 @@ For additional information about configuration options and output file formats, 
       "]": [111.0]          // Applied to protein C-terminus
     },
     "max_variable_mods": 2, // Optional[int] {default=2} Limit modifications on each peptide
+    "max_total_variable_mods": 2, // Exhaustive + PTM-library placements
     "max_combinations": 8,  // Optional[int] {default=null} Limit total variants per peptide
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
@@ -409,11 +410,13 @@ Example:
 #### Variable Modifications
 
 - **max_variable_mods**: Integer. Limit the total variable modifications on each peptide (default: 2).
+- **max_total_variable_mods**: Integer. Limit exhaustive and PTM-library-supported variable modifications combined. Defaults to `max_variable_mods` and cannot be lower.
 - **max_combinations**: Integer. Optional hard cap on the total variants generated per input peptide, including the unmodified form. Variants with fewer modifications are retained first. Values below 1 are treated as 1 (default: unlimited).
-- **static_mods** and **variable_mods** accept existing bare numeric masses or structured objects. Structured objects require `mass` and may contain `name`, `neutral_losses`, and `neutral_loss_mode`; variable modifications may additionally contain `max_count`.
+- **static_mods** and **variable_mods** accept existing bare numeric masses or structured objects. Structured objects require `mass` and may contain `name`, `neutral_losses`, and `neutral_loss_mode`; variable modifications may additionally contain `max_count` and `site_mode`.
 - **name**: Optional display label. Named peptide modifications render as `[Name]`; unnamed and legacy entries retain numeric mass rendering.
 - **neutral_losses**: Optional list of positive neutral-loss masses. During full scoring, retained and loss forms from the same cleavage and charge are alternatives and contribute at most one match. When multiple applicable modified sites occur in one fragment, their allowed loss choices are combined and duplicate total losses are removed.
 - **neutral_loss_mode**: Either `"optional"` (default) or `"required"`. Optional mode generates the retained fragment plus configured losses. Required mode suppresses the retained form for fragments containing the modification and requires at least one configured neutral loss. Preliminary indexing retains one canonical form per cleavage to avoid favoring modifications with more configured fragment alternatives.
+- **site_mode**: Either `"exhaustive"` (default), `"library"`, or `"both"`. Library-backed modes require `name` and `max_count`. Entries with the same name across residue specificities are one logical modification and must have identical mass, limit, name, and neutral-loss settings.
   - Example: Apply a variable modification of 15.9949 to methionine, 49.2022 to the C-terminus of the peptide, 42.0 to the N-terminus of the protein, and 111.0 to the C-terminus of the protein.
     ```jsonc
     "database": {
@@ -433,6 +436,50 @@ Example:
       }
     }
     ```
+
+#### PTM site libraries
+
+A PTM library is a Parquet or TSV table containing observed locations only. Modification
+masses, names, limits, and neutral losses remain defined in `variable_mods`. The format is
+selected from the `.parquet`, `.tsv`, or `.tsv.gz` filename extension.
+
+Required columns are `protein` (UTF-8), `position` (one-based integer), `residue`
+(one-letter UTF-8), and `modification` (the exact configured modification name).
+Additional evidence columns are allowed and ignored during database construction.
+When `ptm_library` is configured, every variable modification must specify `max_count`;
+library-referenced modifications must also have a unique, non-empty `name`.
+
+```json
+"database": {
+  "variable_mods": {
+    "S": [{
+      "name": "Phospho",
+      "mass": 79.966331,
+      "max_count": 3,
+      "site_mode": "both",
+      "neutral_losses": [97.976896]
+    }]
+  },
+  "max_variable_mods": 1,
+  "max_total_variable_mods": 3,
+  "max_combinations": 1000,
+  "ptm_library": {
+    "path": "discovery-sites.tsv",
+    "strict": true
+  }
+}
+```
+
+`max_variable_mods` limits placements generated exhaustively. Library-supported
+placements do not consume that budget, but do consume `max_total_variable_mods`, the
+named modification's `max_count`, and `max_combinations`. All candidates are enumerated
+together before decoy generation and indexing. With no library configured, existing
+modification behavior is unchanged.
+
+When PTM localization is enabled for a FASTA search, Sage also writes both
+`results.sage.ptm-library.parquet` and `results.sage.ptm-library.tsv`. They contain the
+passing localized sites whose modification names match the configured variable
+modifications; either file can be supplied to a later search through `ptm_library.path`.
   - Syntax:
     "^X": Modification to be applied to amino acid X if it appears at the N-terminus of a peptide
     "$X": Modification to be applied to amino acid X if it appears at the C-terminus of a peptide

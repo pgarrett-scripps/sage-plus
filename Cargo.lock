@@ -2803,6 +2803,7 @@ dependencies = [
 name = "sage-core"
 version = "0.15.0-beta.2"
 dependencies = [
+ "csv",
  "dashmap",
  "fnv",
  "itertools 0.10.5",

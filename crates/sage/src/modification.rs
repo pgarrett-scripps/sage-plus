@@ -19,6 +19,19 @@ pub enum NeutralLossMode {
     Required,
 }
 
+/// Controls where candidates for a variable modification are generated.
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SiteMode {
+    /// Generate the modification at every compatible site from the config.
+    #[default]
+    Exhaustive,
+    /// Generate the modification only at sites listed in the PTM library.
+    Library,
+    /// Generate exhaustive candidates and allow library sites as targeted additions.
+    Both,
+}
+
 fn is_optional(mode: &NeutralLossMode) -> bool {
     *mode == NeutralLossMode::Optional
 }
@@ -112,6 +125,12 @@ pub struct VariableModification {
     pub neutral_losses: Vec<f32>,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
+    #[serde(default, skip_serializing_if = "is_exhaustive")]
+    pub site_mode: SiteMode,
+}
+
+fn is_exhaustive(mode: &SiteMode) -> bool {
+    *mode == SiteMode::Exhaustive
 }
 
 impl<'de> Deserialize<'de> for VariableModification {
@@ -131,6 +150,8 @@ impl<'de> Deserialize<'de> for VariableModification {
             neutral_losses: Vec<f32>,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
+            #[serde(default)]
+            site_mode: SiteMode,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -146,6 +167,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             name: raw.name,
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
+            site_mode: raw.site_mode,
         })
     }
 }
@@ -378,6 +400,13 @@ impl VarModEntry {
             ),
         }
     }
+
+    pub fn site_mode(&self) -> SiteMode {
+        match self {
+            VarModEntry::Mass(_) => SiteMode::Exhaustive,
+            VarModEntry::Detailed(modification) => modification.site_mode,
+        }
+    }
 }
 
 use crate::mass::VALID_AA;
@@ -569,6 +598,7 @@ mod test {
             name: None,
             neutral_losses: vec![],
             neutral_loss_mode: NeutralLossMode::Optional,
+            site_mode: SiteMode::Exhaustive,
         });
         assert_eq!(entry.mass(), 15.9949);
         assert_eq!(entry.max_count(), Some(1));
@@ -608,7 +638,8 @@ mod test {
                 "max_count": 2,
                 "name": "Phospho",
                 "neutral_losses": [97.9769],
-                "neutral_loss_mode": "required"
+                "neutral_loss_mode": "required",
+                "site_mode": "both"
             }"#,
         )
         .unwrap();
@@ -619,6 +650,7 @@ mod test {
         assert_eq!(entry.name.as_deref(), Some("Phospho"));
         assert_eq!(entry.neutral_losses, vec![97.9769]);
         assert_eq!(entry.neutral_loss_mode, NeutralLossMode::Required);
+        assert_eq!(entry.site_mode, SiteMode::Both);
 
         let round_trip: VarModEntry =
             serde_json::from_value(serde_json::to_value(entry).unwrap()).unwrap();
@@ -684,6 +716,7 @@ mod test {
                     name: None,
                     neutral_losses: vec![],
                     neutral_loss_mode: NeutralLossMode::Optional,
+                    site_mode: SiteMode::Exhaustive,
                 }),
             ],
         );
@@ -695,6 +728,7 @@ mod test {
                 name: None,
                 neutral_losses: vec![],
                 neutral_loss_mode: NeutralLossMode::Optional,
+                site_mode: SiteMode::Exhaustive,
             })],
         );
         let result = validate_var_mods(Some(raw));

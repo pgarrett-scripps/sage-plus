@@ -11,6 +11,7 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+csv = "1"
 dashmap = { version = "5.4.0", features = ["rayon"] }
 fnv = "1.0"
 itertools = "0.10"

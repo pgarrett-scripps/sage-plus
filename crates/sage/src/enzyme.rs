@@ -19,6 +19,8 @@ pub struct Digest {
     pub sequence: String,
     /// Protein accession
     pub protein: Arc<str>,
+    /// Zero-based start offset of this peptide in the source protein.
+    pub protein_start: u32,
     /// Missed cleavages
     pub missed_cleavages: u8,
     /// Is this an N-terminal peptide of the protein?
@@ -27,7 +29,13 @@ pub struct Digest {
 
 pub struct DigestGroup {
     pub reference: Digest,
-    pub proteins: Vec<Arc<str>>,
+    pub origins: Vec<ProteinOccurrence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ProteinOccurrence {
+    pub protein: Arc<str>,
+    pub start: u32,
 }
 
 pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
@@ -43,24 +51,33 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
     });
     let mut digests = digests.into_iter();
     let first = digests.next().expect("checked non-empty above");
-    let first_protein = first.protein.clone();
+    let first_origin = ProteinOccurrence {
+        protein: first.protein.clone(),
+        start: first.protein_start,
+    };
     let mut curr_group = DigestGroup {
         reference: first,
-        proteins: vec![first_protein],
+        origins: vec![first_origin],
     };
     for digest in digests {
         if digest.decoy == curr_group.reference.decoy
             && digest.position == curr_group.reference.position
             && digest.sequence == curr_group.reference.sequence
         {
-            curr_group.proteins.push(digest.protein);
+            curr_group.origins.push(ProteinOccurrence {
+                protein: digest.protein,
+                start: digest.protein_start,
+            });
         } else {
-            curr_group.proteins.sort_unstable();
+            curr_group.origins.sort_unstable();
             groups.push(curr_group);
-            let protein = digest.protein.clone();
+            let origin = ProteinOccurrence {
+                protein: digest.protein.clone(),
+                start: digest.protein_start,
+            };
             curr_group = DigestGroup {
                 reference: digest,
-                proteins: vec![protein],
+                origins: vec![origin],
             };
         }
     }
@@ -93,6 +110,7 @@ impl Digest {
             decoy: true,
             semi_enzymatic: self.semi_enzymatic,
             protein: self.protein.clone(),
+            protein_start: self.protein_start,
             sequence: sequence.into_iter().collect(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
@@ -310,8 +328,8 @@ impl EnzymeParameters {
             self.semi_enzymatic_sites(&mut sites);
         }
 
-        // Keep a set of peptides that have been digested from this sequence
-        // - handles cases where the same peptide occurs multiple times in a protein
+        // Keep ranges unique while preserving repeated peptide sequences at
+        // different protein positions for protein-coordinate PTM libraries.
         let mut seen = FnvHashSet::default();
 
         for site in sites.iter_mut() {
@@ -332,7 +350,7 @@ impl EnzymeParameters {
                 (false, false) => Position::Internal,
             };
 
-            if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert(sequence) {
+            if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert((start, end)) {
                 digests.push(Digest {
                     sequence: sequence.into(),
                     missed_cleavages: site.missed_cleavages,
@@ -340,6 +358,7 @@ impl EnzymeParameters {
                     semi_enzymatic: site.semi_enzymatic,
                     position,
                     protein: protein.clone(),
+                    protein_start: start as u32,
                 });
             }
         }
@@ -364,6 +383,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
             Digest {
                 decoy: false,
@@ -372,6 +392,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
         ];
 
@@ -387,6 +408,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Nterm,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
             Digest {
                 decoy: false,
@@ -395,6 +417,7 @@ mod test {
                 missed_cleavages: 0,
                 position: Position::Internal,
                 protein: Arc::from(String::default()),
+                protein_start: 0,
             },
         ];
 
@@ -655,9 +678,9 @@ mod test {
     }
 
     #[test]
-    fn ensure_unique() {
+    fn preserve_repeated_sequence_coordinates() {
         let sequence = "KVEGAQNQGKKVEGAQNQGK";
-        let expected = vec!["VEGAQNQGK"];
+        let expected = vec![("VEGAQNQGK".to_string(), 1), ("VEGAQNQGK".to_string(), 11)];
 
         let tryp = EnzymeParameters {
             min_len: 2,
@@ -670,7 +693,7 @@ mod test {
             expected,
             tryp.digest(sequence, Arc::default())
                 .into_iter()
-                .map(|d| d.sequence)
+                .map(|d| (d.sequence, d.protein_start))
                 .collect::<Vec<_>>()
         );
     }

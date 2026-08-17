@@ -427,6 +427,9 @@ impl Input {
         let memory_limits = self.memory_limits()?;
         let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self.database.make_parameters();
+        database
+            .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
+            .map_err(anyhow::Error::msg)?;
 
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
