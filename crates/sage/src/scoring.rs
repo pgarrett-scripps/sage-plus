@@ -15,7 +15,7 @@ pub enum ScoreType {
 }
 
 /// Structure to hold temporary scores
-#[derive(Copy, Clone, Default, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Default, Debug, PartialEq)]
 struct Score {
     peptide: PeptideIx,
     matched_b: u16,
@@ -32,6 +32,12 @@ struct Score {
 }
 
 impl Eq for Score {}
+
+impl PartialOrd for Score {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl Ord for Score {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -1079,6 +1085,30 @@ mod tests {
     use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
     use crate::peptide::Peptide;
     use std::{collections::HashMap, sync::Arc};
+
+    #[test]
+    fn score_ordering_uses_hyperscore() {
+        let database_first = Score {
+            peptide: PeptideIx(0),
+            hyperscore: 1.0,
+            ..Default::default()
+        };
+        let database_last = Score {
+            peptide: PeptideIx(10_000),
+            hyperscore: 100.0,
+            ..Default::default()
+        };
+
+        assert!(database_last > database_first);
+        assert_eq!(
+            database_last.partial_cmp(&database_first),
+            Some(database_last.cmp(&database_first))
+        );
+
+        let mut candidates = vec![database_first, database_last];
+        bounded_min_heapify(&mut candidates, 1);
+        assert_eq!(candidates[0].peptide, database_last.peptide);
+    }
 
     #[test]
     fn longest_series() {
