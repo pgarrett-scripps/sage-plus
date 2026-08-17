@@ -12,13 +12,17 @@ use std::collections::HashMap;
 use std::hash::BuildHasher;
 
 use parquet::data_type::{BoolType, ByteArray, FloatType, Int64Type};
+use parquet::errors::ParquetError;
+use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedColumnWriter;
+use parquet::record::{Field, Row};
 use parquet::{
     basic::ZstdLevel,
     data_type::{ByteArrayType, DataType, Int32Type},
     file::{properties::WriterProperties, writer::SerializedFileWriter},
     schema::types::Type,
 };
+use sage_core::cleavage::CustomCleavageLibrary;
 use sage_core::database::IndexedDatabase;
 use sage_core::ion_series::Kind;
 use sage_core::lfq::{Peak, PrecursorId};
@@ -60,6 +64,108 @@ pub struct ProteinSiteRecord {
     pub best_delta_localization_score: f32,
     pub best_localization_q_value: f32,
     pub best_spectrum_q: f32,
+}
+
+/// Read a protein-specific custom cleavage library from Parquet bytes.
+/// Required columns are UTF-8 `protein` and integer `position`; optional
+/// `context` is UTF-8 and may be null.
+pub fn deserialize_custom_cleavage_sites(
+    bytes: Vec<u8>,
+) -> parquet::errors::Result<CustomCleavageLibrary> {
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let columns = reader
+        .metadata()
+        .file_metadata()
+        .schema_descr()
+        .columns()
+        .iter()
+        .map(|column| column.name())
+        .collect::<Vec<_>>();
+    for required in ["protein", "position"] {
+        if !columns.contains(&required) {
+            return Err(ParquetError::General(format!(
+                "custom cleavage-site Parquet is missing required `{required}` column"
+            )));
+        }
+    }
+
+    let mut records = Vec::new();
+    for (index, row) in reader.get_row_iter(None)?.enumerate() {
+        let row_number = index + 1;
+        let row = row?;
+        let protein = match row_field(&row, "protein") {
+            Some(Field::Str(protein)) => protein.clone(),
+            Some(field) => {
+                return Err(ParquetError::General(format!(
+                    "custom cleavage-site Parquet row {row_number} has non-string `protein` value `{field}`"
+                )));
+            }
+            None => {
+                return Err(ParquetError::General(format!(
+                    "custom cleavage-site Parquet row {row_number} is missing `protein`"
+                )));
+            }
+        };
+        let position = parquet_position(row_field(&row, "position"), row_number)?;
+        let context = match row_field(&row, "context") {
+            None | Some(Field::Null) => None,
+            Some(Field::Str(context)) => Some(context.clone()),
+            Some(field) => {
+                return Err(ParquetError::General(format!(
+                    "custom cleavage-site Parquet row {row_number} has non-string `context` value `{field}`"
+                )));
+            }
+        };
+        records.push((protein, position, context));
+    }
+
+    CustomCleavageLibrary::from_records(records)
+        .map_err(|error| ParquetError::General(error.to_string()))
+}
+
+fn row_field<'a>(row: &'a Row, name: &str) -> Option<&'a Field> {
+    row.get_column_iter()
+        .find_map(|(column, field)| (column == name).then_some(field))
+}
+
+fn parquet_position(field: Option<&Field>, row: usize) -> parquet::errors::Result<usize> {
+    let value = match field {
+        Some(Field::Byte(value)) => i64::from(*value),
+        Some(Field::Short(value)) => i64::from(*value),
+        Some(Field::Int(value)) => i64::from(*value),
+        Some(Field::Long(value)) => *value,
+        Some(Field::UByte(value)) => return Ok(usize::from(*value)),
+        Some(Field::UShort(value)) => return Ok(usize::from(*value)),
+        Some(Field::UInt(value)) => {
+            return usize::try_from(*value).map_err(|_| {
+                ParquetError::General(format!(
+                "custom cleavage-site Parquet row {row} has `position` outside the supported range"
+            ))
+            })
+        }
+        Some(Field::ULong(value)) => {
+            return usize::try_from(*value).map_err(|_| {
+                ParquetError::General(format!(
+                    "custom cleavage-site Parquet row {row} has `position` outside the supported range"
+                ))
+            });
+        }
+        Some(field) => {
+            return Err(ParquetError::General(format!(
+                "custom cleavage-site Parquet row {row} has non-integer `position` value `{field}`"
+            )));
+        }
+        None => {
+            return Err(ParquetError::General(format!(
+                "custom cleavage-site Parquet row {row} is missing `position`"
+            )));
+        }
+    };
+    usize::try_from(value).map_err(|_| {
+        ParquetError::General(format!(
+            "custom cleavage-site Parquet row {row} has negative `position` {value}"
+        ))
+    })
 }
 
 fn ptm_site_schema() -> parquet::errors::Result<Type> {
@@ -948,6 +1054,49 @@ pub fn serialize_lfq<H: BuildHasher>(
 mod ptm_tests {
     use super::*;
     use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    #[test]
+    fn deserialize_custom_cleavage_library() -> parquet::errors::Result<()> {
+        let schema = parquet::schema::parser::parse_message_type(
+            r#"
+            message schema {
+                required byte_array protein (utf8);
+                required int64 position;
+                required byte_array context (utf8);
+            }
+            "#,
+        )
+        .unwrap();
+        let mut writer = SerializedFileWriter::new(
+            Vec::new(),
+            schema.into(),
+            WriterProperties::default().into(),
+        )
+        .unwrap();
+        let mut row_group = writer.next_row_group().unwrap();
+        write_required_column!(
+            row_group,
+            vec![ByteArray::from("P1"), ByteArray::from("P2")],
+            ByteArrayType
+        );
+        write_required_column!(row_group, vec![4_i64, 0_i64], Int64Type);
+        write_required_column!(
+            row_group,
+            vec![ByteArray::from("PEPK|TIDE"), ByteArray::from("A|CDE")],
+            ByteArrayType
+        );
+        row_group.close().unwrap();
+        let bytes = writer.into_inner().unwrap();
+
+        let library = deserialize_custom_cleavage_sites(bytes).unwrap();
+        let fasta =
+            sage_core::fasta::Fasta::parse(">P1\nMPEPKTIDER\n>P2\nACDE\n".into(), "rev_", true);
+        let validated = library.validate(&fasta).unwrap();
+        assert_eq!(validated.boundaries_for("P1"), &[5]);
+        assert_eq!(validated.boundaries_for("P2"), &[1]);
+        assert_eq!(validated.sites_without_context, 0);
+        Ok(())
+    }
 
     #[test]
     fn serialize_ptm_site_reports() {

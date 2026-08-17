@@ -1,4 +1,5 @@
 use crate::bitmap::BitmapIndex;
+use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonGroupSeries, Kind};
@@ -103,6 +104,9 @@ pub struct Builder {
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
     /// No variable/static mods are applied; sequences are used as-is.
     pub peptides: Option<String>,
+    /// Path to a protein-specific custom cleavage-site TSV or Parquet file.
+    /// Required columns: `protein`, `position`; optional column: `context`.
+    pub custom_cleavage_sites: Option<String>,
     /// Number of sequences to handle simultaneously when pre-filtering the db
     pub prefilter_chunk_size: Option<usize>,
     /// Pre-filter the database to minimize memory usage
@@ -130,6 +134,7 @@ impl Builder {
             generate_decoys: self.generate_decoys.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
             peptides: self.peptides,
+            custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
             prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
@@ -159,6 +164,7 @@ pub struct Parameters {
     pub generate_decoys: bool,
     pub fasta: String,
     pub peptides: Option<String>,
+    pub custom_cleavage_sites: Option<String>,
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
     pub prefilter_low_memory: bool,
@@ -225,6 +231,14 @@ impl Parameters {
     /// making this a conservative upper bound for rejecting unsafe searches before the
     /// variable-modification expansion begins.
     pub fn estimate_memory(&self, fasta: &Fasta) -> DatabaseMemoryEstimate {
+        self.estimate_memory_with_custom_cleavages(fasta, None)
+    }
+
+    pub fn estimate_memory_with_custom_cleavages(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> DatabaseMemoryEstimate {
         const ALLOCATION_OVERHEAD: u64 = 16;
 
         let enzyme: EnzymeParameters = self.enzyme.clone().into();
@@ -234,7 +248,11 @@ impl Parameters {
         let mut peptide_bytes = 0u64;
 
         for (protein, sequence) in &fasta.targets {
-            for digest in enzyme.digest(sequence, protein.clone()) {
+            let boundaries = custom_cleavages
+                .map(|library| library.boundaries_for(protein))
+                .unwrap_or_default();
+            for digest in enzyme.digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
+            {
                 let sequence_len = digest.sequence.len() as u64;
                 let variants = self
                     .variable_variant_count(&digest)
@@ -499,9 +517,17 @@ impl Parameters {
 
     /// Digest and group proteins without applying variable modifications.
     pub fn digest_unmodified(&self, fasta: &Fasta) -> Vec<DigestGroup> {
+        self.digest_unmodified_with_custom_cleavages(fasta, None)
+    }
+
+    pub fn digest_unmodified_with_custom_cleavages(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
         let enzyme = self.enzyme.clone().into();
-        let digests = fasta.digest(&enzyme);
+        let digests = fasta.digest_with_custom_cleavages(&enzyme, custom_cleavages);
 
         log::trace!("grouping digests");
         let start_num = digests.len();
@@ -562,7 +588,15 @@ impl Parameters {
     }
 
     pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
-        self.modify_digests(self.digest_unmodified(fasta))
+        self.digest_with_custom_cleavages(fasta, None)
+    }
+
+    pub fn digest_with_custom_cleavages(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> Vec<Peptide> {
+        self.modify_digests(self.digest_unmodified_with_custom_cleavages(fasta, custom_cleavages))
     }
 
     pub fn reorder_peptides(target_decoys: &mut Vec<Peptide>) {
@@ -704,7 +738,15 @@ impl Parameters {
     }
 
     pub fn build(self, fasta: Fasta) -> IndexedDatabase {
-        let target_decoys = self.digest(&fasta);
+        self.build_with_custom_cleavages(fasta, None)
+    }
+
+    pub fn build_with_custom_cleavages(
+        self,
+        fasta: Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> IndexedDatabase {
+        let target_decoys = self.digest_with_custom_cleavages(&fasta, custom_cleavages);
         self.build_from_peptides(target_decoys)
     }
 
@@ -1058,6 +1100,7 @@ mod test {
     use std::sync::Arc;
 
     use super::*;
+    use crate::cleavage::CustomCleavageLibrary;
 
     #[test]
     fn binary_search_slice_smoke() {
@@ -1195,6 +1238,7 @@ mod test {
             generate_decoys: false,
             fasta: "none".into(),
             peptides: None,
+            custom_cleavage_sites: None,
             prefilter: false,
             prefilter_chunk_size: 0,
             prefilter_low_memory: true,
@@ -1226,6 +1270,39 @@ mod test {
             peptides.last().unwrap().proteins,
             vec!["sp|AAAAA".to_string().into()]
         );
+    }
+
+    #[test]
+    fn custom_cleavages_flow_through_modification_and_memory_paths() {
+        let fasta = Fasta::parse(">P1\nAAKAPEPTIDERQQQK\n".into(), "rev_", true);
+        let library =
+            CustomCleavageLibrary::from_tsv("protein\tposition\tcontext\nP1\t7\tAPEPT|IDER\n")
+                .unwrap()
+                .validate(&fasta)
+                .unwrap();
+        let mut builder = Builder::default();
+        builder.enzyme = Some(EnzymeBuilder {
+            missed_cleavages: Some(1),
+            min_len: Some(3),
+            max_len: Some(50),
+            ..Default::default()
+        });
+        builder.generate_decoys = Some(false);
+        let parameters = builder.make_parameters();
+
+        let ordinary = parameters.digest(&fasta);
+        let custom = parameters.digest_with_custom_cleavages(&fasta, Some(&library));
+        let custom_sequences = custom
+            .iter()
+            .map(|peptide| std::str::from_utf8(&peptide.sequence).unwrap())
+            .collect::<Vec<_>>();
+        assert!(custom.len() > ordinary.len());
+        assert!(custom_sequences.contains(&"APEPT"));
+        assert!(custom_sequences.contains(&"IDER"));
+
+        let estimate = parameters.estimate_memory_with_custom_cleavages(&fasta, Some(&library));
+        assert!(estimate.modified_peptides as usize >= custom.len());
+        assert!(estimate.modified_peptides > parameters.estimate_memory(&fasta).modified_peptides);
     }
 
     #[test]

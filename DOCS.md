@@ -217,6 +217,25 @@ Sage will process a protein into peptides via several routes listed below. Curre
 - Non-enzymatic: `database.enzyme.cleave_at = ""` - All potential peptides between `min_len` and `max_len` will be generated from the sequence
 - No digestion: `database.enzyme.cleave_at = "$"` - FASTA entries will be used as-is, subject to `min_len` and `max_len` options
 
+Protein-specific cleavage sites can be added to any FASTA digest with
+`database.custom_cleavage_sites = "cleavage-sites.tsv"`. TSV and Parquet files
+are supported and require `protein` and `position` columns. In Parquet,
+`protein` must be UTF-8 and `position` must be an integer. `position` is the
+zero-based index of the residue immediately before the cut; for example,
+position `0` cuts between the first and second residues. An optional UTF-8
+`context` column validates a short sequence window, with `|` marking the cut:
+
+```text
+protein	position	context
+P12345	86	KLGF|APQT
+```
+
+Both products adjacent to each site are generated using the configured enzyme
+boundaries, missed-cleavage allowance, length, mass, and modification limits.
+Normal digest peptides remain unchanged. Context mismatches and terminal or
+out-of-range positions are errors; sites without context are accepted with a
+warning.
+
 
 ### Example configuration file
 
@@ -265,7 +284,8 @@ For additional information about configuration options and output file formats, 
     "max_combinations": 8,  // Optional[int] {default=null} Limit total variants per peptide
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
-    "fasta": "dual.fasta"   // str: mandatory path to FASTA file
+    "fasta": "dual.fasta",  // str: mandatory path to FASTA file
+    "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
   "quant": {                // Optional - specify only if TMT or LFQ
     "tmt": "Tmt16",         // Optional[str] {default=null}, one of "Tmt6", "Tmt10", "Tmt11", "Tmt16", or "Tmt18"

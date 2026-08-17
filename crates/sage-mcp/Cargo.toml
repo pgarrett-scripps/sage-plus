@@ -16,7 +16,7 @@ anyhow = "1"
 csv = "1"
 rmcp = { version = "3.1.2", features = ["server", "transport-io"] }
 sage-cli = { path = "../sage-cli" }
-sage-cloudpath = { path = "../sage-cloudpath" }
+sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 sage-core = { path = "../sage" }
 schemars = "1"
 serde = { version = "1", features = ["derive"] }

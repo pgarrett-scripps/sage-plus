@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
+- Additive protein-specific cleavage-site TSV or Parquet input with optional FASTA sequence-context validation.
 - Optional `max_memory_gb` and `min_free_memory_gb` safeguards that preflight unmodified peptides, variable-modification expansion, and fragment indexes, then monitor the running process to stop Sage before configured limits are crossed.
 - A top-level `batch_size` configuration option; the existing `--batch-size` command-line option takes precedence.
 - **Bitmap-based preliminary search** (`use_bitmap: true`): an alternative to the bucketed binary-search preliminary scoring stage.

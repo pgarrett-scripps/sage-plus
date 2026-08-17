@@ -292,9 +292,28 @@ impl EnzymeParameters {
     }
 
     pub fn digest(&self, sequence: &str, protein: Arc<str>) -> Vec<Digest> {
+        self.digest_with_custom_cleavages(sequence, protein, &[])
+    }
+
+    /// Perform the configured digest and add peptides anchored at the supplied
+    /// protein-specific cleavage boundaries. Boundaries are zero-based offsets
+    /// into `sequence` (one greater than the user-facing residue index).
+    pub fn digest_with_custom_cleavages(
+        &self,
+        sequence: &str,
+        protein: Arc<str>,
+        custom_boundaries: &[usize],
+    ) -> Vec<Digest> {
         let n = sequence.len();
         let mut digests = Vec::new();
         let mut sites = self.cleavage_sites(sequence);
+        let mut enzyme_boundaries = Vec::new();
+        if self.enzyme.is_some() {
+            enzyme_boundaries.push(0);
+            enzyme_boundaries.extend(sites.iter().map(|site| site.site.end));
+            enzyme_boundaries.sort_unstable();
+            enzyme_boundaries.dedup();
+        }
         // Allowing missed_cleavages with non-specific digest causes OOB panics
         // in the below indexing code
         let missed_cleavages = match self.enzyme {
@@ -308,6 +327,43 @@ impl EnzymeParameters {
 
         if self.is_semi_enzymatic() {
             self.semi_enzymatic_sites(&mut sites);
+        }
+
+        // A non-specific digest already contains every possible peptide. For
+        // enzymatic and no-digest modes, add only peptides that terminate at a
+        // nominated custom boundary and an ordinary enzyme/protein boundary.
+        if !enzyme_boundaries.is_empty() {
+            for &boundary in custom_boundaries {
+                if boundary == 0 || boundary >= n {
+                    continue;
+                }
+                let semi_enzymatic = enzyme_boundaries.binary_search(&boundary).is_err();
+                for (missed, &start) in enzyme_boundaries
+                    .iter()
+                    .rev()
+                    .filter(|&&candidate| candidate < boundary)
+                    .take(self.missed_cleavages as usize + 1)
+                    .enumerate()
+                {
+                    sites.push(DigestSite {
+                        site: start..boundary,
+                        missed_cleavages: missed as u8,
+                        semi_enzymatic,
+                    });
+                }
+                for (missed, &end) in enzyme_boundaries
+                    .iter()
+                    .filter(|&&candidate| candidate > boundary)
+                    .take(self.missed_cleavages as usize + 1)
+                    .enumerate()
+                {
+                    sites.push(DigestSite {
+                        site: boundary..end,
+                        missed_cleavages: missed as u8,
+                        semi_enzymatic,
+                    });
+                }
+            }
         }
 
         // Keep a set of peptides that have been digested from this sequence
@@ -764,6 +820,75 @@ mod test {
                 assert_eq!(digest.position, Position::Nterm);
             }
         }
+    }
+
+    #[test]
+    fn custom_cleavages_add_both_sides_with_missed_cleavages() {
+        let sequence = "AAKAPEPTIDERQQQK";
+        let tryp = EnzymeParameters {
+            min_len: 3,
+            max_len: 50,
+            missed_cleavages: 1,
+            enzyme: Enzyme::new("KR", "P", true, false),
+        };
+
+        let digests = tryp.digest_with_custom_cleavages(sequence, Arc::default(), &[8]);
+        let by_sequence = digests
+            .iter()
+            .map(|digest| (digest.sequence.as_str(), digest))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(by_sequence["APEPT"].missed_cleavages, 0);
+        assert_eq!(by_sequence["AAKAPEPT"].missed_cleavages, 1);
+        assert_eq!(by_sequence["IDER"].missed_cleavages, 0);
+        assert_eq!(by_sequence["IDERQQQK"].missed_cleavages, 1);
+        assert!(by_sequence["APEPT"].semi_enzymatic);
+        assert!(by_sequence["IDER"].semi_enzymatic);
+    }
+
+    #[test]
+    fn existing_enzyme_boundary_does_not_add_duplicates() {
+        let sequence = "AAKAPEPTIDER";
+        let tryp = EnzymeParameters {
+            min_len: 3,
+            max_len: 50,
+            missed_cleavages: 1,
+            enzyme: Enzyme::new("KR", "P", true, false),
+        };
+
+        let ordinary = tryp.digest(sequence, Arc::default());
+        let custom = tryp.digest_with_custom_cleavages(sequence, Arc::default(), &[3]);
+        assert_eq!(ordinary, custom);
+    }
+
+    #[test]
+    fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
+        let sequence = "ACDEFGHIK";
+        let no_digest = EnzymeParameters {
+            min_len: 3,
+            max_len: 50,
+            missed_cleavages: 0,
+            enzyme: Enzyme::new("$", "", true, false),
+        };
+        let sequences = no_digest
+            .digest_with_custom_cleavages(sequence, Arc::default(), &[4])
+            .into_iter()
+            .map(|digest| digest.sequence)
+            .collect::<HashSet<_>>();
+        assert!(sequences.contains("ACDE"));
+        assert!(sequences.contains("FGHIK"));
+        assert!(sequences.contains(sequence));
+
+        let nonspecific = EnzymeParameters {
+            min_len: 3,
+            max_len: 5,
+            missed_cleavages: 0,
+            enzyme: None,
+        };
+        assert_eq!(
+            nonspecific.digest(sequence, Arc::default()),
+            nonspecific.digest_with_custom_cleavages(sequence, Arc::default(), &[4])
+        );
     }
 
     /// Helper struct for generation of random sequences of valid amino acids

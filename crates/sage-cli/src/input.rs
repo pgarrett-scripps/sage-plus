@@ -373,6 +373,10 @@ impl Input {
             "Either `database.fasta` or `database.peptides` must be set"
         );
         ensure!(
+            self.database.custom_cleavage_sites.is_none() || self.database.fasta.is_some(),
+            "`database.custom_cleavage_sites` requires `database.fasta`"
+        );
+        ensure!(
             self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
             "`mzml_paths` must contain at least one spectra file"
         );
@@ -616,6 +620,26 @@ mod test {
         }
         assert_eq!(c.enzyme.map(|e| e.skip_suffix), Some([false; 26]));
 
+        Ok(())
+    }
+
+    #[test]
+    fn deserialize_custom_cleavage_site_path() -> Result<(), serde_json::Error> {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": {
+                "fasta": "proteome.fasta",
+                "custom_cleavage_sites": "cleavage-sites.tsv"
+            },
+            "precursor_tol": { "ppm": [-10.0, 10.0] },
+            "fragment_tol": { "ppm": [-20.0, 20.0] },
+            "mzml_paths": ["input.mzML"]
+        }))?;
+
+        assert_eq!(
+            input.database.custom_cleavage_sites.as_deref(),
+            Some("cleavage-sites.tsv")
+        );
+        assert!(input.validate().is_ok());
         Ok(())
     }
 
