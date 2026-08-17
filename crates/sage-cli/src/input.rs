@@ -19,6 +19,8 @@ pub struct PtmLocalizationSettings {
     /// Identification q-value cutoff for PSMs included in PTM site reports.
     #[serde(alias = "q_value")]
     pub psm_q_value: f32,
+    /// Arrangement-level false-localization-rate q-value cutoff.
+    pub localization_q_value: f32,
 }
 
 impl Default for PtmLocalizationSettings {
@@ -26,6 +28,7 @@ impl Default for PtmLocalizationSettings {
         Self {
             enabled: false,
             psm_q_value: 0.01,
+            localization_q_value: 0.01,
         }
     }
 }
@@ -393,6 +396,11 @@ impl Input {
                 && (0.0..=1.0).contains(&ptm_localization.psm_q_value),
             "ptm_localization.psm_q_value must be between 0 and 1"
         );
+        ensure!(
+            ptm_localization.localization_q_value.is_finite()
+                && (0.0..=1.0).contains(&ptm_localization.localization_q_value),
+            "ptm_localization.localization_q_value must be between 0 and 1"
+        );
 
         Ok(Search {
             version: clap::crate_version!().into(),
@@ -440,15 +448,18 @@ mod test {
     fn deserialize_ptm_localization_settings() -> Result<(), serde_json::Error> {
         let configured: PtmLocalizationSettings = serde_json::from_value(serde_json::json!({
             "enabled": true,
-            "psm_q_value": 0.025
+            "psm_q_value": 0.025,
+            "localization_q_value": 0.05
         }))?;
         assert!(configured.enabled);
         assert_eq!(configured.psm_q_value, 0.025);
+        assert_eq!(configured.localization_q_value, 0.05);
 
         let partial: PtmLocalizationSettings =
             serde_json::from_value(serde_json::json!({ "enabled": true }))?;
         assert!(partial.enabled);
         assert_eq!(partial.psm_q_value, 0.01);
+        assert_eq!(partial.localization_q_value, 0.01);
 
         let legacy_name: PtmLocalizationSettings =
             serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;

@@ -40,6 +40,8 @@ pub struct PtmSiteRecord {
     pub residue: String,
     pub localization_probability: f32,
     pub delta_localization_score: f32,
+    pub target_decoy_score: f32,
+    pub localization_q_value: f32,
     pub candidate_sites: i32,
     pub site_determining_ions_matched: i32,
     pub site_determining_ions_total: i32,
@@ -56,6 +58,7 @@ pub struct ProteinSiteRecord {
     pub num_psms: i32,
     pub best_localization_probability: f32,
     pub best_delta_localization_score: f32,
+    pub best_localization_q_value: f32,
     pub best_spectrum_q: f32,
 }
 
@@ -77,6 +80,8 @@ fn ptm_site_schema() -> parquet::errors::Result<Type> {
             required byte_array residue (utf8);
             required float localization_probability;
             required float delta_localization_score;
+            required float target_decoy_score;
+            required float localization_q_value;
             required int32 candidate_sites;
             required int32 site_determining_ions_matched;
             required int32 site_determining_ions_total;
@@ -99,6 +104,7 @@ fn protein_site_schema() -> parquet::errors::Result<Type> {
             required int32 num_psms;
             required float best_localization_probability;
             required float best_delta_localization_score;
+            required float best_localization_q_value;
             required float best_spectrum_q;
         }
         "#,
@@ -224,6 +230,22 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
             rg,
             records
                 .iter()
+                .map(|r| r.target_decoy_score)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.localization_q_value)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
                 .map(|r| r.candidate_sites)
                 .collect::<Vec<_>>(),
             Int32Type
@@ -333,6 +355,14 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
             records
                 .iter()
                 .map(|r| r.best_delta_localization_score)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.best_localization_q_value)
                 .collect::<Vec<_>>(),
             FloatType
         );
@@ -919,6 +949,8 @@ mod ptm_tests {
             residue: "S".into(),
             localization_probability: 0.982,
             delta_localization_score: 18.7,
+            target_decoy_score: 21.0,
+            localization_q_value: 0.01,
             candidate_sites: 2,
             site_determining_ions_matched: 6,
             site_determining_ions_total: 8,
@@ -933,7 +965,7 @@ mod ptm_tests {
                 .file_metadata()
                 .schema_descr()
                 .num_columns(),
-            18
+            20
         );
 
         let protein = serialize_protein_sites(&[ProteinSiteRecord {
@@ -946,6 +978,7 @@ mod ptm_tests {
             num_psms: 2,
             best_localization_probability: 0.982,
             best_delta_localization_score: 18.7,
+            best_localization_q_value: 0.01,
             best_spectrum_q: 0.005,
         }])
         .unwrap();
@@ -957,7 +990,7 @@ mod ptm_tests {
                 .file_metadata()
                 .schema_descr()
                 .num_columns(),
-            10
+            11
         );
     }
 }
