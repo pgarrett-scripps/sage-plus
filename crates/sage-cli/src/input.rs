@@ -324,22 +324,7 @@ impl Input {
             input.ptm_localization.get_or_insert_default().enabled = true;
         }
 
-        // avoid to later panic if these parameters are not set (but doesn't check if files exist)
-
-        ensure!(
-            input.database.fasta.is_some() || input.database.peptides.is_some(),
-            "Either `database.fasta` or `database.peptides` must be set. For more information try '--help'"
-        );
-        ensure!(
-            input
-                .mzml_paths
-                .as_ref()
-                .map(|p| p.len())
-                .unwrap_or_default()
-                > 0,
-            "`mzml_paths` must be set. For more information try '--help'"
-        );
-
+        input.validate()?;
         Ok(input)
     }
 
@@ -381,31 +366,37 @@ impl Input {
         }
     }
 
-    pub fn build(self) -> anyhow::Result<Search> {
-        let memory_limits = self.memory_limits()?;
-        let batch_size = resolve_batch_size(self.batch_size)?;
-        let database = self.database.make_parameters();
-
-        Self::check_mass_tolerances(&self.fragment_tol);
-        Self::check_mass_tolerances(&self.precursor_tol);
-
-        if let Some(isotope_errors) = self.isotope_errors {
-            if isotope_errors.0 > isotope_errors.1 {
-                log::error!("Minimum isotope_error value greater than maximum! Typical usage: `isotope_errors: [-1, 3]`");
-                std::process::exit(1);
-            }
+    /// Validate logical configuration constraints without reading inputs or writing outputs.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.database.fasta.is_some() || self.database.peptides.is_some(),
+            "Either `database.fasta` or `database.peptides` must be set"
+        );
+        ensure!(
+            self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
+            "`mzml_paths` must contain at least one spectra file"
+        );
+        if let Some((low, high)) = self.isotope_errors {
+            ensure!(
+                low <= high,
+                "isotope errors must be specified [low, high], received [{low}, {high}]"
+            );
         }
-        if let Some(charges) = self.precursor_charge {
-            if charges.0 > charges.1 {
-                log::error!(
-                    "Precursor charges should be specified [low, high], user provided: [{}, {}]",
-                    charges.0,
-                    charges.1
-                );
-                std::process::exit(1);
-            }
+        if let Some((low, high)) = self.precursor_charge {
+            ensure!(
+                low <= high,
+                "precursor charges must be specified [low, high], received [{low}, {high}]"
+            );
         }
-
+        if let (Some(min), Some(max)) = (self.min_peaks, self.max_peaks) {
+            ensure!(min <= max, "`min_peaks` cannot exceed `max_peaks`");
+        }
+        ensure!(
+            self.report_psms.unwrap_or(1) > 0,
+            "`report_psms` must be greater than zero"
+        );
+        self.memory_limits()?;
+        resolve_batch_size(self.batch_size)?;
         if let Some(rt_pct_tolerance) = self
             .quant
             .as_ref()
@@ -417,6 +408,29 @@ impl Input {
                 "`lfq_settings.rt_pct_tolerance` must not be zero"
             );
         }
+        if let Some(settings) = self.ptm_localization {
+            ensure!(
+                settings.psm_q_value.is_finite() && (0.0..=1.0).contains(&settings.psm_q_value),
+                "ptm_localization.psm_q_value must be between 0 and 1"
+            );
+            ensure!(
+                settings.localization_q_value.is_finite()
+                    && (0.0..=1.0).contains(&settings.localization_q_value),
+                "ptm_localization.localization_q_value must be between 0 and 1"
+            );
+        }
+        Ok(())
+    }
+
+    pub fn build(self) -> anyhow::Result<Search> {
+        self.validate()?;
+        let memory_limits = self.memory_limits()?;
+        let batch_size = resolve_batch_size(self.batch_size)?;
+        let database = self.database.make_parameters();
+
+        Self::check_mass_tolerances(&self.fragment_tol);
+        Self::check_mass_tolerances(&self.precursor_tol);
+
         let mzml_paths = self
             .mzml_paths
             .expect("'mzml_paths' must be provided!")
@@ -635,5 +649,20 @@ mod test {
         let method: AlignmentMethod = serde_json::from_value(serde_json::json!("nonlinear"))?;
         assert_eq!(method, AlignmentMethod::Nonlinear);
         Ok(())
+    }
+
+    #[test]
+    fn validation_returns_range_errors_instead_of_exiting() {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [3, -1],
+            "mzml_paths": ["test.mzML"]
+        }))
+        .unwrap();
+
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains("isotope errors"));
     }
 }

@@ -88,6 +88,10 @@ Options:
       --max-memory <GiB>
           Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
           (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
+      --events-jsonl <PATH>
+          Stream versioned JSONL job events to PATH (use '-' for stdout)
+      --validate-only
+          Validate the configuration and overrides without running a search
   -h, --help
           Print help information
   -V, --version
@@ -144,6 +148,35 @@ Every PSM row carries two additional columns, `ambiguity_sequence` and `mass_shi
 - **mass_shift**: the residual `expmass - calcmass` (in Da) that was placed, or `0.0` when the precursor matches within `mass_shift_ppm`.
 
 These are computed for every search; mods are rendered in the same `[+mass]`/`[Name]` notation as the `peptide` column. The threshold used to decide whether a precursor delta mass is a real shift is configurable via the top-level **`mass_shift_ppm`** parameter (default: 50.0). It is deliberately independent of `precursor_tol`, so wide/open searches still surface and place real shifts.
+
+## Machine-readable jobs
+
+Use `--validate-only` to check configuration and CLI overrides without reading the FASTA,
+spectra, or creating the output directory:
+
+```shell
+sage config.json --validate-only
+```
+
+Use `--events-jsonl <path>` to stream versioned, newline-delimited JSON events while a
+search runs. `--events-jsonl -` writes events to standard output. Human-readable logs remain
+on standard error, so standard output can be consumed directly by workflow engines and other
+applications.
+
+```shell
+sage config.json --events-jsonl run.events.jsonl
+```
+
+Every event contains `schema_version`, a monotonically increasing `sequence`, `elapsed_ms`,
+and an `event` discriminator. Events cover configuration validation, database construction,
+file reads, spectra processing, search progress, model fitting or fallback, FDR, written
+outputs, and terminal job state. Consumers should ignore unknown fields and event names so
+that compatible events can be added to schema version 1.
+
+Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
+accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
+`RunSummary` alongside telemetry. This application layer is intended to be shared by future
+protocol servers and user interfaces.
 
 ## Configuration file schema
 

@@ -1,3 +1,5 @@
+pub mod api;
+pub mod events;
 pub mod input;
 pub mod memory;
 pub mod output;
