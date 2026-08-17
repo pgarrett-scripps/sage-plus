@@ -20,6 +20,7 @@ This integration build adds the following features on top of upstream Sage:
 - PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
 - Enriched linear retention-time features with regularized, cross-validated variable-PTM offsets.
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
+- PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
 
 Most additions are opt-in; existing Sage defaults are retained where practical. See [DOCS.md](DOCS.md) for configuration and output details.
@@ -81,6 +82,21 @@ Linear regression with the original feature set remains the default retention-ti
 ```
 
 The `additive_ptm` feature set uses exact N1/C1 residue indicators, position-binned hydrophobicity and residue-property fractions. It then learns cross-validated, regularized offsets for each configured variable modification plus residue/terminal identity. Static modifications are excluded. Use `"features": "physicochemical"` for enriched linear features with generic modification descriptors.
+
+When nonzero precursor ion-mobility values are present, Sage can independently fit a peptide-grouped, cross-validated linear mobility model:
+
+```json
+"ion_mobility_model": {
+  "enabled": true,
+  "features": "additive_ptm",
+  "folds": 3,
+  "seed": 42,
+  "ptm_regularization": 25.0,
+  "min_training_psms": 200
+}
+```
+
+The enriched mobility model adds exact N1/C1 residues, physicochemical composition, peptide mass, m/z and charge features. `additive_ptm` learns regularized variable-PTM offsets with more strongly shrunk charge-specific deviations. It does not fit PTM-pair interactions, ignores static modifications, and falls back to the basic linear mobility features if the enriched fit fails.
 
 ## Interoperability
 

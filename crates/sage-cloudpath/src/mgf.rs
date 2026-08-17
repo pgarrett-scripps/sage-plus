@@ -47,6 +47,7 @@ pub struct QueryData {
     precursor_tol_unit: Option<String>,
     precursor_charge_array: Option<Vec<u8>>,
     rt_in_minutes: Option<f32>,
+    inverse_ion_mobility: Option<f32>,
     ion_mz_array: Vec<f32>,
     ion_intensity_array: Vec<f32>,
 }
@@ -65,6 +66,7 @@ impl QueryData {
         self.precursor_tol_unit = self.default_params.tol_unit.clone();
         self.precursor_charge_array = self.default_params.charge_array.clone();
         self.rt_in_minutes = None;
+        self.inverse_ion_mobility = None;
         self.ion_mz_array = Vec::new();
         self.ion_intensity_array = Vec::new();
     }
@@ -89,6 +91,7 @@ impl QueryData {
 
         for precursor in &mut self.precursors {
             precursor.isolation_window = isolation_window;
+            precursor.inverse_ion_mobility = self.inverse_ion_mobility;
 
             if let Some(charge_array) = &self.precursor_charge_array {
                 for &charge in charge_array.iter() {
@@ -192,6 +195,7 @@ impl QueryParser {
             Self::parse_tol,
             Self::parse_tol_unit,
             Self::parse_rt,
+            Self::parse_ion_mobility,
         ]
     }
 
@@ -250,6 +254,19 @@ impl QueryParser {
     pub fn parse_title(line: &str, query_data: &mut QueryData) -> Result<bool, MgfError> {
         if let Some(id_str) = line.strip_prefix("TITLE=") {
             query_data.id = id_str.to_string();
+            if let Some(mobility) = parse_inverse_ion_mobility(id_str) {
+                query_data.inverse_ion_mobility = Some(mobility);
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    pub fn parse_ion_mobility(line: &str, query_data: &mut QueryData) -> Result<bool, MgfError> {
+        if let Some(value) = line.strip_prefix("INVERSE_REDUCED_ION_MOBILITY=") {
+            if let Ok(mobility) = value.parse::<f32>() {
+                query_data.inverse_ion_mobility = Some(mobility);
+            }
             return Ok(true);
         }
         Ok(false)
@@ -319,6 +336,15 @@ impl QueryParser {
         }
         Ok(false)
     }
+}
+
+fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {
+    let value = title.split_once("1/K0=")?.1;
+    value
+        .split(|character: char| character.is_ascii_whitespace() || character == ',')
+        .next()?
+        .parse()
+        .ok()
 }
 
 pub struct MgfReader {
@@ -399,7 +425,7 @@ mod test {
     fn make_ions_section_spectrum_0() -> String {
         let s = r#"
         BEGIN IONS
-        TITLE=spectrum 0
+        TITLE=spectrum 0, 1/K0=0.966
         RTINSECONDS=0.8963232289
         PEPMASS=367.069682741984 56700.5185546875
         CHARGE=2+ and 3+
@@ -417,12 +443,14 @@ mod test {
     }
 
     fn run_asserts_for_spectrum_0(s: &RawSpectrum) {
-        assert_eq!(s.id, "spectrum 0");
+        assert_eq!(s.id, "spectrum 0, 1/K0=0.966");
         assert_eq!(s.ms_level, 2);
         assert_eq!(s.representation, Representation::Centroid);
         assert_eq!(s.precursors.len(), 2);
         assert_eq!(s.precursors[0].charge, Some(2));
         assert_eq!(s.precursors[1].charge, Some(3));
+        assert_eq!(s.precursors[0].inverse_ion_mobility, Some(0.966));
+        assert_eq!(s.precursors[1].inverse_ion_mobility, Some(0.966));
         assert!((s.precursors[0].mz - 367.069682741984).abs() < 0.0001);
         assert_eq!(s.precursors[0].intensity, Some(56700.5185546875));
         assert_eq!(

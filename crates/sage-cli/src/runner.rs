@@ -918,13 +918,18 @@ impl Runner {
         let mut outputs = self.batch_files(&scorer, parallel);
 
         // Establish provisional q-values from the search-only Poisson feature,
-        // then use confident PSMs for mass-error and retention-time alignment
-        // before final FDR fitting.
+        // then use confident PSMs for mass-error alignment and property-model
+        // training before final FDR fitting.
         outputs
             .features
             .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
         sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
         self.align_mass_errors(&mut outputs.features);
+
+        let has_ion_mobility = outputs
+            .features
+            .iter()
+            .any(|feature| feature.ims.is_finite() && feature.ims > 0.0);
 
         let needs_alignment = self.parameters.predict_rt
             || self.parameters.quant.lfq
@@ -947,7 +952,13 @@ impl Runner {
                 &mut outputs.features,
                 &self.parameters.retention_time_model,
             );
-            let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
+        }
+        if has_ion_mobility {
+            let _ = sage_core::ml::mobility_model::predict(
+                &self.database,
+                &mut outputs.features,
+                &self.parameters.ion_mobility_model,
+            );
         }
 
         let (q_spectrum, percolator_succeeded) = self.spectrum_fdr(&mut outputs.features);
