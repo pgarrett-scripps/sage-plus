@@ -2,6 +2,16 @@
 
 # Sage Plus
 
+> [!WARNING]
+> **Sage Plus is an experimental, actively developed downstream distribution.** Features are
+> being integrated rapidly and have not yet been comprehensively validated together. APIs,
+> configuration, output formats, and scientific behavior may change or contain unresolved
+> issues. Sage Plus is independently maintained, is not an official Sage release, and should
+> not be adopted accidentally as a drop-in replacement. Most users should use
+> [upstream Sage](https://github.com/lazear/sage). If you evaluate Sage Plus, pin an exact commit
+> or release and independently validate results before relying on them for production, clinical,
+> or published analyses.
+
 [![Rust](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml/badge.svg)](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml) [![Upstream Sage](https://img.shields.io/badge/upstream-lazear%2Fsage-blue)](https://github.com/lazear/sage)
 
 Sage Plus is a downstream distribution of the [Sage proteomics search engine](https://github.com/lazear/sage). It preserves Sage's core workflow while integrating additional PTM, modeling, performance, automation, and agent-facing capabilities. It is independently maintained and is not an official Sage release.
