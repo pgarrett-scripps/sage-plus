@@ -9,6 +9,7 @@ use sage_core::{
     lfq::LfqSettings,
     mass::Tolerance,
     ml::percolator::PercolatorSettings,
+    ml::retention_model::RetentionTimeSettings,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,7 @@ pub struct Search {
     pub min_matched_peaks: u16,
     pub report_psms: usize,
     pub predict_rt: bool,
+    pub retention_time_model: RetentionTimeSettings,
     pub mzml_paths: Vec<Url>,
     pub output_paths: Vec<Url>,
     pub bruker_config: BrukerProcessingConfig,
@@ -107,6 +109,7 @@ pub struct Input {
     pub deisotope: Option<bool>,
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
+    pub retention_time_model: Option<RetentionTimeSettings>,
     pub output_directory: Option<String>,
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
@@ -484,6 +487,7 @@ impl Input {
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
             predict_rt: self.predict_rt.unwrap_or(true),
+            retention_time_model: self.retention_time_model.unwrap_or_default(),
             output_paths: Vec::new(),
             write_pin: self.write_pin.unwrap_or(false),
             bruker_config: self.bruker_config.unwrap_or_default(),
@@ -523,7 +527,27 @@ fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
 mod test {
 
     use super::{resolve_batch_size, Input, PtmLocalizationSettings};
-    use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
+    use sage_core::{
+        database::EnzymeBuilder,
+        enzyme::EnzymeParameters,
+        ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
+    };
+
+    #[test]
+    fn deserialize_enriched_retention_time_settings() -> Result<(), serde_json::Error> {
+        let settings: RetentionTimeSettings = serde_json::from_value(serde_json::json!({
+            "features": "additive_ptm",
+            "folds": 5,
+            "seed": 7,
+            "ptm_regularization": 12.5
+        }))?;
+
+        assert_eq!(settings.features, RetentionTimeFeatureSet::AdditivePtm);
+        assert_eq!(settings.folds, 5);
+        assert_eq!(settings.seed, 7);
+        assert_eq!(settings.ptm_regularization, 12.5);
+        Ok(())
+    }
 
     #[test]
     fn deserialize_ptm_localization_settings() -> Result<(), serde_json::Error> {
