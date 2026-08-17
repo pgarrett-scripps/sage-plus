@@ -2338,7 +2338,7 @@ impl Runner {
         let mut report = Report::new(
             "Sage",
             &self.parameters.version,
-            Some("https://github.com/lazear/sage/blob/master/figures/logo.png?raw=true"),
+            Some("https://github.com/pgarrett-scripps/sage-plus/blob/main/figures/logo.png?raw=true"),
             "Sage Report",
         );
 

@@ -1,6 +1,6 @@
-# Contributing to Sage
+# Contributing to Sage Plus
 
-Thank you for your interest in contributing to Sage!
+Thank you for your interest in contributing to Sage Plus!
 
 Table of Contents:
 
@@ -12,20 +12,20 @@ Table of Contents:
 ## Feature Requests
 
 Feature requests should be reported in the
-[Sage issue tracker](https://github.com/lazear/sage/issues). To reduce the number of
+[Sage Plus issue tracker](https://github.com/pgarrett-scripps/sage-plus/issues). To reduce the number of
 duplicates, please make sure to check the existing issues labeled
-[enhancement](https://github.com/lazear/sage/labels/enhancement).
+[enhancement](https://github.com/pgarrett-scripps/sage-plus/labels/enhancement).
 
 ## Bug Reports
 
 Bug reports should be reported in the
-[Sage issue tracker](https://github.com/lazear/sage/issues). 
+[Sage Plus issue tracker](https://github.com/pgarrett-scripps/sage-plus/issues).
 
 When possible, please share the input parameters and at least one mzML input file used in your search - providing as much information as possible makes it much easier to track down bugs!
 
 ## Pull Requests
 
-If you are looking for a good place to start contributing, check out the [help wanted](https://github.com/lazear/sage/labels/help%20wanted) and [good first issue](https://github.com/lazear/sage/labels/good%20first%20issue) labels on the issue tracker!
+If you are looking for a good place to start contributing, check out the [help wanted](https://github.com/pgarrett-scripps/sage-plus/labels/help%20wanted) and [good first issue](https://github.com/pgarrett-scripps/sage-plus/labels/good%20first%20issue) labels on the issue tracker.
 
 General guidelines before submitting a PR:
 
@@ -36,4 +36,4 @@ General guidelines before submitting a PR:
 
 ## Contact
 
-Please use the [Sage issue tracker](https://github.com/lazear/sage/issues).
+Please use the [Sage Plus issue tracker](https://github.com/pgarrett-scripps/sage-plus/issues). Issues that reproduce in unmodified upstream Sage may instead belong in the [upstream tracker](https://github.com/lazear/sage/issues).

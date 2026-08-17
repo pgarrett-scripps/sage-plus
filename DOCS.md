@@ -37,21 +37,21 @@ $ sage --help
 ### Compiling the development version
 
 1. Install the [Rust programming language compiler](https://rustup.rs/)
-2. Download Sage source code via git: `git clone https://github.com/lazear/sage.git` or by [zip file](https://github.com/lazear/sage/archive/refs/heads/master.zip)
+2. Download Sage Plus source code via git: `git clone https://github.com/pgarrett-scripps/sage-plus.git` or by [zip file](https://github.com/pgarrett-scripps/sage-plus/archive/refs/heads/main.zip)
 3. Compile: `cargo build --release`
 4. Run: `./target/release/sage config.json`
 
 Once you have Rust installed, you can copy and paste the following lines into your terminal to complete the above instructions, and run Sage on the example mzML provided in the repository (a single scan from PXD016766)
 
 ```sh
-git clone https://github.com/lazear/sage.git
-cd sage
+git clone https://github.com/pgarrett-scripps/sage-plus.git
+cd sage-plus
 cargo run --release tests/config.json 
 ```
 
 ### Downloading the latest release
 
-1. Visit the [Releases](https://github.com/lazear/sage/releases/latest) website.
+1. Visit the [Sage Plus releases](https://github.com/pgarrett-scripps/sage-plus/releases/latest) website.
 2. Download the correct pre-compiled binary for your operating system.
 3. Run: `sage <path/to/config.json>`
 

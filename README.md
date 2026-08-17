@@ -1,15 +1,16 @@
 <img src="figures/logo.png" width="300">
 
-# Sage: proteomics searching so fast it seems like magic
+# Sage Plus
 
-[![Rust](https://github.com/lazear/sage/actions/workflows/rust.yml/badge.svg)](https://github.com/lazear/sage/actions/workflows/rust.yml) [![Anaconda-Server Badge](https://anaconda.org/bioconda/sage-proteomics/badges/version.svg)](https://anaconda.org/bioconda/sage-proteomics)
+[![Rust](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml/badge.svg)](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml) [![Upstream Sage](https://img.shields.io/badge/upstream-lazear%2Fsage-blue)](https://github.com/lazear/sage)
 
+Sage Plus is a downstream distribution of the [Sage proteomics search engine](https://github.com/lazear/sage). It preserves Sage's core workflow while integrating additional PTM, modeling, performance, automation, and agent-facing capabilities. It is independently maintained and is not an official Sage release.
 
-For more information please read [the online documentation!](https://sage-docs.vercel.app/docs)
+See [DOCS.md](DOCS.md) for Sage Plus configuration and the [upstream Sage documentation](https://sage-docs.vercel.app/docs) for the core search engine.
 
 ## Sage Plus additions
 
-This integration build adds the following features on top of upstream Sage:
+This distribution adds the following features on top of upstream Sage:
 
 - Faster, lower-memory searching with compact peptide/spectrum storage and optional bitmap preliminary scoring.
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
@@ -24,7 +25,7 @@ This integration build adds the following features on top of upstream Sage:
 - A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
 - A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, and result queries.
 
-Most additions are opt-in; existing Sage defaults are retained where practical. See [DOCS.md](DOCS.md) for configuration and output details.
+Most additions are opt-in; existing Sage defaults are retained where practical. See [UPSTREAM.md](UPSTREAM.md) for the maintenance and attribution policy.
 
 
 # Introduction
