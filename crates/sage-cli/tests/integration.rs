@@ -40,6 +40,7 @@ fn integration() -> anyhow::Result<()> {
         report_psms: 1,
         wide_window: false,
         annotate_matches: false,
+        mass_shift_ppm: 50.0,
         score_type: ScoreType::SageHyperScore,
         use_bitmap: false,
     };
@@ -47,6 +48,7 @@ fn integration() -> anyhow::Result<()> {
     let psm = scorer.score(&processed);
     assert_eq!(psm.len(), 1);
     assert_eq!(psm[0].matched_peaks, 21);
+    assert!(psm[0].localization.is_none());
 
     Ok(())
 }

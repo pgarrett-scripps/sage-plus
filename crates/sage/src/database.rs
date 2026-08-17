@@ -803,6 +803,18 @@ impl Parameters {
             })
             .collect::<Vec<_>>();
 
+        // PTM localization works from the compact mass/specificity list below,
+        // while ambiguity and site reports resolve display labels by mass.
+        // Preserve names from Sage Plus's structured modification definitions.
+        for entries in self.variable_mods.values() {
+            for entry in entries {
+                let definition = entry.definition();
+                if let Some(name) = definition.name.as_deref() {
+                    crate::unimod::register_label(definition.mass, name);
+                }
+            }
+        }
+
         let potential_mods = self
             .variable_mods
             .iter()

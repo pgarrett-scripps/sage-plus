@@ -85,6 +85,9 @@ Options:
           Write parquet files instead of tab-separated files
       --write-pin
           Write percolator-compatible `.pin` output files
+      --max-memory <GiB>
+          Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
+          (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
   -h, --help
           Print help information
   -V, --version
@@ -120,6 +123,27 @@ Running Sage will produce several output files (located in either the current di
 - MS2 and MS3 quantitation results will be stored as a tab-separated file (`tmt.tsv`, `lfq.tsv`) if `quant.tmt` or `quant.lfq` options are used in the parameter file
 
 If `--parquet` is passed as a command line argument, `results.sage.parquet` (and optionally, `lfq.parquet`) will be written. These have a similar set of columns, but TMT values are stored as a nested array alongside PSM features
+
+#### Memory guard
+
+A search can balloon in memory — most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To prevent a runaway search from exhausting RAM and freezing the host, Sage runs a lightweight background watchdog that terminates the process **cleanly** (exit code 137) if either:
+
+- Sage's own resident memory exceeds a ceiling (default: 90% of total system RAM), or
+- system-wide available memory drops below a small safety floor (max of 1 GiB or 2% of RAM).
+
+The ceiling is set with `--max-memory <GiB>` (or the `SAGE_MAX_MEMORY_GB` environment variable); `--max-memory 0` disables the guard entirely. The watchdog polls a few times per second from a single thread and adds no overhead to the allocation hot path. When it trips it prints how to reduce the search size (e.g. lower `max_variable_mods` / `max_peff_variable_mods`, use a smaller FASTA, narrow tolerances, or enable `prefilter`).
+
+#### Sequence-ambiguity annotation
+
+Every PSM row carries two additional columns, `ambiguity_sequence` and `mass_shift`, that encode which residues are actually supported by fragment-ion evidence (a native port of the [SagePeptideAmbiguityAnnotator](https://github.com/pgarrett-scripps/SagePeptideAmbiguityAnnotator) tool):
+
+- **ambiguity_sequence**: the peptide string in which any run of residues lacking *both* forward (a/b/c) and reverse (x/y/z) ion cleavage evidence is wrapped in `(?...)`. For example `(?LQ)SRPAAPPAPGPGQLTLR` means the leading `L`/`Q` could be reordered without changing the matched peaks. When the experimental precursor mass does not match the peptide's calculated mass (e.g. in an open search), the residual mass is placed using the same coverage:
+  - `...T[+79.96633]...` — localized to a single residue,
+  - `(...)[+mass]` — confined to a region but not a single residue,
+  - a leading `{+mass}` — labile / cannot be localized (forward and reverse coverage overlap).
+- **mass_shift**: the residual `expmass - calcmass` (in Da) that was placed, or `0.0` when the precursor matches within `mass_shift_ppm`.
+
+These are computed for every search; mods are rendered in the same `[+mass]`/`[Name]` notation as the `peptide` column. The threshold used to decide whether a precursor delta mass is a real shift is configurable via the top-level **`mass_shift_ppm`** parameter (default: 50.0). It is deliberately independent of `precursor_tol`, so wide/open searches still surface and place real shifts.
 
 ## Configuration file schema
 
@@ -484,6 +508,49 @@ Note on the settings below:
 
 When either memory limit is enabled, Sage estimates the unmodified digest, variable-modification expansion, and fragment/index sizes before allocating them. Unsafe database searches return an error before expansion begins. Estimates are conservative and are backed by a runtime memory monitor for allocations outside database construction.
 
+- **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
+  - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
+  - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
+
+## PTM Site Localization
+
+When `ptm_localization.enabled` is true, sage attempts to pinpoint which residue carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
+
+Example configuration:
+
+```json
+"ptm_localization": {
+  "enabled": true,
+  "psm_q_value": 0.01
+}
+```
+
+For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification delta mass it carries, sage:
+1. recovers the candidate residues from the search's modification specificity rules (e.g. all S/T/Y for Phospho),
+2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
+3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
+4. converts the per-arrangement scores into an AScore-style delta between the two best arrangements and a per-site localization probability (the Andromeda/MaxQuant convention, summing to 1 across candidate sites).
+
+The initial implementation has one AScore-inspired, site-determining-ion strategy. It is intentionally not presented as a configurable strategy yet: a strategy name should select a genuinely different, validated statistical model rather than act as an alias for the same calculation. The nested `ptm_localization` object leaves room for a future `strategy` field when another method (for example, a dataset-trained target/decoy model with false-localization-rate estimation) is implemented.
+
+Two site reports are written. They use TSV by default and Parquet when `--parquet` is selected:
+
+- **results.sage.ptm-sites.tsv** or **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score` (AScore), `candidate_sites`, `site_determining_ions_matched`/`_total`, and `site_probabilities` (a `residue+position:probability` list over all candidate sites).
+- **results.sage.protein-sites.tsv** or **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, with `num_psms`, `best_localization_probability`, `best_delta_localization_score`, and `best_spectrum_q`.
+
+For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
+
+```text
+psm_id  peptide            modification  position  residue  localization_probability  delta_localization_score  site_probabilities
+42      AAS[+79.966]AATAA  Phospho       3         S        0.982                     18.7                      S3:0.982;T6:0.018
+```
+
+Notes:
+- All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
+- Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
+- `ptm_localization.psm_q_value` controls identification quality only. Filter `localization_probability` or `delta_localization_score` separately when selecting confidently localized sites.
+- Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
+
 ## mzML Paths
 
 - **mzml_paths**: List of strings. The paths to mzML (or gzipped-mzML) files for search. Paths are either local, or point to an S3 object. Files ended in ".gz" or ".gzip" are inferred to be compressed.
@@ -498,7 +565,7 @@ When either memory limit is enabled, Sage estimates the unmodified digest, varia
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible output files are: "results.json", "results.sage.tsv", "lfq.tsv", and "tmt.tsv"
+  - Possible output files are: "results.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

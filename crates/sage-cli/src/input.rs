@@ -13,6 +13,25 @@ use sage_core::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[serde(default)]
+pub struct PtmLocalizationSettings {
+    /// Compute PTM site localization and write site-level reports.
+    pub enabled: bool,
+    /// Identification q-value cutoff for PSMs included in PTM site reports.
+    #[serde(alias = "q_value")]
+    pub psm_q_value: f32,
+}
+
+impl Default for PtmLocalizationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            psm_q_value: 0.01,
+        }
+    }
+}
+
 #[derive(Serialize, Clone)]
 /// Actual search parameters - may include overrides or default values not set by user
 pub struct Search {
@@ -45,6 +64,12 @@ pub struct Search {
     pub min_free_memory_gb: Option<f64>,
     /// Number of input files to load and search at once.
     pub batch_size: usize,
+
+    pub ptm_localization: PtmLocalizationSettings,
+
+    /// ppm threshold below which a precursor delta mass is treated as no shift
+    /// for sequence-ambiguity annotation (`ambiguity_sequence` / `mass_shift`)
+    pub mass_shift_ppm: f32,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -91,6 +116,9 @@ pub struct Input {
     pub max_memory_gb: Option<f64>,
     pub min_free_memory_gb: Option<f64>,
     pub batch_size: Option<usize>,
+
+    pub ptm_localization: Option<PtmLocalizationSettings>,
+    pub mass_shift_ppm: Option<f32>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -277,6 +305,14 @@ impl Input {
         if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
             input.batch_size = Some(batch_size as usize);
         }
+        if let Some(max_memory_gb) = matches.get_one::<f64>("max-memory").copied() {
+            input.max_memory_gb = Some(max_memory_gb);
+        }
+
+        // Only override the config-file value when the flag is explicitly set.
+        if matches.get_flag("localize") {
+            input.ptm_localization.get_or_insert_default().enabled = true;
+        }
 
         // avoid to later panic if these parameters are not set (but doesn't check if files exist)
 
@@ -420,6 +456,13 @@ impl Input {
 
         let score_type = self.score_type.unwrap_or(ScoreType::SageHyperScore);
 
+        let ptm_localization = self.ptm_localization.unwrap_or_default();
+        ensure!(
+            ptm_localization.psm_q_value.is_finite()
+                && (0.0..=1.0).contains(&ptm_localization.psm_q_value),
+            "ptm_localization.psm_q_value must be between 0 and 1"
+        );
+
         Ok(Search {
             version: clap::crate_version!().into(),
             database,
@@ -451,6 +494,10 @@ impl Input {
             max_memory_gb: memory_limits.max_gib(),
             min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
+            ptm_localization,
+            mass_shift_ppm: self
+                .mass_shift_ppm
+                .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             score_type,
             use_bitmap: self.use_bitmap.unwrap_or(false),
         })
@@ -475,8 +522,28 @@ fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod test {
 
-    use super::{resolve_batch_size, Input};
+    use super::{resolve_batch_size, Input, PtmLocalizationSettings};
     use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
+
+    #[test]
+    fn deserialize_ptm_localization_settings() -> Result<(), serde_json::Error> {
+        let configured: PtmLocalizationSettings = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "psm_q_value": 0.025
+        }))?;
+        assert!(configured.enabled);
+        assert_eq!(configured.psm_q_value, 0.025);
+
+        let partial: PtmLocalizationSettings =
+            serde_json::from_value(serde_json::json!({ "enabled": true }))?;
+        assert!(partial.enabled);
+        assert_eq!(partial.psm_q_value, 0.01);
+
+        let legacy_name: PtmLocalizationSettings =
+            serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;
+        assert_eq!(legacy_name.psm_q_value, 0.02);
+        Ok(())
+    }
 
     #[test]
     fn deserialize_enzyme_builder() -> Result<(), serde_json::Error> {

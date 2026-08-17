@@ -1,3 +1,4 @@
+pub mod ambiguity;
 pub mod bitmap;
 pub mod database;
 pub mod enzyme;
@@ -10,8 +11,11 @@ pub mod lfq;
 pub mod mass;
 pub mod ml;
 pub mod modification;
+pub mod peff;
 pub mod peptide;
 pub mod protein_grouping;
+pub mod ptm;
 pub mod scoring;
 pub mod spectrum;
 pub mod tmt;
+pub mod unimod;

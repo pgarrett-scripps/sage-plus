@@ -25,6 +25,331 @@ use sage_core::lfq::{Peak, PrecursorId};
 use sage_core::scoring::Feature;
 use sage_core::tmt::TmtQuant;
 
+pub struct PtmSiteRecord {
+    pub psm_id: i64,
+    pub filename: String,
+    pub scannr: String,
+    pub peptide: String,
+    pub proteins: String,
+    pub charge: i32,
+    pub spectrum_q: f32,
+    pub peptide_q: f32,
+    pub modification: String,
+    pub modification_mass: f32,
+    pub position: i32,
+    pub residue: String,
+    pub localization_probability: f32,
+    pub delta_localization_score: f32,
+    pub candidate_sites: i32,
+    pub site_determining_ions_matched: i32,
+    pub site_determining_ions_total: i32,
+    pub site_probabilities: String,
+}
+
+pub struct ProteinSiteRecord {
+    pub protein: String,
+    pub peptide: String,
+    pub residue: String,
+    pub position_in_peptide: i32,
+    pub modification: String,
+    pub modification_mass: f32,
+    pub num_psms: i32,
+    pub best_localization_probability: f32,
+    pub best_delta_localization_score: f32,
+    pub best_spectrum_q: f32,
+}
+
+fn ptm_site_schema() -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(
+        r#"
+        message schema {
+            required int64 psm_id;
+            required byte_array filename (utf8);
+            required byte_array scannr (utf8);
+            required byte_array peptide (utf8);
+            required byte_array proteins (utf8);
+            required int32 charge;
+            required float spectrum_q;
+            required float peptide_q;
+            required byte_array modification (utf8);
+            required float modification_mass;
+            required int32 position;
+            required byte_array residue (utf8);
+            required float localization_probability;
+            required float delta_localization_score;
+            required int32 candidate_sites;
+            required int32 site_determining_ions_matched;
+            required int32 site_determining_ions_total;
+            required byte_array site_probabilities (utf8);
+        }
+        "#,
+    )
+}
+
+fn protein_site_schema() -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(
+        r#"
+        message schema {
+            required byte_array protein (utf8);
+            required byte_array peptide (utf8);
+            required byte_array residue (utf8);
+            required int32 position_in_peptide;
+            required byte_array modification (utf8);
+            required float modification_mass;
+            required int32 num_psms;
+            required float best_localization_probability;
+            required float best_delta_localization_score;
+            required float best_spectrum_q;
+        }
+        "#,
+    )
+}
+
+macro_rules! write_required_column {
+    ($row_group:expr, $values:expr, $ty:ident) => {
+        if let Some(mut column) = $row_group.next_column()? {
+            column.typed::<$ty>().write_batch(&$values, None, None)?;
+            column.close()?;
+        }
+    };
+}
+
+pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
+    let schema = ptm_site_schema()?;
+    let options = WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .build();
+    let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
+
+    for records in records.chunks(65536) {
+        let mut rg = writer.next_row_group()?;
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.psm_id).collect::<Vec<_>>(),
+            Int64Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.filename.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.scannr.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.peptide.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.proteins.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.charge).collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.spectrum_q).collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.peptide_q).collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.modification.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.modification_mass)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.position).collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.residue.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.localization_probability)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.delta_localization_score)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.candidate_sites)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.site_determining_ions_matched)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.site_determining_ions_total)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.site_probabilities.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        rg.close()?;
+    }
+
+    writer.into_inner().map(|bytes| bytes.to_vec())
+}
+
+pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
+    let schema = protein_site_schema()?;
+    let options = WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .build();
+    let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
+
+    for records in records.chunks(65536) {
+        let mut rg = writer.next_row_group()?;
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.protein.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.peptide.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.residue.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.position_in_peptide)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.modification.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.modification_mass)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.num_psms).collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.best_localization_probability)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.best_delta_localization_score)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.best_spectrum_q)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        rg.close()?;
+    }
+
+    writer.into_inner().map(|bytes| bytes.to_vec())
+}
+
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     let msg = r#"
         message schema {
@@ -32,6 +357,8 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
             required byte_array filename (utf8);
             required byte_array scannr (utf8);
             required byte_array peptide (utf8);
+            required byte_array ambiguity_sequence (utf8);
+            required float mass_shift;
             required byte_array stripped_peptide (utf8);
             required byte_array proteins (utf8);
             required byte_array protein_groups (utf8);
@@ -180,6 +507,11 @@ pub fn serialize_features(
             |f: &Feature| database[f.peptide_idx].to_string().as_bytes().into(),
             ByteArrayType
         );
+        write_col!(
+            |f: &Feature| f.ambiguity_sequence.as_str().into(),
+            ByteArrayType
+        );
+        write_col!(mass_shift, FloatType);
         write_col!(
             |f: &Feature| database[f.peptide_idx].sequence.as_ref().into(),
             ByteArrayType
@@ -580,4 +912,69 @@ pub fn serialize_lfq<H: BuildHasher>(
 
     rg.close()?;
     writer.into_inner()
+}
+
+#[cfg(test)]
+mod ptm_tests {
+    use super::*;
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    #[test]
+    fn serialize_ptm_site_reports() {
+        let ptm = serialize_ptm_sites(&[PtmSiteRecord {
+            psm_id: 42,
+            filename: "sample.mzML".into(),
+            scannr: "scan=42".into(),
+            peptide: "AAS[+79.966]AATAA".into(),
+            proteins: "P12345".into(),
+            charge: 2,
+            spectrum_q: 0.005,
+            peptide_q: 0.006,
+            modification: "Phospho".into(),
+            modification_mass: 79.96633,
+            position: 3,
+            residue: "S".into(),
+            localization_probability: 0.982,
+            delta_localization_score: 18.7,
+            candidate_sites: 2,
+            site_determining_ions_matched: 6,
+            site_determining_ions_total: 8,
+            site_probabilities: "S3:0.982;T6:0.018".into(),
+        }])
+        .unwrap();
+        let reader = SerializedFileReader::new(bytes::Bytes::from(ptm)).unwrap();
+        assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
+        assert_eq!(
+            reader
+                .metadata()
+                .file_metadata()
+                .schema_descr()
+                .num_columns(),
+            18
+        );
+
+        let protein = serialize_protein_sites(&[ProteinSiteRecord {
+            protein: "P12345".into(),
+            peptide: "AAS[+79.966]AATAA".into(),
+            residue: "S".into(),
+            position_in_peptide: 3,
+            modification: "Phospho".into(),
+            modification_mass: 79.96633,
+            num_psms: 2,
+            best_localization_probability: 0.982,
+            best_delta_localization_score: 18.7,
+            best_spectrum_q: 0.005,
+        }])
+        .unwrap();
+        let reader = SerializedFileReader::new(bytes::Bytes::from(protein)).unwrap();
+        assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
+        assert_eq!(
+            reader
+                .metadata()
+                .file_metadata()
+                .schema_descr()
+                .num_columns(),
+            10
+        );
+    }
 }

@@ -81,6 +81,12 @@ fn main() -> anyhow::Result<()> {
                 .help("Write percolator-compatible `.pin` output files"),
         )
         .arg(
+            Arg::new("localize")
+                .long("localize")
+                .action(clap::ArgAction::SetTrue)
+                .help("Compute PTM site localization and write site-level reports"),
+        )
+        .arg(
             Arg::new("write-report")
                 .long("write-report")
                 .action(clap::ArgAction::SetTrue)
@@ -97,6 +103,16 @@ fn main() -> anyhow::Result<()> {
                 .long("stack-size")
                 .value_parser(value_parser!(u32).range(1..))
                 .help("Set Rayon worker thread stack size in MiB (default: 2 MiB)")
+                .value_hint(ValueHint::Other),
+        )
+        .arg(
+            Arg::new("max-memory")
+                .long("max-memory")
+                .value_parser(value_parser!(f64))
+                .help(
+                    "Override `max_memory_gb` from the parameter file. Sage aborts \
+                     if its resident memory exceeds this many GiB; 0 disables the limit.",
+                )
                 .value_hint(ValueHint::Other),
         )
         .help_template(

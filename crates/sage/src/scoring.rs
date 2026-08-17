@@ -147,6 +147,18 @@ pub struct Feature {
     pub num_protein_groups: u32,
 
     pub fragments: Option<Fragments>,
+
+    /// Sequence-ambiguity annotation: the peptide string with residues lacking
+    /// flanking fragment-ion evidence wrapped in `(?...)`, plus any residual
+    /// mass-shift placement.
+    pub ambiguity_sequence: String,
+    /// Residual precursor mass shift (`expmass - calcmass`) placed during
+    /// ambiguity annotation; 0.0 when within the closed-search tolerance.
+    pub mass_shift: f32,
+
+    /// Per-modification PTM site localization, if localization is enabled
+    #[serde(skip_serializing)]
+    pub localization: Option<crate::ptm::Localization>,
 }
 
 /// Matching Fragment details
@@ -163,6 +175,16 @@ pub struct Fragments {
     /// Neutral loss applied to the matched theoretical fragment; zero is the
     /// retained (no-loss) variant.
     pub neutral_losses: Vec<f32>,
+}
+
+/// Per-residue fragment-ion coverage, used to compute sequence-ambiguity
+/// annotation. `forward[i]` counts matched a/b/c ions mapping to residue `i`
+/// (ion ordinal `i + 1`); `reverse[i]` counts matched x/y/z ions mapping to
+/// residue `i` (ordinal `n - i`).
+#[derive(Default, Clone, Debug)]
+pub struct Coverage {
+    pub forward: Vec<u16>,
+    pub reverse: Vec<u16>,
 }
 
 static PSM_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -238,6 +260,9 @@ pub struct Scorer<'db> {
     // the precursor tolerance window based on MS2 isolation window and charge
     pub wide_window: bool,
     pub annotate_matches: bool,
+    /// A precursor delta mass (`expmass - calcmass`) within this many ppm of the
+    /// calculated mass is treated as no shift for sequence-ambiguity annotation.
+    pub mass_shift_ppm: f32,
     pub score_type: ScoreType,
 
     /// Use the bitmap-based preliminary search instead of the bucketed binary search.
@@ -289,7 +314,7 @@ impl<'db> Scorer<'db> {
                     if pre.peptide == PeptideIx::default() {
                         return None;
                     }
-                    let (score, _) = self.score_candidate(query, pre);
+                    let (score, _, _) = self.score_candidate(query, pre);
                     if (score.matched_b + score.matched_y) < self.min_matched_peaks {
                         return None;
                     }
@@ -693,6 +718,7 @@ impl<'db> Scorer<'db> {
         for idx in 0..report_psms.min(score_vector.len()) {
             let score = score_vector[idx].0;
             let fragments: Option<Fragments> = score_vector[idx].1.take();
+            let coverage = std::mem::take(&mut score_vector[idx].2);
             let psm_id = increment_psm_counter();
 
             let peptide = &self.db[score.peptide];
@@ -718,6 +744,24 @@ impl<'db> Scorer<'db> {
             let isotope_error = score.isotope_error as f32 * NEUTRON;
             let delta_mass = (precursor_mass - peptide.monoisotopic - isotope_error) * 2E6
                 / (precursor_mass - isotope_error + peptide.monoisotopic);
+
+            // Sequence-ambiguity annotation. A residual precursor mass shift is
+            // only placed when it exceeds the closed-search tolerance (a small
+            // fixed ppm threshold, independent of the precursor search window so
+            // that wide/open searches still surface real shifts).
+            let raw_mass_shift = precursor_mass - peptide.monoisotopic;
+            let mass_shift =
+                if (raw_mass_shift / peptide.monoisotopic * 1e6).abs() <= self.mass_shift_ppm {
+                    None
+                } else {
+                    Some(raw_mass_shift)
+                };
+            let ambiguity = crate::ambiguity::annotate(
+                peptide,
+                &coverage.forward,
+                &coverage.reverse,
+                mass_shift,
+            );
 
             // let (num_proteins, proteins) = self.db.assign_proteins(peptide);
 
@@ -778,7 +822,10 @@ impl<'db> Scorer<'db> {
                 protein_groups: None,
                 num_protein_groups: 0,
                 fragments,
+                ambiguity_sequence: ambiguity.sequence,
+                mass_shift: ambiguity.mass_shift,
                 protein_group_q: 1.0,
+                localization: None,
             })
         }
     }
@@ -868,7 +915,7 @@ impl<'db> Scorer<'db> {
         &self,
         query: &ProcessedSpectrum,
         pre_score: &PreScore,
-    ) -> (Score, Option<Fragments>) {
+    ) -> (Score, Option<Fragments>, Coverage) {
         let mut score = Score {
             peptide: pre_score.peptide,
             precursor_charge: pre_score.precursor_charge,
@@ -892,6 +939,12 @@ impl<'db> Scorer<'db> {
         let mut y_run = Run::default();
 
         let mut fragments_details = Fragments::default();
+
+        let n = peptide.sequence.len();
+        let mut coverage = Coverage {
+            forward: vec![0u16; n],
+            reverse: vec![0u16; n],
+        };
 
         for group in fragment_groups {
             for charge in 1..max_fragment_charge {
@@ -930,11 +983,13 @@ impl<'db> Scorer<'db> {
                             score.matched_b += 1;
                             score.summed_b += peak_intensity;
                             b_run.matched(group.series_index);
+                            coverage.forward[group.series_index] += 1;
                         }
                         Kind::X | Kind::Y | Kind::Z => {
                             score.matched_y += 1;
                             score.summed_y += peak_intensity;
                             y_run.matched(group.series_index);
+                            coverage.reverse[group.series_index + 1] += 1;
                         }
                     }
 
@@ -966,10 +1021,10 @@ impl<'db> Scorer<'db> {
         score.ppm_difference /= score.summed_b + score.summed_y;
 
         if self.annotate_matches {
-            (score, Some(fragments_details))
+            (score, Some(fragments_details), coverage)
         } else {
             // drop(fragments_details);
-            (score, None)
+            (score, None, coverage)
         }
     }
 }
@@ -1093,6 +1148,7 @@ mod tests {
                 report_psms: 1,
                 wide_window: false,
                 annotate_matches: false,
+                mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
                 score_type: ScoreType::SageHyperScore,
                 use_bitmap,
             };
@@ -1155,6 +1211,7 @@ mod tests {
             report_psms: 1,
             wide_window: false,
             annotate_matches: true,
+            mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
             score_type: ScoreType::SageHyperScore,
             use_bitmap: false,
         };
@@ -1174,7 +1231,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (score, fragments) = scorer.score_candidate(&query, &pre_score);
+        let (score, fragments, _) = scorer.score_candidate(&query, &pre_score);
         assert_eq!(score.matched_b, 1);
         assert_eq!(score.summed_b, 100.0);
         let fragments = fragments.unwrap();
