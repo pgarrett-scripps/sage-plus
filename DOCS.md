@@ -601,7 +601,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible output files are: "results.json", "run-summary.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead. `run-summary.json` is always written after a successful run and contains runtime, database size, 1% FDR counts, and output paths.
+  - Possible output files are: "results.json", "run-summary.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead. `run-summary.json` is always written after a successful run and contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

@@ -175,7 +175,13 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         .await?;
     assert_eq!(analysis.is_error, Some(false));
     let analysis = analysis.structured_content.as_ref().unwrap();
-    assert_eq!(analysis["summary"]["schema_version"], 1);
+    assert_eq!(analysis["summary"]["schema_version"], 2);
+    assert_eq!(analysis["summary"]["inputs"]["mzml_files"], 1);
+    assert_eq!(
+        analysis["summary"]["models"]["mass_alignment_applied"],
+        true
+    );
+    assert_eq!(analysis["summary"]["ptm_localization"]["enabled"], false);
     assert!(std::path::Path::new(analysis["summary_path"].as_str().unwrap()).is_file());
 
     let query = client

@@ -109,11 +109,76 @@ pub struct RunSummary {
     pub peptides_at_one_percent_fdr: usize,
     pub proteins_at_one_percent_fdr: usize,
     pub protein_groups_at_one_percent_fdr: usize,
+    #[serde(default)]
+    pub ptm_localization: PtmLocalizationRunStats,
+    #[serde(default)]
+    pub models: ModelRunStats,
+    #[serde(default)]
+    pub quantification: QuantificationRunStats,
+    #[serde(default)]
+    pub execution: ExecutionRunStats,
+    #[serde(default)]
+    pub inputs: InputRunStats,
+    #[serde(default)]
+    pub modifications: ModificationRunStats,
     pub output_paths: Vec<String>,
 }
 
 const fn run_summary_schema_version() -> u32 {
     1
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PtmLocalizationRunStats {
+    pub enabled: bool,
+    pub localized_psms: usize,
+    pub psm_q_value: f32,
+    pub localization_q_value: f32,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModelRunStats {
+    pub mass_alignment_applied: bool,
+    pub retention_time_prediction_enabled: bool,
+    pub retention_time_model_fitted: bool,
+    pub retention_time_features: String,
+    pub retention_time_alignment: Option<String>,
+    pub ion_mobility_observed: bool,
+    pub ion_mobility_model_enabled: bool,
+    pub ion_mobility_model_fitted: bool,
+    pub ion_mobility_features: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct QuantificationRunStats {
+    pub lfq_enabled: bool,
+    pub lfq_features: usize,
+    pub tmt: Option<String>,
+    pub tmt_features: usize,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ExecutionRunStats {
+    pub batch_size: usize,
+    pub parallelism: usize,
+    pub bitmap_search: bool,
+    pub max_memory_gb: Option<f64>,
+    pub min_free_memory_gb: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct InputRunStats {
+    pub mzml_files: usize,
+    pub thermo_raw_files: usize,
+    pub other_files: usize,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModificationRunStats {
+    pub static_definitions: usize,
+    pub variable_definitions: usize,
+    pub max_variable_mods: usize,
+    pub max_combinations: Option<usize>,
 }
 
 /// A single localized modification site for one PSM, used to build the
@@ -1026,7 +1091,7 @@ impl Runner {
             None
         };
 
-        if self.parameters.predict_rt {
+        let retention_time_model_fitted = if self.parameters.predict_rt {
             if sage_core::ml::retention_model::predict(
                 &self.database,
                 &mut outputs.features,
@@ -1035,17 +1100,20 @@ impl Runner {
             .is_some()
             {
                 self.events.emit(EventKind::RtModelFitted);
+                true
             } else {
                 self.events.emit(EventKind::RtModelSkipped {
                     reason: "insufficient high-confidence observations or poor model fit".into(),
                 });
+                false
             }
         } else {
             self.events.emit(EventKind::RtModelSkipped {
                 reason: "retention-time prediction disabled".into(),
             });
-        }
-        if has_ion_mobility {
+            false
+        };
+        let ion_mobility_model_fitted = if has_ion_mobility {
             if sage_core::ml::mobility_model::predict(
                 &self.database,
                 &mut outputs.features,
@@ -1054,16 +1122,19 @@ impl Runner {
             .is_some()
             {
                 self.events.emit(EventKind::MobilityModelFitted);
+                true
             } else {
                 self.events.emit(EventKind::MobilityModelSkipped {
                     reason: "ion mobility unavailable or model fitting failed".into(),
                 });
+                false
             }
         } else {
             self.events.emit(EventKind::MobilityModelSkipped {
                 reason: "no ion-mobility observations present".into(),
             });
-        }
+            false
+        };
 
         let q_spectrum = self.spectrum_fdr(&mut outputs.features);
         self.events.emit(EventKind::LdaScoringCompleted);
@@ -1091,11 +1162,14 @@ impl Runner {
         });
         self.cancellation.check()?;
 
-        if self.parameters.ptm_localization.enabled {
+        let localized_psms = if self.parameters.ptm_localization.enabled {
             let localized = self.localize_features(&mut outputs.features, parallel);
             self.events
                 .emit(EventKind::PtmLocalizationCompleted { psms: localized });
-        }
+            localized
+        } else {
+            0
+        };
 
         let filenames = self
             .parameters
@@ -1137,6 +1211,8 @@ impl Runner {
                 features: outputs.quant.len(),
             });
         }
+        let lfq_features = areas.as_ref().map(|areas| areas.len()).unwrap_or_default();
+        let tmt_features = outputs.quant.len();
 
         log::info!(
             "discovered {} target peptide-spectrum matches at 1% FDR",
@@ -1258,8 +1334,19 @@ impl Runner {
             .map(ToString::to_string)
             .collect::<Vec<_>>();
         output_paths.push(summary_path.to_string());
+        let mut input_stats = InputRunStats::default();
+        for path in &self.parameters.mzml_paths {
+            let path = path.path().trim_end_matches('/').to_ascii_lowercase();
+            if path.ends_with(".raw") {
+                input_stats.thermo_raw_files += 1;
+            } else if path.ends_with(".mzml") || path.ends_with(".mzml.gz") {
+                input_stats.mzml_files += 1;
+            } else {
+                input_stats.other_files += 1;
+            }
+        }
         let summary = RunSummary {
-            schema_version: 1,
+            schema_version: 2,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1268,6 +1355,65 @@ impl Runner {
             peptides_at_one_percent_fdr: q_peptide,
             proteins_at_one_percent_fdr: q_protein,
             protein_groups_at_one_percent_fdr: q_protein_group,
+            ptm_localization: PtmLocalizationRunStats {
+                enabled: self.parameters.ptm_localization.enabled,
+                localized_psms,
+                psm_q_value: self.parameters.ptm_localization.psm_q_value,
+                localization_q_value: self.parameters.ptm_localization.localization_q_value,
+            },
+            models: ModelRunStats {
+                mass_alignment_applied: true,
+                retention_time_prediction_enabled: self.parameters.predict_rt,
+                retention_time_model_fitted,
+                retention_time_features: format!(
+                    "{:?}",
+                    self.parameters.retention_time_model.features
+                )
+                .to_lowercase(),
+                retention_time_alignment: needs_alignment.then(|| {
+                    format!(
+                        "{:?}",
+                        self.parameters.retention_time_alignment.unwrap_or_default()
+                    )
+                    .to_lowercase()
+                }),
+                ion_mobility_observed: has_ion_mobility,
+                ion_mobility_model_enabled: self.parameters.ion_mobility_model.enabled,
+                ion_mobility_model_fitted,
+                ion_mobility_features: format!("{:?}", self.parameters.ion_mobility_model.features)
+                    .to_lowercase(),
+            },
+            quantification: QuantificationRunStats {
+                lfq_enabled: self.parameters.quant.lfq,
+                lfq_features,
+                tmt: self
+                    .parameters
+                    .quant
+                    .tmt
+                    .as_ref()
+                    .map(|tmt| format!("{tmt:?}").to_lowercase()),
+                tmt_features,
+            },
+            execution: ExecutionRunStats {
+                batch_size: self.parameters.batch_size,
+                parallelism: parallel,
+                bitmap_search: self.parameters.use_bitmap,
+                max_memory_gb: self.parameters.max_memory_gb,
+                min_free_memory_gb: self.parameters.min_free_memory_gb,
+            },
+            inputs: input_stats,
+            modifications: ModificationRunStats {
+                static_definitions: self.parameters.database.static_mods.len(),
+                variable_definitions: self
+                    .parameters
+                    .database
+                    .variable_mods
+                    .values()
+                    .map(Vec::len)
+                    .sum(),
+                max_variable_mods: self.parameters.database.max_variable_mods,
+                max_combinations: self.parameters.database.max_combinations,
+            },
             output_paths,
         };
         sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
@@ -2742,7 +2888,7 @@ impl Runner {
 
 #[cfg(test)]
 mod tests {
-    use super::passes_localization_filter;
+    use super::{passes_localization_filter, RunSummary};
     use sage_core::scoring::Feature;
 
     #[test]
@@ -2765,5 +2911,25 @@ mod tests {
             ..passing
         };
         assert!(!passes_localization_filter(&decoy, 0.01));
+    }
+
+    #[test]
+    fn older_run_summaries_receive_compatible_defaults() {
+        let summary: RunSummary = serde_json::from_value(serde_json::json!({
+            "runtime_secs": 1,
+            "files": 1,
+            "peptides_in_database": 10,
+            "fragments_in_database": 20,
+            "psms_at_one_percent_fdr": 2,
+            "peptides_at_one_percent_fdr": 1,
+            "proteins_at_one_percent_fdr": 1,
+            "protein_groups_at_one_percent_fdr": 1,
+            "output_paths": []
+        }))
+        .unwrap();
+
+        assert_eq!(summary.schema_version, 1);
+        assert!(!summary.ptm_localization.enabled);
+        assert_eq!(summary.quantification.lfq_features, 0);
     }
 }

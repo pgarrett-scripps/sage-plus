@@ -504,6 +504,22 @@ impl State {
         if summary.files == 0 {
             observations.push("The run did not report any processed spectra files.");
         }
+        if summary.ptm_localization.enabled && summary.ptm_localization.localized_psms == 0 {
+            observations.push("PTM localization was enabled, but no passing PSMs were localized.");
+        }
+        if summary.models.retention_time_prediction_enabled
+            && !summary.models.retention_time_model_fitted
+        {
+            observations
+                .push("Retention-time prediction was enabled, but the model was not fitted.");
+        }
+        if summary.models.ion_mobility_observed
+            && summary.models.ion_mobility_model_enabled
+            && !summary.models.ion_mobility_model_fitted
+        {
+            observations
+                .push("Ion mobility was observed, but the prediction model was not fitted.");
+        }
         Ok(serde_json::json!({
             "job_id": record.job_id,
             "summary_path": summary_path.to_string_lossy(),
