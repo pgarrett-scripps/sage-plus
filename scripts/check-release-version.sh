@@ -21,11 +21,11 @@ crate_manifests=(
 )
 
 for manifest in "${crate_manifests[@]}"; do
-  if ! rg --quiet --fixed-strings 'version.workspace = true' "$manifest"; then
+  if ! grep -Fq 'version.workspace = true' "$manifest"; then
     echo "$manifest must inherit the workspace release version" >&2
     exit 1
   fi
-  if ! rg --quiet --fixed-strings 'publish = false' "$manifest"; then
+  if ! grep -Fq 'publish = false' "$manifest"; then
     echo "$manifest must set publish = false for GitHub-only releases" >&2
     exit 1
   fi
@@ -44,7 +44,7 @@ if [[ $# -gt 0 ]]; then
     exit 1
   fi
 
-  if ! rg --quiet --fixed-strings "## [$release_tag]" CHANGELOG.md; then
+  if ! grep -Fq "## [$release_tag]" CHANGELOG.md; then
     echo "CHANGELOG.md does not contain a section for $release_tag" >&2
     exit 1
   fi
