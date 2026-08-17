@@ -12,6 +12,11 @@
 > or release and independently validate results before relying on them for production, clinical,
 > or published analyses.
 
+This is my personal experimental project for exploring how Sage, proteomics models, structured
+workflows, and related analysis tools can be integrated into automated and AI-assisted pipelines.
+I am sharing it publicly for transparency, reproducibility, and collaboration while I test ideas;
+it is not intended to compete with, replace, or speak for the upstream Sage project.
+
 [![Rust](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml/badge.svg)](https://github.com/pgarrett-scripps/sage-plus/actions/workflows/rust.yml) [![Upstream Sage](https://img.shields.io/badge/upstream-lazear%2Fsage-blue)](https://github.com/lazear/sage)
 
 Sage Plus is a downstream distribution of the [Sage proteomics search engine](https://github.com/lazear/sage). It preserves Sage's core workflow while integrating additional PTM, modeling, performance, automation, and agent-facing capabilities. It is independently maintained and is not an official Sage release.
