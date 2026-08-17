@@ -50,10 +50,15 @@ cargo build --release --workspace
 The release build produces the standard `sage` executable and the optional `sage-mcp` server.
 Run `sage --help` for CLI options.
 
+Prebuilt binaries are available from [Sage Plus releases](https://github.com/pgarrett-scripps/sage-plus/releases),
+and versioned Linux AMD64 container images are published as
+`ghcr.io/pgarrett-scripps/sage-plus:<release-tag>`.
+
 ## Documentation
 
 - [Sage Plus configuration and outputs](DOCS.md)
 - [Sage MCP server](crates/sage-mcp/README.md)
+- [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 

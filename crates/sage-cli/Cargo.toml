@@ -1,12 +1,13 @@
 [package]
 name = "sage-cli"
-version = "0.15.0-beta.2"
+version.workspace = true
 authors = ["Michael Lazear <michaellazear92@gmail.com"]
 edition = "2021"
 rust-version = "1.88"
 description = "A very fast proteomics database search tool"
 readme = "README.md"
 license = "MIT"
+publish = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

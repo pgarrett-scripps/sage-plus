@@ -356,10 +356,13 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/lazear/sage:master
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/lazear/sage:master sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.16.0-beta.1
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.16.0-beta.1 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
+
+Container images currently target Linux AMD64. Use the native ARM64 executable archive from
+the GitHub release on ARM64 systems until a native multi-architecture image is available.
 
 > `-v ${PWD}:/data` means it will mount your current directory as `/data`
 > in the docker image. Make sure all the paths in your command and configuration

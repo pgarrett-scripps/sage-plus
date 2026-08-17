@@ -7,7 +7,8 @@ fn usage() -> &'static str {
     "Usage: sage-mcp [--root PATH] [--jobs-dir PATH]\n\
      \n\
      --root PATH      Restrict all configuration and input files to PATH (default: cwd)\n\
-     --jobs-dir PATH  Store job manifests, events, and outputs here (default: ROOT/.sage/jobs)"
+     --jobs-dir PATH  Store job manifests, events, and outputs here (default: ROOT/.sage/jobs)\n\
+     -V, --version    Print version information"
 }
 
 fn arguments() -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
@@ -26,6 +27,10 @@ fn arguments() -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
             }
             "-h" | "--help" => {
                 eprintln!("{}", usage());
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("sage-mcp {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             unknown => bail!("unknown argument `{unknown}`\n{}", usage()),

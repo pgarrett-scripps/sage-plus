@@ -951,7 +951,6 @@ impl SageMcp {
 
 #[tool_handler(
     name = "sage-mcp",
-    version = "0.1.0",
     instructions = "Operate Sage through validated, root-bounded local paths. Validate configurations before searches. Never call start_search with approved=true until the user has approved the compute and output location. Poll status/events rather than starting duplicate jobs."
 )]
 impl ServerHandler for SageMcp {

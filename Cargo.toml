@@ -8,6 +8,9 @@ members = [
 
 resolver = "2"
 
+[workspace.package]
+version = "0.16.0-beta.1"
+
 [profile.release]
 lto = "fat"
 codegen-units = 1

@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [v0.16.0-beta.1]
 ### Added
 - Additive protein-specific cleavage-site TSV or Parquet input with optional FASTA sequence-context validation.
 - Optional `max_memory_gb` and `min_free_memory_gb` safeguards that preflight unmodified peptides, variable-modification expansion, and fragment indexes, then monitor the running process to stop Sage before configured limits are crossed.
@@ -27,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional names for structured static and variable modifications; named modifications are preserved on exact peptide sites and rendered in peptide output.
 - Neutral-loss fragment variants for structured modifications, with `neutral_loss_mode` controlling whether retained fragments are optional or suppressed.
 - Neutral-loss annotations in matched-fragment TSV and Parquet output.
+
+### Changed
+- **Breaking:** Parquet is now the canonical analytical output. Sage no longer emits TSV variants of PSM, LFQ, matched-fragment, or PTM-site result tables, and the `--parquet` option has been removed. Purpose-specific `.pin`, JSON, HTML, and PTM-library interchange outputs are unchanged.
+- LFQ remains a separate long-form `lfq.parquet`. Missing integrated signals are encoded as Parquet nulls instead of zero; each precursor/file row now includes `ms2_confirmed`, plus the LFQ peak `score` and `spectral_angle`.
+- MCP result queries now scan canonical Parquet result files and return typed JSON values.
+- PSM and matched-fragment Parquet output now share `output_filter.psm_q_value` (default `0.1`), an inclusive spectrum-level q-value cutoff. The effective cutoff is embedded in both files' Parquet metadata; setting it to `1.0` retains all scored PSMs.
+- Matched-fragment details are now reconstructed only for retained PSMs in a batched post-FDR MS2 pass. This removes fragment-detail allocation from candidate scoring, preserves rank-ordered chimera peak removal, and shares spectrum rereads with PTM localization when both are enabled.
 
 ## [v0.15.0]
 ### Added
