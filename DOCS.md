@@ -439,8 +439,9 @@ Example:
 
 #### PTM site libraries
 
-A PTM library is a Parquet table containing observed locations only. Modification masses,
-names, limits, and neutral losses remain defined in `variable_mods`.
+A PTM library is a Parquet or TSV table containing observed locations only. Modification
+masses, names, limits, and neutral losses remain defined in `variable_mods`. The format is
+selected from the `.parquet`, `.tsv`, or `.tsv.gz` filename extension.
 
 Required columns are `protein` (UTF-8), `position` (one-based integer), `residue`
 (one-letter UTF-8), and `modification` (the exact configured modification name).
@@ -463,7 +464,7 @@ library-referenced modifications must also have a unique, non-empty `name`.
   "max_total_variable_mods": 3,
   "max_combinations": 1000,
   "ptm_library": {
-    "path": "discovery-sites.parquet",
+    "path": "discovery-sites.tsv",
     "strict": true
   }
 }
@@ -475,10 +476,10 @@ named modification's `max_count`, and `max_combinations`. All candidates are enu
 together before decoy generation and indexing. With no library configured, existing
 modification behavior is unchanged.
 
-When PTM localization is enabled for a FASTA search, Sage also writes
-`results.sage.ptm-library.parquet`. It contains the passing localized sites whose
-modification names match the configured variable modifications and can be supplied to a
-later search through `ptm_library.path`.
+When PTM localization is enabled for a FASTA search, Sage also writes both
+`results.sage.ptm-library.parquet` and `results.sage.ptm-library.tsv`. They contain the
+passing localized sites whose modification names match the configured variable
+modifications; either file can be supplied to a later search through `ptm_library.path`.
   - Syntax:
     "^X": Modification to be applied to amino acid X if it appears at the N-terminus of a peptide
     "$X": Modification to be applied to amino acid X if it appears at the C-terminus of a peptide

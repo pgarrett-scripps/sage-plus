@@ -279,10 +279,16 @@ impl Runner {
         let mut parameters = parameters.clone();
         parameters.database.use_bitmap = parameters.use_bitmap;
         if let Some(settings) = parameters.database.ptm_library.clone() {
-            let bytes = sage_cloudpath::util::read_bytes(&settings.path)
-                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
-            let library = sage_cloudpath::parquet::deserialize_ptm_library(bytes)
-                .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
+            let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
+                let contents = sage_cloudpath::util::read_text(&settings.path)
+                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+                sage_core::ptm_library::PtmLibrary::from_tsv(&contents).map_err(anyhow::Error::msg)
+            } else {
+                let bytes = sage_cloudpath::util::read_bytes(&settings.path)
+                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+                sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
+            }
+            .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
             parameters
                 .database
                 .validate_ptm_library(&library)
@@ -1357,9 +1363,9 @@ impl Runner {
                 &filenames,
                 parquet,
             )?);
-            if let Some(path) = self.write_ptm_library(&outputs.features, &filenames)? {
-                self.parameters.output_paths.push(path);
-            }
+            self.parameters
+                .output_paths
+                .extend(self.write_ptm_library(&outputs.features, &filenames)?);
         }
 
         // Write percolator input file if requested
@@ -2111,9 +2117,9 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
-    ) -> anyhow::Result<Option<Url>> {
+    ) -> anyhow::Result<Vec<Url>> {
         if self.parameters.database.fasta.is_empty() {
-            return Ok(None);
+            return Ok(Vec::new());
         }
 
         let known_names = self
@@ -2179,10 +2185,26 @@ impl Runner {
                 .then_with(|| a.position.cmp(&b.position))
                 .then_with(|| a.modification.cmp(&b.modification))
         });
-        let path = self.make_path("results.sage.ptm-library.parquet");
+        let parquet_path = self.make_path("results.sage.ptm-library.parquet");
         let bytes = sage_cloudpath::parquet::serialize_ptm_library(&sites)?;
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
-        Ok(Some(path))
+        sage_cloudpath::write_bytes_sync(&parquet_path, bytes)?;
+
+        let tsv_path = self.make_path("results.sage.ptm-library.tsv");
+        let mut writer = csv::WriterBuilder::new()
+            .delimiter(b'\t')
+            .from_writer(Vec::new());
+        writer.write_record(["protein", "position", "residue", "modification"])?;
+        for site in &sites {
+            writer.write_record([
+                site.protein.as_ref(),
+                &(site.position + 1).to_string(),
+                std::str::from_utf8(&[site.residue])?,
+                site.modification.as_ref(),
+            ])?;
+        }
+        writer.flush()?;
+        sage_cloudpath::write_bytes_sync(&tsv_path, writer.into_inner()?)?;
+        Ok(vec![parquet_path, tsv_path])
     }
 
     fn serialize_pin(

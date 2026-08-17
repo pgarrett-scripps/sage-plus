@@ -278,8 +278,14 @@ impl State {
         let mut parameters = input.database.make_parameters();
         parameters.use_bitmap = input.use_bitmap.unwrap_or(false);
         if let Some(settings) = parameters.ptm_library.as_ref() {
-            let bytes = sage_cloudpath::util::read_bytes(&settings.path)?;
-            let library = sage_cloudpath::parquet::deserialize_ptm_library(bytes)?;
+            let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
+                let contents = sage_cloudpath::util::read_text(&settings.path)?;
+                sage_core::ptm_library::PtmLibrary::from_tsv(&contents)
+                    .map_err(anyhow::Error::msg)?
+            } else {
+                let bytes = sage_cloudpath::util::read_bytes(&settings.path)?;
+                sage_cloudpath::parquet::deserialize_ptm_library(bytes)?
+            };
             parameters
                 .validate_ptm_library(&library)
                 .map_err(anyhow::Error::msg)?;
