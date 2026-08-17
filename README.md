@@ -15,6 +15,7 @@ This integration build adds the following features on top of upstream Sage:
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
 - Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
 - Cross-fitted Percolator-style rescoring, while retaining LDA as the default.
+- Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
 - Configurable LFQ match-between-runs retention-time tolerance.
 - PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
 - Enriched linear retention-time features with regularized, cross-validated variable-PTM offsets.

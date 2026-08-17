@@ -112,8 +112,8 @@ fn feature_row(psm: &Feature, mass_error_pep: f64) -> [f64; FEATURES] {
         value if value.is_finite() => value,
         _ => 3.5,
     };
-    let delta_mass = psm.delta_mass as f64;
-    let fragment_ppm = psm.average_ppm as f64;
+    let delta_mass = psm.aligned_delta_mass as f64;
+    let fragment_ppm = psm.aligned_average_ppm as f64;
 
     [
         psm.charge as f64,
@@ -205,7 +205,7 @@ fn positives(
 
 fn mass_error(psm: &Feature, precursor_tol: Tolerance) -> f64 {
     match precursor_tol {
-        Tolerance::Ppm(_, _) => psm.delta_mass as f64,
+        Tolerance::Ppm(_, _) => psm.aligned_delta_mass as f64,
         Tolerance::Pct(_, _) => unreachable!("Pct tolerance should never be used on mz"),
         Tolerance::Da(_, _) => (psm.expmass - psm.calcmass) as f64,
     }
@@ -617,6 +617,20 @@ mod tests {
     }
 
     #[test]
+    fn feature_rows_use_aligned_mass_errors() {
+        let feature = Feature {
+            delta_mass: 100.0,
+            average_ppm: 200.0,
+            aligned_delta_mass: 1.5,
+            aligned_average_ppm: 2.5,
+            ..Feature::default()
+        };
+        let row = feature_row(&feature, 0.0);
+        assert_eq!(row[4], 1.5);
+        assert_eq!(row[8], 2.5);
+    }
+
+    #[test]
     fn held_out_labels_do_not_change_mass_error_features() {
         let mut features = Vec::new();
         for idx in 0..120 {
@@ -627,6 +641,7 @@ mod tests {
             } else {
                 (idx % 7) as f32 * 0.02
             };
+            feature.aligned_delta_mass = feature.delta_mass;
             features.push(feature);
         }
         let training = (0..100).collect::<Vec<_>>();
@@ -651,6 +666,7 @@ mod tests {
             } else {
                 5.0 + (idx % 5) as f32 * 0.1
             };
+            feature.aligned_delta_mass = feature.delta_mass;
             features.push(feature);
         }
         let settings = PercolatorSettings {
