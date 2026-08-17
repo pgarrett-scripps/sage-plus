@@ -9,6 +9,7 @@ pub mod ion_series;
 pub mod isotopes;
 pub mod lfq;
 pub mod mass;
+pub mod mass_calibration;
 pub mod ml;
 pub mod modification;
 pub mod peff;
