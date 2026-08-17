@@ -1,6 +1,7 @@
 use super::input::Search;
 use super::output::SageResults;
 use super::telemetry;
+use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
 use csv::ByteRecord;
 use log::info;
@@ -29,6 +30,21 @@ pub struct Runner {
     pub database: IndexedDatabase,
     pub parameters: Search,
     start: Instant,
+    events: EventEmitter,
+    cancellation: CancellationToken,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RunSummary {
+    pub runtime_secs: u64,
+    pub files: usize,
+    pub peptides_in_database: usize,
+    pub fragments_in_database: usize,
+    pub psms_at_one_percent_fdr: usize,
+    pub peptides_at_one_percent_fdr: usize,
+    pub proteins_at_one_percent_fdr: usize,
+    pub protein_groups_at_one_percent_fdr: usize,
+    pub output_paths: Vec<String>,
 }
 
 #[derive(Default)]
@@ -86,8 +102,24 @@ impl FromIterator<RawSpectrum> for RawSpectrumAccumulator {
 
 impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
+        Self::new_with_control(
+            parameters,
+            parallel,
+            EventEmitter::disabled(),
+            CancellationToken::default(),
+        )
+    }
+
+    pub fn new_with_control(
+        parameters: Search,
+        parallel: usize,
+        events: EventEmitter,
+        cancellation: CancellationToken,
+    ) -> anyhow::Result<Self> {
         let mut parameters = parameters.clone();
         let start = Instant::now();
+        cancellation.check()?;
+        events.emit(EventKind::DatabaseStarted);
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
             let fasta_url = sage_cloudpath::to_url(&parameters.database.fasta)?;
@@ -122,6 +154,8 @@ impl Runner {
                             database: IndexedDatabase::default(),
                             parameters: parameters.clone(),
                             start,
+                            events: events.clone(),
+                            cancellation: cancellation.clone(),
                         };
                         mini_runner.prefilter_peptides(parallel, fasta)
                     }
@@ -145,6 +179,13 @@ impl Runner {
             .clone()
             .build_from_peptides(all_peptides);
 
+        cancellation.check()?;
+        events.emit(EventKind::DatabaseBuilt {
+            peptides: database.peptides.len(),
+            fragments: database.fragments.len(),
+        });
+        events.check()?;
+
         info!(
             "generated {} fragments, {} peptides in {:#?}",
             database.fragments.len(),
@@ -155,6 +196,8 @@ impl Runner {
             database,
             parameters,
             start,
+            events,
+            cancellation,
         })
     }
 
@@ -301,6 +344,10 @@ impl Runner {
             .is_none()
         {
             log::warn!("linear model fitting failed, falling back to heuristic discriminant score");
+            self.events.emit(EventKind::Warning {
+                code: "discriminant_model_fallback".into(),
+                message: "linear model fitting failed; using heuristic discriminant score".into(),
+            });
             features.par_iter_mut().for_each(|feat| {
                 feat.discriminant_score = (-feat.poisson as f32).ln_1p() + feat.longest_y_pct / 3.0
             });
@@ -329,7 +376,11 @@ impl Runner {
 
         let features: Vec<_> = msn_spectra
             .par_iter()
-            .filter(|spec| spec.masses.len() >= self.parameters.min_peaks && spec.level == 2)
+            .filter(|spec| {
+                !self.cancellation.is_cancelled()
+                    && spec.masses.len() >= self.parameters.min_peaks
+                    && spec.level == 2
+            })
             .map(|x| {
                 let prev = counter.fetch_add(1, Ordering::Relaxed);
                 if prev > 0 && prev % 10_000 == 0 {
@@ -435,8 +486,12 @@ impl Runner {
             .iter()
             .all(|path| FileFormat::from(path.as_ref()).within_file_parallel());
         log::trace!("file serial read: {}", file_serial_read);
-        let inner_closure = |(idx, path)| {
+        let inner_closure = |(idx, path): (usize, &Url)| {
             let file_id = chunk_idx * batch_size + idx;
+            self.events.emit(EventKind::FileStarted {
+                file_id,
+                path: path.to_string(),
+            });
             let res = sage_cloudpath::util::read_spectra(
                 path,
                 file_id,
@@ -448,6 +503,11 @@ impl Runner {
             match res {
                 Ok(s) => {
                     log::trace!("- {}: read {} spectra", path, s.len());
+                    self.events.emit(EventKind::FileCompleted {
+                        file_id,
+                        path: path.to_string(),
+                        spectra: s.len(),
+                    });
                     Ok(s)
                 }
                 Err(e) => {
@@ -492,6 +552,11 @@ impl Runner {
             spectra.ms1.into_par_iter().map(|s| sp.process(s)).collect()
         };
 
+        self.events.emit(EventKind::SpectraProcessed {
+            ms1_spectra: ms1_spectra.len(),
+            msn_spectra: msn_spectra.len(),
+        });
+
         let io_time = Instant::now() - start;
         info!("- file IO: {:8} ms", io_time.as_millis());
 
@@ -503,11 +568,31 @@ impl Runner {
             .mzml_paths
             .chunks(batch_size)
             .enumerate()
-            .map(|(chunk_idx, chunk)| self.process_chunk(scorer, chunk, chunk_idx, batch_size))
+            .map(|(chunk_idx, chunk)| {
+                let results = self.process_chunk(scorer, chunk, chunk_idx, batch_size);
+                self.events.emit(EventKind::SearchProgress {
+                    files_completed: (chunk_idx * batch_size + chunk.len())
+                        .min(self.parameters.mzml_paths.len()),
+                    files_total: self.parameters.mzml_paths.len(),
+                });
+                results
+            })
             .collect::<SageResults>()
     }
 
-    pub fn run(mut self, parallel: usize, parquet: bool) -> anyhow::Result<telemetry::Telemetry> {
+    pub fn run(self, parallel: usize, parquet: bool) -> anyhow::Result<telemetry::Telemetry> {
+        self.run_with_summary(parallel, parquet)
+            .map(|(telemetry, _summary)| telemetry)
+    }
+
+    pub fn run_with_summary(
+        mut self,
+        parallel: usize,
+        parquet: bool,
+    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
+        anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        self.cancellation.check()?;
+        self.events.check()?;
         let scorer = Scorer {
             db: &self.database,
             precursor_tol: self.parameters.precursor_tol,
@@ -529,6 +614,8 @@ impl Runner {
 
         //Collect all results into a single container
         let mut outputs = self.batch_files(&scorer, parallel);
+        self.cancellation.check()?;
+        self.events.check()?;
 
         let alignments = if self.parameters.predict_rt {
             // Poisson probability is usually the best single feature for refining FDR.
@@ -543,10 +630,32 @@ impl Runner {
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),
             );
-            let _ = sage_core::ml::retention_model::predict(&self.database, &mut outputs.features);
-            let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
+            if sage_core::ml::retention_model::predict(&self.database, &mut outputs.features)
+                .is_some()
+            {
+                self.events.emit(EventKind::RtModelFitted);
+            } else {
+                self.events.emit(EventKind::RtModelSkipped {
+                    reason: "insufficient high-confidence observations or poor model fit".into(),
+                });
+            }
+            if sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features)
+                .is_some()
+            {
+                self.events.emit(EventKind::MobilityModelFitted);
+            } else {
+                self.events.emit(EventKind::MobilityModelSkipped {
+                    reason: "ion mobility unavailable or model fitting failed".into(),
+                });
+            }
             Some(alignments)
         } else {
+            self.events.emit(EventKind::RtModelSkipped {
+                reason: "retention-time prediction disabled".into(),
+            });
+            self.events.emit(EventKind::MobilityModelSkipped {
+                reason: "retention-time prediction disabled".into(),
+            });
             None
         };
 
@@ -567,6 +676,13 @@ impl Runner {
         // are reported with protein group FDR = 1.0
         let q_protein_group =
             sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
+        self.events.emit(EventKind::FdrCompleted {
+            psms: q_spectrum,
+            peptides: q_peptide,
+            proteins: q_protein,
+            protein_groups: q_protein_group,
+        });
+        self.cancellation.check()?;
 
         let filenames = self
             .parameters
@@ -684,16 +800,40 @@ impl Runner {
         }
 
         let path = self.make_path("results.json");
-        println!("{}", serde_json::to_string_pretty(&self.parameters)?);
+        if !self.events.is_enabled() {
+            println!("{}", serde_json::to_string_pretty(&self.parameters)?);
+        }
 
         let bytes = serde_json::to_vec_pretty(&self.parameters)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
 
+        for path in &self.parameters.output_paths {
+            self.events.emit(EventKind::OutputWritten {
+                path: path.to_string(),
+            });
+        }
+
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
         info!("cite: \"Sage: An Open-Source Tool for Fast Proteomics Searching and Quantification at Scale\" https://doi.org/10.1021/acs.jproteome.3c00486");
 
+        let summary = RunSummary {
+            runtime_secs: run_time,
+            files: self.parameters.mzml_paths.len(),
+            peptides_in_database: self.database.peptides.len(),
+            fragments_in_database: self.database.fragments.len(),
+            psms_at_one_percent_fdr: q_spectrum,
+            peptides_at_one_percent_fdr: q_peptide,
+            proteins_at_one_percent_fdr: q_protein,
+            protein_groups_at_one_percent_fdr: q_protein_group,
+            output_paths: self
+                .parameters
+                .output_paths
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        };
         let telemetry = telemetry::Telemetry::new(
             self.parameters,
             self.database.peptides.len(),
@@ -702,7 +842,13 @@ impl Runner {
             run_time,
         );
 
-        Ok(telemetry)
+        self.events.emit(EventKind::JobCompleted {
+            runtime_secs: run_time,
+            outputs: summary.output_paths.len(),
+        });
+        self.events.check()?;
+
+        Ok((telemetry, summary))
     }
     pub fn serialize_feature(&self, feature: &Feature, filenames: &[String]) -> csv::ByteRecord {
         let mut record = csv::ByteRecord::new();

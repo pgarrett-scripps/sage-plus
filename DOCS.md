@@ -85,6 +85,10 @@ Options:
           Write parquet files instead of tab-separated files
       --write-pin
           Write percolator-compatible `.pin` output files
+      --events-jsonl <PATH>
+          Stream versioned JSONL job events to PATH (use '-' for stdout)
+      --validate-only
+          Validate the configuration and overrides without running a search
   -h, --help
           Print help information
   -V, --version
@@ -120,6 +124,35 @@ Running Sage will produce several output files (located in either the current di
 - MS2 and MS3 quantitation results will be stored as a tab-separated file (`tmt.tsv`, `lfq.tsv`) if `quant.tmt` or `quant.lfq` options are used in the parameter file
 
 If `--parquet` is passed as a command line argument, `results.sage.parquet` (and optionally, `lfq.parquet`) will be written. These have a similar set of columns, but TMT values are stored as a nested array alongside PSM features
+
+## Machine-readable jobs
+
+Use `--validate-only` to check configuration and CLI overrides without reading the FASTA,
+spectra, or creating the output directory:
+
+```shell
+sage config.json --validate-only
+```
+
+Use `--events-jsonl <path>` to stream versioned, newline-delimited JSON events while a
+search runs. `--events-jsonl -` writes events to standard output. Human-readable logs remain
+on standard error, so standard output can be consumed directly by workflow engines and other
+applications.
+
+```shell
+sage config.json --events-jsonl run.events.jsonl
+```
+
+Every event contains `schema_version`, a monotonically increasing `sequence`, `elapsed_ms`,
+and an `event` discriminator. Events cover configuration validation, database construction,
+file reads, spectra processing, search progress, model fitting or fallback, FDR, written
+outputs, and terminal job state. Consumers should ignore unknown fields and event names so
+that compatible events can be added to schema version 1.
+
+Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
+accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
+`RunSummary` alongside telemetry. This application layer is intended to be shared by future
+protocol servers and user interfaces.
 
 ## Configuration file schema
 

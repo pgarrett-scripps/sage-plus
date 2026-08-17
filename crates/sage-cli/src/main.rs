@@ -1,7 +1,10 @@
 use clap::{value_parser, Arg, Command, ValueHint};
 use rayon::ThreadPoolBuilder;
+use sage_cli::api::{JobOptions, SageRunner};
+use sage_cli::events::{CancellationToken, EventEmitter, EventKind};
 use sage_cli::input::Input;
-use sage_cli::runner::Runner;
+use std::fs::File;
+use std::io::BufWriter;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::default()
@@ -96,6 +99,20 @@ fn main() -> anyhow::Result<()> {
                 .help("Set Rayon worker thread stack size in MiB (default: 2 MiB)")
                 .value_hint(ValueHint::Other),
         )
+        .arg(
+            Arg::new("events-jsonl")
+                .long("events-jsonl")
+                .value_name("PATH")
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .help("Stream versioned JSONL job events to PATH (use '-' for stdout)")
+                .value_hint(ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("validate-only")
+                .long("validate-only")
+                .action(clap::ArgAction::SetTrue)
+                .help("Validate the configuration and overrides without running a search"),
+        )
         .help_template(
             "{usage-heading} {usage}\n\n\
              {about-with-newline}\n\
@@ -118,24 +135,52 @@ fn main() -> anyhow::Result<()> {
     let parallel = matches
         .get_one::<u16>("batch-size")
         .copied()
-        .unwrap_or_else(|| num_cpus::get() as u16 / 2) as usize;
+        .unwrap_or_else(|| (num_cpus::get() as u16 / 2).max(1)) as usize;
 
     let parquet = matches.get_one::<bool>("parquet").copied().unwrap_or(false);
     let send_telemetry = matches
         .get_one::<bool>("disable-telemetry")
         .copied()
         .unwrap_or(true);
+    let validate_only = matches
+        .get_one::<bool>("validate-only")
+        .copied()
+        .unwrap_or(false);
+    let events = match matches.get_one::<String>("events-jsonl") {
+        Some(path) if path == "-" => EventEmitter::from_writer(std::io::stdout()),
+        Some(path) => EventEmitter::from_writer(BufWriter::new(File::create(path)?)),
+        None => EventEmitter::disabled(),
+    };
 
-    let input = Input::from_arguments(matches)?;
+    let input = match Input::from_arguments(matches) {
+        Ok(input) => input,
+        Err(error) => {
+            events.emit(EventKind::JobFailed {
+                message: error.to_string(),
+            });
+            return Err(error);
+        }
+    };
+    let runner = SageRunner::new(
+        input,
+        JobOptions {
+            parallel,
+            parquet,
+            events,
+            cancellation: CancellationToken::default(),
+        },
+    );
 
-    let runner = input
-        .build()
-        .and_then(|parameters| Runner::new(parameters, parallel))?;
+    if validate_only {
+        runner.validate()?;
+        eprintln!("configuration is valid");
+        return Ok(());
+    }
 
-    let tel = runner.run(parallel, parquet)?;
+    let result = runner.run()?;
 
     if send_telemetry {
-        tel.send();
+        result.telemetry.send();
     }
 
     Ok(())

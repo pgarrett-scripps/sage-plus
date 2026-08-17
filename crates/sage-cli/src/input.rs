@@ -229,22 +229,7 @@ impl Input {
             input.annotate_matches = Some(annotate_matches);
         }
 
-        // avoid to later panic if these parameters are not set (but doesn't check if files exist)
-
-        ensure!(
-            input.database.fasta.is_some() || input.database.peptides.is_some(),
-            "Either `database.fasta` or `database.peptides` must be set. For more information try '--help'"
-        );
-        ensure!(
-            input
-                .mzml_paths
-                .as_ref()
-                .map(|p| p.len())
-                .unwrap_or_default()
-                > 0,
-            "`mzml_paths` must be set. For more information try '--help'"
-        );
-
+        input.validate()?;
         Ok(input)
     }
 
@@ -286,28 +271,44 @@ impl Input {
         }
     }
 
+    /// Validate logical configuration constraints without reading inputs or writing outputs.
+    pub fn validate(&self) -> anyhow::Result<()> {
+        ensure!(
+            self.database.fasta.is_some() || self.database.peptides.is_some(),
+            "Either `database.fasta` or `database.peptides` must be set"
+        );
+        ensure!(
+            self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
+            "`mzml_paths` must contain at least one spectra file"
+        );
+        if let Some((low, high)) = self.isotope_errors {
+            ensure!(
+                low <= high,
+                "isotope errors must be specified [low, high], received [{low}, {high}]"
+            );
+        }
+        if let Some((low, high)) = self.precursor_charge {
+            ensure!(
+                low <= high,
+                "precursor charges must be specified [low, high], received [{low}, {high}]"
+            );
+        }
+        if let (Some(min), Some(max)) = (self.min_peaks, self.max_peaks) {
+            ensure!(min <= max, "`min_peaks` cannot exceed `max_peaks`");
+        }
+        ensure!(
+            self.report_psms.unwrap_or(1) > 0,
+            "`report_psms` must be greater than zero"
+        );
+        Ok(())
+    }
+
     pub fn build(mut self) -> anyhow::Result<Search> {
+        self.validate()?;
         let database = self.database.make_parameters();
 
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
-
-        if let Some(isotope_errors) = self.isotope_errors {
-            if isotope_errors.0 > isotope_errors.1 {
-                log::error!("Minimum isotope_error value greater than maximum! Typical usage: `isotope_errors: [-1, 3]`");
-                std::process::exit(1);
-            }
-        }
-        if let Some(charges) = self.precursor_charge {
-            if charges.0 > charges.1 {
-                log::error!(
-                    "Precursor charges should be specified [low, high], user provided: [{}, {}]",
-                    charges.0,
-                    charges.1
-                );
-                std::process::exit(1);
-            }
-        }
 
         if !self.predict_rt.unwrap_or(true)
             && self.quant.as_ref().and_then(|q| q.lfq).unwrap_or(false)
@@ -395,6 +396,8 @@ mod test {
 
     use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
 
+    use super::Input;
+
     #[test]
     fn deserialize_enzyme_builder() -> Result<(), serde_json::Error> {
         let a: EnzymeBuilder = serde_json::from_value(serde_json::json!({
@@ -422,5 +425,20 @@ mod test {
         assert_eq!(c.enzyme.map(|e| e.skip_suffix), Some([false; 26]));
 
         Ok(())
+    }
+
+    #[test]
+    fn validation_returns_range_errors_instead_of_exiting() {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [3, -1],
+            "mzml_paths": ["test.mzML"]
+        }))
+        .unwrap();
+
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains("isotope errors"));
     }
 }
