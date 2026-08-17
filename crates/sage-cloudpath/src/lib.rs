@@ -9,6 +9,7 @@ pub use url::Url;
 pub mod mgf;
 pub mod mzml;
 pub mod tdf;
+pub mod thermoraw;
 pub mod util;
 pub use util::FileFormat;
 
@@ -155,6 +156,8 @@ where
 pub enum Error {
     #[error("invalid uri")]
     InvalidUri,
+    #[error("unsupported input option: {0}")]
+    Unsupported(String),
     #[error("object store error: {0}")]
     ObjectStore(#[from] object_store::Error),
     #[error(transparent)]
@@ -165,6 +168,8 @@ pub enum Error {
     MzML(#[from] mzml::MzMLError),
     #[error("TDF error: {0}")]
     TDF(#[from] timsrust::TimsRustError),
+    #[error("Thermo RAW error: {0}")]
+    ThermoRaw(#[from] opentfraw::Error),
     #[error("MGF error: {0}")]
     MGF(#[from] mgf::MgfError),
 }

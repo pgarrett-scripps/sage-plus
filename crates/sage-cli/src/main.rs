@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
                 .num_args(1..)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .help(
-                    "Paths to mzML files to process. Overrides mzML files listed in the \
+                    "Paths to mzML, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the \
                      configuration file.",
                 )
                 .value_hint(ValueHint::FilePath),

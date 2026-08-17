@@ -1860,10 +1860,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "openmassspec-core"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ff14ab1fb4227689a34adac26485b770381d39f3c7d09019037b610d696a63e"
+dependencies = [
+ "flate2",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
+
+[[package]]
+name = "opentfraw"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfeb6cfccaa1ae1d967cabda663853c4f402e672e662f4859a2d814b88a37425"
+dependencies = [
+ "openmassspec-core",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "ordered-float"
@@ -2643,6 +2664,7 @@ dependencies = [
  "futures",
  "log",
  "object_store",
+ "opentfraw",
  "parquet 50.0.0",
  "quick-xml 0.31.0",
  "rayon",
