@@ -21,9 +21,6 @@ pub struct Telemetry {
     lfq: bool,
     // Which kind of TMT tags are used, if any?
     tmt: Option<Isobaric>,
-    // Are results written in parquet format?
-    parquet: bool,
-
     // Details about the operating system and computer:
     // - Which OS?
     // - Total memory available
@@ -38,7 +35,6 @@ impl Telemetry {
         settings: crate::input::Search,
         peptides: usize,
         fragments: usize,
-        parquet: bool,
         runtime_secs: u64,
     ) -> Telemetry {
         let mut system = System::default();
@@ -52,7 +48,6 @@ impl Telemetry {
             runtime_secs,
             lfq: settings.quant.lfq,
             tmt: settings.quant.tmt,
-            parquet,
             os_name: system.long_os_version().unwrap_or_default(),
             total_memory: system.total_memory(),
             cpus: num_cpus::get(),

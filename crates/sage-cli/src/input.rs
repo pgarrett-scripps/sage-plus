@@ -56,6 +56,7 @@ pub struct Search {
     pub max_fragment_charge: Option<u8>,
     pub min_matched_peaks: u16,
     pub report_psms: usize,
+    pub output_filter: OutputFilter,
     pub predict_rt: bool,
     pub retention_time_model: RetentionTimeSettings,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,6 +104,7 @@ pub struct Input {
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
     pub report_psms: Option<usize>,
+    pub output_filter: Option<OutputFilter>,
     pub chimera: Option<bool>,
     pub wide_window: Option<bool>,
     pub min_peaks: Option<usize>,
@@ -135,6 +137,19 @@ pub struct Input {
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
     pub use_bitmap: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputFilter {
+    /// Maximum spectrum-level q-value written to the PSM and matched-fragment tables.
+    pub psm_q_value: f32,
+}
+
+impl Default for OutputFilter {
+    fn default() -> Self {
+        Self { psm_q_value: 0.1 }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -399,6 +414,11 @@ impl Input {
             self.report_psms.unwrap_or(1) > 0,
             "`report_psms` must be greater than zero"
         );
+        let output_psm_q_value = self.output_filter.unwrap_or_default().psm_q_value;
+        ensure!(
+            output_psm_q_value.is_finite() && (0.0..=1.0).contains(&output_psm_q_value),
+            "output_filter.psm_q_value must be between 0 and 1"
+        );
         self.memory_limits()?;
         resolve_batch_size(self.batch_size)?;
         if let Some(rt_pct_tolerance) = self
@@ -498,6 +518,7 @@ impl Input {
             precursor_tol: self.precursor_tol,
             fragment_tol: self.fragment_tol,
             report_psms: self.report_psms.unwrap_or(1),
+            output_filter: self.output_filter.unwrap_or_default(),
             max_peaks: self.max_peaks.unwrap_or(150),
             min_peaks: self.min_peaks.unwrap_or(15),
             min_matched_peaks: self.min_matched_peaks.unwrap_or(4),
@@ -550,7 +571,7 @@ fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod test {
 
-    use super::{resolve_batch_size, Input, PtmLocalizationSettings};
+    use super::{resolve_batch_size, Input, OutputFilter, PtmLocalizationSettings};
     use sage_core::{
         database::EnzymeBuilder,
         enzyme::EnzymeParameters,
@@ -595,6 +616,32 @@ mod test {
             serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;
         assert_eq!(legacy_name.psm_q_value, 0.02);
         Ok(())
+    }
+
+    #[test]
+    fn output_filter_defaults_and_deserializes() -> Result<(), serde_json::Error> {
+        let default: OutputFilter = serde_json::from_value(serde_json::json!({}))?;
+        assert_eq!(default.psm_q_value, 0.1);
+
+        let configured: OutputFilter =
+            serde_json::from_value(serde_json::json!({ "psm_q_value": 0.025 }))?;
+        assert_eq!(configured.psm_q_value, 0.025);
+        Ok(())
+    }
+
+    #[test]
+    fn output_filter_q_value_must_be_a_probability() {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"],
+            "output_filter": { "psm_q_value": 1.1 }
+        }))
+        .unwrap();
+
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains("output_filter.psm_q_value"));
     }
 
     #[test]

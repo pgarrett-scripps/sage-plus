@@ -9,12 +9,15 @@
 #![cfg(feature = "parquet")]
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::hash::BuildHasher;
+use std::path::Path;
 
-use parquet::data_type::{BoolType, ByteArray, FloatType, Int64Type};
+use parquet::data_type::{BoolType, ByteArray, DoubleType, FloatType, Int64Type};
 use parquet::errors::ParquetError;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedColumnWriter;
+use parquet::format::KeyValue;
 use parquet::record::{Field, Row};
 use parquet::{
     basic::ZstdLevel,
@@ -25,10 +28,81 @@ use parquet::{
 use sage_core::cleavage::CustomCleavageLibrary;
 use sage_core::database::IndexedDatabase;
 use sage_core::ion_series::Kind;
-use sage_core::lfq::{Peak, PrecursorId};
+use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::ptm_library::{PtmLibrary, PtmLibrarySite};
 use sage_core::scoring::Feature;
 use sage_core::tmt::TmtQuant;
+
+fn field_to_json(field: &Field) -> serde_json::Value {
+    use serde_json::{Number, Value};
+
+    match field {
+        Field::Null => Value::Null,
+        Field::Bool(value) => Value::Bool(*value),
+        Field::Byte(value) => Value::Number(Number::from(*value)),
+        Field::Short(value) => Value::Number(Number::from(*value)),
+        Field::Int(value) => Value::Number(Number::from(*value)),
+        Field::Long(value) => Value::Number(Number::from(*value)),
+        Field::UByte(value) => Value::Number(Number::from(*value)),
+        Field::UShort(value) => Value::Number(Number::from(*value)),
+        Field::UInt(value) => Value::Number(Number::from(*value)),
+        Field::ULong(value) => Value::Number(Number::from(*value)),
+        Field::Float(value) => Number::from_f64(f64::from(*value))
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        Field::Double(value) => Number::from_f64(*value)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        Field::Str(value) => Value::String(value.clone()),
+        Field::Bytes(value) => Value::String(base64::encode(value.data())),
+        Field::Date(value) => Value::Number(Number::from(*value)),
+        Field::TimestampMillis(value) | Field::TimestampMicros(value) => {
+            Value::Number(Number::from(*value))
+        }
+        // Sage's analytical schemas currently use only the scalar types above.
+        // Preserve any future logical/nested values as their Parquet display form.
+        other => Value::String(other.to_string()),
+    }
+}
+
+/// Scan a Parquet file as typed JSON objects without materializing the full file.
+/// The predicate is evaluated before `limit` is applied.
+pub fn scan_json_rows<F>(
+    path: &Path,
+    scan_limit: usize,
+    limit: usize,
+    mut predicate: F,
+) -> parquet::errors::Result<(Vec<serde_json::Value>, usize, bool)>
+where
+    F: FnMut(&serde_json::Map<String, serde_json::Value>) -> bool,
+{
+    let file = File::open(path).map_err(|error| ParquetError::External(Box::new(error)))?;
+    let reader = SerializedFileReader::new(file)?;
+    let mut rows = Vec::new();
+    let mut scanned_rows = 0usize;
+    let mut truncated = false;
+
+    for row in reader.get_row_iter(None)?.take(scan_limit) {
+        scanned_rows += 1;
+        let row = row?;
+        let object = row
+            .get_column_iter()
+            .map(|(name, field)| (name.clone(), field_to_json(field)))
+            .collect::<serde_json::Map<_, _>>();
+        if !predicate(&object) {
+            continue;
+        }
+        if rows.len() == limit {
+            truncated = true;
+            break;
+        }
+        rows.push(serde_json::Value::Object(object));
+    }
+    if scanned_rows == scan_limit {
+        truncated = true;
+    }
+    Ok((rows, scanned_rows, truncated))
+}
 
 /// Read a compact PTM site library. Required columns are `protein`,
 /// `position` (one-based), `residue`, and `modification`. Additional evidence
@@ -632,68 +706,15 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
 }
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    let msg = r#"
-        message schema {
-            required int64 psm_id;
-            required byte_array filename (utf8);
-            required byte_array scannr (utf8);
-            required byte_array peptide (utf8);
-            required byte_array ambiguity_sequence (utf8);
-            required float mass_shift;
-            required byte_array stripped_peptide (utf8);
-            required byte_array proteins (utf8);
-            required byte_array protein_groups (utf8);
-            required int32 num_proteins;
-            required int32 num_protein_groups;
-            required int32 rank;
-            required boolean is_decoy;
-            required float expmass;
-            required float calcmass;
-            required int32 charge;
-            required int32 peptide_len;
-            required int32 missed_cleavages;
-            required boolean semi_enzymatic;
-            required float ms2_intensity;
-            required float isotope_error;
-            required float precursor_ppm;
-            required float fragment_ppm;
-            required float hyperscore;
-            required float delta_next;
-            required float delta_best;
-            required float rt;
-            required float aligned_rt;
-            required float predicted_rt;
-            required float delta_rt_model;
-            required float ion_mobility;
-            required float predicted_mobility;
-            required float delta_mobility;
-            required int32 matched_peaks;
-            required int32 longest_b;
-            required int32 longest_y;
-            required float longest_y_pct;
-            required float matched_intensity_pct;
-            required int32 scored_candidates;
-            required float poisson;
-            required float sage_discriminant_score;
-            required float posterior_error;
-            required float spectrum_q;
-            required float peptide_q;
-            required float protein_q;
-            required float protein_group_q;
-            optional group reporter_ion_intensity (LIST) {
-                repeated group list {
-                    optional float element;
-                }
-            }
-        }
-    "#;
-    parquet::schema::parser::parse_message_type(msg)
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../schemas/results.sage.v1.parquet.schema"
+    ))
 }
 
 /// Caller must guarantee that `reporter_ions` is not an empty slice
 fn write_reporter_ions(
     mut column: SerializedColumnWriter,
-    features: &[Feature],
+    features: &[&Feature],
     reporter_ions: &[TmtQuant],
 ) -> parquet::errors::Result<()> {
     let mut scan_map = HashMap::new();
@@ -736,15 +757,24 @@ fn write_null_column(
 }
 
 pub fn serialize_features(
-    features: &[Feature],
+    features: &[&Feature],
     reporter_ions: &[TmtQuant],
     filenames: &[String],
     database: &IndexedDatabase,
+    output_psm_q_value: f32,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let schema = build_schema()?;
 
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.output_filter.spectrum_q_max".into(),
+                Some(output_psm_q_value.to_string()),
+            ),
+        ]))
         .build();
 
     let buf = Vec::new();
@@ -778,50 +808,50 @@ pub fn serialize_features(
             };
         }
 
-        write_col!(|f: &Feature| f.psm_id as i64, Int64Type);
+        write_col!(|f: &&Feature| f.psm_id as i64, Int64Type);
         write_col!(
-            |f: &Feature| filenames[f.file_id].as_str().into(),
+            |f: &&Feature| filenames[f.file_id].as_str().into(),
             ByteArrayType
         );
-        write_col!(|f: &Feature| f.spec_id.as_str().into(), ByteArrayType);
+        write_col!(|f: &&Feature| f.spec_id.as_str().into(), ByteArrayType);
         write_col!(
-            |f: &Feature| database[f.peptide_idx].to_string().as_bytes().into(),
+            |f: &&Feature| database[f.peptide_idx].to_string().as_bytes().into(),
             ByteArrayType
         );
         write_col!(
-            |f: &Feature| f.ambiguity_sequence.as_str().into(),
+            |f: &&Feature| f.ambiguity_sequence.as_str().into(),
             ByteArrayType
         );
         write_col!(mass_shift, FloatType);
         write_col!(
-            |f: &Feature| database[f.peptide_idx].sequence.as_ref().into(),
+            |f: &&Feature| database[f.peptide_idx].sequence.as_ref().into(),
             ByteArrayType
         );
         write_col!(
-            |f: &Feature| database[f.peptide_idx]
+            |f: &&Feature| database[f.peptide_idx]
                 .proteins(&database.decoy_tag, database.generate_decoys)
                 .as_str()
                 .into(),
             ByteArrayType
         );
         write_col!(
-            |f: &Feature| f.protein_groups.as_deref().unwrap_or("").into(),
+            |f: &&Feature| f.protein_groups.as_deref().unwrap_or("").into(),
             ByteArrayType
         );
         write_col!(
-            |f: &Feature| database[f.peptide_idx].proteins.len() as i32,
+            |f: &&Feature| database[f.peptide_idx].proteins.len() as i32,
             Int32Type
         );
         write_col!(num_protein_groups, Int32Type);
         write_col!(rank, Int32Type);
-        write_col!(|f: &Feature| f.label == -1, BoolType);
+        write_col!(|f: &&Feature| f.label == -1, BoolType);
         write_col!(expmass, FloatType);
         write_col!(calcmass, FloatType);
         write_col!(charge, Int32Type);
         write_col!(peptide_len, Int32Type);
         write_col!(missed_cleavages, Int32Type);
         write_col!(
-            |f: &Feature| database[f.peptide_idx].semi_enzymatic,
+            |f: &&Feature| database[f.peptide_idx].semi_enzymatic,
             BoolType
         );
         write_col!(ms2_intensity, FloatType);
@@ -883,12 +913,17 @@ pub fn build_matched_fragment_schema() -> parquet::errors::Result<Type> {
 }
 
 pub fn serialize_matched_fragments(
-    features: &[Feature],
+    features: &[&Feature],
+    output_psm_q_value: f32,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let schema = build_matched_fragment_schema()?;
 
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_key_value_metadata(Some(vec![KeyValue::new(
+            "sage.output_filter.spectrum_q_max".into(),
+            Some(output_psm_q_value.to_string()),
+        )]))
         .build();
 
     let buf = Vec::new();
@@ -1042,30 +1077,35 @@ pub fn serialize_matched_fragments(
 }
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
-    let msg = r#"
-        message schema {
-            required byte_array peptide (utf8);
-            required byte_array stripped_peptide (utf8);
-            optional int32 charge;
-            required byte_array proteins (utf8);
-            required boolean is_decoy;
-            required float q_value;
-            required byte_array filename (utf8);
-            required float intensity;
-        }
-    "#;
-    parquet::schema::parser::parse_message_type(msg)
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../schemas/lfq.v1.parquet.schema"
+    ))
 }
 
 pub fn serialize_lfq<H: BuildHasher>(
-    areas: &HashMap<(PrecursorId, bool), (Peak, Vec<f64>), H>,
+    areas: &HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
     filenames: &[String],
     database: &IndexedDatabase,
 ) -> parquet::errors::Result<Vec<u8>> {
+    if let Some((_, quantified)) = areas.iter().find(|(_, quantified)| {
+        quantified.intensities.len() != filenames.len()
+            || quantified.ms2_confirmed.len() != filenames.len()
+    }) {
+        return Err(ParquetError::General(format!(
+            "LFQ row has {} intensities and {} MS2 evidence values for {} files",
+            quantified.intensities.len(),
+            quantified.ms2_confirmed.len(),
+            filenames.len()
+        )));
+    }
     let schema = build_lfq_schema()?;
 
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("lfq".into())),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+        ]))
         .build();
 
     let buf = Vec::new();
@@ -1160,7 +1200,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     if let Some(mut col) = rg.next_column()? {
         let values = areas
             .iter()
-            .flat_map(|(_, (peak, _))| std::iter::repeat(peak.q_value).take(filenames.len()))
+            .flat_map(|(_, quantified)| {
+                std::iter::repeat(quantified.peak.q_value).take(filenames.len())
+            })
             .collect::<Vec<_>>();
 
         col.typed::<FloatType>().write_batch(&values, None, None)?;
@@ -1170,9 +1212,31 @@ pub fn serialize_lfq<H: BuildHasher>(
     if let Some(mut col) = rg.next_column()? {
         let values = areas
             .iter()
-            .flat_map(|(_, (_, values))| {
-                (0..values.len()).map(|idx| filenames[idx].as_bytes().into())
+            .flat_map(|(_, quantified)| {
+                std::iter::repeat(quantified.peak.score).take(filenames.len())
             })
+            .collect::<Vec<_>>();
+
+        col.typed::<DoubleType>().write_batch(&values, None, None)?;
+        col.close()?;
+    }
+
+    if let Some(mut col) = rg.next_column()? {
+        let values = areas
+            .iter()
+            .flat_map(|(_, quantified)| {
+                std::iter::repeat(quantified.peak.spectral_angle).take(filenames.len())
+            })
+            .collect::<Vec<_>>();
+
+        col.typed::<DoubleType>().write_batch(&values, None, None)?;
+        col.close()?;
+    }
+
+    if let Some(mut col) = rg.next_column()? {
+        let values = areas
+            .iter()
+            .flat_map(|_| filenames.iter().map(|filename| filename.as_bytes().into()))
             .collect::<Vec<_>>();
 
         col.typed::<ByteArrayType>()
@@ -1182,12 +1246,31 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::with_capacity(areas.len() * filenames.len());
+        let mut def_levels = Vec::with_capacity(areas.len() * filenames.len());
+        for quantified in areas.values() {
+            for intensity in &quantified.intensities {
+                if let Some(intensity) = intensity {
+                    values.push(*intensity);
+                    def_levels.push(1);
+                } else {
+                    def_levels.push(0);
+                }
+            }
+        }
+
+        col.typed::<DoubleType>()
+            .write_batch(&values, Some(&def_levels), None)?;
+        col.close()?;
+    }
+
+    if let Some(mut col) = rg.next_column()? {
         let values = areas
-            .iter()
-            .flat_map(|(_, (_, values))| values.iter().copied().map(|v| v as f32))
+            .values()
+            .flat_map(|quantified| quantified.ms2_confirmed.iter().copied())
             .collect::<Vec<_>>();
 
-        col.typed::<FloatType>().write_batch(&values, None, None)?;
+        col.typed::<BoolType>().write_batch(&values, None, None)?;
         col.close()?;
     }
 
@@ -1199,7 +1282,61 @@ pub fn serialize_lfq<H: BuildHasher>(
 mod ptm_tests {
     use super::*;
     use parquet::file::reader::{FileReader, SerializedFileReader};
+    use sage_core::database::PeptideIx;
+    use sage_core::peptide::Peptide;
     use std::sync::Arc;
+
+    #[test]
+    fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
+        let mut database = IndexedDatabase::default();
+        database.peptides.push(Peptide {
+            sequence: Arc::from(&b"PEPTIDE"[..]),
+            proteins: vec![Arc::from("P12345")],
+            ..Peptide::default()
+        });
+        let mut areas = HashMap::new();
+        areas.insert(
+            (PrecursorId::Charged((PeptideIx(0), 2)), false),
+            QuantifiedPeak {
+                peak: sage_core::lfq::Peak {
+                    score: 12.5,
+                    spectral_angle: 0.91,
+                    q_value: 0.005,
+                    ..Default::default()
+                },
+                intensities: vec![Some(42.0), None],
+                ms2_confirmed: vec![true, false],
+            },
+        );
+
+        let bytes = serialize_lfq(&areas, &["run-a".into(), "run-b".into()], &database)?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let metadata = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .expect("LFQ schema metadata");
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq")
+        }));
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
+        }));
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        assert_eq!(rows.len(), 2);
+        fn values(row: &Row) -> HashMap<&str, &Field> {
+            row.get_column_iter()
+                .map(|(name, field)| (name.as_str(), field))
+                .collect::<HashMap<_, _>>()
+        }
+        assert_eq!(values(&rows[0])["intensity"], &Field::Double(42.0));
+        assert_eq!(values(&rows[0])["ms2_confirmed"], &Field::Bool(true));
+        assert_eq!(values(&rows[1])["intensity"], &Field::Null);
+        assert_eq!(values(&rows[1])["ms2_confirmed"], &Field::Bool(false));
+        Ok(())
+    }
 
     #[test]
     fn ptm_library_round_trip() {

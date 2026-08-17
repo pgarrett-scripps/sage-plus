@@ -81,8 +81,6 @@ Options:
           Path where search and quant results will be written. Overrides the directory specified in the configuration file.
       --batch-size <batch-size>
           Number of files to search in parallel (default = number of CPUs/2)
-      --parquet
-          Write parquet files instead of tab-separated files
       --write-pin
           Write percolator-compatible `.pin` output files
       --max-memory <GiB>
@@ -123,10 +121,13 @@ sage config.json s3://my-bucket/YYYY-MM-DD_expt_A_fraction_1.mzML.gz
 
 Running Sage will produce several output files (located in either the current directory, or `output_directory` if that option is specified):
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
-- MS2 search results will be stored as a tab-separated file (`results.sage.tsv`) file - this is a tab-separated file, which can be opened in Excel/Pandas/etc
-- MS2 and MS3 quantitation results will be stored as a tab-separated file (`tmt.tsv`, `lfq.tsv`) if `quant.tmt` or `quant.lfq` options are used in the parameter file
+- MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
+- Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
+- `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
-If `--parquet` is passed as a command line argument, `results.sage.parquet` (and optionally, `lfq.parquet`) will be written. These have a similar set of columns, but TMT values are stored as a nested array alongside PSM features
+Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
+
+The versioned physical schemas and score definitions are published in [`schemas/`](schemas/). Canonical Parquet files embed `sage.schema.name` and `sage.schema.version` metadata so downstream tools can select the matching contract.
 
 #### Memory guard
 
@@ -336,6 +337,9 @@ For additional information about configuration options and output file formats, 
   "min_matched_peaks": 6,   // Optional[int] {default=4}: minimum # of matched b+y ions to use for reporting PSMs
   "max_fragment_charge": 1, // Optional[int] {default=null}: maximum fragment ion charge states to consider,
   "report_psms": 1,         // Optional[int] {default=1}: number of PSMs to report for each spectra. Higher values might disrupt PSM rescoring.
+  "output_filter": {         // Optional: rows written to PSM and matched-fragment Parquet files
+    "psm_q_value": 0.1       // Optional[float] {default=0.1}: maximum spectrum-level q-value, inclusive
+  },
   "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its resident memory reaches this many GiB; 0 disables
   "min_free_memory_gb": 2,  // Optional[float] {default=null}: stop Sage if system-available memory falls to this many GiB; 0 disables
   "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
@@ -598,6 +602,8 @@ Retention-time alignment and prediction are separate features. `retention_time_a
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
+- **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
+- **output_filter.psm_q_value**: Float from 0 to 1. Maximum spectrum-level PSM q-value written to `results.sage.parquet` and `matched_fragments.sage.parquet` (default: 0.1). The boundary is inclusive. Set it to `1.0` to retain every scored PSM. This is an output-only filter: scoring, FDR estimation, LFQ, PTM localization, `.pin` output, and the HTML report continue to use their existing inputs and thresholds. Target and decoy PSMs that pass the threshold are retained so downstream target-decoy analyses remain possible.
 - **max_memory_gb**: Number. Abort the search if Sage's resident memory reaches this many GiB. Zero disables this limit (default: disabled).
 - **min_free_memory_gb**: Number. Abort the search if system-available memory falls to this many GiB, preserving capacity for the operating system and other applications. Zero disables this limit (default: disabled).
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
@@ -633,10 +639,10 @@ For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_va
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 
-Two site reports are written. They use TSV by default and Parquet when `--parquet` is selected:
+Two Parquet site reports are written:
 
-- **results.sage.ptm-sites.tsv** or **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, and `site_probabilities`.
-- **results.sage.protein-sites.tsv** or **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, including `best_localization_q_value`.
+- **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, and `site_probabilities`.
+- **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, including `best_localization_q_value`.
 
 For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
 
@@ -668,7 +674,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible output files are: "results.json", "run-summary.json", "results.sage.tsv", "lfq.tsv", "tmt.tsv", "results.sage.ptm-sites.tsv", and "results.sage.protein-sites.tsv". With `--parquet`, the Sage and PTM result tables use the corresponding `.parquet` names instead. `run-summary.json` is always written after a successful run and contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, and `results.sage.protein-sites.parquet`. Optional purpose-specific artifacts include `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
@@ -676,7 +682,9 @@ Notes:
 
 # Interpreting Sage Output
 
-The "results.sage.tsv" file contains the following columns (headers):
+The `results.sage.parquet` file contains the following columns:
+
+Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
 - `proteins`: Proteins containing the peptide sequence.
@@ -716,3 +724,21 @@ The "results.sage.tsv" file contains the following columns (headers):
 - `ms2_intensity`: Total intensity of MS2 spectrum
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
+
+## Label-free quantification output
+
+`lfq.parquet` is a separate long-form table with one row per quantified precursor and acquisition file. All intensities are produced by Sage's cross-run feature-tracing workflow; `ms2_confirmed` records whether that precursor also has an accepted target PSM in the specific file.
+
+- `peptide`: Modified peptide sequence.
+- `stripped_peptide`: Unmodified amino-acid sequence.
+- `charge`: Precursor charge, or null when charge states were combined.
+- `proteins`: Protein assignments.
+- `is_decoy`: Whether the LFQ precursor is a decoy.
+- `q_value`: Precursor-level q-value assigned by picked target-decoy competition.
+- `score`: Cross-run LFQ peak score used for precursor-level competition.
+- `spectral_angle`: Intensity-weighted normalized isotope-pattern spectral angle for the selected cross-run peak.
+- `filename`: Acquisition file represented by this row.
+- `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
+- `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
+
+Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.

@@ -57,10 +57,9 @@ MCP is used. In addition to identification and throughput statistics, it records
 model/alignment outcomes, quantification, memory controls, input formats, and modification limits.
 `analyze_run` reads that portable artifact and highlights basic outcomes that need attention.
 
-`query_results` reads at most 200 matching rows and scans at most one million rows from TSV
+`query_results` reads at most 200 matching rows and scans at most one million rows from Parquet
 outputs. It supports PSMs, localized PTM sites, and collapsed protein sites, with optional
-q-value, protein, peptide, and modification filters. Parquet searches remain available, but
-result queries currently require TSV output.
+q-value, protein, peptide, and modification filters.
 
 Each job also exposes `sage://jobs/{job_id}/manifest`, `sage://jobs/{job_id}/summary`, and
 `sage://jobs/{job_id}/events` resources.

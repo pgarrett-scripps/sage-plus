@@ -140,6 +140,13 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
     let status = final_status.expect("fixture search did not finish in time");
     assert_eq!(status["status"], "completed", "{status:#}");
     assert!(status["summary"]["output_paths"].as_array().unwrap().len() >= 2);
+    assert!(status["summary"]["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path
+            .as_str()
+            .is_some_and(|path| path.ends_with("matched_fragments.sage.parquet"))));
 
     let events = client
         .call_tool(
@@ -154,6 +161,14 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         .unwrap()
         .iter()
         .any(|event| { event["event"] == "job_completed" }));
+    let annotation_event = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["event"] == "fragment_annotation_completed")
+        .expect("deferred fragment annotation event");
+    assert!(annotation_event["psms"].as_u64().unwrap() > 0);
+    assert!(annotation_event["fragments"].as_u64().unwrap() > 0);
 
     let summary = client
         .call_tool(

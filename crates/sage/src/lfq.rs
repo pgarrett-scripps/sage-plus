@@ -4,6 +4,7 @@ use crate::ml::{matrix::Matrix, retention_alignment::Alignment};
 use crate::scoring::Feature;
 use crate::spectrum::ProcessedSpectrum;
 use dashmap::DashMap;
+use fnv::FnvHashSet;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -101,6 +102,22 @@ pub struct FeatureMap {
     pub min_rts: Vec<f32>,
     pub bin_size: usize,
     pub settings: LfqSettings,
+    /// Direct MS2 evidence for each LFQ precursor in each acquisition file.
+    /// LFQ intensities are always obtained through the cross-run feature-tracing
+    /// workflow; this set records only whether a matching accepted PSM was
+    /// observed in the file itself.
+    ms2_confirmed: FnvHashSet<(PrecursorId, usize)>,
+}
+
+/// A quantified LFQ precursor across all acquisition files.
+#[derive(Clone, Debug)]
+pub struct QuantifiedPeak {
+    pub peak: Peak,
+    /// Integrated MS1 intensity for each acquisition file. `None` represents
+    /// an absent integrated signal rather than a measured zero.
+    pub intensities: Vec<Option<f64>>,
+    /// Whether the corresponding file contains a matching accepted target PSM.
+    pub ms2_confirmed: Vec<bool>,
 }
 
 pub fn build_feature_map(
@@ -109,6 +126,18 @@ pub fn build_feature_map(
     features: &[Feature],
 ) -> FeatureMap {
     let rt_tol = settings.rt_tolerance();
+    let ms2_confirmed = features
+        .iter()
+        .filter(|feat| feat.peptide_q <= settings.peptide_q_value && feat.label == 1)
+        .map(|feat| {
+            let id = if settings.combine_charge_states {
+                PrecursorId::Combined(feat.peptide_idx)
+            } else {
+                PrecursorId::Charged((feat.peptide_idx, feat.charge))
+            };
+            (id, feat.file_id)
+        })
+        .collect::<FnvHashSet<_>>();
     let map: DashMap<PeptideIx, PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
     features
         .iter()
@@ -202,6 +231,7 @@ pub fn build_feature_map(
         min_rts,
         bin_size: 16 * 1024,
         settings,
+        ms2_confirmed,
     }
 }
 
@@ -241,7 +271,7 @@ impl FeatureMap {
         db: &IndexedDatabase,
         spectra: &[ProcessedSpectrum],
         alignments: &[Alignment],
-    ) -> HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher> {
+    ) -> HashMap<(PrecursorId, bool), QuantifiedPeak, fnv::FnvBuildHasher> {
         let scores: DashMap<(PrecursorId, bool), Grid, fnv::FnvBuildHasher> = DashMap::default();
 
         log::info!("tracing MS1 features");
@@ -304,14 +334,24 @@ impl FeatureMap {
 
         scores
             .into_par_iter()
-            .filter_map(|(peptide_ix, mut grid)| {
+            .filter_map(|(key, mut grid)| {
                 // MS1 ions have been added to any relevant grids, so we now
                 // attempt to trace the peaks, find the best peak, and integrate
                 // it across all of the files
                 let mut traces = grid.summarize_traces();
-                let (peak, data) = traces.integrate(&self.settings)?;
+                let (peak, intensities) = traces.integrate(&self.settings)?;
+                let ms2_confirmed = (0..alignments.len())
+                    .map(|file_id| !key.1 && self.ms2_confirmed.contains(&(key.0, file_id)))
+                    .collect();
 
-                Some((peptide_ix, (peak, data)))
+                Some((
+                    key,
+                    QuantifiedPeak {
+                        peak,
+                        intensities,
+                        ms2_confirmed,
+                    },
+                ))
             })
             .collect::<HashMap<_, _, _>>()
     }
@@ -457,7 +497,7 @@ impl Traces {
     ///   angle observed across all of the files
     /// * Integrate all of the MS1 traces within said window, returning a vector
     ///   of length `n_files` containing the summed MS1 intensities
-    pub fn integrate(&mut self, settings: &LfqSettings) -> Option<(Peak, Vec<f64>)> {
+    pub fn integrate(&mut self, settings: &LfqSettings) -> Option<(Peak, Vec<Option<f64>>)> {
         self.warp();
 
         let (scores, spectral) = self.scores(settings.peak_scoring);
@@ -504,7 +544,7 @@ impl Traces {
                 IntegrationStrategy::Apex => self.dot_product.row_slice(file)[best.rt],
             };
 
-            areas.push(area);
+            areas.push((area.is_finite() && area > 0.0).then_some(area));
         }
 
         let mut summed_int = 1.0;

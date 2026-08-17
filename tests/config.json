@@ -17,8 +17,12 @@
     },
     "deisotope": true,
     "chimera": false,
+    "annotate_matches": true,
     "max_fragment_charge": 1,
     "report_psms": 1,
+    "output_filter": {
+        "psm_q_value": 1.0
+    },
     "precursor_tol": {
         "ppm": [
             -50,

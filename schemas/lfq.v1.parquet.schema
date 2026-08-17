@@ -1,0 +1,13 @@
+message schema {
+    required byte_array peptide (utf8);
+    required byte_array stripped_peptide (utf8);
+    optional int32 charge;
+    required byte_array proteins (utf8);
+    required boolean is_decoy;
+    required float q_value;
+    required double score;
+    required double spectral_angle;
+    required byte_array filename (utf8);
+    optional double intensity;
+    required boolean ms2_confirmed;
+}

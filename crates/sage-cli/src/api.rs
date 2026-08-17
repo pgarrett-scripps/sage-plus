@@ -7,7 +7,6 @@ use crate::telemetry::Telemetry;
 /// Execution controls shared by CLI, GUI, TUI, and protocol adapters.
 pub struct JobOptions {
     pub parallel: usize,
-    pub parquet: bool,
     pub events: EventEmitter,
     pub cancellation: CancellationToken,
 }
@@ -16,7 +15,6 @@ impl Default for JobOptions {
     fn default() -> Self {
         Self {
             parallel: (num_cpus::get() / 2).max(1),
-            parquet: false,
             events: EventEmitter::disabled(),
             cancellation: CancellationToken::default(),
         }
@@ -74,7 +72,6 @@ impl SageRunner {
 
         let JobOptions {
             parallel,
-            parquet,
             events,
             cancellation,
         } = self.options;
@@ -110,7 +107,7 @@ impl SageRunner {
                 return Err(error);
             }
         };
-        match runner.run_with_summary(parallel, parquet) {
+        match runner.run_with_summary(parallel) {
             Ok((telemetry, summary)) => Ok(JobResult { telemetry, summary }),
             Err(error) => {
                 events.emit(if cancellation.is_cancelled() {

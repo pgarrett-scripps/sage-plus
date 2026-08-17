@@ -330,7 +330,7 @@ impl<'db> Scorer<'db> {
                     if pre.peptide == PeptideIx::default() {
                         return None;
                     }
-                    let (score, _, _) = self.score_candidate(query, pre);
+                    let (score, _, _) = self.score_candidate(query, pre, false);
                     if (score.matched_b + score.matched_y) < self.min_matched_peaks {
                         return None;
                     }
@@ -717,7 +717,7 @@ impl<'db> Scorer<'db> {
             .preliminary
             .iter()
             .filter(|score| score.peptide != PeptideIx::default())
-            .map(|pre| self.score_candidate(query, pre))
+            .map(|pre| self.score_candidate(query, pre, self.annotate_matches))
             .filter(|s| (s.0.matched_b + s.0.matched_y) >= self.min_matched_peaks)
             .collect::<Vec<_>>();
 
@@ -934,6 +934,7 @@ impl<'db> Scorer<'db> {
         &self,
         query: &ProcessedSpectrum,
         pre_score: &PreScore,
+        collect_fragments: bool,
     ) -> (Score, Option<Fragments>, Coverage) {
         let mut score = Score {
             peptide: pre_score.peptide,
@@ -1014,7 +1015,7 @@ impl<'db> Scorer<'db> {
                         }
                     }
 
-                    if self.annotate_matches {
+                    if collect_fragments {
                         let idx = match frag.kind {
                             Kind::A | Kind::B | Kind::C => group.series_index as i32 + 1,
                             Kind::X | Kind::Y | Kind::Z => {
@@ -1042,12 +1043,60 @@ impl<'db> Scorer<'db> {
         score.ppm_difference /= score.summed_b + score.summed_y;
         score.signed_ppm_difference /= score.summed_b + score.summed_y;
 
-        if self.annotate_matches {
+        if collect_fragments {
             (score, Some(fragments_details), coverage)
         } else {
             // drop(fragments_details);
             (score, None, coverage)
         }
+    }
+
+    /// Reconstruct detailed fragment matches for an already-scored PSM.
+    /// This intentionally reuses the same candidate-matching path as the
+    /// primary search so neutral-loss selection, charge assignment, and mass
+    /// calculations cannot drift between scoring and deferred annotation.
+    pub fn annotate_candidate(&self, query: &ProcessedSpectrum, feature: &Feature) -> Fragments {
+        let pre_score = PreScore {
+            peptide: feature.peptide_idx,
+            precursor_charge: feature.charge,
+            ..Default::default()
+        };
+        self.score_candidate(query, &pre_score, true)
+            .1
+            .expect("fragment collection was explicitly requested")
+    }
+
+    /// Reconstruct fragment details for the reported PSMs from one spectrum.
+    /// In chimera mode every preceding rank is replayed, even when it is not
+    /// selected for output, because later ranks were scored after its peaks
+    /// had been removed.
+    pub fn annotate_ranked_candidates(
+        &self,
+        query: &ProcessedSpectrum,
+        features: &[&Feature],
+        selected: &[bool],
+    ) -> Vec<Option<Fragments>> {
+        assert_eq!(features.len(), selected.len());
+        if !self.chimera {
+            return features
+                .iter()
+                .zip(selected)
+                .map(|(feature, selected)| {
+                    selected.then(|| self.annotate_candidate(query, feature))
+                })
+                .collect();
+        }
+
+        let mut residual = query.clone();
+        features
+            .iter()
+            .zip(selected)
+            .map(|(feature, selected)| {
+                let fragments = selected.then(|| self.annotate_candidate(&residual, feature));
+                self.remove_matched_peaks(&mut residual, feature);
+                fragments
+            })
+            .collect()
     }
 }
 
@@ -1277,11 +1326,101 @@ mod tests {
             ..Default::default()
         };
 
-        let (score, fragments, _) = scorer.score_candidate(&query, &pre_score);
+        let (score, fragments, _) = scorer.score_candidate(&query, &pre_score, true);
         assert_eq!(score.matched_b, 1);
         assert_eq!(score.summed_b, 100.0);
         let fragments = fragments.unwrap();
         assert_eq!(fragments.fragment_ordinals.len(), 1);
         assert_eq!(fragments.neutral_losses, vec![10.0]);
+
+        let deferred = scorer.annotate_candidate(
+            &query,
+            &Feature {
+                peptide_idx: PeptideIx(0),
+                charge: 2,
+                ..Default::default()
+            },
+        );
+        assert_eq!(deferred.kinds, fragments.kinds);
+        assert_eq!(deferred.charges, fragments.charges);
+        assert_eq!(deferred.fragment_ordinals, fragments.fragment_ordinals);
+        assert_eq!(deferred.intensities, fragments.intensities);
+        assert_eq!(deferred.mz_calculated, fragments.mz_calculated);
+        assert_eq!(deferred.mz_experimental, fragments.mz_experimental);
+        assert_eq!(deferred.neutral_losses, fragments.neutral_losses);
+    }
+
+    #[test]
+    fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
+        let peptide = Peptide::try_from(Digest {
+            sequence: "PEPTIDER".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut peaks = [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| IonSeries::new(&peptide, kind))
+            .map(|ion| (ion.monoisotopic_mass, 100.0, 1))
+            .collect::<Vec<_>>();
+        peaks.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
+        let query = ProcessedSpectrum {
+            level: 2,
+            masses: peaks.iter().map(|peak| peak.0).collect(),
+            intensities: peaks.iter().map(|peak| peak.1).collect(),
+            charges: peaks.iter().map(|peak| peak.2).collect(),
+            total_ion_current: peaks.iter().map(|peak| peak.1).sum(),
+            ..Default::default()
+        };
+        let database = IndexedDatabase {
+            peptides: vec![peptide],
+            ion_kinds: vec![Kind::B, Kind::Y],
+            ..Default::default()
+        };
+        let scorer = |chimera| Scorer {
+            db: &database,
+            precursor_tol: Tolerance::Da(-0.01, 0.01),
+            fragment_tol: Tolerance::Da(-0.01, 0.01),
+            min_matched_peaks: 1,
+            min_isotope_err: 0,
+            max_isotope_err: 0,
+            min_precursor_charge: 2,
+            max_precursor_charge: 2,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera,
+            report_psms: 2,
+            wide_window: false,
+            annotate_matches: false,
+            mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+            score_type: ScoreType::SageHyperScore,
+            use_bitmap: false,
+        };
+        let rank_one = Feature {
+            peptide_idx: PeptideIx(0),
+            charge: 2,
+            rank: 1,
+            ..Default::default()
+        };
+        let rank_two = Feature {
+            rank: 2,
+            ..rank_one.clone()
+        };
+        let features = [&rank_one, &rank_two];
+
+        let replayed = scorer(true).annotate_ranked_candidates(&query, &features, &[false, true]);
+        assert!(replayed[0].is_none());
+        assert_eq!(
+            replayed[1].as_ref().unwrap().fragment_ordinals.len(),
+            0,
+            "rank one must remove its peaks even when it is filtered from output"
+        );
+
+        let independent =
+            scorer(false).annotate_ranked_candidates(&query, &features, &[false, true]);
+        assert!(!independent[1]
+            .as_ref()
+            .unwrap()
+            .fragment_ordinals
+            .is_empty());
     }
 }

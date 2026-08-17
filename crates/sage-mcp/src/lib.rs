@@ -399,7 +399,6 @@ impl State {
                     input,
                     JobOptions {
                         parallel,
-                        parquet: args.parquet.unwrap_or(false),
                         events,
                         cancellation: cancellation.clone(),
                     },
@@ -577,12 +576,12 @@ impl State {
         let path = Path::new(&record.output_directory).join(filename);
         ensure!(
             path.is_file(),
-            "job did not produce the `{}` TSV dataset",
+            "job did not produce the `{}` Parquet dataset",
             args.dataset.name()
         );
         ensure!(
-            path.extension().and_then(|ext| ext.to_str()) == Some("tsv"),
-            "bounded result queries currently require TSV output"
+            path.extension().and_then(|ext| ext.to_str()) == Some("parquet"),
+            "bounded result queries require Parquet output"
         );
         let output_dir = Path::new(&record.output_directory).canonicalize()?;
         let path = path.canonicalize()?;
@@ -593,55 +592,23 @@ impl State {
 
         let limit = args.limit.unwrap_or(50).clamp(1, 200);
         let scan_limit = args.scan_limit.unwrap_or(100_000).clamp(1, 1_000_000);
-        let mut reader = csv::ReaderBuilder::new()
-            .delimiter(b'\t')
-            .from_path(&path)?;
-        let headers = reader.headers()?.clone();
         let q_column = args.dataset.q_column();
-        let mut rows = Vec::new();
-        let mut scanned_rows = 0usize;
-        let mut truncated = false;
-        for row in reader.records().take(scan_limit) {
-            scanned_rows += 1;
-            let row = row?;
-            let value = |name: &str| {
-                headers
-                    .iter()
-                    .position(|header| header == name)
-                    .and_then(|index| row.get(index))
-                    .unwrap_or("")
-            };
-            if args
-                .max_q_value
-                .is_some_and(|max| value(q_column).parse::<f64>().map_or(true, |q| q > max))
-                || args.protein.as_deref().is_some_and(|needle| {
-                    !value("proteins").contains(needle) && !value("protein").contains(needle)
+        let (rows, scanned_rows, truncated) =
+            sage_cloudpath::parquet::scan_json_rows(&path, scan_limit, limit, |row| {
+                let text = |name: &str| row.get(name).and_then(serde_json::Value::as_str);
+                !args.max_q_value.is_some_and(|max| {
+                    row.get(q_column)
+                        .and_then(serde_json::Value::as_f64)
+                        .map_or(true, |q| q > max)
+                }) && !args.protein.as_deref().is_some_and(|needle| {
+                    !text("proteins").is_some_and(|value| value.contains(needle))
+                        && !text("protein").is_some_and(|value| value.contains(needle))
+                }) && !args.peptide.as_deref().is_some_and(|needle| {
+                    !text("peptide").is_some_and(|value| value.contains(needle))
+                }) && !args.modification.as_deref().is_some_and(|needle| {
+                    !text("modification").is_some_and(|value| value.contains(needle))
                 })
-                || args
-                    .peptide
-                    .as_deref()
-                    .is_some_and(|needle| !value("peptide").contains(needle))
-                || args
-                    .modification
-                    .as_deref()
-                    .is_some_and(|needle| !value("modification").contains(needle))
-            {
-                continue;
-            }
-            if rows.len() == limit {
-                truncated = true;
-                break;
-            }
-            let object = headers
-                .iter()
-                .zip(row.iter())
-                .map(|(key, value)| (key.to_owned(), serde_json::Value::String(value.to_owned())))
-                .collect::<serde_json::Map<_, _>>();
-            rows.push(serde_json::Value::Object(object));
-        }
-        if scanned_rows == scan_limit {
-            truncated = true;
-        }
+            })?;
         Ok(ResultQuery {
             job_id: args.job_id,
             dataset: args.dataset,
@@ -732,8 +699,6 @@ pub struct StartSearchArgs {
     pub config_path: String,
     /// Must be true only after the user approves the potentially expensive search.
     pub approved: bool,
-    /// Write Parquet output instead of TSV.
-    pub parquet: Option<bool>,
     /// Number of spectra files to process in each batch.
     pub batch_size: Option<usize>,
 }
@@ -771,9 +736,9 @@ impl ResultDataset {
 
     fn filename(self) -> &'static str {
         match self {
-            Self::Psms => "results.sage.tsv",
-            Self::PtmSites => "results.sage.ptm-sites.tsv",
-            Self::ProteinSites => "results.sage.protein-sites.tsv",
+            Self::Psms => "results.sage.parquet",
+            Self::PtmSites => "results.sage.ptm-sites.parquet",
+            Self::ProteinSites => "results.sage.protein-sites.parquet",
         }
     }
 
@@ -1071,7 +1036,6 @@ mod tests {
             .start_search(StartSearchArgs {
                 config_path: "missing.json".into(),
                 approved: false,
-                parquet: None,
                 batch_size: None,
             })
             .unwrap_err()

@@ -4,24 +4,20 @@ use super::output::SageResults;
 use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
-use csv::ByteRecord;
 use log::{info, warn};
 use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
 use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
 use sage_core::database::{IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
-use sage_core::ion_series::Kind;
-use sage_core::lfq::{Peak, PrecursorId};
+use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
 use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::peptide::Peptide;
-use sage_core::scoring::Fragments;
 use sage_core::scoring::{Feature, Scorer};
 use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
-use sage_core::tmt::TmtQuant;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::sync::Arc;
@@ -216,10 +212,21 @@ fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
     feature.label == 1 && feature.spectrum_q <= psm_q_value
 }
 
+fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
+    feature.spectrum_q <= psm_q_value
+}
+
 #[derive(Default)]
 struct SpectrumAccumulator {
     pub ms1: Vec<ProcessedSpectrum>,
     pub msn: Vec<ProcessedSpectrum>,
+}
+
+#[derive(Default)]
+struct PostprocessStats {
+    annotated_psms: usize,
+    annotated_fragments: usize,
+    localized_psms: usize,
 }
 
 impl SpectrumAccumulator {
@@ -609,7 +616,7 @@ impl Runner {
                     chimera: self.parameters.chimera,
                     report_psms: self.parameters.report_psms + 1, // Q: Why is 1 being added here? (JSPP: Feb 2024)
                     wide_window: self.parameters.wide_window,
-                    annotate_matches: self.parameters.annotate_matches,
+                    annotate_matches: false,
                     mass_shift_ppm: self.parameters.mass_shift_ppm,
                     score_type: self.parameters.score_type,
                     use_bitmap: self.parameters.use_bitmap,
@@ -1020,53 +1027,154 @@ impl Runner {
         (spectra.ms1, spectra.msn)
     }
 
-    /// Re-read MS2 spectra and localize only target PSMs that passed the
-    /// configured identification q-value. This keeps localization out of the
-    /// search hot path without retaining every processed spectrum in memory.
-    fn localize_features(&self, features: &mut [Feature], batch_size: usize) -> usize {
-        let mut feature_indices: HashMap<usize, HashMap<String, Vec<usize>>> = HashMap::new();
-        for (idx, feature) in features.iter().enumerate() {
-            if passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value)
-                && sage_core::ptm::has_localizable_modification(
-                    &self.database[feature.peptide_idx],
-                    &self.database.potential_mods,
-                )
-            {
-                feature_indices
-                    .entry(feature.file_id)
+    /// Re-read only the MS2 files needed for post-FDR work. Detailed matched
+    /// fragments and PTM localization share this pass so enabling both does
+    /// not double the input I/O.
+    fn postprocess_features(
+        &self,
+        scorer: &Scorer,
+        features: &mut [Feature],
+        batch_size: usize,
+    ) -> anyhow::Result<PostprocessStats> {
+        #[derive(Default)]
+        struct SpectrumWork {
+            /// Every reported PSM for this spectrum, required to replay
+            /// rank-ordered peak removal in chimera mode.
+            feature_indices: Vec<usize>,
+            annotate: bool,
+            localization_indices: Vec<usize>,
+        }
+
+        let annotate_matches = self.parameters.annotate_matches;
+        let localize = self.parameters.ptm_localization.enabled;
+        if !annotate_matches && !localize {
+            return Ok(PostprocessStats::default());
+        }
+
+        let output_psm_q_value = self.parameters.output_filter.psm_q_value;
+        let mut work: HashMap<usize, HashMap<String, SpectrumWork>> = HashMap::new();
+
+        if annotate_matches {
+            for (idx, feature) in features.iter().enumerate() {
+                work.entry(feature.file_id)
                     .or_default()
                     .entry(feature.spec_id.clone())
                     .or_default()
+                    .feature_indices
                     .push(idx);
+            }
+            for feature in features
+                .iter()
+                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
+            {
+                if let Some(spectrum) = work
+                    .get_mut(&feature.file_id)
+                    .and_then(|file| file.get_mut(feature.spec_id.as_str()))
+                {
+                    spectrum.annotate = true;
+                }
             }
         }
 
-        if feature_indices.is_empty() {
-            log::info!("- PTM localization: no passing target PSMs");
-            return 0;
+        if localize {
+            for (idx, feature) in features.iter().enumerate() {
+                if passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value)
+                    && sage_core::ptm::has_localizable_modification(
+                        &self.database[feature.peptide_idx],
+                        &self.database.potential_mods,
+                    )
+                {
+                    work.entry(feature.file_id)
+                        .or_default()
+                        .entry(feature.spec_id.clone())
+                        .or_default()
+                        .localization_indices
+                        .push(idx);
+                }
+            }
+        }
+
+        for file in work.values_mut() {
+            file.retain(|_, spectrum| {
+                spectrum.annotate || !spectrum.localization_indices.is_empty()
+            });
+            for spectrum in file.values_mut() {
+                spectrum
+                    .feature_indices
+                    .sort_unstable_by_key(|idx| features[*idx].rank);
+            }
+        }
+        work.retain(|_, file| !file.is_empty());
+
+        let expected_annotations = if annotate_matches {
+            features
+                .iter()
+                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
+                .count()
+        } else {
+            0
+        };
+        if work.is_empty() {
+            anyhow::ensure!(
+                expected_annotations == 0,
+                "internal error: selected PSMs were not scheduled for fragment annotation"
+            );
+            return Ok(PostprocessStats::default());
         }
 
         let start = Instant::now();
-        let mut localized = 0usize;
+        let mut annotations = Vec::with_capacity(expected_annotations);
+        let mut localizations = Vec::new();
+
         for (chunk_idx, chunk) in self.parameters.mzml_paths.chunks(batch_size).enumerate() {
+            self.cancellation.check()?;
             let first_file_id = chunk_idx * batch_size;
             if !(first_file_id..first_file_id + chunk.len())
-                .any(|file_id| feature_indices.contains_key(&file_id))
+                .any(|file_id| work.contains_key(&file_id))
             {
                 continue;
             }
+
             let spectra = self
                 .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)
                 .1;
             let results = spectra
                 .par_iter()
-                .map(|spectrum| {
-                    feature_indices
-                        .get(&spectrum.file_id)
-                        .and_then(|file| file.get(spectrum.id.as_str()))
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|&idx| {
+                .filter_map(|spectrum| {
+                    let spectrum_work = work.get(&spectrum.file_id)?.get(spectrum.id.as_str())?;
+                    let mut annotated = Vec::new();
+
+                    if spectrum_work.annotate {
+                        let ranked_features = spectrum_work
+                            .feature_indices
+                            .iter()
+                            .map(|&idx| &features[idx])
+                            .collect::<Vec<_>>();
+                        let selected = ranked_features
+                            .iter()
+                            .map(|feature| passes_output_filter(feature, output_psm_q_value))
+                            .collect::<Vec<_>>();
+                        annotated.extend(
+                            spectrum_work
+                                .feature_indices
+                                .iter()
+                                .copied()
+                                .zip(scorer.annotate_ranked_candidates(
+                                    spectrum,
+                                    &ranked_features,
+                                    &selected,
+                                ))
+                                .filter_map(|(idx, fragments)| {
+                                    fragments.map(|fragments| (idx, fragments))
+                                }),
+                        );
+                    }
+
+                    let localized = spectrum_work
+                        .localization_indices
+                        .iter()
+                        .copied()
+                        .filter_map(|idx| {
                             let feature = &features[idx];
                             let peptide = &self.database[feature.peptide_idx];
                             let localization = sage_core::ptm::localize(
@@ -1080,15 +1188,57 @@ impl Runner {
                             );
                             (!localization.mods.is_empty()).then_some((idx, localization))
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>();
+
+                    Some((annotated, localized))
                 })
-                .flatten()
                 .collect::<Vec<_>>();
 
-            localized += results.len();
-            for (idx, localization) in results {
-                features[idx].localization = Some(localization);
+            for (mut batch_annotations, mut batch_localizations) in results {
+                annotations.append(&mut batch_annotations);
+                localizations.append(&mut batch_localizations);
             }
+        }
+
+        let mut annotated_indices = HashSet::with_capacity(annotations.len());
+        let mut annotated_fragments = 0usize;
+        for (idx, fragments) in annotations {
+            anyhow::ensure!(
+                annotated_indices.insert(idx),
+                "spectrum {} in file {} was encountered more than once during deferred annotation",
+                features[idx].spec_id,
+                features[idx].file_id
+            );
+            annotated_fragments += fragments.fragment_ordinals.len();
+            features[idx].fragments = Some(fragments);
+        }
+
+        if annotated_indices.len() != expected_annotations {
+            let missing = features
+                .iter()
+                .enumerate()
+                .find(|(idx, feature)| {
+                    passes_output_filter(feature, output_psm_q_value)
+                        && !annotated_indices.contains(idx)
+                })
+                .map(|(_, feature)| {
+                    format!(
+                        "file {} spectrum {} (PSM {})",
+                        feature.file_id, feature.spec_id, feature.psm_id
+                    )
+                })
+                .unwrap_or_else(|| "unknown PSM".into());
+            anyhow::bail!(
+                "deferred fragment annotation completed {}/{} selected PSMs; missing {}",
+                annotated_indices.len(),
+                expected_annotations,
+                missing
+            );
+        }
+
+        let localized_psms = localizations.len();
+        for (idx, localization) in localizations {
+            features[idx].localization = Some(localization);
         }
 
         let localization_indices = features
@@ -1120,11 +1270,18 @@ impl Runner {
         }
 
         log::info!(
-            "- PTM localization: {} PSMs in {} ms",
-            localized,
+            "- post-FDR MS2 pass: {} annotated PSMs ({} fragments), {} localized PSMs in {} ms",
+            annotated_indices.len(),
+            annotated_fragments,
+            localized_psms,
             start.elapsed().as_millis()
         );
-        localized
+
+        Ok(PostprocessStats {
+            annotated_psms: annotated_indices.len(),
+            annotated_fragments,
+            localized_psms,
+        })
     }
 
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
@@ -1144,15 +1301,14 @@ impl Runner {
             .collect::<SageResults>()
     }
 
-    pub fn run(self, parallel: usize, parquet: bool) -> anyhow::Result<telemetry::Telemetry> {
-        self.run_with_summary(parallel, parquet)
+    pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
+        self.run_with_summary(parallel)
             .map(|(telemetry, _summary)| telemetry)
     }
 
     pub fn run_with_summary(
         mut self,
         parallel: usize,
-        parquet: bool,
     ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
         self.cancellation.check()?;
@@ -1171,7 +1327,7 @@ impl Runner {
             chimera: self.parameters.chimera,
             report_psms: self.parameters.report_psms,
             wide_window: self.parameters.wide_window,
-            annotate_matches: self.parameters.annotate_matches,
+            annotate_matches: false,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
             use_bitmap: self.parameters.use_bitmap,
@@ -1290,11 +1446,18 @@ impl Runner {
         });
         self.cancellation.check()?;
 
+        let postprocess = self.postprocess_features(&scorer, &mut outputs.features, parallel)?;
+        if self.parameters.annotate_matches {
+            self.events.emit(EventKind::FragmentAnnotationCompleted {
+                psms: postprocess.annotated_psms,
+                fragments: postprocess.annotated_fragments,
+            });
+        }
         let localized_psms = if self.parameters.ptm_localization.enabled {
-            let localized = self.localize_features(&mut outputs.features, parallel);
-            self.events
-                .emit(EventKind::PtmLocalizationCompleted { psms: localized });
-            localized
+            self.events.emit(EventKind::PtmLocalizationCompleted {
+                psms: postprocess.localized_psms,
+            });
+            postprocess.localized_psms
         } else {
             0
         };
@@ -1357,72 +1520,57 @@ impl Runner {
         );
         log::trace!("writing outputs");
 
-        // Write either a single parquet file, or multiple tsv files
-        if parquet {
-            log::warn!("parquet output format is currently unstable! There may be failures or schema changes!");
+        let output_psm_q_value = self.parameters.output_filter.psm_q_value;
+        let output_features = outputs
+            .features
+            .iter()
+            .filter(|feature| passes_output_filter(feature, output_psm_q_value))
+            .collect::<Vec<_>>();
+        log::info!(
+            "writing {} of {} PSMs at spectrum q-value <= {}",
+            output_features.len(),
+            outputs.features.len(),
+            output_psm_q_value
+        );
 
-            let bytes = sage_cloudpath::parquet::serialize_features(
-                &outputs.features,
-                &outputs.quant,
-                &filenames,
-                &self.database,
+        let bytes = sage_cloudpath::parquet::serialize_features(
+            &output_features,
+            &outputs.quant,
+            &filenames,
+            &self.database,
+            output_psm_q_value,
+        )?;
+
+        let path = self.make_path("results.sage.parquet");
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
+
+        if self.parameters.annotate_matches {
+            let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
+                &output_features,
+                output_psm_q_value,
             )?;
-
-            let path = self.make_path("results.sage.parquet");
+            let path = self.make_path("matched_fragments.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
             self.parameters.output_paths.push(path);
+        }
 
-            if self.parameters.annotate_matches {
-                let bytes =
-                    sage_cloudpath::parquet::serialize_matched_fragments(&outputs.features)?;
-                let path = self.make_path("matched_fragments.sage.parquet");
-                sage_cloudpath::write_bytes_sync(&path, bytes)?;
-                self.parameters.output_paths.push(path);
-            }
+        if let Some(areas) = &areas {
+            let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
 
-            if let Some(areas) = &areas {
-                let bytes =
-                    sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
-
-                let path = self.make_path("lfq.parquet");
-                sage_cloudpath::write_bytes_sync(&path, bytes)?;
-                self.parameters.output_paths.push(path);
-            }
-        } else {
-            self.parameters
-                .output_paths
-                .push(self.write_features(&outputs.features, &filenames)?);
-
-            if self.parameters.annotate_matches {
-                self.parameters
-                    .output_paths
-                    .push(self.write_fragments(&outputs.features)?);
-            }
-
-            if !outputs.quant.is_empty() {
-                self.parameters
-                    .output_paths
-                    .push(self.write_tmt(&outputs.quant, &filenames)?);
-            }
-            if let Some(areas) = &areas {
-                self.parameters
-                    .output_paths
-                    .push(self.write_lfq(areas, &filenames)?);
-            }
+            let path = self.make_path("lfq.parquet");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
         }
 
         // PTM site reports follow the selected main output format.
         if self.parameters.ptm_localization.enabled {
-            self.parameters.output_paths.push(self.write_ptm_sites(
-                &outputs.features,
-                &filenames,
-                parquet,
-            )?);
-            self.parameters.output_paths.push(self.write_protein_sites(
-                &outputs.features,
-                &filenames,
-                parquet,
-            )?);
+            self.parameters
+                .output_paths
+                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+            self.parameters
+                .output_paths
+                .push(self.write_protein_sites(&outputs.features, &filenames)?);
             self.parameters
                 .output_paths
                 .extend(self.write_ptm_library(&outputs.features, &filenames)?);
@@ -1567,7 +1715,6 @@ impl Runner {
             self.parameters,
             self.database.peptides.len(),
             self.database.fragments.len(),
-            parquet,
             run_time,
         );
 
@@ -1579,267 +1726,6 @@ impl Runner {
 
         Ok((telemetry, summary))
     }
-    pub fn serialize_feature(&self, feature: &Feature, filenames: &[String]) -> csv::ByteRecord {
-        let mut record = csv::ByteRecord::new();
-
-        record.push_field(itoa::Buffer::new().format(feature.psm_id).as_bytes());
-
-        let peptide = &self.database[feature.peptide_idx];
-        record.push_field(peptide.to_string().as_bytes());
-        record.push_field(feature.ambiguity_sequence.as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.mass_shift).as_bytes());
-        record.push_field(
-            peptide
-                .proteins(&self.database.decoy_tag, self.database.generate_decoys)
-                .as_bytes(),
-        );
-        record.push_field(feature.protein_groups.as_deref().unwrap_or("").as_bytes());
-        record.push_field(
-            itoa::Buffer::new()
-                .format(peptide.proteins.len())
-                .as_bytes(),
-        );
-        record.push_field(
-            itoa::Buffer::new()
-                .format(feature.num_protein_groups)
-                .as_bytes(),
-        );
-        record.push_field(filenames[feature.file_id].as_bytes());
-        record.push_field(feature.spec_id.as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.rank).as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.label).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.expmass).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.calcmass).as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.charge).as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.peptide_len).as_bytes());
-        record.push_field(
-            itoa::Buffer::new()
-                .format(feature.missed_cleavages)
-                .as_bytes(),
-        );
-        record.push_field(
-            itoa::Buffer::new()
-                .format(peptide.semi_enzymatic as u8)
-                .as_bytes(),
-        );
-        record.push_field(ryu::Buffer::new().format(feature.isotope_error).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.delta_mass).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.average_ppm).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.hyperscore).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.delta_next).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.delta_best).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.rt).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.aligned_rt).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.predicted_rt).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.delta_rt_model).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.ims).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.predicted_ims).as_bytes());
-        record.push_field(
-            ryu::Buffer::new()
-                .format(feature.delta_ims_model)
-                .as_bytes(),
-        );
-        record.push_field(itoa::Buffer::new().format(feature.matched_peaks).as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.longest_b).as_bytes());
-        record.push_field(itoa::Buffer::new().format(feature.longest_y).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.longest_y_pct).as_bytes());
-        record.push_field(
-            ryu::Buffer::new()
-                .format(feature.matched_intensity_pct)
-                .as_bytes(),
-        );
-        record.push_field(
-            itoa::Buffer::new()
-                .format(feature.scored_candidates)
-                .as_bytes(),
-        );
-        record.push_field(ryu::Buffer::new().format(feature.poisson).as_bytes());
-        record.push_field(
-            ryu::Buffer::new()
-                .format(feature.discriminant_score)
-                .as_bytes(),
-        );
-        record.push_field(
-            ryu::Buffer::new()
-                .format(feature.posterior_error)
-                .as_bytes(),
-        );
-        record.push_field(ryu::Buffer::new().format(feature.spectrum_q).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.peptide_q).as_bytes());
-        record.push_field(ryu::Buffer::new().format(feature.protein_q).as_bytes());
-        record.push_field(
-            ryu::Buffer::new()
-                .format(feature.protein_group_q)
-                .as_bytes(),
-        );
-        record.push_field(ryu::Buffer::new().format(feature.ms2_intensity).as_bytes());
-        record
-    }
-
-    pub fn serialize_fragments(
-        &self,
-        psm_id: usize,
-        fragments_: &Option<Fragments>,
-    ) -> Vec<ByteRecord> {
-        let mut frag_records = vec![];
-
-        if let Some(fragments) = fragments_ {
-            for id in 0..fragments.fragment_ordinals.len() {
-                let mut record = ByteRecord::new();
-                record.push_field(itoa::Buffer::new().format(psm_id).as_bytes());
-                let ion_type = match fragments.kinds[id] {
-                    Kind::A => "a",
-                    Kind::B => "b",
-                    Kind::C => "c",
-                    Kind::X => "x",
-                    Kind::Y => "y",
-                    Kind::Z => "z",
-                };
-                record.push_field(ion_type.as_bytes());
-                record.push_field(
-                    itoa::Buffer::new()
-                        .format(fragments.fragment_ordinals[id])
-                        .as_bytes(),
-                );
-                record.push_field(itoa::Buffer::new().format(fragments.charges[id]).as_bytes());
-                record.push_field(
-                    ryu::Buffer::new()
-                        .format(fragments.mz_calculated[id])
-                        .as_bytes(),
-                );
-                record.push_field(
-                    ryu::Buffer::new()
-                        .format(fragments.mz_experimental[id])
-                        .as_bytes(),
-                );
-                record.push_field(
-                    ryu::Buffer::new()
-                        .format(fragments.neutral_losses[id])
-                        .as_bytes(),
-                );
-                record.push_field(
-                    ryu::Buffer::new()
-                        .format(fragments.intensities[id])
-                        .as_bytes(),
-                );
-                frag_records.push(record);
-            }
-        }
-
-        frag_records
-    }
-
-    pub fn write_features(
-        &self,
-        features: &[Feature],
-        filenames: &[String],
-    ) -> anyhow::Result<Url> {
-        let path = self.make_path("results.sage.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(OutputTarget::new(&path)?);
-
-        let csv_headers = vec![
-            "psm_id",
-            "peptide",
-            "ambiguity_sequence",
-            "mass_shift",
-            "proteins",
-            "protein_groups",
-            "num_proteins",
-            "num_protein_groups",
-            "filename",
-            "scannr",
-            "rank",
-            "label",
-            "expmass",
-            "calcmass",
-            "charge",
-            "peptide_len",
-            "missed_cleavages",
-            "semi_enzymatic",
-            "isotope_error",
-            "precursor_ppm",
-            "fragment_ppm",
-            "hyperscore",
-            "delta_next",
-            "delta_best",
-            "rt",
-            "aligned_rt",
-            "predicted_rt",
-            "delta_rt_model",
-            "ion_mobility",
-            "predicted_mobility",
-            "delta_mobility",
-            "matched_peaks",
-            "longest_b",
-            "longest_y",
-            "longest_y_pct",
-            "matched_intensity_pct",
-            "scored_candidates",
-            "poisson",
-            "sage_discriminant_score",
-            "posterior_error",
-            "spectrum_q",
-            "peptide_q",
-            "protein_q",
-            "protein_group_q",
-            "ms2_intensity",
-        ];
-
-        let headers = csv::ByteRecord::from(csv_headers);
-
-        wtr.write_byte_record(&headers)?;
-        for chunk in features.chunks(1024) {
-            for record in chunk
-                .par_iter()
-                .map(|feat| self.serialize_feature(feat, filenames))
-                .collect::<Vec<_>>()
-            {
-                wtr.write_byte_record(&record)?;
-            }
-        }
-
-        finish_csv_writer(wtr, &path)?;
-        Ok(path)
-    }
-
-    pub fn write_fragments(&self, features: &[Feature]) -> anyhow::Result<Url> {
-        let path = self.make_path("matched_fragments.sage.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(OutputTarget::new(&path)?);
-
-        let headers = csv::ByteRecord::from(vec![
-            "psm_id",
-            "fragment_type",
-            "fragment_ordinals",
-            "fragment_charge",
-            "fragment_mz_calculated",
-            "fragment_mz_experimental",
-            "neutral_loss",
-            "fragment_intensity",
-        ]);
-
-        wtr.write_byte_record(&headers)?;
-
-        for chunk in features.chunks(1024) {
-            for record in chunk
-                .par_iter()
-                .map(|feat| self.serialize_fragments(feat.psm_id, &feat.fragments))
-                .flatten()
-                .collect::<Vec<_>>()
-            {
-                wtr.write_byte_record(&record)?;
-            }
-        }
-
-        finish_csv_writer(wtr, &path)?;
-        Ok(path)
-    }
-
     /// Flatten FDR-passing target PSMs into one [`SiteRow`] per localized
     /// modification site. Shared by the PSM-site and protein-site reports.
     fn collect_site_rows(&self, features: &[Feature], filenames: &[String]) -> Vec<SiteRow> {
@@ -1917,115 +1803,37 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
-        parquet: bool,
     ) -> anyhow::Result<Url> {
         let rows = self.collect_site_rows(features, filenames);
 
-        if parquet {
-            use sage_cloudpath::parquet::PtmSiteRecord;
-            let records = rows
-                .iter()
-                .map(|row| PtmSiteRecord {
-                    psm_id: row.psm_id as i64,
-                    filename: row.filename.clone(),
-                    scannr: row.scannr.clone(),
-                    peptide: row.peptide.clone(),
-                    proteins: row.proteins.clone(),
-                    charge: row.charge as i32,
-                    spectrum_q: row.spectrum_q,
-                    peptide_q: row.peptide_q,
-                    modification: row.modification.clone(),
-                    modification_mass: row.modification_mass,
-                    position: row.position as i32,
-                    residue: (row.residue as char).to_string(),
-                    localization_probability: row.localization_probability,
-                    delta_localization_score: row.delta_score,
-                    target_decoy_score: row.target_decoy_score,
-                    localization_q_value: row.localization_q_value,
-                    candidate_sites: row.candidate_sites as i32,
-                    site_determining_ions_matched: row.site_determining_matched as i32,
-                    site_determining_ions_total: row.site_determining_total as i32,
-                    site_probabilities: row.site_probabilities.clone(),
-                })
-                .collect::<Vec<_>>();
-            let path = self.make_path("results.sage.ptm-sites.parquet");
-            let bytes = sage_cloudpath::parquet::serialize_ptm_sites(&records)?;
-            sage_cloudpath::write_bytes_sync(&path, bytes)?;
-            return Ok(path);
-        }
-
-        let path = self.make_path("results.sage.ptm-sites.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(vec![]);
-
-        wtr.write_byte_record(&csv::ByteRecord::from(vec![
-            "psm_id",
-            "filename",
-            "scannr",
-            "peptide",
-            "proteins",
-            "charge",
-            "spectrum_q",
-            "peptide_q",
-            "modification",
-            "modification_mass",
-            "position",
-            "residue",
-            "localization_probability",
-            "delta_localization_score",
-            "target_decoy_score",
-            "localization_q_value",
-            "candidate_sites",
-            "site_determining_ions_matched",
-            "site_determining_ions_total",
-            "site_probabilities",
-        ]))?;
-
-        for row in &rows {
-            let mut record = ByteRecord::new();
-            record.push_field(itoa::Buffer::new().format(row.psm_id).as_bytes());
-            record.push_field(row.filename.as_bytes());
-            record.push_field(row.scannr.as_bytes());
-            record.push_field(row.peptide.as_bytes());
-            record.push_field(row.proteins.as_bytes());
-            record.push_field(itoa::Buffer::new().format(row.charge).as_bytes());
-            record.push_field(ryu::Buffer::new().format(row.spectrum_q).as_bytes());
-            record.push_field(ryu::Buffer::new().format(row.peptide_q).as_bytes());
-            record.push_field(row.modification.as_bytes());
-            record.push_field(ryu::Buffer::new().format(row.modification_mass).as_bytes());
-            record.push_field(itoa::Buffer::new().format(row.position).as_bytes());
-            record.push_field([row.residue].as_slice());
-            record.push_field(
-                ryu::Buffer::new()
-                    .format(row.localization_probability)
-                    .as_bytes(),
-            );
-            record.push_field(ryu::Buffer::new().format(row.delta_score).as_bytes());
-            record.push_field(ryu::Buffer::new().format(row.target_decoy_score).as_bytes());
-            record.push_field(
-                ryu::Buffer::new()
-                    .format(row.localization_q_value)
-                    .as_bytes(),
-            );
-            record.push_field(itoa::Buffer::new().format(row.candidate_sites).as_bytes());
-            record.push_field(
-                itoa::Buffer::new()
-                    .format(row.site_determining_matched)
-                    .as_bytes(),
-            );
-            record.push_field(
-                itoa::Buffer::new()
-                    .format(row.site_determining_total)
-                    .as_bytes(),
-            );
-            record.push_field(row.site_probabilities.as_bytes());
-            wtr.write_byte_record(&record)?;
-        }
-
-        wtr.flush()?;
-        let bytes = wtr.into_inner()?;
+        use sage_cloudpath::parquet::PtmSiteRecord;
+        let records = rows
+            .iter()
+            .map(|row| PtmSiteRecord {
+                psm_id: row.psm_id as i64,
+                filename: row.filename.clone(),
+                scannr: row.scannr.clone(),
+                peptide: row.peptide.clone(),
+                proteins: row.proteins.clone(),
+                charge: row.charge as i32,
+                spectrum_q: row.spectrum_q,
+                peptide_q: row.peptide_q,
+                modification: row.modification.clone(),
+                modification_mass: row.modification_mass,
+                position: row.position as i32,
+                residue: (row.residue as char).to_string(),
+                localization_probability: row.localization_probability,
+                delta_localization_score: row.delta_score,
+                target_decoy_score: row.target_decoy_score,
+                localization_q_value: row.localization_q_value,
+                candidate_sites: row.candidate_sites as i32,
+                site_determining_ions_matched: row.site_determining_matched as i32,
+                site_determining_ions_total: row.site_determining_total as i32,
+                site_probabilities: row.site_probabilities.clone(),
+            })
+            .collect::<Vec<_>>();
+        let path = self.make_path("results.sage.ptm-sites.parquet");
+        let bytes = sage_cloudpath::parquet::serialize_ptm_sites(&records)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
@@ -2036,7 +1844,6 @@ impl Runner {
         &self,
         features: &[Feature],
         filenames: &[String],
-        parquet: bool,
     ) -> anyhow::Result<Url> {
         let rows = self.collect_site_rows(features, filenames);
 
@@ -2100,72 +1907,25 @@ impl Runner {
                 .then_with(|| a.position.cmp(&b.position))
         });
 
-        if parquet {
-            use sage_cloudpath::parquet::ProteinSiteRecord;
-            let records = aggregated
-                .iter()
-                .map(|agg| ProteinSiteRecord {
-                    protein: agg.protein.clone(),
-                    peptide: agg.peptide.clone(),
-                    residue: (agg.residue as char).to_string(),
-                    position_in_peptide: agg.position as i32,
-                    modification: agg.modification.clone(),
-                    modification_mass: agg.modification_mass,
-                    num_psms: agg.n_psms as i32,
-                    best_localization_probability: agg.best_probability,
-                    best_delta_localization_score: agg.best_delta_score,
-                    best_localization_q_value: agg.best_localization_q_value,
-                    best_spectrum_q: agg.best_spectrum_q,
-                })
-                .collect::<Vec<_>>();
-            let path = self.make_path("results.sage.protein-sites.parquet");
-            let bytes = sage_cloudpath::parquet::serialize_protein_sites(&records)?;
-            sage_cloudpath::write_bytes_sync(&path, bytes)?;
-            return Ok(path);
-        }
-
-        let path = self.make_path("results.sage.protein-sites.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(vec![]);
-
-        wtr.write_byte_record(&csv::ByteRecord::from(vec![
-            "protein",
-            "peptide",
-            "residue",
-            "position_in_peptide",
-            "modification",
-            "modification_mass",
-            "num_psms",
-            "best_localization_probability",
-            "best_delta_localization_score",
-            "best_localization_q_value",
-            "best_spectrum_q",
-        ]))?;
-
-        for agg in &aggregated {
-            let mut record = ByteRecord::new();
-            record.push_field(agg.protein.as_bytes());
-            record.push_field(agg.peptide.as_bytes());
-            record.push_field([agg.residue].as_slice());
-            record.push_field(itoa::Buffer::new().format(agg.position).as_bytes());
-            record.push_field(agg.modification.as_bytes());
-            record.push_field(ryu::Buffer::new().format(agg.modification_mass).as_bytes());
-            record.push_field(itoa::Buffer::new().format(agg.n_psms).as_bytes());
-            record.push_field(ryu::Buffer::new().format(agg.best_probability).as_bytes());
-            record.push_field(ryu::Buffer::new().format(agg.best_delta_score).as_bytes());
-            record.push_field(
-                ryu::Buffer::new()
-                    .format(agg.best_localization_q_value)
-                    .as_bytes(),
-            );
-            record.push_field(ryu::Buffer::new().format(agg.best_spectrum_q).as_bytes());
-            wtr.write_byte_record(&record)?;
-        }
-
-        wtr.flush()?;
-        let bytes = wtr.into_inner()?;
+        use sage_cloudpath::parquet::ProteinSiteRecord;
+        let records = aggregated
+            .iter()
+            .map(|agg| ProteinSiteRecord {
+                protein: agg.protein.clone(),
+                peptide: agg.peptide.clone(),
+                residue: (agg.residue as char).to_string(),
+                position_in_peptide: agg.position as i32,
+                modification: agg.modification.clone(),
+                modification_mass: agg.modification_mass,
+                num_psms: agg.n_psms as i32,
+                best_localization_probability: agg.best_probability,
+                best_delta_localization_score: agg.best_delta_score,
+                best_localization_q_value: agg.best_localization_q_value,
+                best_spectrum_q: agg.best_spectrum_q,
+            })
+            .collect::<Vec<_>>();
+        let path = self.make_path("results.sage.protein-sites.parquet");
+        let bytes = sage_cloudpath::parquet::serialize_protein_sites(&records)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
@@ -2469,100 +2229,10 @@ impl Runner {
         Ok(path)
     }
 
-    pub fn write_tmt(&self, quant: &[TmtQuant], filenames: &[String]) -> anyhow::Result<Url> {
-        let path = self.make_path("tmt.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(OutputTarget::new(&path)?);
-        let mut headers = csv::ByteRecord::from(vec!["filename", "scannr", "ion_injection_time"]);
-        headers.extend(
-            self.parameters
-                .quant
-                .tmt
-                .as_ref()
-                .map(|tmt| tmt.headers())
-                .expect("TMT quant cannot be performed without setting this parameter"),
-        );
-
-        wtr.write_byte_record(&headers)?;
-
-        for chunk in quant.chunks(1024) {
-            for record in chunk
-                .par_iter()
-                .map(|q| {
-                    let mut record = csv::ByteRecord::new();
-                    record.push_field(filenames[q.file_id].as_bytes());
-                    record.push_field(q.spec_id.as_bytes());
-                    record.push_field(ryu::Buffer::new().format(q.ion_injection_time).as_bytes());
-                    for peak in &q.peaks {
-                        record.push_field(ryu::Buffer::new().format(*peak).as_bytes());
-                    }
-                    record
-                })
-                .collect::<Vec<csv::ByteRecord>>()
-            {
-                wtr.write_record(&record)?;
-            }
-        }
-        finish_csv_writer(wtr, &path)?;
-        Ok(path)
-    }
-
-    pub fn write_lfq(
-        &self,
-        areas: &HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>,
-        filenames: &[String],
-    ) -> anyhow::Result<Url> {
-        let path = self.make_path("lfq.tsv");
-
-        let mut wtr = csv::WriterBuilder::new()
-            .delimiter(b'\t')
-            .from_writer(OutputTarget::new(&path)?);
-        let mut headers = csv::ByteRecord::from(vec![
-            "peptide",
-            "charge",
-            "proteins",
-            "q_value",
-            "score",
-            "spectral_angle",
-        ]);
-        headers.extend(filenames);
-
-        wtr.write_byte_record(&headers)?;
-
-        for ((id, decoy), (peak, data)) in areas {
-            if *decoy {
-                continue;
-            }
-            let mut record = csv::ByteRecord::new();
-            let (peptide_ix, charge) = match id {
-                PrecursorId::Combined(x) => (*x, None),
-                PrecursorId::Charged((x, charge)) => (*x, Some(*charge as i32)),
-            };
-            record.push_field(self.database[peptide_ix].to_string().as_bytes());
-            record.push_field(itoa::Buffer::new().format(charge.unwrap_or(-1)).as_bytes());
-            record.push_field(
-                self.database[peptide_ix]
-                    .proteins(&self.database.decoy_tag, self.database.generate_decoys)
-                    .as_bytes(),
-            );
-            record.push_field(ryu::Buffer::new().format(peak.q_value).as_bytes());
-            record.push_field(ryu::Buffer::new().format(peak.score).as_bytes());
-            record.push_field(ryu::Buffer::new().format(peak.spectral_angle).as_bytes());
-            for x in data {
-                record.push_field(ryu::Buffer::new().format(*x).as_bytes());
-            }
-            wtr.write_record(&record)?;
-        }
-        finish_csv_writer(wtr, &path)?;
-        Ok(path)
-    }
-
     fn write_report(
         &self,
         features: &[Feature],
-        areas: Option<HashMap<(PrecursorId, bool), (Peak, Vec<f64>), fnv::FnvBuildHasher>>,
+        areas: Option<HashMap<(PrecursorId, bool), QuantifiedPeak, fnv::FnvBuildHasher>>,
         filenames: &[String],
     ) -> anyhow::Result<Url> {
         let path = self.make_path("results.sage.report.html");
@@ -2661,9 +2331,11 @@ impl Runner {
                 let mut total_lfq_intensities = Vec::new();
                 for i in 0..filenames.len() {
                     let mut intensities = Vec::new();
-                    for ((_id, decoy), (peak, data)) in areas {
-                        if !decoy && peak.q_value <= global_q_value_filter {
-                            intensities.push(data[i] as f32);
+                    for ((_id, decoy), quantified) in areas {
+                        if !decoy && quantified.peak.q_value <= global_q_value_filter {
+                            if let Some(intensity) = quantified.intensities[i] {
+                                intensities.push(intensity as f32);
+                            }
                         }
                     }
                     total_lfq_intensities.push(intensities.iter().sum());
@@ -2897,9 +2569,11 @@ impl Runner {
                 let mut lfq_intensities: Vec<Vec<f64>> = Vec::new();
                 for i in 0..filenames.len() {
                     let mut intensities = Vec::new();
-                    for ((_id, decoy), (peak, data)) in &areas {
-                        if !decoy && peak.q_value <= global_q_value_filter {
-                            intensities.push(data[i].log2());
+                    for ((_id, decoy), quantified) in &areas {
+                        if !decoy && quantified.peak.q_value <= global_q_value_filter {
+                            if let Some(intensity) = quantified.intensities[i] {
+                                intensities.push(intensity.log2());
+                            }
                         }
                     }
                     lfq_intensities.push(intensities);
@@ -3126,7 +2800,7 @@ impl Runner {
 
 #[cfg(test)]
 mod tests {
-    use super::{passes_localization_filter, RunSummary};
+    use super::{passes_localization_filter, passes_output_filter, RunSummary};
     use sage_core::scoring::Feature;
 
     #[test]
@@ -3149,6 +2823,28 @@ mod tests {
             ..passing
         };
         assert!(!passes_localization_filter(&decoy, 0.01));
+    }
+
+    #[test]
+    fn output_filter_is_inclusive_and_applies_to_targets_and_decoys() {
+        let target = Feature {
+            label: 1,
+            spectrum_q: 0.1,
+            ..Default::default()
+        };
+        assert!(passes_output_filter(&target, 0.1));
+
+        let decoy = Feature {
+            label: -1,
+            ..target.clone()
+        };
+        assert!(passes_output_filter(&decoy, 0.1));
+
+        let failing = Feature {
+            spectrum_q: 0.100_001,
+            ..target
+        };
+        assert!(!passes_output_filter(&failing, 0.1));
     }
 
     #[test]

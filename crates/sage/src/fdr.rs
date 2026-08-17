@@ -5,7 +5,7 @@
 //! Savitski et al., https://pubmed.ncbi.nlm.nih.gov/25987413/
 
 use crate::database::{IndexedDatabase, PeptideIx};
-use crate::lfq::PrecursorId;
+use crate::lfq::{PrecursorId, QuantifiedPeak};
 use crate::ml::kde::Estimator;
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
@@ -225,9 +225,7 @@ pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> u
     passing
 }
 
-pub fn picked_precursor(
-    peaks: &mut FnvHashMap<(PrecursorId, bool), (crate::lfq::Peak, Vec<f64>)>,
-) -> usize {
+pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {
     // let mut map: FnvHashMap<PeptideIx, Competition<(PeptideIx, bool)>> = FnvHashMap::default();
     // for (key, (peak, _)) in peaks.iter() {
     //     let entry = map.entry(key.0).or_default();
@@ -244,10 +242,10 @@ pub fn picked_precursor(
     // }
     let mut scores = peaks
         .par_iter()
-        .map(|(&(ix, decoy), (peak, _))| Row {
+        .map(|(&(ix, decoy), quantified)| Row {
             ix,
             decoy,
-            score: peak.score as f32,
+            score: quantified.peak.score as f32,
             q: 1.0,
         })
         .collect::<Vec<_>>();
@@ -280,8 +278,8 @@ pub fn picked_precursor(
         .map(|score| ((score.ix, score.decoy), score.q))
         .collect::<FnvHashMap<_, _>>();
 
-    peaks.par_iter_mut().for_each(|(ix, (peak, _))| {
-        peak.q_value = scores[ix];
+    peaks.par_iter_mut().for_each(|(ix, quantified)| {
+        quantified.peak.q_value = scores[ix];
     });
     passing
 }

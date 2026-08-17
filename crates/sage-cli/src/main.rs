@@ -65,12 +65,6 @@ fn main() -> anyhow::Result<()> {
                 .value_hint(ValueHint::Other),
         )
         .arg(
-            Arg::new("parquet")
-                .long("parquet")
-                .action(clap::ArgAction::SetTrue)
-                .help("Write search output in parquet format instead of tsv"),
-        )
-        .arg(
             Arg::new("annotate-matches")
                 .long("annotate-matches")
                 .action(clap::ArgAction::SetTrue)
@@ -150,7 +144,6 @@ fn main() -> anyhow::Result<()> {
         .build_global()
         .expect("configure Rayon pool");
 
-    let parquet = matches.get_one::<bool>("parquet").copied().unwrap_or(false);
     let send_telemetry = matches
         .get_one::<bool>("disable-telemetry")
         .copied()
@@ -181,7 +174,6 @@ fn main() -> anyhow::Result<()> {
         input,
         JobOptions {
             parallel,
-            parquet,
             events,
             cancellation: CancellationToken::default(),
         },

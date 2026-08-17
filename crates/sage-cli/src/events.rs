@@ -83,6 +83,10 @@ pub enum EventKind {
     PtmLocalizationCompleted {
         psms: usize,
     },
+    FragmentAnnotationCompleted {
+        psms: usize,
+        fragments: usize,
+    },
     QuantificationCompleted {
         kind: String,
         features: usize,
