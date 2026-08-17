@@ -7,6 +7,7 @@ use sage_core::{
     database::{Builder, Parameters},
     lfq::LfqSettings,
     mass::Tolerance,
+    ml::retention_alignment::AlignmentMethod,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,8 @@ pub struct Search {
     pub min_matched_peaks: u16,
     pub report_psms: usize,
     pub predict_rt: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retention_time_alignment: Option<AlignmentMethod>,
     pub mzml_paths: Vec<Url>,
     pub output_paths: Vec<Url>,
     pub bruker_config: BrukerProcessingConfig,
@@ -73,6 +76,7 @@ pub struct Input {
     pub deisotope: Option<bool>,
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
+    pub retention_time_alignment: Option<AlignmentMethod>,
     pub output_directory: Option<String>,
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
@@ -286,7 +290,7 @@ impl Input {
         }
     }
 
-    pub fn build(mut self) -> anyhow::Result<Search> {
+    pub fn build(self) -> anyhow::Result<Search> {
         let database = self.database.make_parameters();
 
         Self::check_mass_tolerances(&self.fragment_tol);
@@ -307,15 +311,6 @@ impl Input {
                 );
                 std::process::exit(1);
             }
-        }
-
-        if !self.predict_rt.unwrap_or(true)
-            && self.quant.as_ref().and_then(|q| q.lfq).unwrap_or(false)
-        {
-            log::warn!(
-                "`predict_rt: false` and `lfq: true` are incompatible. Setting `predict_rt: true`"
-            );
-            self.predict_rt = Some(true);
         }
 
         let mzml_paths = self
@@ -378,6 +373,7 @@ impl Input {
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
             predict_rt: self.predict_rt.unwrap_or(true),
+            retention_time_alignment: self.retention_time_alignment,
             output_paths: Vec::new(),
             write_pin: self.write_pin.unwrap_or(false),
             bruker_config: self.bruker_config.unwrap_or_default(),
@@ -393,6 +389,7 @@ impl Input {
 #[cfg(test)]
 mod test {
 
+    use sage_core::ml::retention_alignment::AlignmentMethod;
     use sage_core::{database::EnzymeBuilder, enzyme::EnzymeParameters};
 
     #[test]
@@ -421,6 +418,13 @@ mod test {
         }
         assert_eq!(c.enzyme.map(|e| e.skip_suffix), Some([false; 26]));
 
+        Ok(())
+    }
+
+    #[test]
+    fn deserialize_nonlinear_retention_time_alignment() -> Result<(), serde_json::Error> {
+        let method: AlignmentMethod = serde_json::from_value(serde_json::json!("nonlinear"))?;
+        assert_eq!(method, AlignmentMethod::Nonlinear);
         Ok(())
     }
 }

@@ -530,25 +530,30 @@ impl Runner {
         //Collect all results into a single container
         let mut outputs = self.batch_files(&scorer, parallel);
 
-        let alignments = if self.parameters.predict_rt {
-            // Poisson probability is usually the best single feature for refining FDR.
-            // Take our set of 1% FDR filtered PSMs, and use them to train a linear
-            // regression model for predicting retention time
+        let needs_alignment = self.parameters.predict_rt
+            || self.parameters.quant.lfq
+            || self.parameters.retention_time_alignment.is_some();
+        let alignments = if needs_alignment {
+            // Alignment landmarks are observed target PSMs passing 1% spectrum FDR.
             outputs
                 .features
                 .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
             sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
 
-            let alignments = sage_core::ml::retention_alignment::global_alignment(
+            let alignments = sage_core::ml::retention_alignment::global_alignment_with_method(
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),
+                self.parameters.retention_time_alignment.unwrap_or_default(),
             );
-            let _ = sage_core::ml::retention_model::predict(&self.database, &mut outputs.features);
-            let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
             Some(alignments)
         } else {
             None
         };
+
+        if self.parameters.predict_rt {
+            let _ = sage_core::ml::retention_model::predict(&self.database, &mut outputs.features);
+            let _ = sage_core::ml::mobility_model::predict(&self.database, &mut outputs.features);
+        }
 
         let q_spectrum = self.spectrum_fdr(&mut outputs.features);
         let q_peptide = sage_core::fdr::picked_peptide(&self.database, &mut outputs.features);

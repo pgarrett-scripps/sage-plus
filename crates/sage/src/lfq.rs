@@ -237,8 +237,7 @@ impl FeatureMap {
             log::warn!("no MS1 spectra found for quantification");
         } else {
             spectra.par_iter().for_each(|spectrum| {
-                let a = alignments[spectrum.file_id];
-                let rt = (spectrum.scan_start_time / a.max_rt) * a.slope + a.intercept;
+                let rt = alignments[spectrum.file_id].transform(spectrum.scan_start_time);
                 let query = self.rt_slice(rt, RT_TOL);
 
                 let add_entry = |entry: &PrecursorRange, intensity: f32| {
