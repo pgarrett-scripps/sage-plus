@@ -72,7 +72,7 @@ Usage: sage [OPTIONS] <parameters> [mzml_paths]...
 
 Arguments:
   <parameters>     Path to configuration parameters (JSON file)
-  [mzml_paths]...  Paths to mzML files to process. Overrides mzML files listed in the configuration file.
+  [mzml_paths]...  Paths to mzML, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the configuration file.
 
 Options:
   -f, --fasta <fasta>
@@ -551,13 +551,15 @@ Notes:
 - `ptm_localization.psm_q_value` controls identification quality only. Filter `localization_probability` or `delta_localization_score` separately when selecting confidently localized sites.
 - Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
 
-## mzML Paths
+## Spectrum Paths
 
-- **mzml_paths**: List of strings. The paths to mzML (or gzipped-mzML) files for search. Paths are either local, or point to an S3 object. Files ended in ".gz" or ".gzip" are inferred to be compressed.
+- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. Thermo RAW and Bruker TDF inputs must be local because their readers require seekable files. Files ending in ".gz" or ".gzip" are inferred to be compressed.
+  - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
   - Example:
     ```json
     "mzml_paths": [
       "local/path.mzML",
+      "local/path.raw",
       "s3://my-mass-spec-data/PXD0000001/foo.mzML.gz"
     ]
     ```

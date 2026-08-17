@@ -9,6 +9,7 @@ pub enum FileFormat {
     MzML,
     MGF,
     TDF,
+    ThermoRaw,
     Unidentified,
 }
 
@@ -23,6 +24,7 @@ impl FileFormat {
             FileFormat::MzML => false,
             FileFormat::MGF => false,
             FileFormat::TDF => true,
+            FileFormat::ThermoRaw => false,
             FileFormat::Unidentified => false,
         }
     }
@@ -33,6 +35,8 @@ impl From<&str> for FileFormat {
         let path_lower = s.to_lowercase();
         if path_lower.ends_with(".mgf.gz") || path_lower.ends_with(".mgf") {
             FileFormat::MGF
+        } else if path_lower.ends_with(".raw") {
+            FileFormat::ThermoRaw
         } else if is_bruker(&path_lower) {
             FileFormat::TDF
         } else if path_lower.ends_with(".mzml.gz") || path_lower.ends_with(".mzml") {
@@ -43,7 +47,7 @@ impl From<&str> for FileFormat {
     }
 }
 
-const BRUKER_EXTENSIONS: [&str; 5] = [".d", ".tdf", ".tdf_bin", "ms2", "raw"];
+const BRUKER_EXTENSIONS: [&str; 4] = [".d", ".tdf", ".tdf_bin", "ms2"];
 
 fn is_bruker(path: &str) -> bool {
     BRUKER_EXTENSIONS.iter().any(|ext| {
@@ -68,8 +72,31 @@ pub fn read_spectra(
         FileFormat::MzML => read_mzml(url, file_id, sn),
         FileFormat::MGF => read_mgf(url, file_id),
         FileFormat::TDF => read_tdf(url, file_id, bruker_processor, requires_ms1),
+        FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn),
         FileFormat::Unidentified => panic!("Unable to get type for '{}'", url), // read_mzml(path, file_id, sn),
     }
+}
+
+pub fn read_thermoraw(
+    url: &Url,
+    file_id: usize,
+    signal_to_noise: Option<u8>,
+) -> Result<Vec<RawSpectrum>, Error> {
+    if signal_to_noise.is_some() {
+        return Err(Error::Unsupported(
+            "TMT signal-to-noise quantification is not yet available for Thermo RAW input"
+                .to_string(),
+        ));
+    }
+    if url.scheme() != "file" {
+        log::error!("Thermo RAW files must be local: {}", url);
+        return Err(Error::InvalidUri);
+    }
+
+    let path = url.to_file_path().map_err(|_| Error::InvalidUri)?;
+    crate::thermoraw::ThermoRawReader::with_file_id(file_id)
+        .parse(path)
+        .map_err(Error::ThermoRaw)
 }
 
 pub fn read_mzml(
@@ -191,5 +218,16 @@ mod test {
         assert_eq!(FileFormat::from("foo.tdf"), FileFormat::TDF);
         assert_eq!(FileFormat::from("./tomato/foo.d"), FileFormat::TDF);
         assert_eq!(FileFormat::from("./tomato/foo.d/"), FileFormat::TDF);
+        assert_eq!(FileFormat::from("foo.raw"), FileFormat::ThermoRaw);
+        assert_eq!(FileFormat::from("foo.RAW"), FileFormat::ThermoRaw);
+    }
+
+    #[test]
+    fn thermoraw_rejects_signal_to_noise_mode() {
+        let url = Url::parse("file:///tmp/example.raw").unwrap();
+        assert!(matches!(
+            read_thermoraw(&url, 0, Some(2)),
+            Err(Error::Unsupported(_))
+        ));
     }
 }
