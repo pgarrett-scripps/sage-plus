@@ -63,10 +63,20 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
         "sage-plus-spectral-library-{}-{nonce}",
         std::process::id()
     ));
+    let config_path = std::env::temp_dir().join(format!(
+        "sage-plus-spectral-library-config-{}-{nonce}.json",
+        std::process::id()
+    ));
+    let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        workspace.join("tests/config_spectral_library.json"),
+    )?)?;
+    config["write_pin"] = true.into();
+    config["write_report"] = true.into();
+    std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_sage"))
         .current_dir(&workspace)
-        .arg(workspace.join("tests/config_spectral_library.json"))
+        .arg(&config_path)
         .arg("--output_directory")
         .arg(&output_directory)
         .arg("--disable-telemetry-i-dont-want-to-improve-sage")
@@ -81,13 +91,15 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     let parquet = output_directory.join("spectral_library.sage.parquet");
     let mzspeclib = output_directory.join("spectral_library.mzspeclib.txt");
     assert!(parquet.metadata()?.len() > 0);
+    assert!(output_directory.join("results.sage.pin").is_file());
+    assert!(output_directory.join("results.sage.report.html").is_file());
     let text = std::fs::read_to_string(mzspeclib)?;
     assert!(text.contains("<Spectrum=1>"));
     assert!(text.contains("MS:1003270|proforma peptidoform ion notation="));
 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
-    assert_eq!(summary["schema_version"], 4);
+    assert_eq!(summary["schema_version"], 5);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 20);
@@ -97,6 +109,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     );
 
     std::fs::remove_dir_all(output_directory)?;
+    std::fs::remove_file(config_path)?;
     Ok(())
 }
 
@@ -125,6 +138,7 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
     );
 
     let config_path = root.join("library-search.json");
+    let events_path = root.join("events.jsonl");
     std::fs::write(
         &config_path,
         serde_json::to_vec_pretty(&serde_json::json!({
@@ -151,6 +165,8 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
         .arg(&config_path)
         .arg("--output_directory")
         .arg(&search_directory)
+        .arg("--events-jsonl")
+        .arg(&events_path)
         .arg("--disable-telemetry-i-dont-want-to-improve-sage")
         .output()?;
     assert!(
@@ -173,6 +189,11 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
     assert_eq!(summary["quantification"]["lfq_enabled"], true);
     assert_eq!(summary["quantification"]["tmt"], "tmt6");
     assert_eq!(summary["quantification"]["tmt_features"], 1);
+    let events = std::fs::read_to_string(events_path)?;
+    assert!(events.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .is_ok_and(|event| event["code"] == "library_source_overlap")
+    }));
 
     std::fs::remove_dir_all(root)?;
     Ok(())

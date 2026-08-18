@@ -190,7 +190,7 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         .await?;
     assert_eq!(analysis.is_error, Some(false));
     let analysis = analysis.structured_content.as_ref().unwrap();
-    assert_eq!(analysis["summary"]["schema_version"], 4);
+    assert_eq!(analysis["summary"]["schema_version"], 5);
     assert_eq!(analysis["summary"]["inputs"]["mzml_files"], 1);
     assert_eq!(
         analysis["summary"]["models"]["mass_alignment_applied"],

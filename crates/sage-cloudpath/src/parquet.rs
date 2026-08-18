@@ -1214,6 +1214,16 @@ pub fn deserialize_spectral_library(
             "proteins",
             row_number,
         )?;
+        let source_file = text(
+            required(&row, "source_file", row_number)?,
+            "source_file",
+            row_number,
+        )?;
+        let source_spectrum = text(
+            required(&row, "source_spectrum", row_number)?,
+            "source_spectrum",
+            row_number,
+        )?;
         let precursor_charge = charge(
             required(&row, "precursor_charge", row_number)?,
             "precursor_charge",
@@ -1263,6 +1273,8 @@ pub fn deserialize_spectral_library(
                 entry_indices.insert(id.clone(), entry_index);
                 entries.push(DdaLibraryEntry {
                     library_entry_id: id,
+                    source_file,
+                    source_spectrum,
                     proforma,
                     stripped_peptide,
                     proteins,
@@ -1840,6 +1852,8 @@ mod ptm_tests {
         let search_entries = deserialize_spectral_library(bytes.clone())?;
         assert_eq!(search_entries.len(), 1);
         assert_eq!(search_entries[0].library_entry_id, "PEPTIDE/2");
+        assert_eq!(search_entries[0].source_file, "sample.mzML");
+        assert_eq!(search_entries[0].source_spectrum, "scan=42");
         assert_eq!(search_entries[0].fragments.len(), 2);
         assert!(!search_entries[0].is_decoy);
 

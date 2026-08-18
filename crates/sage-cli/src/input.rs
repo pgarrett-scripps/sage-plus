@@ -324,12 +324,12 @@ impl Input {
             input.mzml_paths = Some(mzml_paths.into_iter().map(|p| p.into()).collect());
         }
 
-        if let Some(write_pin) = matches.get_one::<bool>("write-pin").copied() {
-            input.write_pin = Some(write_pin);
+        if matches.get_flag("write-pin") {
+            input.write_pin = Some(true);
         }
 
-        if let Some(write_report) = matches.get_one::<bool>("write-report").copied() {
-            input.write_report = Some(write_report);
+        if matches.get_flag("write-report") {
+            input.write_report = Some(true);
         }
 
         if matches.get_flag("annotate-matches") {

@@ -46,6 +46,10 @@ impl LibrarySearchSettings {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DdaLibraryEntry {
     pub library_entry_id: String,
+    /// Source acquisition basename when provided by the library format.
+    pub source_file: String,
+    /// Source spectrum identifier when provided by the library format.
+    pub source_spectrum: String,
     pub proforma: String,
     pub stripped_peptide: String,
     pub proteins: String,
@@ -63,6 +67,8 @@ impl DdaLibraryEntry {
     pub fn from_export(entry: &SpectralLibraryEntry) -> Self {
         Self {
             library_entry_id: entry.library_entry_id.clone(),
+            source_file: entry.source_file.clone(),
+            source_spectrum: entry.source_spectrum.clone(),
             proforma: entry.proforma.clone(),
             stripped_peptide: entry.stripped_peptide.clone(),
             proteins: entry.proteins.clone(),
@@ -863,6 +869,8 @@ mod tests {
     fn entry(id: &str, charge: u8, fragments: Vec<LibraryFragment>) -> DdaLibraryEntry {
         DdaLibraryEntry {
             library_entry_id: id.into(),
+            source_file: String::new(),
+            source_spectrum: String::new(),
             proforma: id.into(),
             stripped_peptide: id.into(),
             proteins: "P1".into(),
@@ -1094,6 +1102,8 @@ mod tests {
     fn shuffled_decoys_preserve_precursor_and_intensities() {
         let target = DdaLibraryEntry {
             library_entry_id: "PEPTIDER/2".into(),
+            source_file: "sample.mzML".into(),
+            source_spectrum: "scan=42".into(),
             proforma: "PEPTIDER".into(),
             stripped_peptide: "PEPTIDER".into(),
             proteins: "P1;P2".into(),
@@ -1132,6 +1142,8 @@ mod tests {
         assert_ne!(decoy.proforma, target.proforma);
         assert_eq!(decoy.precursor_neutral_mass, target.precursor_neutral_mass);
         assert_eq!(decoy.proteins, target.proteins);
+        assert_eq!(decoy.source_file, target.source_file);
+        assert_eq!(decoy.source_spectrum, target.source_spectrum);
         let mut intensities = decoy
             .fragments
             .iter()

@@ -37,6 +37,10 @@ are validated explicitly: library search does not yet support chimera/DIA wide-w
 bitmap search, PTM localization, or spectral-library re-export. Library matches support matched
 fragment export, direct library RT/mobility alignment, LFQ, and TMT quantification.
 
+Sage Parquet libraries retain each entry's source file and spectrum. When a query filename matches
+a recorded library source filename, Sage emits a `library_source_overlap` warning because that run
+is useful for regression testing but not independent FDR validation.
+
 Before calling the mode production-validated, benchmark its FDR calibration with held-out and
 entrapment datasets across library sources and instruments. See `DDA_LIBRARY_FDR_VALIDATION.md`
 and `scripts/validate-library-fdr.sh` for the reproducible workflow and threshold report.
