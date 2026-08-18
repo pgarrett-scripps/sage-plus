@@ -31,7 +31,8 @@ use sage_core::ion_series::Kind;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::ptm_library::{PtmLibrary, PtmLibrarySite};
 use sage_core::scoring::Feature;
-use sage_core::spectral_library::{SpectralLibraryEntry, SpectralLibrarySettings};
+use sage_core::spectral_library::{LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings};
+use sage_core::spectral_library_search::{DdaLibraryEntry, DdaLibraryIndex};
 use sage_core::tmt::TmtQuant;
 
 fn field_to_json(field: &Field) -> serde_json::Value {
@@ -1083,6 +1084,237 @@ pub fn build_spectral_library_schema() -> parquet::errors::Result<Type> {
     ))
 }
 
+/// Read Sage's canonical long-form empirical library into DDA search entries.
+///
+/// The v1 export contains target entries only. `is_decoy` therefore remains
+/// false until a future schema defines portable decoy provenance.
+pub fn deserialize_spectral_library(
+    bytes: Vec<u8>,
+) -> parquet::errors::Result<Vec<DdaLibraryEntry>> {
+    fn required<'a>(
+        row: &'a Row,
+        name: &str,
+        row_number: usize,
+    ) -> parquet::errors::Result<&'a Field> {
+        row_field(row, name).ok_or_else(|| {
+            ParquetError::General(format!(
+                "spectral-library row {row_number} is missing `{name}`"
+            ))
+        })
+    }
+
+    fn text(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<String> {
+        match field {
+            Field::Str(value) => Ok(value.clone()),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-string `{name}`"
+            ))),
+        }
+    }
+
+    fn float(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<f32> {
+        match field {
+            Field::Float(value) => Ok(*value),
+            Field::Double(value) => Ok(*value as f32),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-floating-point `{name}`"
+            ))),
+        }
+    }
+
+    fn integer(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<i64> {
+        match field {
+            Field::Byte(value) => Ok(i64::from(*value)),
+            Field::Short(value) => Ok(i64::from(*value)),
+            Field::Int(value) => Ok(i64::from(*value)),
+            Field::Long(value) => Ok(*value),
+            Field::UByte(value) => Ok(i64::from(*value)),
+            Field::UShort(value) => Ok(i64::from(*value)),
+            Field::UInt(value) => Ok(i64::from(*value)),
+            Field::ULong(value) => i64::try_from(*value).map_err(|_| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has out-of-range `{name}`"
+                ))
+            }),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-integer `{name}`"
+            ))),
+        }
+    }
+
+    fn charge(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<u8> {
+        u8::try_from(integer(field, name, row_number)?)
+            .ok()
+            .filter(|charge| *charge > 0)
+            .ok_or_else(|| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has invalid `{name}`"
+                ))
+            })
+    }
+
+    fn fragment_kind(field: &Field, row_number: usize) -> parquet::errors::Result<Kind> {
+        match text(field, "fragment_type", row_number)?.as_str() {
+            "a" => Ok(Kind::A),
+            "b" => Ok(Kind::B),
+            "c" => Ok(Kind::C),
+            "x" => Ok(Kind::X),
+            "y" => Ok(Kind::Y),
+            "z" => Ok(Kind::Z),
+            kind => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has unsupported fragment type `{kind}`"
+            ))),
+        }
+    }
+
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let metadata = reader.metadata().file_metadata().key_value_metadata();
+    let has_metadata = |key: &str, value: &str| {
+        metadata.is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.key == key && entry.value.as_deref() == Some(value))
+        })
+    };
+    if !has_metadata("sage.schema.name", "spectral_library")
+        || !has_metadata("sage.schema.version", "1")
+    {
+        return Err(ParquetError::General(
+            "input is not a Sage spectral_library schema version 1 Parquet file".into(),
+        ));
+    }
+
+    let mut entries = Vec::<DdaLibraryEntry>::new();
+    let mut entry_indices = HashMap::<String, usize>::new();
+    for (row_index, row) in reader.get_row_iter(None)?.enumerate() {
+        let row_number = row_index + 1;
+        let row = row?;
+        let id = text(
+            required(&row, "library_entry_id", row_number)?,
+            "library_entry_id",
+            row_number,
+        )?;
+        let proforma = text(
+            required(&row, "proforma", row_number)?,
+            "proforma",
+            row_number,
+        )?;
+        let stripped_peptide = text(
+            required(&row, "stripped_peptide", row_number)?,
+            "stripped_peptide",
+            row_number,
+        )?;
+        let proteins = text(
+            required(&row, "proteins", row_number)?,
+            "proteins",
+            row_number,
+        )?;
+        let precursor_charge = charge(
+            required(&row, "precursor_charge", row_number)?,
+            "precursor_charge",
+            row_number,
+        )?;
+        let precursor_neutral_mass = float(
+            required(&row, "precursor_neutral_mass", row_number)?,
+            "precursor_neutral_mass",
+            row_number,
+        )?;
+        let precursor_mz = float(
+            required(&row, "precursor_mz", row_number)?,
+            "precursor_mz",
+            row_number,
+        )?;
+        let retention_time_minutes = float(
+            required(&row, "aligned_retention_time_minutes", row_number)?,
+            "aligned_retention_time_minutes",
+            row_number,
+        )?;
+        let ion_mobility = float(
+            required(&row, "ion_mobility", row_number)?,
+            "ion_mobility",
+            row_number,
+        )?;
+        let source_spectrum_q = float(
+            required(&row, "spectrum_q", row_number)?,
+            "spectrum_q",
+            row_number,
+        )?;
+
+        let entry_index = match entry_indices.get(&id).copied() {
+            Some(entry_index) => {
+                let existing = &entries[entry_index];
+                if existing.proforma != proforma
+                    || existing.precursor_charge != precursor_charge
+                    || existing.precursor_neutral_mass != precursor_neutral_mass
+                {
+                    return Err(ParquetError::General(format!(
+                        "spectral-library entry `{id}` has inconsistent precursor metadata"
+                    )));
+                }
+                entry_index
+            }
+            None => {
+                let entry_index = entries.len();
+                entry_indices.insert(id.clone(), entry_index);
+                entries.push(DdaLibraryEntry {
+                    library_entry_id: id,
+                    proforma,
+                    stripped_peptide,
+                    proteins,
+                    precursor_charge,
+                    precursor_neutral_mass,
+                    precursor_mz,
+                    retention_time_minutes,
+                    ion_mobility,
+                    source_spectrum_q,
+                    is_decoy: false,
+                    fragments: Vec::new(),
+                });
+                entry_index
+            }
+        };
+
+        let fragment_charge = charge(
+            required(&row, "fragment_charge", row_number)?,
+            "fragment_charge",
+            row_number,
+        )?;
+        entries[entry_index].fragments.push(LibraryFragment {
+            kind: fragment_kind(required(&row, "fragment_type", row_number)?, row_number)?,
+            ordinal: i32::try_from(integer(
+                required(&row, "fragment_ordinal", row_number)?,
+                "fragment_ordinal",
+                row_number,
+            )?)
+            .map_err(|_| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has out-of-range `fragment_ordinal`"
+                ))
+            })?,
+            charge: i32::from(fragment_charge),
+            neutral_loss: float(
+                required(&row, "neutral_loss", row_number)?,
+                "neutral_loss",
+                row_number,
+            )?,
+            mz: float(
+                required(&row, "fragment_mz", row_number)?,
+                "fragment_mz",
+                row_number,
+            )?,
+            relative_intensity: float(
+                required(&row, "relative_intensity", row_number)?,
+                "relative_intensity",
+                row_number,
+            )?,
+        });
+    }
+
+    DdaLibraryIndex::new(entries)
+        .map(|index| index.entries().to_vec())
+        .map_err(ParquetError::General)
+}
+
 /// Serialize one long-form row per selected transition in the empirical library.
 pub fn serialize_spectral_library(
     entries: &[SpectralLibraryEntry],
@@ -1600,6 +1832,12 @@ mod ptm_tests {
             ],
         };
         let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
+        let search_entries = deserialize_spectral_library(bytes.clone())?;
+        assert_eq!(search_entries.len(), 1);
+        assert_eq!(search_entries[0].library_entry_id, "PEPTIDE/2");
+        assert_eq!(search_entries[0].fragments.len(), 2);
+        assert!(!search_entries[0].is_decoy);
+
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
         assert_eq!(reader.metadata().file_metadata().num_rows(), 2);
         assert_eq!(

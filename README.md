@@ -62,6 +62,7 @@ and versioned Linux AMD64 container images are published as
 - [Sage MCP server](crates/sage-mcp/README.md)
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
+- [DDA spectrum-to-library search spike](DDA_LIBRARY_SEARCH.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 
 ## Attribution and citation
