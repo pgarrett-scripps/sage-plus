@@ -332,8 +332,8 @@ impl Input {
             input.write_report = Some(write_report);
         }
 
-        if let Some(annotate_matches) = matches.get_one::<bool>("annotate-matches").copied() {
-            input.annotate_matches = Some(annotate_matches);
+        if matches.get_flag("annotate-matches") {
+            input.annotate_matches = Some(true);
         }
         if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
             input.batch_size = Some(batch_size as usize);
@@ -427,10 +427,6 @@ impl Input {
                 "`use_bitmap` is not supported with `library_search`"
             );
             ensure!(
-                !self.annotate_matches.unwrap_or(false),
-                "`annotate_matches` is not yet supported with `library_search`"
-            );
-            ensure!(
                 !self.ptm_localization.unwrap_or_default().enabled,
                 "`ptm_localization` is not supported with `library_search`"
             );
@@ -440,13 +436,6 @@ impl Input {
                     .as_ref()
                     .is_some_and(|settings| settings.enabled),
                 "spectral-library export is not supported during `library_search`"
-            );
-            ensure!(
-                !self
-                    .quant
-                    .as_ref()
-                    .is_some_and(|quant| { quant.lfq.unwrap_or(false) || quant.tmt.is_some() }),
-                "quantification is not yet supported with `library_search`"
             );
         }
         ensure!(

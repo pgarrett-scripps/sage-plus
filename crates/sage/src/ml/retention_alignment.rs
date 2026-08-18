@@ -113,6 +113,66 @@ pub struct Alignment {
     pub knots: Vec<(f32, f32)>,
 }
 
+/// Affine mapping from an observed run coordinate into an external reference
+/// coordinate, such as library retention time or ion mobility.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReferenceAlignment {
+    pub slope: f32,
+    pub intercept: f32,
+    pub points: usize,
+    pub inliers: usize,
+}
+
+impl ReferenceAlignment {
+    pub fn transform(&self, observed: f32) -> f32 {
+        observed * self.slope + self.intercept
+    }
+
+    /// Adapt this direct affine mapping for LFQ's retention-alignment API.
+    pub fn for_lfq(&self, file_id: usize) -> Alignment {
+        Alignment {
+            file_id,
+            max_rt: 1.0,
+            slope: self.slope,
+            intercept: self.intercept,
+            knots: Vec::new(),
+        }
+    }
+}
+
+/// Fit a robust observed-to-reference affine mapping.
+pub fn fit_reference_alignment(
+    points: &[(f32, f32)],
+    min_points: usize,
+) -> Option<ReferenceAlignment> {
+    let points = points
+        .iter()
+        .copied()
+        .filter(|(observed, reference)| {
+            observed.is_finite() && reference.is_finite() && *observed > 0.0 && *reference > 0.0
+        })
+        .map(|(observed, reference)| (f64::from(observed), f64::from(reference)))
+        .collect::<Vec<_>>();
+    if points.len() < min_points {
+        return None;
+    }
+    let (_, inlier_indices) = robust_affine_inliers(&points);
+    if inlier_indices.len() < min_points {
+        return None;
+    }
+    let inliers = inlier_indices
+        .iter()
+        .map(|&index| points[index])
+        .collect::<Vec<_>>();
+    let (slope, intercept) = ordinary_least_squares(&inliers);
+    (slope.is_finite() && slope > 0.0 && intercept.is_finite()).then_some(ReferenceAlignment {
+        slope: slope as f32,
+        intercept: intercept as f32,
+        points: points.len(),
+        inliers: inliers.len(),
+    })
+}
+
 impl Alignment {
     /// Transform a retention time in the original run's time units into consensus RT.
     pub fn transform(&self, rt: f32) -> f32 {
@@ -524,5 +584,25 @@ mod tests {
     #[test]
     fn alignment_method_is_explicit_and_defaults_to_linear() {
         assert_eq!(AlignmentMethod::default(), AlignmentMethod::Linear);
+    }
+
+    #[test]
+    fn reference_alignment_recovers_affine_shift_with_outliers() {
+        let points = (0..80)
+            .map(|i| {
+                let observed = i as f32 + 1.0;
+                let reference = if i % 19 == 0 {
+                    200.0 - observed
+                } else {
+                    observed * 0.85 + 3.0
+                };
+                (observed, reference)
+            })
+            .collect::<Vec<_>>();
+        let alignment = fit_reference_alignment(&points, 16).unwrap();
+        assert!((alignment.slope - 0.85).abs() < 0.01);
+        assert!((alignment.intercept - 3.0).abs() < 0.1);
+        assert!((alignment.transform(40.0) - 37.0).abs() < 0.1);
+        assert!(alignment.inliers < alignment.points);
     }
 }

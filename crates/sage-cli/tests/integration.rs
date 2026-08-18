@@ -132,6 +132,12 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
                 "path": export_directory.join("spectral_library.sage.parquet")
             },
             "deisotope": true,
+            "annotate_matches": true,
+            "quant": {
+                "tmt": "Tmt6",
+                "tmt_settings": { "level": 2 },
+                "lfq": true
+            },
             "max_fragment_charge": 1,
             "report_psms": 1,
             "output_filter": { "psm_q_value": 1.0 },
@@ -154,12 +160,19 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
         String::from_utf8_lossy(&search.stderr)
     );
     assert!(search_directory.join("results.sage.parquet").is_file());
+    assert!(search_directory
+        .join("matched_fragments.sage.parquet")
+        .is_file());
+    assert!(search_directory.join("lfq.parquet").is_file());
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(search_directory.join("run-summary.json"))?)?;
     assert_eq!(summary["library_search"]["enabled"], true);
     assert_eq!(summary["library_search"]["target_entries"], 1);
     assert_eq!(summary["library_search"]["decoy_entries"], 1);
     assert_eq!(summary["peptides_in_database"], 0);
+    assert_eq!(summary["quantification"]["lfq_enabled"], true);
+    assert_eq!(summary["quantification"]["tmt"], "tmt6");
+    assert_eq!(summary["quantification"]["tmt_features"], 1);
 
     std::fs::remove_dir_all(root)?;
     Ok(())

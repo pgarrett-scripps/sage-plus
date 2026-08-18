@@ -2,6 +2,7 @@
 
 use crate::database::binary_search_slice;
 use crate::mass::{Tolerance, NEUTRON, PROTON};
+use crate::scoring::Fragments;
 use crate::spectral_library::{LibraryFragment, SpectralLibraryEntry};
 use crate::spectrum::ProcessedSpectrum;
 use serde::{Deserialize, Serialize};
@@ -513,9 +514,14 @@ pub struct DdaLibraryMatch {
     pub explained_library_intensity: f32,
     pub explained_query_intensity: f32,
     pub precursor_ppm: f32,
+    pub raw_precursor_ppm: f32,
     pub isotope_error: i8,
+    pub average_fragment_ppm: f32,
+    pub signed_fragment_ppm: f32,
+    pub aligned_average_fragment_ppm: f32,
     pub retention_time_delta_minutes: f32,
     pub ion_mobility_delta: Option<f32>,
+    pub fragments: Option<Fragments>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -526,6 +532,11 @@ pub struct DdaLibrarySearchParameters {
     pub max_hits: usize,
     pub min_isotope_error: i8,
     pub max_isotope_error: i8,
+    pub annotate_matches: bool,
+    /// Predicted systematic precursor error using observed-minus-library ppm.
+    pub precursor_offset_ppm: f32,
+    /// Predicted systematic fragment error using observed-minus-library ppm.
+    pub fragment_offset_ppm: f32,
 }
 
 impl Default for DdaLibrarySearchParameters {
@@ -537,6 +548,9 @@ impl Default for DdaLibrarySearchParameters {
             max_hits: 1,
             min_isotope_error: 0,
             max_isotope_error: 0,
+            annotate_matches: false,
+            precursor_offset_ppm: 0.0,
+            fragment_offset_ppm: 0.0,
         }
     }
 }
@@ -652,8 +666,10 @@ impl DdaLibraryIndex {
             .filter(|value| value.is_finite() && *value > 0.0);
         let mut matches = Vec::new();
         for isotope_error in parameters.min_isotope_error..=parameters.max_isotope_error {
-            let corrected_precursor_mass =
+            let isotope_corrected_mass =
                 precursor_neutral_mass - f32::from(isotope_error) * NEUTRON;
+            let corrected_precursor_mass =
+                isotope_corrected_mass / (1.0 + parameters.precursor_offset_ppm * 1e-6);
             matches.extend(
                 self.candidates(
                     corrected_precursor_mass,
@@ -665,12 +681,15 @@ impl DdaLibraryIndex {
                         query,
                         query_intensity_sum,
                         query_mobility,
+                        precursor_neutral_mass,
                         corrected_precursor_mass,
                         isotope_error,
                         entry_index,
                         entry,
                         parameters.fragment_tolerance,
                         parameters.min_matched_peaks,
+                        parameters.annotate_matches,
+                        parameters.fragment_offset_ppm,
                     )
                 }),
             );
@@ -705,18 +724,22 @@ fn score_entry(
     query: &ProcessedSpectrum,
     query_intensity_sum: f32,
     query_mobility: Option<f32>,
+    observed_precursor_mass: f32,
     precursor_neutral_mass: f32,
     isotope_error: i8,
     entry_index: usize,
     entry: &DdaLibraryEntry,
     fragment_tolerance: Tolerance,
     min_matched_peaks: usize,
+    annotate_matches: bool,
+    fragment_offset_ppm: f32,
 ) -> Option<DdaLibraryMatch> {
     // Potential assignments are sorted by their contribution and greedily
     // accepted to enforce a one-to-one mapping between library and query peaks.
     let mut assignments = Vec::new();
     for (library_index, fragment) in entry.fragments.iter().enumerate() {
-        let center = (fragment.mz - PROTON) * fragment.charge as f32;
+        let calculated_mass = (fragment.mz - PROTON) * fragment.charge as f32;
+        let center = calculated_mass * (1.0 + fragment_offset_ppm * 1e-6);
         let (low, high) = fragment_tolerance.bounds(center);
         let (left, right) = binary_search_slice(
             &query.masses,
@@ -747,7 +770,11 @@ fn score_entry(
     let mut numerator = 0.0f32;
     let mut matched_library_intensity = 0.0f32;
     let mut matched_query_intensity = 0.0f32;
+    let mut absolute_fragment_ppm = 0.0f32;
+    let mut signed_fragment_ppm = 0.0f32;
+    let mut aligned_absolute_fragment_ppm = 0.0f32;
     let mut matched_peaks = 0usize;
+    let mut fragments = annotate_matches.then(Fragments::default);
     for (contribution, library_index, query_index) in assignments {
         if used_library[library_index] || used_query[query_index] {
             continue;
@@ -757,6 +784,24 @@ fn score_entry(
         numerator += contribution;
         matched_library_intensity += entry.fragments[library_index].relative_intensity;
         matched_query_intensity += query.intensities[query_index];
+        let fragment = &entry.fragments[library_index];
+        let calculated_mass = (fragment.mz - PROTON) * fragment.charge as f32;
+        let experimental_mass = query.masses[query_index];
+        let ppm = (experimental_mass - calculated_mass) * 2_000_000.0
+            / (experimental_mass + calculated_mass);
+        absolute_fragment_ppm += query.intensities[query_index] * ppm.abs();
+        signed_fragment_ppm += query.intensities[query_index] * ppm;
+        aligned_absolute_fragment_ppm +=
+            query.intensities[query_index] * (ppm - fragment_offset_ppm).abs();
+        if let Some(details) = fragments.as_mut() {
+            details.kinds.push(fragment.kind);
+            details.fragment_ordinals.push(fragment.ordinal);
+            details.charges.push(fragment.charge);
+            details.intensities.push(query.intensities[query_index]);
+            details.mz_calculated.push(fragment.mz);
+            details.mz_experimental.push(query.peak_mz(query_index));
+            details.neutral_losses.push(fragment.neutral_loss);
+        }
         matched_peaks += 1;
     }
     if matched_peaks < min_matched_peaks {
@@ -772,6 +817,9 @@ fn score_entry(
     let spectral_angle = 1.0 - 2.0 * cosine.acos() / std::f32::consts::PI;
     let precursor_ppm = (precursor_neutral_mass - entry.precursor_neutral_mass) * 1_000_000.0
         / entry.precursor_neutral_mass;
+    let isotope_corrected_mass = observed_precursor_mass - f32::from(isotope_error) * NEUTRON;
+    let raw_precursor_ppm = (isotope_corrected_mass - entry.precursor_neutral_mass) * 1_000_000.0
+        / entry.precursor_neutral_mass;
     let ion_mobility_delta = query_mobility.and_then(|observed| {
         (entry.ion_mobility.is_finite() && entry.ion_mobility > 0.0)
             .then_some(observed - entry.ion_mobility)
@@ -784,9 +832,14 @@ fn score_entry(
         explained_library_intensity: matched_library_intensity / library_intensity_sum,
         explained_query_intensity: matched_query_intensity / query_intensity_sum,
         precursor_ppm,
+        raw_precursor_ppm,
         isotope_error,
+        average_fragment_ppm: absolute_fragment_ppm / matched_query_intensity,
+        signed_fragment_ppm: signed_fragment_ppm / matched_query_intensity,
+        aligned_average_fragment_ppm: aligned_absolute_fragment_ppm / matched_query_intensity,
         retention_time_delta_minutes: query.scan_start_time - entry.retention_time_minutes,
         ion_mobility_delta,
+        fragments,
     })
 }
 
@@ -862,6 +915,7 @@ mod tests {
             DdaLibrarySearchParameters {
                 min_matched_peaks: 2,
                 max_hits: 2,
+                annotate_matches: true,
                 ..Default::default()
             },
         );
@@ -873,6 +927,9 @@ mod tests {
         assert!((matches[0].spectral_angle - 1.0).abs() < 1e-5);
         assert!(matches[0].spectral_angle > matches[1].spectral_angle);
         assert_eq!(matches[0].ion_mobility_delta, Some(0.100_000_024));
+        assert_eq!(matches[0].fragments.as_ref().unwrap().kinds.len(), 2);
+        assert!(matches[0].average_fragment_ppm.abs() < 1e-4);
+        assert!(matches[0].signed_fragment_ppm.abs() < 1e-4);
     }
 
     #[test]
@@ -984,6 +1041,35 @@ mod tests {
         );
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].isotope_error, 1);
+    }
+
+    #[test]
+    fn systematic_mass_offsets_are_corrected_during_search() {
+        let index =
+            DdaLibraryIndex::new(vec![entry("calibrated", 2, vec![fragment(200.0, 1.0)])]).unwrap();
+        let ppm = 5.0;
+        let shifted_precursor = 1_000.0 * (1.0 + ppm * 1e-6);
+        let shifted_fragment = 200.0 * (1.0 + ppm * 1e-6);
+        let query = query(&[(shifted_fragment, 100.0)]);
+
+        let matches = index.search(
+            &query,
+            shifted_precursor,
+            2,
+            DdaLibrarySearchParameters {
+                precursor_tolerance: Tolerance::Ppm(-1.0, 1.0),
+                fragment_tolerance: Tolerance::Ppm(-1.0, 1.0),
+                min_matched_peaks: 1,
+                precursor_offset_ppm: ppm,
+                fragment_offset_ppm: ppm,
+                ..Default::default()
+            },
+        );
+        assert_eq!(matches.len(), 1);
+        assert!((matches[0].raw_precursor_ppm - ppm).abs() < 0.1);
+        assert!(matches[0].precursor_ppm.abs() < 0.1);
+        assert!((matches[0].signed_fragment_ppm - ppm).abs() < 0.1);
+        assert!(matches[0].aligned_average_fragment_ppm < 0.1);
     }
 
     #[test]

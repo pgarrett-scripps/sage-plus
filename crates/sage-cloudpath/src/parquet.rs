@@ -860,6 +860,8 @@ pub fn serialize_features(
         write_col!(isotope_error, FloatType);
         write_col!(delta_mass, FloatType);
         write_col!(average_ppm, FloatType);
+        write_col!(aligned_delta_mass, FloatType);
+        write_col!(aligned_average_ppm, FloatType);
         write_col!(hyperscore, FloatType);
         write_col!(delta_next, FloatType);
         write_col!(delta_best, FloatType);
@@ -875,6 +877,9 @@ pub fn serialize_features(
         write_col!(longest_y, Int32Type);
         write_col!(longest_y_pct, FloatType);
         write_col!(matched_intensity_pct, FloatType);
+        write_col!(spectral_angle, FloatType);
+        write_col!(explained_library_intensity, FloatType);
+        write_col!(explained_query_intensity, FloatType);
         write_col!(scored_candidates, Int32Type);
         write_col!(poisson, FloatType);
         write_col!(discriminant_score, FloatType);

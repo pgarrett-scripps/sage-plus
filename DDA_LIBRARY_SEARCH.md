@@ -34,9 +34,9 @@ database peptides/fragments.
 
 Library search supports the same `isotope_errors` range as database search. Current restrictions
 are validated explicitly: library search does not yet support chimera/DIA wide-window search,
-bitmap search, matched-fragment export, PTM localization, spectral-library re-export, or
-quantification. Retention-time prediction defaults off.
+bitmap search, PTM localization, or spectral-library re-export. Library matches support matched
+fragment export, direct library RT/mobility alignment, LFQ, and TMT quantification.
 
-Before calling the mode production-validated, benchmark its 1% FDR calibration with held-out and
-entrapment datasets across library sources and instruments. That scientific validation is separate
-from the now-complete software path.
+Before calling the mode production-validated, benchmark its FDR calibration with held-out and
+entrapment datasets across library sources and instruments. See `DDA_LIBRARY_FDR_VALIDATION.md`
+and `scripts/validate-library-fdr.sh` for the reproducible workflow and threshold report.

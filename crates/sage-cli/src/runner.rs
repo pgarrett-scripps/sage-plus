@@ -14,8 +14,10 @@ use sage_core::fasta::Fasta;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
 use sage_core::mass_calibration::{
-    align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+    align_fragment_error, fit as fit_mass_calibration, CalibrationModel, CalibrationPoint,
+    FitOptions,
 };
+use sage_core::ml::retention_alignment::{fit_reference_alignment, Alignment};
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{Feature, Scorer};
 use sage_core::spectral_library::{
@@ -110,6 +112,13 @@ struct LibrarySearchRuntime {
     peptide_indices: Vec<PeptideIx>,
     target_entries: usize,
     target_transitions: usize,
+    max_retention_time_minutes: f32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct LibraryMassCalibration {
+    precursor: Option<CalibrationModel>,
+    fragment: Option<CalibrationModel>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -414,6 +423,11 @@ fn load_library_search(
     anyhow::ensure!(!targets.is_empty(), "spectral library contains no entries");
     let target_entries = targets.len();
     let target_transitions = targets.iter().map(|entry| entry.fragments.len()).sum();
+    let max_retention_time_minutes = targets
+        .iter()
+        .map(|entry| entry.retention_time_minutes)
+        .filter(|rt| rt.is_finite() && *rt > 0.0)
+        .fold(0.0, f32::max);
     let entries = generate_decoys(targets, settings).map_err(anyhow::Error::msg)?;
     let index = DdaLibraryIndex::new(entries).map_err(anyhow::Error::msg)?;
 
@@ -479,6 +493,7 @@ fn load_library_search(
             peptide_indices,
             target_entries,
             target_transitions,
+            max_retention_time_minutes,
         },
     ))
 }
@@ -1540,7 +1555,11 @@ impl Runner {
         })
     }
 
-    fn search_library_spectrum(&self, spectrum: &ProcessedSpectrum) -> Vec<Feature> {
+    fn search_library_spectrum(
+        &self,
+        spectrum: &ProcessedSpectrum,
+        calibration: LibraryMassCalibration,
+    ) -> Vec<Feature> {
         let Some(runtime) = self.library_search.as_ref() else {
             return Vec::new();
         };
@@ -1558,6 +1577,15 @@ impl Runner {
             max_hits: self.parameters.report_psms,
             min_isotope_error: self.parameters.isotope_errors.0,
             max_isotope_error: self.parameters.isotope_errors.1,
+            annotate_matches: self.parameters.annotate_matches,
+            precursor_offset_ppm: calibration
+                .precursor
+                .map(|model| model.predict_ppm(spectrum.scan_start_time))
+                .unwrap_or_default(),
+            fragment_offset_ppm: calibration
+                .fragment
+                .map(|model| model.predict_ppm(spectrum.scan_start_time))
+                .unwrap_or_default(),
         };
         let mut matches = charges
             .flat_map(|charge| {
@@ -1618,14 +1646,26 @@ impl Runner {
                     charge: entry.precursor_charge,
                     rt: spectrum.scan_start_time,
                     aligned_rt: spectrum.scan_start_time,
+                    predicted_rt: if runtime.max_retention_time_minutes > 0.0 {
+                        entry.retention_time_minutes / runtime.max_retention_time_minutes
+                    } else {
+                        0.0
+                    },
                     ims: ion_mobility,
-                    delta_mass: matched.precursor_ppm,
+                    predicted_ims: entry.ion_mobility,
+                    delta_mass: matched.raw_precursor_ppm,
                     aligned_delta_mass: matched.precursor_ppm,
                     hyperscore: f64::from(matched.spectral_angle),
                     delta_next: f64::from(matched.spectral_angle - next),
                     delta_best: f64::from(best - matched.spectral_angle),
                     matched_peaks: matched.matched_peaks as u32,
                     matched_intensity_pct: matched.explained_query_intensity * 100.0,
+                    spectral_angle: matched.spectral_angle,
+                    explained_library_intensity: matched.explained_library_intensity,
+                    explained_query_intensity: matched.explained_query_intensity,
+                    average_ppm: matched.average_fragment_ppm,
+                    signed_fragment_ppm: matched.signed_fragment_ppm,
+                    aligned_average_ppm: matched.aligned_average_fragment_ppm,
                     isotope_error: f32::from(matched.isotope_error) * sage_core::mass::NEUTRON,
                     scored_candidates,
                     poisson: -f64::from(matched.spectral_angle),
@@ -1639,20 +1679,30 @@ impl Runner {
                     ambiguity_sequence: entry.proforma.clone(),
                     delta_rt_model: matched.retention_time_delta_minutes,
                     delta_ims_model: matched.ion_mobility_delta.unwrap_or_default(),
+                    fragments: matched.fragments.clone(),
                     ..Feature::default()
                 }
             })
             .collect()
     }
 
-    fn batch_library_files(&self, batch_size: usize) -> SageResults {
+    fn batch_library_files(
+        &self,
+        batch_size: usize,
+        calibrations: &[LibraryMassCalibration],
+        collect_quantification: bool,
+    ) -> SageResults {
         self.parameters
             .mzml_paths
             .chunks(batch_size)
             .enumerate()
             .map(|(chunk_idx, chunk)| {
-                let spectra =
-                    self.read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false);
+                let spectra = self.read_processed_spectra_with_ms1(
+                    chunk,
+                    chunk_idx,
+                    batch_size,
+                    collect_quantification && self.requires_ms1(),
+                );
                 let features = spectra
                     .1
                     .par_iter()
@@ -1661,19 +1711,190 @@ impl Runner {
                             && spectrum.masses.len() >= self.parameters.min_peaks
                             && !self.cancellation.is_cancelled()
                     })
-                    .flat_map(|spectrum| self.search_library_spectrum(spectrum))
+                    .flat_map(|spectrum| {
+                        self.search_library_spectrum(
+                            spectrum,
+                            calibrations
+                                .get(spectrum.file_id)
+                                .copied()
+                                .unwrap_or_default(),
+                        )
+                    })
                     .collect();
                 self.events.emit(EventKind::SearchProgress {
                     files_completed: (chunk_idx * batch_size + chunk.len())
                         .min(self.parameters.mzml_paths.len()),
                     files_total: self.parameters.mzml_paths.len(),
                 });
-                SageResults {
-                    features,
-                    ..SageResults::default()
+                if collect_quantification {
+                    self.complete_features(spectra.1, spectra.0, features)
+                } else {
+                    SageResults {
+                        features,
+                        ..SageResults::default()
+                    }
                 }
             })
             .collect()
+    }
+
+    fn fit_library_mass_calibrations(&self, features: &[Feature]) -> Vec<LibraryMassCalibration> {
+        let fit_options = FitOptions {
+            min_linear_improvement: 0.0,
+            ..FitOptions::default()
+        };
+        (0..self.parameters.mzml_paths.len())
+            .map(|file_id| {
+                let calibration_psms = features
+                    .iter()
+                    .filter(|feature| {
+                        feature.file_id == file_id
+                            && feature.rank == 1
+                            && feature.label == 1
+                            && feature.spectrum_q <= 0.01
+                    })
+                    .collect::<Vec<_>>();
+                let precursor_points = calibration_psms
+                    .iter()
+                    .map(|feature| CalibrationPoint {
+                        rt_minutes: feature.rt,
+                        error_ppm: feature.delta_mass,
+                    })
+                    .collect::<Vec<_>>();
+                let fragment_points = calibration_psms
+                    .iter()
+                    .map(|feature| CalibrationPoint {
+                        rt_minutes: feature.rt,
+                        error_ppm: feature.signed_fragment_ppm,
+                    })
+                    .collect::<Vec<_>>();
+                let precursor = matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _))
+                    .then(|| fit_mass_calibration(&precursor_points, fit_options))
+                    .flatten()
+                    .map(|fit| fit.model);
+                let fragment = fit_mass_calibration(&fragment_points, fit_options)
+                    .map(|fit| fit.model);
+                if let Some(model) = precursor {
+                    log::info!(
+                        "- file {} library precursor calibration: {:?}, offset={:.3} ppm, slope={:.4} ppm/min, n={}",
+                        file_id,
+                        model.kind,
+                        model.intercept_ppm,
+                        model.slope_ppm_per_min,
+                        calibration_psms.len(),
+                    );
+                }
+                if let Some(model) = fragment {
+                    log::info!(
+                        "- file {} library fragment calibration: {:?}, offset={:.3} ppm, slope={:.4} ppm/min, n={}",
+                        file_id,
+                        model.kind,
+                        model.intercept_ppm,
+                        model.slope_ppm_per_min,
+                        calibration_psms.len(),
+                    );
+                }
+                LibraryMassCalibration {
+                    precursor,
+                    fragment,
+                }
+            })
+            .collect()
+    }
+
+    fn align_library_properties(&self, features: &mut [Feature]) -> (Vec<Alignment>, bool, bool) {
+        let mut rt_alignments = Vec::with_capacity(self.parameters.mzml_paths.len());
+        let mut mobility_alignments = Vec::with_capacity(self.parameters.mzml_paths.len());
+        let mut rt_alignment_fitted = false;
+        let mut mobility_alignment_fitted = false;
+
+        for file_id in 0..self.parameters.mzml_paths.len() {
+            let landmarks = features.iter().filter(|feature| {
+                feature.file_id == file_id
+                    && feature.rank == 1
+                    && feature.label == 1
+                    && feature.spectrum_q <= 0.01
+            });
+            let rt_points = landmarks
+                .clone()
+                .map(|feature| (feature.rt, feature.predicted_rt))
+                .collect::<Vec<_>>();
+            let mobility_points = landmarks
+                .map(|feature| (feature.ims, feature.predicted_ims))
+                .collect::<Vec<_>>();
+            let rt = fit_reference_alignment(&rt_points, 16);
+            let mobility = fit_reference_alignment(&mobility_points, 16);
+            if let Some(alignment) = rt {
+                rt_alignment_fitted = true;
+                log::info!(
+                    "- file {} library RT alignment: slope={:.5}, intercept={:.3}, inliers={}/{}",
+                    file_id,
+                    alignment.slope,
+                    alignment.intercept,
+                    alignment.inliers,
+                    alignment.points,
+                );
+            }
+            if let Some(alignment) = mobility {
+                mobility_alignment_fitted = true;
+                log::info!(
+                    "- file {} library mobility alignment: slope={:.5}, intercept={:.5}, inliers={}/{}",
+                    file_id,
+                    alignment.slope,
+                    alignment.intercept,
+                    alignment.inliers,
+                    alignment.points,
+                );
+            }
+            let max_observed_rt = features
+                .iter()
+                .filter(|feature| feature.file_id == file_id)
+                .map(|feature| feature.rt)
+                .filter(|rt| rt.is_finite() && *rt > 0.0)
+                .fold(1.0, f32::max);
+            rt_alignments.push(rt.unwrap_or(
+                sage_core::ml::retention_alignment::ReferenceAlignment {
+                    slope: 1.0 / max_observed_rt,
+                    intercept: 0.0,
+                    points: rt_points.len(),
+                    inliers: 0,
+                },
+            ));
+            mobility_alignments.push(mobility);
+        }
+
+        features.par_iter_mut().for_each(|feature| {
+            feature.aligned_rt = rt_alignments
+                .get(feature.file_id)
+                .copied()
+                .map(|alignment| alignment.transform(feature.rt))
+                .unwrap_or(feature.rt);
+            feature.delta_rt_model =
+                if feature.predicted_rt.is_finite() && feature.predicted_rt > 0.0 {
+                    (feature.aligned_rt - feature.predicted_rt).abs()
+                } else {
+                    0.0
+                };
+            feature.delta_ims_model = mobility_alignments
+                .get(feature.file_id)
+                .and_then(|alignment| *alignment)
+                .filter(|_| feature.ims.is_finite() && feature.ims > 0.0)
+                .map(|alignment| alignment.transform(feature.ims))
+                .filter(|_| feature.predicted_ims.is_finite() && feature.predicted_ims > 0.0)
+                .map(|aligned| (aligned - feature.predicted_ims).abs())
+                .unwrap_or_default();
+        });
+
+        let lfq_alignments = rt_alignments
+            .iter()
+            .enumerate()
+            .map(|(file_id, alignment)| alignment.for_lfq(file_id))
+            .collect();
+        (
+            lfq_alignments,
+            rt_alignment_fitted,
+            mobility_alignment_fitted,
+        )
     }
 
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
@@ -1702,9 +1923,29 @@ impl Runner {
             .as_ref()
             .map(|runtime| (runtime.target_entries, runtime.target_transitions))
             .expect("library runtime checked before dispatch");
-        let mut outputs = self.batch_library_files(parallel);
+        let uncalibrated =
+            vec![LibraryMassCalibration::default(); self.parameters.mzml_paths.len()];
+        let mut outputs = self.batch_library_files(parallel, &uncalibrated, false);
         self.cancellation.check()?;
         self.events.check()?;
+        outputs.features.par_sort_unstable_by(|left, right| {
+            right.discriminant_score.total_cmp(&left.discriminant_score)
+        });
+        sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+        let calibrations = self.fit_library_mass_calibrations(&outputs.features);
+        let mass_alignment_applied = calibrations
+            .iter()
+            .any(|calibration| calibration.precursor.is_some() || calibration.fragment.is_some());
+        let quantification_enabled =
+            self.parameters.quant.lfq || self.parameters.quant.tmt.is_some();
+        if mass_alignment_applied || quantification_enabled {
+            outputs = self.batch_library_files(parallel, &calibrations, true);
+            self.cancellation.check()?;
+            self.events.check()?;
+        }
+        self.events.emit(EventKind::MassAlignmentCompleted {
+            files: self.parameters.mzml_paths.len(),
+        });
         for (index, feature) in outputs.features.iter_mut().enumerate() {
             feature.psm_id = index + 1;
         }
@@ -1712,6 +1953,8 @@ impl Runner {
             right.discriminant_score.total_cmp(&left.discriminant_score)
         });
         let q_spectrum = sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+        let (library_rt_alignments, rt_alignment_fitted, mobility_alignment_fitted) =
+            self.align_library_properties(&mut outputs.features);
 
         let q_peptide = assign_entity_q_values(
             &mut outputs.features,
@@ -1764,6 +2007,33 @@ impl Runner {
             protein_groups: q_protein_group,
         });
 
+        let areas = if self.parameters.quant.lfq {
+            let mut areas = sage_core::lfq::build_feature_map(
+                self.parameters.quant.lfq_settings,
+                self.parameters.precursor_charge,
+                &outputs.features,
+            )
+            .quantify(&self.database, &outputs.ms1, &library_rt_alignments);
+            let q_precursor = sage_core::fdr::picked_precursor(&mut areas);
+            log::info!(
+                "discovered {} target library-search MS1 peaks at 5% FDR",
+                q_precursor
+            );
+            self.events.emit(EventKind::QuantificationCompleted {
+                kind: "lfq".into(),
+                features: areas.len(),
+            });
+            Some(areas)
+        } else {
+            None
+        };
+        if !outputs.quant.is_empty() {
+            self.events.emit(EventKind::QuantificationCompleted {
+                kind: "tmt".into(),
+                features: outputs.quant.len(),
+            });
+        }
+
         let filenames = self
             .parameters
             .mzml_paths
@@ -1782,7 +2052,7 @@ impl Runner {
             .collect::<Vec<_>>();
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
-            &[],
+            &outputs.quant,
             &filenames,
             &self.database,
             output_psm_q_value,
@@ -1790,6 +2060,31 @@ impl Runner {
         let path = self.make_path("results.sage.parquet");
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
+
+        if self.parameters.annotate_matches {
+            let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
+                &output_features,
+                output_psm_q_value,
+            )?;
+            let path = self.make_path("matched_fragments.sage.parquet");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+            self.events.emit(EventKind::FragmentAnnotationCompleted {
+                psms: output_features.len(),
+                fragments: output_features
+                    .iter()
+                    .filter_map(|feature| feature.fragments.as_ref())
+                    .map(|fragments| fragments.fragment_ordinals.len())
+                    .sum(),
+            });
+        }
+
+        if let Some(areas) = &areas {
+            let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
+            let path = self.make_path("lfq.parquet");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
 
         let path = self.make_path("results.json");
         let bytes = serde_json::to_vec_pretty(&self.parameters)?;
@@ -1832,8 +2127,32 @@ impl Runner {
             proteins_at_one_percent_fdr: q_protein,
             protein_groups_at_one_percent_fdr: q_protein_group,
             ptm_localization: PtmLocalizationRunStats::default(),
-            models: ModelRunStats::default(),
-            quantification: QuantificationRunStats::default(),
+            models: ModelRunStats {
+                mass_alignment_applied,
+                retention_time_prediction_enabled: true,
+                retention_time_model_fitted: rt_alignment_fitted,
+                retention_time_features: "library_reference".into(),
+                retention_time_alignment: rt_alignment_fitted
+                    .then(|| "library_reference_linear".into()),
+                ion_mobility_observed: outputs
+                    .features
+                    .iter()
+                    .any(|feature| feature.ims.is_finite() && feature.ims > 0.0),
+                ion_mobility_model_enabled: mobility_alignment_fitted,
+                ion_mobility_model_fitted: mobility_alignment_fitted,
+                ion_mobility_features: "library_reference".into(),
+            },
+            quantification: QuantificationRunStats {
+                lfq_enabled: self.parameters.quant.lfq,
+                lfq_features: areas.as_ref().map(HashMap::len).unwrap_or_default(),
+                tmt: self
+                    .parameters
+                    .quant
+                    .tmt
+                    .as_ref()
+                    .map(|tmt| format!("{tmt:?}").to_lowercase()),
+                tmt_features: outputs.quant.len(),
+            },
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
                 parallelism: parallel,

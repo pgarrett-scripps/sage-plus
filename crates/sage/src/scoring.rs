@@ -143,6 +143,12 @@ pub struct Feature {
     pub missed_cleavages: u8,
     /// Fraction of matched MS2 intensity
     pub matched_intensity_pct: f32,
+    /// Spectral angle for empirical library matching (zero for database search).
+    pub spectral_angle: f32,
+    /// Fraction of empirical library intensity explained by matched peaks.
+    pub explained_library_intensity: f32,
+    /// Fraction of query intensity explained by matched library peaks.
+    pub explained_query_intensity: f32,
     /// Number of scored candidates for this spectrum
     pub scored_candidates: u32,
     /// Probability of matching exactly N peaks across all candidates Pr(x=k)
@@ -178,7 +184,7 @@ pub struct Feature {
 }
 
 /// Matching Fragment details
-#[derive(Serialize, Default, Clone, Debug)]
+#[derive(Serialize, Default, Clone, Debug, PartialEq)]
 pub struct Fragments {
     /// Observed fragment charge state.
     #[serde(skip_serializing)]
@@ -812,6 +818,9 @@ impl<'db> Scorer<'db> {
                 matched_peaks: k as u32,
                 matched_intensity_pct: 100.0 * (score.summed_b + score.summed_y)
                     / query.total_ion_current,
+                spectral_angle: 0.0,
+                explained_library_intensity: 0.0,
+                explained_query_intensity: 0.0,
                 poisson: if log10_poisson.is_finite() {
                     log10_poisson
                 } else {
