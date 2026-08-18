@@ -58,8 +58,9 @@ model/alignment outcomes, quantification, memory controls, input formats, and mo
 `analyze_run` reads that portable artifact and highlights basic outcomes that need attention.
 
 `query_results` reads at most 200 matching rows and scans at most one million rows from Parquet
-outputs. It supports PSMs, localized PTM sites, and collapsed protein sites, with optional
-q-value, protein, peptide, and modification filters.
+outputs. It supports PSMs, localized PTM sites, collapsed protein sites, and empirical spectral
+library transitions, with optional q-value, protein, peptide, and modification filters. Use the
+`spectral_library` dataset to query `spectral_library.sage.parquet`.
 
 Each job also exposes `sage://jobs/{job_id}/manifest`, `sage://jobs/{job_id}/summary`, and
 `sage://jobs/{job_id}/events` resources.

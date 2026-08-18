@@ -606,12 +606,60 @@ Retention-time alignment and prediction are separate features. `retention_time_a
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
 - **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
+- **spectral_library**: Object. Build an empirical library from confident target PSMs. See [Empirical Spectral Libraries](#empirical-spectral-libraries).
 - **output_filter.psm_q_value**: Float from 0 to 1. Maximum spectrum-level PSM q-value written to `results.sage.parquet` and `matched_fragments.sage.parquet` (default: 0.1). The boundary is inclusive. Set it to `1.0` to retain every scored PSM. This is an output-only filter: scoring, FDR estimation, LFQ, PTM localization, `.pin` output, and the HTML report continue to use their existing inputs and thresholds. Target and decoy PSMs that pass the threshold are retained so downstream target-decoy analyses remain possible.
 - **max_memory_gb**: Number. Abort the search if Sage's resident memory reaches this many GiB. Zero disables this limit (default: disabled).
 - **min_free_memory_gb**: Number. Abort the search if system-available memory falls to this many GiB, preserving capacity for the operating system and other applications. Zero disables this limit (default: disabled).
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
 
 When either memory limit is enabled, Sage estimates the unmodified digest, variable-modification expansion, and fragment/index sizes before allocating them. Unsafe database searches return an error before expansion begins. Estimates are conservative and are backed by a runtime memory monitor for allocations outside database construction.
+
+## Empirical Spectral Libraries
+
+Set `spectral_library.enabled` to build a library directly from the spectra identified in the
+current search. `--spectral-library` is a shortcut that enables the feature with the configured
+values or defaults.
+
+```json
+"spectral_library": {
+  "enabled": true,
+  "psm_q_value": 0.01,
+  "peptide_q_value": 0.01,
+  "strategy": "best_psm",
+  "min_matched_peaks": 6,
+  "max_fragments": 20,
+  "min_relative_intensity": 0.01,
+  "include_chimeric": false,
+  "formats": ["sage_parquet", "mzspeclib"]
+}
+```
+
+The current `best_psm` strategy groups eligible target PSMs by exact modified peptide and
+precursor charge, then chooses one representative deterministically: lowest spectrum q-value,
+lowest peptide q-value, highest discriminant score, highest hyperscore, and finally lowest PSM
+ID. By default, only rank-one PSMs are eligible. `include_chimeric: true` also permits later
+chimera ranks. The PSM and peptide cutoffs are independent of `output_filter.psm_q_value`.
+
+For the selected spectrum, Sage retains matched fragments at or above
+`min_relative_intensity`, keeps at most `max_fragments` by observed intensity, and reports them
+in theoretical-m/z order. Intensities are normalized to the most intense retained candidate
+peak. Detailed annotations are reconstructed in the same deferred MS2 pass used by matched-ion
+output and PTM localization, so enabling more than one of these features does not add a separate
+spectrum reread.
+
+Available formats are:
+
+- `sage_parquet`: `spectral_library.sage.parquet`, the canonical long-form table with one row
+  per transition. It includes source-spectrum provenance, mass-delta ProForma, precursor data,
+  aligned retention time, ion mobility, q-values, supporting-PSM count, fragment identity,
+  theoretical fragment m/z, and relative intensity. Its versioned schema is in
+  `schemas/spectral_library.sage.v1.parquet.schema`.
+- `mzspeclib`: `spectral_library.mzspeclib.txt`, a PSI mzSpecLib 1.0 text library containing
+  observed singleton spectra and mzPAF peak annotations.
+
+This is an empirical export, not a consensus builder: one best observed PSM represents each
+peptidoform/charge pair. It is also distinct from `database.ptm_library`, which restricts which
+protein modification sites are searched and is not a spectral library.
 
 - **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
@@ -677,7 +725,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, and `results.sage.protein-sites.parquet`. Optional purpose-specific artifacts include `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

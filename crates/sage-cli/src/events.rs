@@ -41,6 +41,14 @@ pub enum EventKind {
         peptides: usize,
         fragments: usize,
     },
+    LibrarySearchStarted {
+        path: String,
+    },
+    LibrarySearchBuilt {
+        target_entries: usize,
+        decoy_entries: usize,
+        transitions: usize,
+    },
     FileStarted {
         file_id: usize,
         path: String,
@@ -86,6 +94,11 @@ pub enum EventKind {
     FragmentAnnotationCompleted {
         psms: usize,
         fragments: usize,
+    },
+    SpectralLibraryCompleted {
+        entries: usize,
+        transitions: usize,
+        formats: usize,
     },
     QuantificationCompleted {
         kind: String,

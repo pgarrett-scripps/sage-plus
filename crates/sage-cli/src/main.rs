@@ -71,6 +71,12 @@ fn main() -> anyhow::Result<()> {
                 .help("Write matched fragments output file."),
         )
         .arg(
+            Arg::new("spectral-library")
+                .long("spectral-library")
+                .action(clap::ArgAction::SetTrue)
+                .help("Write an empirical spectral library using configured/default settings."),
+        )
+        .arg(
             Arg::new("write-pin")
                 .long("write-pin")
                 .action(clap::ArgAction::SetTrue)

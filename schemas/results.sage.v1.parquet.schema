@@ -22,6 +22,8 @@ message schema {
     required float isotope_error;
     required float precursor_ppm;
     required float fragment_ppm;
+    required float calibrated_precursor_ppm;
+    required float calibrated_fragment_ppm;
     required float hyperscore;
     required float delta_next;
     required float delta_best;
@@ -37,6 +39,9 @@ message schema {
     required int32 longest_y;
     required float longest_y_pct;
     required float matched_intensity_pct;
+    required float spectral_angle;
+    required float explained_library_intensity;
+    required float explained_query_intensity;
     required int32 scored_candidates;
     required float poisson;
     required float sage_discriminant_score;

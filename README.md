@@ -31,6 +31,8 @@ agent-facing capabilities.
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
+- Deterministic empirical spectral-library export as canonical long-form Parquet and PSI
+  mzSpecLib text.
 - A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
 - A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, analysis, and result queries.
 
@@ -60,6 +62,7 @@ and versioned Linux AMD64 container images are published as
 - [Sage MCP server](crates/sage-mcp/README.md)
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
+- [DDA spectrum-to-library search spike](DDA_LIBRARY_SEARCH.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 
 ## Attribution and citation

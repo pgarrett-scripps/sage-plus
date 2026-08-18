@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional names for structured static and variable modifications; named modifications are preserved on exact peptide sites and rendered in peptide output.
 - Neutral-loss fragment variants for structured modifications, with `neutral_loss_mode` controlling whether retained fragments are optional or suppressed.
 - Neutral-loss annotations in matched-fragment TSV and Parquet output.
+- Deterministic empirical spectral-library generation from FDR-filtered target PSMs, with
+  canonical long-form Parquet and PSI mzSpecLib text output.
 
 ### Changed
 - **Breaking:** Parquet is now the canonical analytical output. Sage no longer emits TSV variants of PSM, LFQ, matched-fragment, or PTM-site result tables, and the `--parquet` option has been removed. Purpose-specific `.pin`, JSON, HTML, and PTM-library interchange outputs are unchanged.

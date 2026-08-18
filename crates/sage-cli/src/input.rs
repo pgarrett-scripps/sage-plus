@@ -11,6 +11,8 @@ use sage_core::{
     ml::mobility_model::IonMobilitySettings,
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
+    spectral_library::SpectralLibrarySettings,
+    spectral_library_search::LibrarySearchSettings,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -41,7 +43,10 @@ impl Default for PtmLocalizationSettings {
 /// Actual search parameters - may include overrides or default values not set by user
 pub struct Search {
     pub version: String,
-    pub database: Parameters,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub database: Option<Parameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_search: Option<LibrarySearchSettings>,
     pub quant: QuantSettings,
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
@@ -75,6 +80,7 @@ pub struct Search {
     pub batch_size: usize,
 
     pub ptm_localization: PtmLocalizationSettings,
+    pub spectral_library: SpectralLibrarySettings,
 
     /// ppm threshold below which a precursor delta mass is treated as no shift
     /// for sequence-ambiguity annotation (`ambiguity_sequence` / `mass_shift`)
@@ -100,7 +106,8 @@ pub struct Search {
 #[derive(Deserialize)]
 /// Input search parameters deserialized from JSON file
 pub struct Input {
-    pub database: Builder,
+    pub database: Option<Builder>,
+    pub library_search: Option<LibrarySearchSettings>,
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
     pub report_psms: Option<usize>,
@@ -130,6 +137,7 @@ pub struct Input {
     pub batch_size: Option<usize>,
 
     pub ptm_localization: Option<PtmLocalizationSettings>,
+    pub spectral_library: Option<SpectralLibrarySettings>,
     pub mass_shift_ppm: Option<f32>,
 
     pub annotate_matches: Option<bool>,
@@ -310,22 +318,22 @@ impl Input {
             input.output_directory = Some(output_directory.into());
         }
         if let Some(fasta) = matches.get_one::<String>("fasta") {
-            input.database.fasta = Some(fasta.into());
+            input.database.get_or_insert_default().fasta = Some(fasta.into());
         }
         if let Some(mzml_paths) = matches.get_many::<String>("mzml_paths") {
             input.mzml_paths = Some(mzml_paths.into_iter().map(|p| p.into()).collect());
         }
 
-        if let Some(write_pin) = matches.get_one::<bool>("write-pin").copied() {
-            input.write_pin = Some(write_pin);
+        if matches.get_flag("write-pin") {
+            input.write_pin = Some(true);
         }
 
-        if let Some(write_report) = matches.get_one::<bool>("write-report").copied() {
-            input.write_report = Some(write_report);
+        if matches.get_flag("write-report") {
+            input.write_report = Some(true);
         }
 
-        if let Some(annotate_matches) = matches.get_one::<bool>("annotate-matches").copied() {
-            input.annotate_matches = Some(annotate_matches);
+        if matches.get_flag("annotate-matches") {
+            input.annotate_matches = Some(true);
         }
         if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
             input.batch_size = Some(batch_size as usize);
@@ -337,6 +345,9 @@ impl Input {
         // Only override the config-file value when the flag is explicitly set.
         if matches.get_flag("localize") {
             input.ptm_localization.get_or_insert_default().enabled = true;
+        }
+        if matches.get_flag("spectral-library") {
+            input.spectral_library.get_or_insert_default().enabled = true;
         }
 
         input.validate()?;
@@ -384,13 +395,49 @@ impl Input {
     /// Validate logical configuration constraints without reading inputs or writing outputs.
     pub fn validate(&self) -> anyhow::Result<()> {
         ensure!(
-            self.database.fasta.is_some() || self.database.peptides.is_some(),
-            "Either `database.fasta` or `database.peptides` must be set"
+            self.database.is_some() ^ self.library_search.is_some(),
+            "exactly one of `database` or `library_search` must be configured"
         );
-        ensure!(
-            self.database.custom_cleavage_sites.is_none() || self.database.fasta.is_some(),
-            "`database.custom_cleavage_sites` requires `database.fasta`"
-        );
+        if let Some(database) = &self.database {
+            ensure!(
+                database.fasta.is_some() || database.peptides.is_some(),
+                "Either `database.fasta` or `database.peptides` must be set"
+            );
+            ensure!(
+                database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
+                "`database.custom_cleavage_sites` requires `database.fasta`"
+            );
+        }
+        if let Some(library) = &self.library_search {
+            library.validate().map_err(anyhow::Error::msg)?;
+            ensure!(
+                self.report_psms.unwrap_or(1) == 1,
+                "`report_psms` must be 1 with `library_search` for target-decoy competition"
+            );
+            ensure!(
+                !self.chimera.unwrap_or(false),
+                "`chimera` is not supported with `library_search`"
+            );
+            ensure!(
+                !self.wide_window.unwrap_or(false),
+                "`wide_window` is not supported with `library_search`"
+            );
+            ensure!(
+                !self.use_bitmap.unwrap_or(false),
+                "`use_bitmap` is not supported with `library_search`"
+            );
+            ensure!(
+                !self.ptm_localization.unwrap_or_default().enabled,
+                "`ptm_localization` is not supported with `library_search`"
+            );
+            ensure!(
+                !self
+                    .spectral_library
+                    .as_ref()
+                    .is_some_and(|settings| settings.enabled),
+                "spectral-library export is not supported during `library_search`"
+            );
+        }
         ensure!(
             self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
             "`mzml_paths` must contain at least one spectra file"
@@ -443,6 +490,9 @@ impl Input {
                 "ptm_localization.localization_q_value must be between 0 and 1"
             );
         }
+        if let Some(settings) = &self.spectral_library {
+            settings.validate().map_err(anyhow::Error::msg)?;
+        }
         Ok(())
     }
 
@@ -450,10 +500,13 @@ impl Input {
         self.validate()?;
         let memory_limits = self.memory_limits()?;
         let batch_size = resolve_batch_size(self.batch_size)?;
-        let database = self.database.make_parameters();
-        database
-            .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
-            .map_err(anyhow::Error::msg)?;
+        let database = self.database.map(Builder::make_parameters);
+        if let Some(database) = &database {
+            database
+                .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
+                .map_err(anyhow::Error::msg)?;
+        }
+        let library_mode = self.library_search.is_some();
 
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
@@ -508,10 +561,13 @@ impl Input {
                 && (0.0..=1.0).contains(&ptm_localization.localization_q_value),
             "ptm_localization.localization_q_value must be between 0 and 1"
         );
+        let spectral_library = self.spectral_library.unwrap_or_default();
+        spectral_library.validate().map_err(anyhow::Error::msg)?;
 
         Ok(Search {
             version: clap::crate_version!().into(),
             database,
+            library_search: self.library_search,
             quant: self.quant.map(Into::into).unwrap_or_default(),
             mzml_paths,
             output_directory,
@@ -530,7 +586,7 @@ impl Input {
             deisotope: self.deisotope.unwrap_or(true),
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
-            predict_rt: self.predict_rt.unwrap_or(true),
+            predict_rt: self.predict_rt.unwrap_or(!library_mode),
             retention_time_model: self.retention_time_model.unwrap_or_default(),
             retention_time_alignment: self.retention_time_alignment,
             ion_mobility_model: self.ion_mobility_model.unwrap_or_default(),
@@ -544,6 +600,7 @@ impl Input {
             min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
             ptm_localization,
+            spectral_library,
             mass_shift_ppm: self
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
@@ -577,6 +634,7 @@ mod test {
         enzyme::EnzymeParameters,
         ml::retention_alignment::AlignmentMethod,
         ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
+        spectral_library::{SpectralLibraryFormat, SpectralLibrarySettings},
     };
 
     #[test]
@@ -616,6 +674,112 @@ mod test {
             serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;
         assert_eq!(legacy_name.psm_q_value, 0.02);
         Ok(())
+    }
+
+    #[test]
+    fn deserialize_spectral_library_settings() -> Result<(), serde_json::Error> {
+        let configured: SpectralLibrarySettings = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "max_fragments": 12,
+            "formats": ["sage_parquet", "mzspeclib"]
+        }))?;
+        assert!(configured.enabled);
+        assert_eq!(configured.psm_q_value, 0.01);
+        assert_eq!(configured.peptide_q_value, 0.01);
+        assert_eq!(configured.max_fragments, 12);
+        assert_eq!(
+            configured.formats,
+            vec![
+                SpectralLibraryFormat::SageParquet,
+                SpectralLibraryFormat::MzSpecLib
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_library_settings_are_validated() {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"],
+            "spectral_library": { "enabled": true, "max_fragments": 0 }
+        }))
+        .unwrap();
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains("spectral_library.max_fragments"));
+    }
+
+    fn base_search_space(value: serde_json::Value) -> Input {
+        serde_json::from_value(serde_json::json!({
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"],
+            "database": value
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn database_and_library_search_are_mutually_exclusive() {
+        let database = base_search_space(serde_json::json!({ "fasta": "test.fasta" }));
+        assert!(database.validate().is_ok());
+
+        let library: Input = serde_json::from_value(serde_json::json!({
+            "library_search": { "path": "library.mzspeclib.txt" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [-1, 2],
+            "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"]
+        }))
+        .unwrap();
+        assert!(library.validate().is_ok());
+
+        let both: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "library_search": { "path": "library.sage.parquet" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"]
+        }))
+        .unwrap();
+        assert!(both
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("exactly one"));
+
+        let neither: Input = serde_json::from_value(serde_json::json!({
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"]
+        }))
+        .unwrap();
+        assert!(neither
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("exactly one"));
+    }
+
+    #[test]
+    fn library_search_build_does_not_create_database_parameters() {
+        let spectra = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/LQSRPAAPPAPGPGQLTLR.mzML");
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "library_search": { "path": "library.sage.parquet" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [-1, 2],
+            "mzml_paths": [spectra]
+        }))
+        .unwrap();
+        let search = input.build().unwrap();
+        assert!(search.database.is_none());
+        assert!(search.library_search.is_some());
+        assert_eq!(search.isotope_errors, (-1, 2));
+        assert!(!search.predict_rt);
     }
 
     #[test]
@@ -686,7 +850,10 @@ mod test {
         }))?;
 
         assert_eq!(
-            input.database.custom_cleavage_sites.as_deref(),
+            input
+                .database
+                .as_ref()
+                .and_then(|database| database.custom_cleavage_sites.as_deref()),
             Some("cleavage-sites.tsv")
         );
         assert!(input.validate().is_ok());
