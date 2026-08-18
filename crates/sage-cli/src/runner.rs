@@ -1556,6 +1556,8 @@ impl Runner {
             fragment_tolerance: self.parameters.fragment_tol,
             min_matched_peaks: usize::from(self.parameters.min_matched_peaks),
             max_hits: self.parameters.report_psms,
+            min_isotope_error: self.parameters.isotope_errors.0,
+            max_isotope_error: self.parameters.isotope_errors.1,
         };
         let mut matches = charges
             .flat_map(|charge| {
@@ -1570,6 +1572,16 @@ impl Runner {
                 .spectral_angle
                 .total_cmp(&left.spectral_angle)
                 .then_with(|| right.matched_peaks.cmp(&left.matched_peaks))
+                .then_with(|| {
+                    left.precursor_ppm
+                        .abs()
+                        .total_cmp(&right.precursor_ppm.abs())
+                })
+                .then_with(|| {
+                    left.isotope_error
+                        .unsigned_abs()
+                        .cmp(&right.isotope_error.unsigned_abs())
+                })
                 .then_with(|| left.entry_index.cmp(&right.entry_index))
         });
         let mut seen = HashSet::new();
@@ -1614,6 +1626,7 @@ impl Runner {
                     delta_best: f64::from(best - matched.spectral_angle),
                     matched_peaks: matched.matched_peaks as u32,
                     matched_intensity_pct: matched.explained_query_intensity * 100.0,
+                    isotope_error: f32::from(matched.isotope_error) * sage_core::mass::NEUTRON,
                     scored_candidates,
                     poisson: -f64::from(matched.spectral_angle),
                     discriminant_score: matched.spectral_angle,

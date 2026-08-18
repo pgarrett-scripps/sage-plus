@@ -32,9 +32,10 @@ Spectrum, peptide, protein, and protein-group q-values are calculated within the
 path. The run summary records library entry and transition counts separately and reports zero
 database peptides/fragments.
 
-Current restrictions are validated explicitly: library search does not yet support chimera/DIA
-wide-window search, isotope-error windows, bitmap search, matched-fragment export, PTM
-localization, spectral-library re-export, or quantification. Retention-time prediction defaults off.
+Library search supports the same `isotope_errors` range as database search. Current restrictions
+are validated explicitly: library search does not yet support chimera/DIA wide-window search,
+bitmap search, matched-fragment export, PTM localization, spectral-library re-export, or
+quantification. Retention-time prediction defaults off.
 
 Before calling the mode production-validated, benchmark its 1% FDR calibration with held-out and
 entrapment datasets across library sources and instruments. That scientific validation is separate

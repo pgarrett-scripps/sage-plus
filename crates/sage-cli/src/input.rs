@@ -423,10 +423,6 @@ impl Input {
                 "`wide_window` is not supported with `library_search`"
             );
             ensure!(
-                self.isotope_errors.unwrap_or((0, 0)) == (0, 0),
-                "non-zero `isotope_errors` are not supported with `library_search`"
-            );
-            ensure!(
                 !self.use_bitmap.unwrap_or(false),
                 "`use_bitmap` is not supported with `library_search`"
             );
@@ -745,6 +741,7 @@ mod test {
             "library_search": { "path": "library.mzspeclib.txt" },
             "precursor_tol": { "ppm": [-10, 10] },
             "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [-1, 2],
             "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"]
         }))
         .unwrap();
@@ -785,12 +782,14 @@ mod test {
             "library_search": { "path": "library.sage.parquet" },
             "precursor_tol": { "ppm": [-10, 10] },
             "fragment_tol": { "ppm": [-10, 10] },
+            "isotope_errors": [-1, 2],
             "mzml_paths": [spectra]
         }))
         .unwrap();
         let search = input.build().unwrap();
         assert!(search.database.is_none());
         assert!(search.library_search.is_some());
+        assert_eq!(search.isotope_errors, (-1, 2));
         assert!(!search.predict_rt);
     }
 

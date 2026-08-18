@@ -1,7 +1,7 @@
 //! DDA spectrum-to-library candidate indexing, decoy generation, and scoring.
 
 use crate::database::binary_search_slice;
-use crate::mass::{Tolerance, PROTON};
+use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::spectral_library::{LibraryFragment, SpectralLibraryEntry};
 use crate::spectrum::ProcessedSpectrum;
 use serde::{Deserialize, Serialize};
@@ -513,6 +513,7 @@ pub struct DdaLibraryMatch {
     pub explained_library_intensity: f32,
     pub explained_query_intensity: f32,
     pub precursor_ppm: f32,
+    pub isotope_error: i8,
     pub retention_time_delta_minutes: f32,
     pub ion_mobility_delta: Option<f32>,
 }
@@ -523,6 +524,8 @@ pub struct DdaLibrarySearchParameters {
     pub fragment_tolerance: Tolerance,
     pub min_matched_peaks: usize,
     pub max_hits: usize,
+    pub min_isotope_error: i8,
+    pub max_isotope_error: i8,
 }
 
 impl Default for DdaLibrarySearchParameters {
@@ -532,6 +535,8 @@ impl Default for DdaLibrarySearchParameters {
             fragment_tolerance: Tolerance::Ppm(-10.0, 10.0),
             min_matched_peaks: 6,
             max_hits: 1,
+            min_isotope_error: 0,
+            max_isotope_error: 0,
         }
     }
 }
@@ -645,25 +650,31 @@ impl DdaLibraryIndex {
             .first()
             .and_then(|precursor| precursor.inverse_ion_mobility)
             .filter(|value| value.is_finite() && *value > 0.0);
-        let mut matches = self
-            .candidates(
-                precursor_neutral_mass,
-                precursor_charge,
-                parameters.precursor_tolerance,
-            )
-            .filter_map(|(entry_index, entry)| {
-                score_entry(
-                    query,
-                    query_intensity_sum,
-                    query_mobility,
-                    precursor_neutral_mass,
-                    entry_index,
-                    entry,
-                    parameters.fragment_tolerance,
-                    parameters.min_matched_peaks,
+        let mut matches = Vec::new();
+        for isotope_error in parameters.min_isotope_error..=parameters.max_isotope_error {
+            let corrected_precursor_mass =
+                precursor_neutral_mass - f32::from(isotope_error) * NEUTRON;
+            matches.extend(
+                self.candidates(
+                    corrected_precursor_mass,
+                    precursor_charge,
+                    parameters.precursor_tolerance,
                 )
-            })
-            .collect::<Vec<_>>();
+                .filter_map(|(entry_index, entry)| {
+                    score_entry(
+                        query,
+                        query_intensity_sum,
+                        query_mobility,
+                        corrected_precursor_mass,
+                        isotope_error,
+                        entry_index,
+                        entry,
+                        parameters.fragment_tolerance,
+                        parameters.min_matched_peaks,
+                    )
+                }),
+            );
+        }
         matches.sort_unstable_by(|left, right| {
             right
                 .spectral_angle
@@ -674,8 +685,16 @@ impl DdaLibraryIndex {
                         .abs()
                         .total_cmp(&right.precursor_ppm.abs())
                 })
+                .then_with(|| {
+                    left.isotope_error
+                        .unsigned_abs()
+                        .cmp(&right.isotope_error.unsigned_abs())
+                })
+                .then_with(|| left.isotope_error.cmp(&right.isotope_error))
                 .then_with(|| left.entry_index.cmp(&right.entry_index))
         });
+        let mut seen = std::collections::HashSet::new();
+        matches.retain(|matched| seen.insert(matched.entry_index));
         matches.truncate(parameters.max_hits);
         matches
     }
@@ -687,6 +706,7 @@ fn score_entry(
     query_intensity_sum: f32,
     query_mobility: Option<f32>,
     precursor_neutral_mass: f32,
+    isotope_error: i8,
     entry_index: usize,
     entry: &DdaLibraryEntry,
     fragment_tolerance: Tolerance,
@@ -764,6 +784,7 @@ fn score_entry(
         explained_library_intensity: matched_library_intensity / library_intensity_sum,
         explained_query_intensity: matched_query_intensity / query_intensity_sum,
         precursor_ppm,
+        isotope_error,
         retention_time_delta_minutes: query.scan_start_time - entry.retention_time_minutes,
         ion_mobility_delta,
     })
@@ -898,9 +919,71 @@ mod tests {
                 fragment_tolerance: Tolerance::Da(-0.01, 0.01),
                 min_matched_peaks: 1,
                 max_hits: 1,
+                ..Default::default()
             },
         );
         assert_eq!(matches[0].matched_peaks, 1);
+    }
+
+    #[test]
+    fn isotope_error_corrects_precursor_mass_and_is_reported() {
+        let index = DdaLibraryIndex::new(vec![entry(
+            "isotope-plus-one",
+            2,
+            vec![fragment(200.0, 1.0)],
+        )])
+        .unwrap();
+        let query = query(&[(200.0, 100.0)]);
+        let observed_mass = 1_000.0 + NEUTRON;
+
+        let without_isotope = index.search(
+            &query,
+            observed_mass,
+            2,
+            DdaLibrarySearchParameters {
+                precursor_tolerance: Tolerance::Da(-0.01, 0.01),
+                min_matched_peaks: 1,
+                ..Default::default()
+            },
+        );
+        assert!(without_isotope.is_empty());
+
+        let with_isotope = index.search(
+            &query,
+            observed_mass,
+            2,
+            DdaLibrarySearchParameters {
+                precursor_tolerance: Tolerance::Da(-0.01, 0.01),
+                min_matched_peaks: 1,
+                min_isotope_error: 0,
+                max_isotope_error: 1,
+                ..Default::default()
+            },
+        );
+        assert_eq!(with_isotope.len(), 1);
+        assert_eq!(with_isotope[0].isotope_error, 1);
+        assert!(with_isotope[0].precursor_ppm.abs() < 1e-4);
+    }
+
+    #[test]
+    fn overlapping_isotope_windows_do_not_duplicate_entries() {
+        let index = DdaLibraryIndex::new(vec![entry("wide-window", 2, vec![fragment(200.0, 1.0)])])
+            .unwrap();
+        let matches = index.search(
+            &query(&[(200.0, 100.0)]),
+            1_000.0 + NEUTRON,
+            2,
+            DdaLibrarySearchParameters {
+                precursor_tolerance: Tolerance::Da(-2.0, 2.0),
+                min_matched_peaks: 1,
+                max_hits: 10,
+                min_isotope_error: 0,
+                max_isotope_error: 1,
+                ..Default::default()
+            },
+        );
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].isotope_error, 1);
     }
 
     #[test]
