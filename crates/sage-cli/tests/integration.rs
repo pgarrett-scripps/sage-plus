@@ -87,7 +87,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
-    assert_eq!(summary["schema_version"], 3);
+    assert_eq!(summary["schema_version"], 4);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 20);
@@ -97,5 +97,70 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     );
 
     std::fs::remove_dir_all(output_directory)?;
+    Ok(())
+}
+
+#[test]
+fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-library-search-{}-{nonce}",
+        std::process::id()
+    ));
+    let export_directory = root.join("export");
+    let search_directory = root.join("search");
+
+    let export = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config_spectral_library.json"))
+        .arg("--output_directory")
+        .arg(&export_directory)
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        export.status.success(),
+        "library export failed:\n{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+
+    let config_path = root.join("library-search.json");
+    std::fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "library_search": {
+                "path": export_directory.join("spectral_library.sage.parquet")
+            },
+            "deisotope": true,
+            "max_fragment_charge": 1,
+            "report_psms": 1,
+            "output_filter": { "psm_q_value": 1.0 },
+            "precursor_tol": { "ppm": [-50, 50] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML")]
+        }))?,
+    )?;
+    let search = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(&config_path)
+        .arg("--output_directory")
+        .arg(&search_directory)
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        search.status.success(),
+        "library search failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&search.stdout),
+        String::from_utf8_lossy(&search.stderr)
+    );
+    assert!(search_directory.join("results.sage.parquet").is_file());
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(search_directory.join("run-summary.json"))?)?;
+    assert_eq!(summary["library_search"]["enabled"], true);
+    assert_eq!(summary["library_search"]["target_entries"], 1);
+    assert_eq!(summary["library_search"]["decoy_entries"], 1);
+    assert_eq!(summary["peptides_in_database"], 0);
+
+    std::fs::remove_dir_all(root)?;
     Ok(())
 }

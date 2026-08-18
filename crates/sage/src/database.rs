@@ -1103,6 +1103,7 @@ impl Parameters {
             generate_decoys: self.generate_decoys,
             potential_mods,
             decoy_tag: self.decoy_tag,
+            decoy_pairing: Vec::new(),
             bitmap_index,
         }
     }
@@ -1142,6 +1143,8 @@ pub struct IndexedDatabase {
     pub bucket_size: usize,
     pub generate_decoys: bool,
     pub decoy_tag: String,
+    /// Optional explicit target pairing for non-reversal decoy peptides.
+    pub decoy_pairing: Vec<PeptideIx>,
     /// Bitmap-based preliminary search index (forward/reverse ion bitsets per peptide).
     pub bitmap_index: BitmapIndex,
 }

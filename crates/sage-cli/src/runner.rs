@@ -8,7 +8,8 @@ use log::{info, warn};
 use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
 use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
-use sage_core::database::{IndexedDatabase, Parameters};
+use sage_core::database::{Builder, IndexedDatabase, Parameters, PeptideIx};
+use sage_core::enzyme::Position;
 use sage_core::fasta::Fasta;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
@@ -19,6 +20,10 @@ use sage_core::peptide::Peptide;
 use sage_core::scoring::{Feature, Scorer};
 use sage_core::spectral_library::{
     self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
+};
+use sage_core::spectral_library_search::{
+    generate_decoys, parse_proforma, DdaLibraryIndex, DdaLibrarySearchParameters,
+    LibrarySearchSettings,
 };
 use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
 use std::collections::{HashMap, HashSet};
@@ -93,9 +98,18 @@ fn finish_csv_writer(mut writer: csv::Writer<OutputTarget>, path: &Url) -> anyho
 pub struct Runner {
     pub database: IndexedDatabase,
     pub parameters: Search,
+    database_parameters: Parameters,
+    library_search: Option<LibrarySearchRuntime>,
     start: Instant,
     events: EventEmitter,
     cancellation: CancellationToken,
+}
+
+struct LibrarySearchRuntime {
+    index: DdaLibraryIndex,
+    peptide_indices: Vec<PeptideIx>,
+    target_entries: usize,
+    target_transitions: usize,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -124,6 +138,8 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
+    #[serde(default)]
+    pub library_search: LibrarySearchRunStats,
     pub output_paths: Vec<String>,
 }
 
@@ -197,6 +213,15 @@ pub struct SpectralLibraryRunStats {
     pub formats: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LibrarySearchRunStats {
+    pub enabled: bool,
+    pub path: Option<String>,
+    pub target_entries: usize,
+    pub decoy_entries: usize,
+    pub transitions: usize,
+}
+
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
@@ -230,6 +255,63 @@ fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
 
 fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
     feature.spectrum_q <= psm_q_value
+}
+
+fn assign_entity_q_values(
+    features: &mut [Feature],
+    key: impl Fn(&Feature) -> Option<String>,
+    assign: impl Fn(&mut Feature, f32),
+) -> usize {
+    let mut best = HashMap::<String, [f32; 2]>::new();
+    for feature in features.iter() {
+        if let Some(key) = key(feature) {
+            let scores = best.entry(key).or_insert([f32::MIN; 2]);
+            let decoy = usize::from(feature.label == -1);
+            scores[decoy] = scores[decoy].max(feature.discriminant_score);
+        }
+    }
+    let mut rows = best
+        .into_iter()
+        .map(|(key, scores)| {
+            let decoy = scores[1] >= scores[0];
+            (key, decoy, scores[usize::from(decoy)], 1.0f32)
+        })
+        .collect::<Vec<_>>();
+    rows.sort_unstable_by(|left, right| right.2.total_cmp(&left.2));
+    let mut targets = 0usize;
+    let mut decoys = 1usize;
+    for (_, decoy, _, q) in &mut rows {
+        if *decoy {
+            decoys += 1;
+        } else {
+            targets += 1;
+        }
+        *q = (decoys as f32 / targets as f32).min(1.0);
+    }
+    let mut minimum = 1.0f32;
+    for row in rows.iter_mut().rev() {
+        minimum = minimum.min(row.3);
+        row.3 = minimum;
+    }
+    let values = rows
+        .into_iter()
+        .map(|(key, decoy, _, q)| ((key, decoy), q))
+        .collect::<HashMap<_, _>>();
+    let mut passing = HashSet::new();
+    for feature in features {
+        let Some(key) = key(feature) else {
+            continue;
+        };
+        let q = values
+            .get(&(key.clone(), feature.label == -1))
+            .copied()
+            .unwrap_or(1.0);
+        assign(feature, q);
+        if feature.label == 1 && q <= 0.01 {
+            passing.insert(key);
+        }
+    }
+    passing.len()
 }
 
 #[derive(Default)]
@@ -285,6 +367,122 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
     }
 }
 
+fn library_peptide(
+    entry: &sage_core::spectral_library_search::DdaLibraryEntry,
+) -> anyhow::Result<Peptide> {
+    let parsed = parse_proforma(&entry.proforma).map_err(anyhow::Error::msg)?;
+    let proteins = entry
+        .proteins
+        .split(';')
+        .map(str::trim)
+        .filter(|protein| !protein.is_empty())
+        .map(Arc::<str>::from)
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !proteins.is_empty(),
+        "library entry `{}` has no protein accessions",
+        entry.library_entry_id
+    );
+    Ok(Peptide {
+        decoy: entry.is_decoy,
+        sequence: Arc::from(parsed.sequence.into_boxed_slice()),
+        modifications: parsed.modifications,
+        applied_modifications: Arc::default(),
+        nterm: parsed.nterm,
+        cterm: parsed.cterm,
+        monoisotopic: entry.precursor_neutral_mass,
+        missed_cleavages: 0,
+        semi_enzymatic: false,
+        position: Position::Full,
+        proteins,
+    })
+}
+
+fn load_library_search(
+    settings: &LibrarySearchSettings,
+) -> anyhow::Result<(IndexedDatabase, LibrarySearchRuntime)> {
+    let bytes = sage_cloudpath::util::read_bytes(&settings.path)
+        .with_context(|| format!("Failed to read spectral library `{}`", settings.path))?;
+    let targets = if settings.path.to_ascii_lowercase().ends_with(".parquet") {
+        sage_cloudpath::parquet::deserialize_spectral_library(bytes).map_err(anyhow::Error::from)?
+    } else {
+        let text = String::from_utf8(bytes)
+            .with_context(|| format!("spectral library `{}` is not UTF-8", settings.path))?;
+        sage_core::spectral_library_search::deserialize_mzspeclib(&text)
+            .map_err(anyhow::Error::msg)?
+    };
+    anyhow::ensure!(!targets.is_empty(), "spectral library contains no entries");
+    let target_entries = targets.len();
+    let target_transitions = targets.iter().map(|entry| entry.fragments.len()).sum();
+    let entries = generate_decoys(targets, settings).map_err(anyhow::Error::msg)?;
+    let index = DdaLibraryIndex::new(entries).map_err(anyhow::Error::msg)?;
+
+    let mut peptides = Vec::<Peptide>::new();
+    let mut peptide_indices = Vec::with_capacity(index.entries().len());
+    let mut peptidoforms = HashMap::<(String, bool), PeptideIx>::new();
+    for entry in index.entries() {
+        // Targets with the same peptidoform (for example, multiple charge
+        // states) share identity. Keep decoys pair-specific even if two
+        // shuffles happen to produce the same sequence.
+        let identity = if entry.is_decoy {
+            entry.library_entry_id.clone()
+        } else {
+            entry.proforma.clone()
+        };
+        let key = (identity, entry.is_decoy);
+        let peptide_idx = match peptidoforms.get(&key).copied() {
+            Some(peptide_idx) => peptide_idx,
+            None => {
+                let peptide_idx = PeptideIx(peptides.len() as u32);
+                peptides.push(library_peptide(entry)?);
+                peptidoforms.insert(key, peptide_idx);
+                peptide_idx
+            }
+        };
+        peptide_indices.push(peptide_idx);
+    }
+
+    let target_by_id = index
+        .entries()
+        .iter()
+        .zip(peptide_indices.iter().copied())
+        .filter(|(entry, _)| !entry.is_decoy)
+        .map(|(entry, peptide_idx)| (entry.library_entry_id.as_str(), peptide_idx))
+        .collect::<HashMap<_, _>>();
+    let mut decoy_pairing = (0..peptides.len())
+        .map(|index| PeptideIx(index as u32))
+        .collect::<Vec<_>>();
+    for (entry, peptide_idx) in index.entries().iter().zip(peptide_indices.iter().copied()) {
+        if entry.is_decoy {
+            let target_id = entry
+                .library_entry_id
+                .strip_prefix(&settings.decoy_tag)
+                .ok_or_else(|| anyhow::anyhow!("invalid generated decoy identifier"))?;
+            let target_idx = target_by_id.get(target_id).copied().ok_or_else(|| {
+                anyhow::anyhow!("generated decoy `{}` has no target", entry.library_entry_id)
+            })?;
+            decoy_pairing[peptide_idx.0 as usize] = target_idx;
+        }
+    }
+    drop(target_by_id);
+    let database = IndexedDatabase {
+        peptides,
+        generate_decoys: true,
+        decoy_tag: settings.decoy_tag.clone(),
+        decoy_pairing,
+        ..IndexedDatabase::default()
+    };
+    Ok((
+        database,
+        LibrarySearchRuntime {
+            index,
+            peptide_indices,
+            target_entries,
+            target_transitions,
+        },
+    ))
+}
+
 impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
         Self::new_with_control(
@@ -301,9 +499,36 @@ impl Runner {
         events: EventEmitter,
         cancellation: CancellationToken,
     ) -> anyhow::Result<Self> {
-        let mut parameters = parameters.clone();
-        parameters.database.use_bitmap = parameters.use_bitmap;
-        if let Some(settings) = parameters.database.ptm_library.clone() {
+        let parameters = parameters.clone();
+        let mut database_parameters = parameters
+            .database
+            .clone()
+            .unwrap_or_else(|| Builder::default().make_parameters());
+        let start = Instant::now();
+        cancellation.check()?;
+        if let Some(settings) = parameters.library_search.as_ref() {
+            events.emit(EventKind::LibrarySearchStarted {
+                path: settings.path.clone(),
+            });
+            let (database, library_search) = load_library_search(settings)?;
+            events.emit(EventKind::LibrarySearchBuilt {
+                target_entries: library_search.target_entries,
+                decoy_entries: library_search.target_entries,
+                transitions: library_search.target_transitions,
+            });
+            events.check()?;
+            return Ok(Self {
+                database,
+                parameters,
+                database_parameters,
+                library_search: Some(library_search),
+                start,
+                events,
+                cancellation,
+            });
+        }
+        database_parameters.use_bitmap = parameters.use_bitmap;
+        if let Some(settings) = database_parameters.ptm_library.clone() {
             let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
                 let contents = sage_cloudpath::util::read_text(&settings.path)
                     .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
@@ -314,34 +539,31 @@ impl Runner {
                 sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
             }
             .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
-            parameters
-                .database
+            database_parameters
                 .validate_ptm_library(&library)
                 .map_err(anyhow::Error::msg)?;
             info!("loaded {} unique PTM library sites", library.len());
-            parameters.database.loaded_ptm_library = Some(Arc::new(library));
+            database_parameters.loaded_ptm_library = Some(Arc::new(library));
         }
-        let start = Instant::now();
-        cancellation.check()?;
         events.emit(EventKind::DatabaseStarted);
         let limits =
             MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
         // Collect peptides from FASTA (if configured).
-        let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
-            let fasta_url = sage_cloudpath::to_url(&parameters.database.fasta)?;
+        let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
+            let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
             let fasta = sage_cloudpath::util::read_fasta(
                 &fasta_url,
-                &parameters.database.decoy_tag,
-                parameters.database.generate_decoys,
+                &database_parameters.decoy_tag,
+                database_parameters.generate_decoys,
             )
             .with_context(|| {
                 format!(
                     "Failed to build database from `{}`",
-                    parameters.database.fasta
+                    database_parameters.fasta
                 )
             })?;
             let custom_cleavages = if let Some(path) =
-                parameters.database.custom_cleavage_sites.as_deref()
+                database_parameters.custom_cleavage_sites.as_deref()
             {
                 let library = if path.to_ascii_lowercase().ends_with(".parquet") {
                     let content = sage_cloudpath::util::read_bytes(path).with_context(|| {
@@ -384,8 +606,8 @@ impl Runner {
             };
 
             if let (Some(settings), Some(library)) = (
-                parameters.database.ptm_library.as_ref(),
-                parameters.database.loaded_ptm_library.as_deref(),
+                database_parameters.ptm_library.as_ref(),
+                database_parameters.loaded_ptm_library.as_deref(),
             ) {
                 let proteins = fasta
                     .targets
@@ -427,10 +649,9 @@ impl Runner {
             }
 
             let needs_estimate = limits.is_enabled()
-                || (parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0);
+                || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
             if needs_estimate {
-                let full_estimate = parameters
-                    .database
+                let full_estimate = database_parameters
                     .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                 events.emit(EventKind::DatabaseEstimated {
                     unmodified_peptides: full_estimate.unmodified_peptides,
@@ -441,8 +662,8 @@ impl Runner {
                         .max(full_estimate.modified_peak_bytes)
                         .max(full_estimate.fragment_peak_bytes),
                 });
-                if parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0 {
-                    parameters.database.auto_calculate_prefilter_chunk_size(
+                if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
+                    database_parameters.auto_calculate_prefilter_chunk_size(
                         &fasta,
                         full_estimate.modified_peptides,
                     );
@@ -463,12 +684,12 @@ impl Runner {
                         full_estimate.unmodified_peak_bytes,
                     )?;
 
-                    if parameters.database.prefilter {
+                    if database_parameters.prefilter {
                         let mut modified_peak = 0u64;
                         let mut fragment_peak = 0u64;
-                        for chunk in fasta.iter_chunks(parameters.database.prefilter_chunk_size) {
-                            let estimate =
-                                parameters.database.estimate_memory_with_custom_cleavages(
+                        for chunk in fasta.iter_chunks(database_parameters.prefilter_chunk_size) {
+                            let estimate = database_parameters
+                                .estimate_memory_with_custom_cleavages(
                                     &chunk,
                                     custom_cleavages.as_ref(),
                                 );
@@ -481,13 +702,12 @@ impl Runner {
                 }
             }
 
-            match parameters.database.prefilter {
+            match database_parameters.prefilter {
                 false => {
-                    let digests = parameters
-                        .database
+                    let digests = database_parameters
                         .digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                     if limits.is_enabled() {
-                        let estimate = parameters.database.estimate_modified_memory(&digests);
+                        let estimate = database_parameters.estimate_modified_memory(&digests);
                         info!(
                             "modification preflight: {} unmodified peptides may expand to {} modified peptides ({:.2} GiB additional peak)",
                             estimate.unmodified_peptides,
@@ -496,23 +716,24 @@ impl Runner {
                         );
                         limits.check_estimate("modified-peptide", estimate.modified_peak_bytes)?;
                     }
-                    parameters.database.modify_digests(digests)
+                    database_parameters.modify_digests(digests)
                 }
                 true => {
-                    if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
-                        parameters
-                            .database
+                    if database_parameters.prefilter_chunk_size >= fasta.targets.len() {
+                        database_parameters
                             .digest_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
                     } else {
                         info!(
                             "using {} db chunks of size {}",
-                            (fasta.targets.len() + parameters.database.prefilter_chunk_size - 1)
-                                / parameters.database.prefilter_chunk_size,
-                            parameters.database.prefilter_chunk_size,
+                            (fasta.targets.len() + database_parameters.prefilter_chunk_size - 1)
+                                / database_parameters.prefilter_chunk_size,
+                            database_parameters.prefilter_chunk_size,
                         );
                         let mini_runner = Self {
                             database: IndexedDatabase::default(),
                             parameters: parameters.clone(),
+                            database_parameters: database_parameters.clone(),
+                            library_search: None,
                             start,
                             events: events.clone(),
                             cancellation: cancellation.clone(),
@@ -522,23 +743,23 @@ impl Runner {
                 }
             }
         } else {
-            if parameters.database.loaded_ptm_library.is_some() {
+            if database_parameters.loaded_ptm_library.is_some() {
                 anyhow::bail!("database.ptm_library requires database.fasta");
             }
             vec![]
         };
 
         // Append peptides from TSV file (if configured), additive with FASTA.
-        if let Some(peptides_path) = parameters.database.peptides.clone() {
+        if let Some(peptides_path) = database_parameters.peptides.clone() {
             let content = sage_cloudpath::util::read_text(&peptides_path)
                 .with_context(|| format!("Failed to read peptide file `{peptides_path}`"))?;
-            all_peptides.extend(parameters.database.peptides_from_tsv(&content));
+            all_peptides.extend(database_parameters.peptides_from_tsv(&content));
         }
 
         // Merge, deduplicate, and build the index.
         Parameters::reorder_peptides(&mut all_peptides);
         if limits.is_enabled() {
-            let estimate = parameters.database.estimate_index_memory(&all_peptides);
+            let estimate = database_parameters.estimate_index_memory(&all_peptides);
             info!(
                 "final database preflight: {} peptides, {} fragments, estimated {:.2} GiB peak",
                 estimate.modified_peptides,
@@ -552,8 +773,7 @@ impl Runner {
                     .saturating_sub(estimate.modified_peak_bytes),
             )?;
         }
-        let database = parameters
-            .database
+        let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
 
@@ -573,6 +793,8 @@ impl Runner {
         Ok(Self {
             database,
             parameters,
+            database_parameters,
+            library_search: None,
             start,
             events,
             cancellation,
@@ -594,7 +816,7 @@ impl Runner {
                 false => None,
             };
 
-        let db_params = self.parameters.database.clone();
+        let db_params = self.database_parameters.clone();
         // TODO: Don't generate decoys for fast searching
         // * if `generate_decoys` is used, we should re-generate at the end
         //  to ensure that picked-peptide conditions are used, otherwise,
@@ -603,7 +825,7 @@ impl Runner {
         // db_params.generate_decoys = false;
 
         let mut all_peptides: Vec<Peptide> = fasta
-            .iter_chunks(self.parameters.database.prefilter_chunk_size)
+            .iter_chunks(self.database_parameters.prefilter_chunk_size)
             .enumerate()
             .flat_map(|(chunk_id, fasta_chunk)| {
                 let start = Instant::now();
@@ -710,7 +932,7 @@ impl Runner {
                 }
                 scorer.quick_score(
                     spectrum,
-                    self.parameters.database.prefilter_low_memory,
+                    self.database_parameters.prefilter_low_memory,
                     keep,
                 )
             });
@@ -1318,6 +1540,129 @@ impl Runner {
         })
     }
 
+    fn search_library_spectrum(&self, spectrum: &ProcessedSpectrum) -> Vec<Feature> {
+        let Some(runtime) = self.library_search.as_ref() else {
+            return Vec::new();
+        };
+        let Some(precursor) = spectrum.precursors.first() else {
+            return Vec::new();
+        };
+        let charges = match precursor.charge {
+            Some(charge) if !self.parameters.override_precursor_charge => charge..=charge,
+            _ => self.parameters.precursor_charge.0..=self.parameters.precursor_charge.1,
+        };
+        let search_parameters = DdaLibrarySearchParameters {
+            precursor_tolerance: self.parameters.precursor_tol,
+            fragment_tolerance: self.parameters.fragment_tol,
+            min_matched_peaks: usize::from(self.parameters.min_matched_peaks),
+            max_hits: self.parameters.report_psms,
+        };
+        let mut matches = charges
+            .flat_map(|charge| {
+                let neutral_mass = (precursor.mz - sage_core::mass::PROTON) * f32::from(charge);
+                runtime
+                    .index
+                    .search(spectrum, neutral_mass, charge, search_parameters)
+            })
+            .collect::<Vec<_>>();
+        matches.sort_unstable_by(|left, right| {
+            right
+                .spectral_angle
+                .total_cmp(&left.spectral_angle)
+                .then_with(|| right.matched_peaks.cmp(&left.matched_peaks))
+                .then_with(|| left.entry_index.cmp(&right.entry_index))
+        });
+        let mut seen = HashSet::new();
+        matches.retain(|matched| seen.insert(matched.entry_index));
+        matches.truncate(self.parameters.report_psms);
+        let best = matches
+            .first()
+            .map(|matched| matched.spectral_angle)
+            .unwrap_or_default();
+        let scored_candidates = matches.len() as u32;
+        matches
+            .iter()
+            .enumerate()
+            .map(|(rank, matched)| {
+                let entry = &runtime.index.entries()[matched.entry_index];
+                let peptide_idx = runtime.peptide_indices[matched.entry_index];
+                let peptide = &self.database[peptide_idx];
+                let next = matches
+                    .get(rank + 1)
+                    .map(|next| next.spectral_angle)
+                    .unwrap_or_default();
+                let ion_mobility = precursor.inverse_ion_mobility.unwrap_or_default();
+                Feature {
+                    peptide_idx,
+                    psm_id: 0,
+                    peptide_len: peptide.sequence.len(),
+                    spec_id: spectrum.id.clone(),
+                    file_id: spectrum.file_id,
+                    rank: rank as u32 + 1,
+                    label: peptide.label(),
+                    expmass: (precursor.mz - sage_core::mass::PROTON)
+                        * f32::from(entry.precursor_charge),
+                    calcmass: entry.precursor_neutral_mass,
+                    charge: entry.precursor_charge,
+                    rt: spectrum.scan_start_time,
+                    aligned_rt: spectrum.scan_start_time,
+                    ims: ion_mobility,
+                    delta_mass: matched.precursor_ppm,
+                    aligned_delta_mass: matched.precursor_ppm,
+                    hyperscore: f64::from(matched.spectral_angle),
+                    delta_next: f64::from(matched.spectral_angle - next),
+                    delta_best: f64::from(best - matched.spectral_angle),
+                    matched_peaks: matched.matched_peaks as u32,
+                    matched_intensity_pct: matched.explained_query_intensity * 100.0,
+                    scored_candidates,
+                    poisson: -f64::from(matched.spectral_angle),
+                    discriminant_score: matched.spectral_angle,
+                    posterior_error: 1.0,
+                    spectrum_q: 1.0,
+                    peptide_q: 1.0,
+                    protein_q: 1.0,
+                    protein_group_q: 1.0,
+                    ms2_intensity: matched.explained_query_intensity * spectrum.total_ion_current,
+                    ambiguity_sequence: entry.proforma.clone(),
+                    delta_rt_model: matched.retention_time_delta_minutes,
+                    delta_ims_model: matched.ion_mobility_delta.unwrap_or_default(),
+                    ..Feature::default()
+                }
+            })
+            .collect()
+    }
+
+    fn batch_library_files(&self, batch_size: usize) -> SageResults {
+        self.parameters
+            .mzml_paths
+            .chunks(batch_size)
+            .enumerate()
+            .map(|(chunk_idx, chunk)| {
+                let spectra =
+                    self.read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false);
+                let features = spectra
+                    .1
+                    .par_iter()
+                    .filter(|spectrum| {
+                        spectrum.level == 2
+                            && spectrum.masses.len() >= self.parameters.min_peaks
+                            && !self.cancellation.is_cancelled()
+                    })
+                    .flat_map(|spectrum| self.search_library_spectrum(spectrum))
+                    .collect();
+                self.events.emit(EventKind::SearchProgress {
+                    files_completed: (chunk_idx * batch_size + chunk.len())
+                        .min(self.parameters.mzml_paths.len()),
+                    files_total: self.parameters.mzml_paths.len(),
+                });
+                SageResults {
+                    features,
+                    ..SageResults::default()
+                }
+            })
+            .collect()
+    }
+
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
         self.parameters
             .mzml_paths
@@ -1335,6 +1680,187 @@ impl Runner {
             .collect::<SageResults>()
     }
 
+    fn run_library_with_summary(
+        mut self,
+        parallel: usize,
+    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
+        let (target_entries, target_transitions) = self
+            .library_search
+            .as_ref()
+            .map(|runtime| (runtime.target_entries, runtime.target_transitions))
+            .expect("library runtime checked before dispatch");
+        let mut outputs = self.batch_library_files(parallel);
+        self.cancellation.check()?;
+        self.events.check()?;
+        for (index, feature) in outputs.features.iter_mut().enumerate() {
+            feature.psm_id = index + 1;
+        }
+        outputs.features.par_sort_unstable_by(|left, right| {
+            right.discriminant_score.total_cmp(&left.discriminant_score)
+        });
+        let q_spectrum = sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+
+        let q_peptide = assign_entity_q_values(
+            &mut outputs.features,
+            |feature| {
+                let peptide_idx = self
+                    .database
+                    .decoy_pairing
+                    .get(feature.peptide_idx.0 as usize)
+                    .copied()
+                    .unwrap_or(feature.peptide_idx);
+                Some(self.database[peptide_idx].to_string())
+            },
+            |feature, q| feature.peptide_q = q,
+        );
+        let q_protein = assign_entity_q_values(
+            &mut outputs.features,
+            |feature| {
+                let peptide = &self.database[feature.peptide_idx];
+                (peptide.proteins.len() == 1).then(|| peptide.proteins[0].to_string())
+            },
+            |feature, q| feature.protein_q = q,
+        );
+        sage_core::protein_grouping::generate_protein_groups(
+            &self.database,
+            &mut outputs.features,
+            self.parameters.protein_grouping,
+            Some(self.parameters.protein_grouping_peptide_fdr),
+        );
+        let decoy_tag = self.database.decoy_tag.clone();
+        let q_protein_group = assign_entity_q_values(
+            &mut outputs.features,
+            |feature| {
+                (feature.num_protein_groups == 1).then(|| {
+                    feature
+                        .protein_groups
+                        .as_deref()
+                        .unwrap_or_default()
+                        .split(';')
+                        .map(|protein| protein.strip_prefix(&decoy_tag).unwrap_or(protein))
+                        .collect::<Vec<_>>()
+                        .join(";")
+                })
+            },
+            |feature, q| feature.protein_group_q = q,
+        );
+        self.events.emit(EventKind::FdrCompleted {
+            psms: q_spectrum,
+            peptides: q_peptide,
+            proteins: q_protein,
+            protein_groups: q_protein_group,
+        });
+
+        let filenames = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .map(|url| {
+                sage_cloudpath::filename(url)
+                    .unwrap_or_else(|| url.as_str())
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        let output_psm_q_value = self.parameters.output_filter.psm_q_value;
+        let output_features = outputs
+            .features
+            .iter()
+            .filter(|feature| passes_output_filter(feature, output_psm_q_value))
+            .collect::<Vec<_>>();
+        let bytes = sage_cloudpath::parquet::serialize_features(
+            &output_features,
+            &[],
+            &filenames,
+            &self.database,
+            output_psm_q_value,
+        )?;
+        let path = self.make_path("results.sage.parquet");
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
+
+        let path = self.make_path("results.json");
+        let bytes = serde_json::to_vec_pretty(&self.parameters)?;
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
+
+        let runtime_secs = self.start.elapsed().as_secs();
+        let summary_path = self.make_path("run-summary.json");
+        let mut output_paths = self
+            .parameters
+            .output_paths
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        output_paths.push(summary_path.to_string());
+        let mut input_stats = InputRunStats::default();
+        for path in &self.parameters.mzml_paths {
+            let path = path.path().trim_end_matches('/').to_ascii_lowercase();
+            if path.ends_with(".raw") {
+                input_stats.thermo_raw_files += 1;
+            } else if path.ends_with(".mzml") || path.ends_with(".mzml.gz") {
+                input_stats.mzml_files += 1;
+            } else {
+                input_stats.other_files += 1;
+            }
+        }
+        let library_path = self
+            .parameters
+            .library_search
+            .as_ref()
+            .map(|settings| settings.path.clone());
+        let summary = RunSummary {
+            schema_version: 4,
+            runtime_secs,
+            files: self.parameters.mzml_paths.len(),
+            peptides_in_database: 0,
+            fragments_in_database: 0,
+            psms_at_one_percent_fdr: q_spectrum,
+            peptides_at_one_percent_fdr: q_peptide,
+            proteins_at_one_percent_fdr: q_protein,
+            protein_groups_at_one_percent_fdr: q_protein_group,
+            ptm_localization: PtmLocalizationRunStats::default(),
+            models: ModelRunStats::default(),
+            quantification: QuantificationRunStats::default(),
+            execution: ExecutionRunStats {
+                batch_size: self.parameters.batch_size,
+                parallelism: parallel,
+                bitmap_search: false,
+                max_memory_gb: self.parameters.max_memory_gb,
+                min_free_memory_gb: self.parameters.min_free_memory_gb,
+            },
+            inputs: input_stats,
+            modifications: ModificationRunStats::default(),
+            spectral_library: SpectralLibraryRunStats::default(),
+            library_search: LibrarySearchRunStats {
+                enabled: true,
+                path: library_path,
+                target_entries,
+                decoy_entries: target_entries,
+                transitions: target_transitions,
+            },
+            output_paths,
+        };
+        sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
+        self.parameters.output_paths.push(summary_path);
+        for path in &self.parameters.output_paths {
+            self.events.emit(EventKind::OutputWritten {
+                path: path.to_string(),
+            });
+        }
+        let telemetry = telemetry::Telemetry::new(
+            self.parameters,
+            target_entries,
+            target_transitions,
+            runtime_secs,
+        );
+        self.events.emit(EventKind::JobCompleted {
+            runtime_secs,
+            outputs: summary.output_paths.len(),
+        });
+        self.events.check()?;
+        Ok((telemetry, summary))
+    }
+
     pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
         self.run_with_summary(parallel)
             .map(|(telemetry, _summary)| telemetry)
@@ -1345,6 +1871,9 @@ impl Runner {
         parallel: usize,
     ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        if self.library_search.is_some() {
+            return self.run_library_with_summary(parallel);
+        }
         self.cancellation.check()?;
         self.events.check()?;
         let scorer = Scorer {
@@ -1706,7 +2235,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 3,
+            schema_version: 4,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1763,20 +2292,18 @@ impl Runner {
             },
             inputs: input_stats,
             modifications: ModificationRunStats {
-                static_definitions: self.parameters.database.static_mods.len(),
+                static_definitions: self.database_parameters.static_mods.len(),
                 variable_definitions: self
-                    .parameters
-                    .database
+                    .database_parameters
                     .variable_mods
                     .values()
                     .map(Vec::len)
                     .sum(),
-                max_variable_mods: self.parameters.database.max_variable_mods,
-                max_total_variable_mods: self.parameters.database.max_total_variable_mods,
-                max_combinations: self.parameters.database.max_combinations,
+                max_variable_mods: self.database_parameters.max_variable_mods,
+                max_total_variable_mods: self.database_parameters.max_total_variable_mods,
+                max_combinations: self.database_parameters.max_combinations,
                 ptm_library_sites: self
-                    .parameters
-                    .database
+                    .database_parameters
                     .loaded_ptm_library
                     .as_deref()
                     .map_or(0, |library| library.len()),
@@ -1801,6 +2328,7 @@ impl Runner {
                     })
                     .collect(),
             },
+            library_search: LibrarySearchRunStats::default(),
             output_paths,
         };
         sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
@@ -2039,23 +2567,22 @@ impl Runner {
         features: &[Feature],
         filenames: &[String],
     ) -> anyhow::Result<Vec<Url>> {
-        if self.parameters.database.fasta.is_empty() {
+        if self.database_parameters.fasta.is_empty() {
             return Ok(Vec::new());
         }
 
         let known_names = self
-            .parameters
-            .database
+            .database_parameters
             .variable_mods
             .values()
             .flatten()
             .filter_map(|entry| entry.definition().name.map(|name| name.to_string()))
             .collect::<HashSet<_>>();
-        let fasta_url = sage_cloudpath::to_url(&self.parameters.database.fasta)?;
+        let fasta_url = sage_cloudpath::to_url(&self.database_parameters.fasta)?;
         let fasta = sage_cloudpath::util::read_fasta(
             &fasta_url,
-            &self.parameters.database.decoy_tag,
-            self.parameters.database.generate_decoys,
+            &self.database_parameters.decoy_tag,
+            self.database_parameters.generate_decoys,
         )?;
         let proteins = fasta
             .targets
