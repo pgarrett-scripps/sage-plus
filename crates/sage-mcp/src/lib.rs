@@ -605,8 +605,12 @@ impl State {
                         && !text("protein").is_some_and(|value| value.contains(needle))
                 }) && !args.peptide.as_deref().is_some_and(|needle| {
                     !text("peptide").is_some_and(|value| value.contains(needle))
+                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
+                        && !text("stripped_peptide").is_some_and(|value| value.contains(needle))
                 }) && !args.modification.as_deref().is_some_and(|needle| {
                     !text("modification").is_some_and(|value| value.contains(needle))
+                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
+                        && !text("proforma").is_some_and(|value| value.contains(needle))
                 })
             })?;
         Ok(ResultQuery {
@@ -723,6 +727,7 @@ pub enum ResultDataset {
     Psms,
     PtmSites,
     ProteinSites,
+    SpectralLibrary,
 }
 
 impl ResultDataset {
@@ -731,6 +736,7 @@ impl ResultDataset {
             Self::Psms => "psms",
             Self::PtmSites => "ptm_sites",
             Self::ProteinSites => "protein_sites",
+            Self::SpectralLibrary => "spectral_library",
         }
     }
 
@@ -739,6 +745,7 @@ impl ResultDataset {
             Self::Psms => "results.sage.parquet",
             Self::PtmSites => "results.sage.ptm-sites.parquet",
             Self::ProteinSites => "results.sage.protein-sites.parquet",
+            Self::SpectralLibrary => "spectral_library.sage.parquet",
         }
     }
 
@@ -747,6 +754,7 @@ impl ResultDataset {
             Self::Psms => "spectrum_q",
             Self::PtmSites => "localization_q_value",
             Self::ProteinSites => "best_localization_q_value",
+            Self::SpectralLibrary => "spectrum_q",
         }
     }
 }
@@ -754,7 +762,7 @@ impl ResultDataset {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct QueryResultsArgs {
     pub job_id: String,
-    /// Dataset to query: psms, ptm_sites, or protein_sites.
+    /// Dataset to query: psms, ptm_sites, protein_sites, or spectral_library.
     pub dataset: ResultDataset,
     /// Optional maximum spectrum/localization q-value, chosen for the dataset.
     pub max_q_value: Option<f64>,

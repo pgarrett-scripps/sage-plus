@@ -87,6 +87,11 @@ pub enum EventKind {
         psms: usize,
         fragments: usize,
     },
+    SpectralLibraryCompleted {
+        entries: usize,
+        transitions: usize,
+        formats: usize,
+    },
     QuantificationCompleted {
         kind: String,
         features: usize,

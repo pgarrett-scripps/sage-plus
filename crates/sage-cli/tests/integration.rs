@@ -2,6 +2,8 @@ use sage_core::database::Builder;
 use sage_core::mass::Tolerance;
 use sage_core::scoring::{ScoreType, Scorer};
 use sage_core::spectrum::SpectrumProcessor;
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
 fn integration() -> anyhow::Result<()> {
@@ -50,5 +52,50 @@ fn integration() -> anyhow::Result<()> {
     assert_eq!(psm[0].matched_peaks, 21);
     assert!(psm[0].localization.is_none());
 
+    Ok(())
+}
+
+#[test]
+fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let output_directory = std::env::temp_dir().join(format!(
+        "sage-plus-spectral-library-{}-{nonce}",
+        std::process::id()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config_spectral_library.json"))
+        .arg("--output_directory")
+        .arg(&output_directory)
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "sage failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let parquet = output_directory.join("spectral_library.sage.parquet");
+    let mzspeclib = output_directory.join("spectral_library.mzspeclib.txt");
+    assert!(parquet.metadata()?.len() > 0);
+    let text = std::fs::read_to_string(mzspeclib)?;
+    assert!(text.contains("<Spectrum=1>"));
+    assert!(text.contains("MS:1003270|proforma peptidoform ion notation="));
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 3);
+    assert_eq!(summary["spectral_library"]["enabled"], true);
+    assert_eq!(summary["spectral_library"]["entries"], 1);
+    assert_eq!(summary["spectral_library"]["transitions"], 20);
+    assert_eq!(
+        summary["spectral_library"]["formats"],
+        serde_json::json!(["sage_parquet", "mzspeclib"])
+    );
+
+    std::fs::remove_dir_all(output_directory)?;
     Ok(())
 }

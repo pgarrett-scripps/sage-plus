@@ -31,6 +31,8 @@ agent-facing capabilities.
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
+- Deterministic empirical spectral-library export as canonical long-form Parquet and PSI
+  mzSpecLib text.
 - A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
 - A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, analysis, and result queries.
 

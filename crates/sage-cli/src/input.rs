@@ -11,6 +11,7 @@ use sage_core::{
     ml::mobility_model::IonMobilitySettings,
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
+    spectral_library::SpectralLibrarySettings,
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -75,6 +76,7 @@ pub struct Search {
     pub batch_size: usize,
 
     pub ptm_localization: PtmLocalizationSettings,
+    pub spectral_library: SpectralLibrarySettings,
 
     /// ppm threshold below which a precursor delta mass is treated as no shift
     /// for sequence-ambiguity annotation (`ambiguity_sequence` / `mass_shift`)
@@ -130,6 +132,7 @@ pub struct Input {
     pub batch_size: Option<usize>,
 
     pub ptm_localization: Option<PtmLocalizationSettings>,
+    pub spectral_library: Option<SpectralLibrarySettings>,
     pub mass_shift_ppm: Option<f32>,
 
     pub annotate_matches: Option<bool>,
@@ -338,6 +341,9 @@ impl Input {
         if matches.get_flag("localize") {
             input.ptm_localization.get_or_insert_default().enabled = true;
         }
+        if matches.get_flag("spectral-library") {
+            input.spectral_library.get_or_insert_default().enabled = true;
+        }
 
         input.validate()?;
         Ok(input)
@@ -443,6 +449,9 @@ impl Input {
                 "ptm_localization.localization_q_value must be between 0 and 1"
             );
         }
+        if let Some(settings) = &self.spectral_library {
+            settings.validate().map_err(anyhow::Error::msg)?;
+        }
         Ok(())
     }
 
@@ -508,6 +517,8 @@ impl Input {
                 && (0.0..=1.0).contains(&ptm_localization.localization_q_value),
             "ptm_localization.localization_q_value must be between 0 and 1"
         );
+        let spectral_library = self.spectral_library.unwrap_or_default();
+        spectral_library.validate().map_err(anyhow::Error::msg)?;
 
         Ok(Search {
             version: clap::crate_version!().into(),
@@ -544,6 +555,7 @@ impl Input {
             min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
             ptm_localization,
+            spectral_library,
             mass_shift_ppm: self
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
@@ -577,6 +589,7 @@ mod test {
         enzyme::EnzymeParameters,
         ml::retention_alignment::AlignmentMethod,
         ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
+        spectral_library::{SpectralLibraryFormat, SpectralLibrarySettings},
     };
 
     #[test]
@@ -616,6 +629,41 @@ mod test {
             serde_json::from_value(serde_json::json!({ "q_value": 0.02 }))?;
         assert_eq!(legacy_name.psm_q_value, 0.02);
         Ok(())
+    }
+
+    #[test]
+    fn deserialize_spectral_library_settings() -> Result<(), serde_json::Error> {
+        let configured: SpectralLibrarySettings = serde_json::from_value(serde_json::json!({
+            "enabled": true,
+            "max_fragments": 12,
+            "formats": ["sage_parquet", "mzspeclib"]
+        }))?;
+        assert!(configured.enabled);
+        assert_eq!(configured.psm_q_value, 0.01);
+        assert_eq!(configured.peptide_q_value, 0.01);
+        assert_eq!(configured.max_fragments, 12);
+        assert_eq!(
+            configured.formats,
+            vec![
+                SpectralLibraryFormat::SageParquet,
+                SpectralLibraryFormat::MzSpecLib
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_library_settings_are_validated() {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta" },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"],
+            "spectral_library": { "enabled": true, "max_fragments": 0 }
+        }))
+        .unwrap();
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains("spectral_library.max_fragments"));
     }
 
     #[test]

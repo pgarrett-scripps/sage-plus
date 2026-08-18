@@ -17,6 +17,9 @@ use sage_core::mass_calibration::{
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{Feature, Scorer};
+use sage_core::spectral_library::{
+    self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
+};
 use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
@@ -119,6 +122,8 @@ pub struct RunSummary {
     pub inputs: InputRunStats,
     #[serde(default)]
     pub modifications: ModificationRunStats,
+    #[serde(default)]
+    pub spectral_library: SpectralLibraryRunStats,
     pub output_paths: Vec<String>,
 }
 
@@ -181,6 +186,17 @@ pub struct ModificationRunStats {
     pub ptm_library_sites: usize,
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SpectralLibraryRunStats {
+    pub enabled: bool,
+    pub entries: usize,
+    pub transitions: usize,
+    pub strategy: String,
+    pub psm_q_value: f32,
+    pub peptide_q_value: f32,
+    pub formats: Vec<String>,
+}
+
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
@@ -227,6 +243,7 @@ struct PostprocessStats {
     annotated_psms: usize,
     annotated_fragments: usize,
     localized_psms: usize,
+    library_selections: Vec<LibrarySelection>,
 }
 
 impl SpectrumAccumulator {
@@ -1047,14 +1064,36 @@ impl Runner {
 
         let annotate_matches = self.parameters.annotate_matches;
         let localize = self.parameters.ptm_localization.enabled;
-        if !annotate_matches && !localize {
-            return Ok(PostprocessStats::default());
+        let library_selections = spectral_library::select_best_psms(
+            features,
+            &self.database,
+            &self.parameters.spectral_library,
+        );
+        let library_annotation_indices = library_selections
+            .iter()
+            .map(|selection| selection.feature_index)
+            .collect::<HashSet<_>>();
+        let annotate_fragments = annotate_matches || !library_annotation_indices.is_empty();
+        if !annotate_fragments && !localize {
+            return Ok(PostprocessStats {
+                library_selections,
+                ..PostprocessStats::default()
+            });
         }
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
+        let annotation_indices = features
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, feature)| {
+                ((annotate_matches && passes_output_filter(feature, output_psm_q_value))
+                    || library_annotation_indices.contains(&idx))
+                .then_some(idx)
+            })
+            .collect::<HashSet<_>>();
         let mut work: HashMap<usize, HashMap<String, SpectrumWork>> = HashMap::new();
 
-        if annotate_matches {
+        if annotate_fragments {
             for (idx, feature) in features.iter().enumerate() {
                 work.entry(feature.file_id)
                     .or_default()
@@ -1063,10 +1102,8 @@ impl Runner {
                     .feature_indices
                     .push(idx);
             }
-            for feature in features
-                .iter()
-                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
-            {
+            for idx in &annotation_indices {
+                let feature = &features[*idx];
                 if let Some(spectrum) = work
                     .get_mut(&feature.file_id)
                     .and_then(|file| file.get_mut(feature.spec_id.as_str()))
@@ -1106,20 +1143,16 @@ impl Runner {
         }
         work.retain(|_, file| !file.is_empty());
 
-        let expected_annotations = if annotate_matches {
-            features
-                .iter()
-                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
-                .count()
-        } else {
-            0
-        };
+        let expected_annotations = annotation_indices.len();
         if work.is_empty() {
             anyhow::ensure!(
                 expected_annotations == 0,
                 "internal error: selected PSMs were not scheduled for fragment annotation"
             );
-            return Ok(PostprocessStats::default());
+            return Ok(PostprocessStats {
+                library_selections,
+                ..PostprocessStats::default()
+            });
         }
 
         let start = Instant::now();
@@ -1150,9 +1183,10 @@ impl Runner {
                             .iter()
                             .map(|&idx| &features[idx])
                             .collect::<Vec<_>>();
-                        let selected = ranked_features
+                        let selected = spectrum_work
+                            .feature_indices
                             .iter()
-                            .map(|feature| passes_output_filter(feature, output_psm_q_value))
+                            .map(|idx| annotation_indices.contains(idx))
                             .collect::<Vec<_>>();
                         annotated.extend(
                             spectrum_work
@@ -1217,9 +1251,8 @@ impl Runner {
             let missing = features
                 .iter()
                 .enumerate()
-                .find(|(idx, feature)| {
-                    passes_output_filter(feature, output_psm_q_value)
-                        && !annotated_indices.contains(idx)
+                .find(|(idx, _feature)| {
+                    annotation_indices.contains(idx) && !annotated_indices.contains(idx)
                 })
                 .map(|(_, feature)| {
                     format!(
@@ -1281,6 +1314,7 @@ impl Runner {
             annotated_psms: annotated_indices.len(),
             annotated_fragments,
             localized_psms,
+            library_selections,
         })
     }
 
@@ -1473,6 +1507,19 @@ impl Runner {
             })
             .collect::<Vec<_>>();
 
+        let library_entries = spectral_library::build_entries(
+            &outputs.features,
+            &self.database,
+            &filenames,
+            &postprocess.library_selections,
+            &self.parameters.spectral_library,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let library_transitions = library_entries
+            .iter()
+            .map(|entry| entry.fragments.len())
+            .sum::<usize>();
+
         let areas = alignments.and_then(|alignments| {
             if self.parameters.quant.lfq {
                 log::trace!("performing LFQ");
@@ -1555,6 +1602,40 @@ impl Runner {
             self.parameters.output_paths.push(path);
         }
 
+        if self
+            .parameters
+            .spectral_library
+            .writes(SpectralLibraryFormat::SageParquet)
+        {
+            let bytes = sage_cloudpath::parquet::serialize_spectral_library(
+                &library_entries,
+                &self.parameters.spectral_library,
+            )?;
+            let path = self.make_path("spectral_library.sage.parquet");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
+        if self
+            .parameters
+            .spectral_library
+            .writes(SpectralLibraryFormat::MzSpecLib)
+        {
+            let bytes = spectral_library::serialize_mzspeclib(
+                &library_entries,
+                self.parameters.version.as_str(),
+            );
+            let path = self.make_path("spectral_library.mzspeclib.txt");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
+        if self.parameters.spectral_library.enabled {
+            self.events.emit(EventKind::SpectralLibraryCompleted {
+                entries: library_entries.len(),
+                transitions: library_transitions,
+                formats: self.parameters.spectral_library.formats.len(),
+            });
+        }
+
         if let Some(areas) = &areas {
             let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
 
@@ -1625,7 +1706,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 2,
+            schema_version: 3,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1699,6 +1780,26 @@ impl Runner {
                     .loaded_ptm_library
                     .as_deref()
                     .map_or(0, |library| library.len()),
+            },
+            spectral_library: SpectralLibraryRunStats {
+                enabled: self.parameters.spectral_library.enabled,
+                entries: library_entries.len(),
+                transitions: library_transitions,
+                strategy: match self.parameters.spectral_library.strategy {
+                    SpectralLibraryStrategy::BestPsm => "best_psm".into(),
+                },
+                psm_q_value: self.parameters.spectral_library.psm_q_value,
+                peptide_q_value: self.parameters.spectral_library.peptide_q_value,
+                formats: self
+                    .parameters
+                    .spectral_library
+                    .formats
+                    .iter()
+                    .map(|format| match format {
+                        SpectralLibraryFormat::SageParquet => "sage_parquet".into(),
+                        SpectralLibraryFormat::MzSpecLib => "mzspeclib".into(),
+                    })
+                    .collect(),
             },
             output_paths,
         };

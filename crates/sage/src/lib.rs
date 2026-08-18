@@ -19,6 +19,7 @@ pub mod protein_grouping;
 pub mod ptm;
 pub mod ptm_library;
 pub mod scoring;
+pub mod spectral_library;
 pub mod spectrum;
 pub mod tmt;
 pub mod unimod;
