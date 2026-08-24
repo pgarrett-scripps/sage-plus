@@ -8,7 +8,7 @@ use log::{info, warn};
 use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
 use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
-use sage_core::database::{IndexedDatabase, Parameters};
+use sage_core::database::{Builder, IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
@@ -17,6 +17,9 @@ use sage_core::mass_calibration::{
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{Feature, Scorer};
+use sage_core::spectral_library::{
+    self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
+};
 use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
@@ -28,6 +31,8 @@ use report_builder::{
     plots::{plot_boxplot, plot_pp, plot_scatter, plot_score_histogram},
     Report, ReportSection,
 };
+
+mod library_runner;
 
 enum OutputTarget {
     Local(BufWriter<std::fs::File>),
@@ -90,6 +95,8 @@ fn finish_csv_writer(mut writer: csv::Writer<OutputTarget>, path: &Url) -> anyho
 pub struct Runner {
     pub database: IndexedDatabase,
     pub parameters: Search,
+    database_parameters: Parameters,
+    library_search: Option<library_runner::LibrarySearchRuntime>,
     start: Instant,
     events: EventEmitter,
     cancellation: CancellationToken,
@@ -119,6 +126,10 @@ pub struct RunSummary {
     pub inputs: InputRunStats,
     #[serde(default)]
     pub modifications: ModificationRunStats,
+    #[serde(default)]
+    pub spectral_library: SpectralLibraryRunStats,
+    #[serde(default)]
+    pub library_search: LibrarySearchRunStats,
     pub output_paths: Vec<String>,
 }
 
@@ -145,6 +156,12 @@ pub struct ModelRunStats {
     pub ion_mobility_model_enabled: bool,
     pub ion_mobility_model_fitted: bool,
     pub ion_mobility_features: String,
+    /// Library-reference RT alignment, separate from database RT prediction.
+    pub library_retention_time_alignment: Option<String>,
+    pub library_retention_time_files_aligned: usize,
+    /// Library-reference ion-mobility alignment, separate from sequence models.
+    pub library_ion_mobility_alignment: Option<String>,
+    pub library_ion_mobility_files_aligned: usize,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -179,6 +196,26 @@ pub struct ModificationRunStats {
     pub max_total_variable_mods: usize,
     pub max_combinations: Option<usize>,
     pub ptm_library_sites: usize,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SpectralLibraryRunStats {
+    pub enabled: bool,
+    pub entries: usize,
+    pub transitions: usize,
+    pub strategy: String,
+    pub psm_q_value: f32,
+    pub peptide_q_value: f32,
+    pub formats: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LibrarySearchRunStats {
+    pub enabled: bool,
+    pub path: Option<String>,
+    pub target_entries: usize,
+    pub decoy_entries: usize,
+    pub transitions: usize,
 }
 
 /// A single localized modification site for one PSM, used to build the
@@ -227,6 +264,7 @@ struct PostprocessStats {
     annotated_psms: usize,
     annotated_fragments: usize,
     localized_psms: usize,
+    library_selections: Vec<LibrarySelection>,
 }
 
 impl SpectrumAccumulator {
@@ -284,9 +322,49 @@ impl Runner {
         events: EventEmitter,
         cancellation: CancellationToken,
     ) -> anyhow::Result<Self> {
-        let mut parameters = parameters.clone();
-        parameters.database.use_bitmap = parameters.use_bitmap;
-        if let Some(settings) = parameters.database.ptm_library.clone() {
+        let parameters = parameters.clone();
+        let mut database_parameters = parameters
+            .database
+            .clone()
+            .unwrap_or_else(|| Builder::default().make_parameters());
+        let start = Instant::now();
+        cancellation.check()?;
+        if let Some(settings) = parameters.library_search.as_ref() {
+            events.emit(EventKind::LibrarySearchStarted {
+                path: settings.path.clone(),
+            });
+            let (database, library_search) = library_runner::load_library_search(settings)?;
+            let overlapping_sources =
+                library_search.overlapping_source_files(&parameters.mzml_paths);
+            if !overlapping_sources.is_empty() {
+                let message = format!(
+                    "library search input overlaps recorded library source file(s): {}; same-source searches are unsuitable for FDR validation",
+                    overlapping_sources.join(", ")
+                );
+                warn!("{message}");
+                events.emit(EventKind::Warning {
+                    code: "library_source_overlap".into(),
+                    message,
+                });
+            }
+            events.emit(EventKind::LibrarySearchBuilt {
+                target_entries: library_search.target_entries,
+                decoy_entries: library_search.target_entries,
+                transitions: library_search.target_transitions,
+            });
+            events.check()?;
+            return Ok(Self {
+                database,
+                parameters,
+                database_parameters,
+                library_search: Some(library_search),
+                start,
+                events,
+                cancellation,
+            });
+        }
+        database_parameters.use_bitmap = parameters.use_bitmap;
+        if let Some(settings) = database_parameters.ptm_library.clone() {
             let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
                 let contents = sage_cloudpath::util::read_text(&settings.path)
                     .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
@@ -297,34 +375,31 @@ impl Runner {
                 sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
             }
             .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
-            parameters
-                .database
+            database_parameters
                 .validate_ptm_library(&library)
                 .map_err(anyhow::Error::msg)?;
             info!("loaded {} unique PTM library sites", library.len());
-            parameters.database.loaded_ptm_library = Some(Arc::new(library));
+            database_parameters.loaded_ptm_library = Some(Arc::new(library));
         }
-        let start = Instant::now();
-        cancellation.check()?;
         events.emit(EventKind::DatabaseStarted);
         let limits =
             MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
         // Collect peptides from FASTA (if configured).
-        let mut all_peptides: Vec<Peptide> = if !parameters.database.fasta.is_empty() {
-            let fasta_url = sage_cloudpath::to_url(&parameters.database.fasta)?;
+        let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
+            let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
             let fasta = sage_cloudpath::util::read_fasta(
                 &fasta_url,
-                &parameters.database.decoy_tag,
-                parameters.database.generate_decoys,
+                &database_parameters.decoy_tag,
+                database_parameters.generate_decoys,
             )
             .with_context(|| {
                 format!(
                     "Failed to build database from `{}`",
-                    parameters.database.fasta
+                    database_parameters.fasta
                 )
             })?;
             let custom_cleavages = if let Some(path) =
-                parameters.database.custom_cleavage_sites.as_deref()
+                database_parameters.custom_cleavage_sites.as_deref()
             {
                 let library = if path.to_ascii_lowercase().ends_with(".parquet") {
                     let content = sage_cloudpath::util::read_bytes(path).with_context(|| {
@@ -367,8 +442,8 @@ impl Runner {
             };
 
             if let (Some(settings), Some(library)) = (
-                parameters.database.ptm_library.as_ref(),
-                parameters.database.loaded_ptm_library.as_deref(),
+                database_parameters.ptm_library.as_ref(),
+                database_parameters.loaded_ptm_library.as_deref(),
             ) {
                 let proteins = fasta
                     .targets
@@ -410,10 +485,9 @@ impl Runner {
             }
 
             let needs_estimate = limits.is_enabled()
-                || (parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0);
+                || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
             if needs_estimate {
-                let full_estimate = parameters
-                    .database
+                let full_estimate = database_parameters
                     .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                 events.emit(EventKind::DatabaseEstimated {
                     unmodified_peptides: full_estimate.unmodified_peptides,
@@ -424,8 +498,8 @@ impl Runner {
                         .max(full_estimate.modified_peak_bytes)
                         .max(full_estimate.fragment_peak_bytes),
                 });
-                if parameters.database.prefilter && parameters.database.prefilter_chunk_size == 0 {
-                    parameters.database.auto_calculate_prefilter_chunk_size(
+                if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
+                    database_parameters.auto_calculate_prefilter_chunk_size(
                         &fasta,
                         full_estimate.modified_peptides,
                     );
@@ -446,12 +520,12 @@ impl Runner {
                         full_estimate.unmodified_peak_bytes,
                     )?;
 
-                    if parameters.database.prefilter {
+                    if database_parameters.prefilter {
                         let mut modified_peak = 0u64;
                         let mut fragment_peak = 0u64;
-                        for chunk in fasta.iter_chunks(parameters.database.prefilter_chunk_size) {
-                            let estimate =
-                                parameters.database.estimate_memory_with_custom_cleavages(
+                        for chunk in fasta.iter_chunks(database_parameters.prefilter_chunk_size) {
+                            let estimate = database_parameters
+                                .estimate_memory_with_custom_cleavages(
                                     &chunk,
                                     custom_cleavages.as_ref(),
                                 );
@@ -464,13 +538,12 @@ impl Runner {
                 }
             }
 
-            match parameters.database.prefilter {
+            match database_parameters.prefilter {
                 false => {
-                    let digests = parameters
-                        .database
+                    let digests = database_parameters
                         .digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                     if limits.is_enabled() {
-                        let estimate = parameters.database.estimate_modified_memory(&digests);
+                        let estimate = database_parameters.estimate_modified_memory(&digests);
                         info!(
                             "modification preflight: {} unmodified peptides may expand to {} modified peptides ({:.2} GiB additional peak)",
                             estimate.unmodified_peptides,
@@ -479,23 +552,24 @@ impl Runner {
                         );
                         limits.check_estimate("modified-peptide", estimate.modified_peak_bytes)?;
                     }
-                    parameters.database.modify_digests(digests)
+                    database_parameters.modify_digests(digests)
                 }
                 true => {
-                    if parameters.database.prefilter_chunk_size >= fasta.targets.len() {
-                        parameters
-                            .database
+                    if database_parameters.prefilter_chunk_size >= fasta.targets.len() {
+                        database_parameters
                             .digest_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
                     } else {
                         info!(
                             "using {} db chunks of size {}",
-                            (fasta.targets.len() + parameters.database.prefilter_chunk_size - 1)
-                                / parameters.database.prefilter_chunk_size,
-                            parameters.database.prefilter_chunk_size,
+                            (fasta.targets.len() + database_parameters.prefilter_chunk_size - 1)
+                                / database_parameters.prefilter_chunk_size,
+                            database_parameters.prefilter_chunk_size,
                         );
                         let mini_runner = Self {
                             database: IndexedDatabase::default(),
                             parameters: parameters.clone(),
+                            database_parameters: database_parameters.clone(),
+                            library_search: None,
                             start,
                             events: events.clone(),
                             cancellation: cancellation.clone(),
@@ -505,23 +579,23 @@ impl Runner {
                 }
             }
         } else {
-            if parameters.database.loaded_ptm_library.is_some() {
+            if database_parameters.loaded_ptm_library.is_some() {
                 anyhow::bail!("database.ptm_library requires database.fasta");
             }
             vec![]
         };
 
         // Append peptides from TSV file (if configured), additive with FASTA.
-        if let Some(peptides_path) = parameters.database.peptides.clone() {
+        if let Some(peptides_path) = database_parameters.peptides.clone() {
             let content = sage_cloudpath::util::read_text(&peptides_path)
                 .with_context(|| format!("Failed to read peptide file `{peptides_path}`"))?;
-            all_peptides.extend(parameters.database.peptides_from_tsv(&content));
+            all_peptides.extend(database_parameters.peptides_from_tsv(&content));
         }
 
         // Merge, deduplicate, and build the index.
         Parameters::reorder_peptides(&mut all_peptides);
         if limits.is_enabled() {
-            let estimate = parameters.database.estimate_index_memory(&all_peptides);
+            let estimate = database_parameters.estimate_index_memory(&all_peptides);
             info!(
                 "final database preflight: {} peptides, {} fragments, estimated {:.2} GiB peak",
                 estimate.modified_peptides,
@@ -535,8 +609,7 @@ impl Runner {
                     .saturating_sub(estimate.modified_peak_bytes),
             )?;
         }
-        let database = parameters
-            .database
+        let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
 
@@ -556,6 +629,8 @@ impl Runner {
         Ok(Self {
             database,
             parameters,
+            database_parameters,
+            library_search: None,
             start,
             events,
             cancellation,
@@ -577,7 +652,7 @@ impl Runner {
                 false => None,
             };
 
-        let db_params = self.parameters.database.clone();
+        let db_params = self.database_parameters.clone();
         // TODO: Don't generate decoys for fast searching
         // * if `generate_decoys` is used, we should re-generate at the end
         //  to ensure that picked-peptide conditions are used, otherwise,
@@ -586,7 +661,7 @@ impl Runner {
         // db_params.generate_decoys = false;
 
         let mut all_peptides: Vec<Peptide> = fasta
-            .iter_chunks(self.parameters.database.prefilter_chunk_size)
+            .iter_chunks(self.database_parameters.prefilter_chunk_size)
             .enumerate()
             .flat_map(|(chunk_id, fasta_chunk)| {
                 let start = Instant::now();
@@ -693,7 +768,7 @@ impl Runner {
                 }
                 scorer.quick_score(
                     spectrum,
-                    self.parameters.database.prefilter_low_memory,
+                    self.database_parameters.prefilter_low_memory,
                     keep,
                 )
             });
@@ -1047,14 +1122,36 @@ impl Runner {
 
         let annotate_matches = self.parameters.annotate_matches;
         let localize = self.parameters.ptm_localization.enabled;
-        if !annotate_matches && !localize {
-            return Ok(PostprocessStats::default());
+        let library_selections = spectral_library::select_best_psms(
+            features,
+            &self.database,
+            &self.parameters.spectral_library,
+        );
+        let library_annotation_indices = library_selections
+            .iter()
+            .map(|selection| selection.feature_index)
+            .collect::<HashSet<_>>();
+        let annotate_fragments = annotate_matches || !library_annotation_indices.is_empty();
+        if !annotate_fragments && !localize {
+            return Ok(PostprocessStats {
+                library_selections,
+                ..PostprocessStats::default()
+            });
         }
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
+        let annotation_indices = features
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, feature)| {
+                ((annotate_matches && passes_output_filter(feature, output_psm_q_value))
+                    || library_annotation_indices.contains(&idx))
+                .then_some(idx)
+            })
+            .collect::<HashSet<_>>();
         let mut work: HashMap<usize, HashMap<String, SpectrumWork>> = HashMap::new();
 
-        if annotate_matches {
+        if annotate_fragments {
             for (idx, feature) in features.iter().enumerate() {
                 work.entry(feature.file_id)
                     .or_default()
@@ -1063,10 +1160,8 @@ impl Runner {
                     .feature_indices
                     .push(idx);
             }
-            for feature in features
-                .iter()
-                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
-            {
+            for idx in &annotation_indices {
+                let feature = &features[*idx];
                 if let Some(spectrum) = work
                     .get_mut(&feature.file_id)
                     .and_then(|file| file.get_mut(feature.spec_id.as_str()))
@@ -1106,20 +1201,16 @@ impl Runner {
         }
         work.retain(|_, file| !file.is_empty());
 
-        let expected_annotations = if annotate_matches {
-            features
-                .iter()
-                .filter(|feature| passes_output_filter(feature, output_psm_q_value))
-                .count()
-        } else {
-            0
-        };
+        let expected_annotations = annotation_indices.len();
         if work.is_empty() {
             anyhow::ensure!(
                 expected_annotations == 0,
                 "internal error: selected PSMs were not scheduled for fragment annotation"
             );
-            return Ok(PostprocessStats::default());
+            return Ok(PostprocessStats {
+                library_selections,
+                ..PostprocessStats::default()
+            });
         }
 
         let start = Instant::now();
@@ -1150,9 +1241,10 @@ impl Runner {
                             .iter()
                             .map(|&idx| &features[idx])
                             .collect::<Vec<_>>();
-                        let selected = ranked_features
+                        let selected = spectrum_work
+                            .feature_indices
                             .iter()
-                            .map(|feature| passes_output_filter(feature, output_psm_q_value))
+                            .map(|idx| annotation_indices.contains(idx))
                             .collect::<Vec<_>>();
                         annotated.extend(
                             spectrum_work
@@ -1217,9 +1309,8 @@ impl Runner {
             let missing = features
                 .iter()
                 .enumerate()
-                .find(|(idx, feature)| {
-                    passes_output_filter(feature, output_psm_q_value)
-                        && !annotated_indices.contains(idx)
+                .find(|(idx, _feature)| {
+                    annotation_indices.contains(idx) && !annotated_indices.contains(idx)
                 })
                 .map(|(_, feature)| {
                     format!(
@@ -1281,6 +1372,7 @@ impl Runner {
             annotated_psms: annotated_indices.len(),
             annotated_fragments,
             localized_psms,
+            library_selections,
         })
     }
 
@@ -1311,6 +1403,9 @@ impl Runner {
         parallel: usize,
     ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        if self.library_search.is_some() {
+            return self.run_library_with_summary(parallel);
+        }
         self.cancellation.check()?;
         self.events.check()?;
         let scorer = Scorer {
@@ -1473,6 +1568,19 @@ impl Runner {
             })
             .collect::<Vec<_>>();
 
+        let library_entries = spectral_library::build_entries(
+            &outputs.features,
+            &self.database,
+            &filenames,
+            &postprocess.library_selections,
+            &self.parameters.spectral_library,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let library_transitions = library_entries
+            .iter()
+            .map(|entry| entry.fragments.len())
+            .sum::<usize>();
+
         let areas = alignments.and_then(|alignments| {
             if self.parameters.quant.lfq {
                 log::trace!("performing LFQ");
@@ -1555,6 +1663,40 @@ impl Runner {
             self.parameters.output_paths.push(path);
         }
 
+        if self
+            .parameters
+            .spectral_library
+            .writes(SpectralLibraryFormat::SageParquet)
+        {
+            let bytes = sage_cloudpath::parquet::serialize_spectral_library(
+                &library_entries,
+                &self.parameters.spectral_library,
+            )?;
+            let path = self.make_path("spectral_library.sage.parquet");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
+        if self
+            .parameters
+            .spectral_library
+            .writes(SpectralLibraryFormat::MzSpecLib)
+        {
+            let bytes = spectral_library::serialize_mzspeclib(
+                &library_entries,
+                self.parameters.version.as_str(),
+            );
+            let path = self.make_path("spectral_library.mzspeclib.txt");
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
+        if self.parameters.spectral_library.enabled {
+            self.events.emit(EventKind::SpectralLibraryCompleted {
+                entries: library_entries.len(),
+                transitions: library_transitions,
+                formats: self.parameters.spectral_library.formats.len(),
+            });
+        }
+
         if let Some(areas) = &areas {
             let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
 
@@ -1625,7 +1767,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 2,
+            schema_version: 5,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1661,6 +1803,7 @@ impl Runner {
                 ion_mobility_model_fitted,
                 ion_mobility_features: format!("{:?}", self.parameters.ion_mobility_model.features)
                     .to_lowercase(),
+                ..ModelRunStats::default()
             },
             quantification: QuantificationRunStats {
                 lfq_enabled: self.parameters.quant.lfq,
@@ -1682,24 +1825,43 @@ impl Runner {
             },
             inputs: input_stats,
             modifications: ModificationRunStats {
-                static_definitions: self.parameters.database.static_mods.len(),
+                static_definitions: self.database_parameters.static_mods.len(),
                 variable_definitions: self
-                    .parameters
-                    .database
+                    .database_parameters
                     .variable_mods
                     .values()
                     .map(Vec::len)
                     .sum(),
-                max_variable_mods: self.parameters.database.max_variable_mods,
-                max_total_variable_mods: self.parameters.database.max_total_variable_mods,
-                max_combinations: self.parameters.database.max_combinations,
+                max_variable_mods: self.database_parameters.max_variable_mods,
+                max_total_variable_mods: self.database_parameters.max_total_variable_mods,
+                max_combinations: self.database_parameters.max_combinations,
                 ptm_library_sites: self
-                    .parameters
-                    .database
+                    .database_parameters
                     .loaded_ptm_library
                     .as_deref()
                     .map_or(0, |library| library.len()),
             },
+            spectral_library: SpectralLibraryRunStats {
+                enabled: self.parameters.spectral_library.enabled,
+                entries: library_entries.len(),
+                transitions: library_transitions,
+                strategy: match self.parameters.spectral_library.strategy {
+                    SpectralLibraryStrategy::BestPsm => "best_psm".into(),
+                },
+                psm_q_value: self.parameters.spectral_library.psm_q_value,
+                peptide_q_value: self.parameters.spectral_library.peptide_q_value,
+                formats: self
+                    .parameters
+                    .spectral_library
+                    .formats
+                    .iter()
+                    .map(|format| match format {
+                        SpectralLibraryFormat::SageParquet => "sage_parquet".into(),
+                        SpectralLibraryFormat::MzSpecLib => "mzspeclib".into(),
+                    })
+                    .collect(),
+            },
+            library_search: LibrarySearchRunStats::default(),
             output_paths,
         };
         sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
@@ -1938,23 +2100,22 @@ impl Runner {
         features: &[Feature],
         filenames: &[String],
     ) -> anyhow::Result<Vec<Url>> {
-        if self.parameters.database.fasta.is_empty() {
+        if self.database_parameters.fasta.is_empty() {
             return Ok(Vec::new());
         }
 
         let known_names = self
-            .parameters
-            .database
+            .database_parameters
             .variable_mods
             .values()
             .flatten()
             .filter_map(|entry| entry.definition().name.map(|name| name.to_string()))
             .collect::<HashSet<_>>();
-        let fasta_url = sage_cloudpath::to_url(&self.parameters.database.fasta)?;
+        let fasta_url = sage_cloudpath::to_url(&self.database_parameters.fasta)?;
         let fasta = sage_cloudpath::util::read_fasta(
             &fasta_url,
-            &self.parameters.database.decoy_tag,
-            self.parameters.database.generate_decoys,
+            &self.database_parameters.decoy_tag,
+            self.database_parameters.generate_decoys,
         )?;
         let proteins = fasta
             .targets
@@ -2864,6 +3025,10 @@ mod tests {
 
         assert_eq!(summary.schema_version, 1);
         assert!(!summary.ptm_localization.enabled);
+        assert_eq!(summary.models.library_retention_time_alignment, None);
+        assert_eq!(summary.models.library_retention_time_files_aligned, 0);
+        assert_eq!(summary.models.library_ion_mobility_alignment, None);
+        assert_eq!(summary.models.library_ion_mobility_files_aligned, 0);
         assert_eq!(summary.quantification.lfq_features, 0);
     }
 }

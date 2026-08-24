@@ -31,6 +31,8 @@ use sage_core::ion_series::Kind;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::ptm_library::{PtmLibrary, PtmLibrarySite};
 use sage_core::scoring::Feature;
+use sage_core::spectral_library::{LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings};
+use sage_core::spectral_library_search::{DdaLibraryEntry, DdaLibraryIndex};
 use sage_core::tmt::TmtQuant;
 
 fn field_to_json(field: &Field) -> serde_json::Value {
@@ -858,6 +860,8 @@ pub fn serialize_features(
         write_col!(isotope_error, FloatType);
         write_col!(delta_mass, FloatType);
         write_col!(average_ppm, FloatType);
+        write_col!(aligned_delta_mass, FloatType);
+        write_col!(aligned_average_ppm, FloatType);
         write_col!(hyperscore, FloatType);
         write_col!(delta_next, FloatType);
         write_col!(delta_best, FloatType);
@@ -873,6 +877,9 @@ pub fn serialize_features(
         write_col!(longest_y, Int32Type);
         write_col!(longest_y_pct, FloatType);
         write_col!(matched_intensity_pct, FloatType);
+        write_col!(spectral_angle, FloatType);
+        write_col!(explained_library_intensity, FloatType);
+        write_col!(explained_query_intensity, FloatType);
         write_col!(scored_candidates, Int32Type);
         write_col!(poisson, FloatType);
         write_col!(discriminant_score, FloatType);
@@ -1074,6 +1081,466 @@ pub fn serialize_matched_fragments(
     }
 
     writer.into_inner()
+}
+
+pub fn build_spectral_library_schema() -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../schemas/spectral_library.sage.v1.parquet.schema"
+    ))
+}
+
+/// Read Sage's canonical long-form empirical library into DDA search entries.
+///
+/// The v1 export contains target entries only. `is_decoy` therefore remains
+/// false until a future schema defines portable decoy provenance.
+pub fn deserialize_spectral_library(
+    bytes: Vec<u8>,
+) -> parquet::errors::Result<Vec<DdaLibraryEntry>> {
+    fn required<'a>(
+        row: &'a Row,
+        name: &str,
+        row_number: usize,
+    ) -> parquet::errors::Result<&'a Field> {
+        row_field(row, name).ok_or_else(|| {
+            ParquetError::General(format!(
+                "spectral-library row {row_number} is missing `{name}`"
+            ))
+        })
+    }
+
+    fn text(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<String> {
+        match field {
+            Field::Str(value) => Ok(value.clone()),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-string `{name}`"
+            ))),
+        }
+    }
+
+    fn float(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<f32> {
+        match field {
+            Field::Float(value) => Ok(*value),
+            Field::Double(value) => Ok(*value as f32),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-floating-point `{name}`"
+            ))),
+        }
+    }
+
+    fn integer(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<i64> {
+        match field {
+            Field::Byte(value) => Ok(i64::from(*value)),
+            Field::Short(value) => Ok(i64::from(*value)),
+            Field::Int(value) => Ok(i64::from(*value)),
+            Field::Long(value) => Ok(*value),
+            Field::UByte(value) => Ok(i64::from(*value)),
+            Field::UShort(value) => Ok(i64::from(*value)),
+            Field::UInt(value) => Ok(i64::from(*value)),
+            Field::ULong(value) => i64::try_from(*value).map_err(|_| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has out-of-range `{name}`"
+                ))
+            }),
+            _ => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has non-integer `{name}`"
+            ))),
+        }
+    }
+
+    fn charge(field: &Field, name: &str, row_number: usize) -> parquet::errors::Result<u8> {
+        u8::try_from(integer(field, name, row_number)?)
+            .ok()
+            .filter(|charge| *charge > 0)
+            .ok_or_else(|| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has invalid `{name}`"
+                ))
+            })
+    }
+
+    fn fragment_kind(field: &Field, row_number: usize) -> parquet::errors::Result<Kind> {
+        match text(field, "fragment_type", row_number)?.as_str() {
+            "a" => Ok(Kind::A),
+            "b" => Ok(Kind::B),
+            "c" => Ok(Kind::C),
+            "x" => Ok(Kind::X),
+            "y" => Ok(Kind::Y),
+            "z" => Ok(Kind::Z),
+            kind => Err(ParquetError::General(format!(
+                "spectral-library row {row_number} has unsupported fragment type `{kind}`"
+            ))),
+        }
+    }
+
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let metadata = reader.metadata().file_metadata().key_value_metadata();
+    let has_metadata = |key: &str, value: &str| {
+        metadata.is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry.key == key && entry.value.as_deref() == Some(value))
+        })
+    };
+    if !has_metadata("sage.schema.name", "spectral_library")
+        || !has_metadata("sage.schema.version", "1")
+    {
+        return Err(ParquetError::General(
+            "input is not a Sage spectral_library schema version 1 Parquet file".into(),
+        ));
+    }
+
+    let mut entries = Vec::<DdaLibraryEntry>::new();
+    let mut entry_indices = HashMap::<String, usize>::new();
+    for (row_index, row) in reader.get_row_iter(None)?.enumerate() {
+        let row_number = row_index + 1;
+        let row = row?;
+        let id = text(
+            required(&row, "library_entry_id", row_number)?,
+            "library_entry_id",
+            row_number,
+        )?;
+        let proforma = text(
+            required(&row, "proforma", row_number)?,
+            "proforma",
+            row_number,
+        )?;
+        let stripped_peptide = text(
+            required(&row, "stripped_peptide", row_number)?,
+            "stripped_peptide",
+            row_number,
+        )?;
+        let proteins = text(
+            required(&row, "proteins", row_number)?,
+            "proteins",
+            row_number,
+        )?;
+        let source_file = text(
+            required(&row, "source_file", row_number)?,
+            "source_file",
+            row_number,
+        )?;
+        let source_spectrum = text(
+            required(&row, "source_spectrum", row_number)?,
+            "source_spectrum",
+            row_number,
+        )?;
+        let precursor_charge = charge(
+            required(&row, "precursor_charge", row_number)?,
+            "precursor_charge",
+            row_number,
+        )?;
+        let precursor_neutral_mass = float(
+            required(&row, "precursor_neutral_mass", row_number)?,
+            "precursor_neutral_mass",
+            row_number,
+        )?;
+        let precursor_mz = float(
+            required(&row, "precursor_mz", row_number)?,
+            "precursor_mz",
+            row_number,
+        )?;
+        let retention_time_minutes = float(
+            required(&row, "aligned_retention_time_minutes", row_number)?,
+            "aligned_retention_time_minutes",
+            row_number,
+        )?;
+        let ion_mobility = float(
+            required(&row, "ion_mobility", row_number)?,
+            "ion_mobility",
+            row_number,
+        )?;
+        let source_spectrum_q = float(
+            required(&row, "spectrum_q", row_number)?,
+            "spectrum_q",
+            row_number,
+        )?;
+
+        let entry_index = match entry_indices.get(&id).copied() {
+            Some(entry_index) => {
+                let existing = &entries[entry_index];
+                if existing.proforma != proforma
+                    || existing.precursor_charge != precursor_charge
+                    || existing.precursor_neutral_mass != precursor_neutral_mass
+                {
+                    return Err(ParquetError::General(format!(
+                        "spectral-library entry `{id}` has inconsistent precursor metadata"
+                    )));
+                }
+                entry_index
+            }
+            None => {
+                let entry_index = entries.len();
+                entry_indices.insert(id.clone(), entry_index);
+                entries.push(DdaLibraryEntry {
+                    library_entry_id: id,
+                    source_file,
+                    source_spectrum,
+                    proforma,
+                    stripped_peptide,
+                    proteins,
+                    precursor_charge,
+                    precursor_neutral_mass,
+                    precursor_mz,
+                    retention_time_minutes,
+                    ion_mobility,
+                    source_spectrum_q,
+                    is_decoy: false,
+                    fragments: Vec::new(),
+                });
+                entry_index
+            }
+        };
+
+        let fragment_charge = charge(
+            required(&row, "fragment_charge", row_number)?,
+            "fragment_charge",
+            row_number,
+        )?;
+        entries[entry_index].fragments.push(LibraryFragment {
+            kind: fragment_kind(required(&row, "fragment_type", row_number)?, row_number)?,
+            ordinal: i32::try_from(integer(
+                required(&row, "fragment_ordinal", row_number)?,
+                "fragment_ordinal",
+                row_number,
+            )?)
+            .map_err(|_| {
+                ParquetError::General(format!(
+                    "spectral-library row {row_number} has out-of-range `fragment_ordinal`"
+                ))
+            })?,
+            charge: i32::from(fragment_charge),
+            neutral_loss: float(
+                required(&row, "neutral_loss", row_number)?,
+                "neutral_loss",
+                row_number,
+            )?,
+            mz: float(
+                required(&row, "fragment_mz", row_number)?,
+                "fragment_mz",
+                row_number,
+            )?,
+            relative_intensity: float(
+                required(&row, "relative_intensity", row_number)?,
+                "relative_intensity",
+                row_number,
+            )?,
+        });
+    }
+
+    DdaLibraryIndex::new(entries)
+        .map(|index| index.entries().to_vec())
+        .map_err(ParquetError::General)
+}
+
+/// Serialize one long-form row per selected transition in the empirical library.
+pub fn serialize_spectral_library(
+    entries: &[SpectralLibraryEntry],
+    settings: &SpectralLibrarySettings,
+) -> parquet::errors::Result<Vec<u8>> {
+    let schema = build_spectral_library_schema()?;
+    let options = WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("spectral_library".into())),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.spectral_library.strategy".into(),
+                Some("best_psm".into()),
+            ),
+            KeyValue::new(
+                "sage.spectral_library.psm_q_max".into(),
+                Some(settings.psm_q_value.to_string()),
+            ),
+            KeyValue::new(
+                "sage.spectral_library.peptide_q_max".into(),
+                Some(settings.peptide_q_value.to_string()),
+            ),
+        ]))
+        .build();
+    let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
+    let rows = entries
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .fragments
+                .iter()
+                .map(move |fragment| (entry, fragment))
+        })
+        .collect::<Vec<_>>();
+
+    for rows in rows.chunks(65_536) {
+        let mut rg = writer.next_row_group()?;
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.library_entry_id.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.source_psm_id as i64)
+                .collect::<Vec<_>>(),
+            Int64Type
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.source_file.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.source_spectrum.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.modified_peptide.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.proforma.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.stripped_peptide.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.proteins.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| i32::from(entry.precursor_charge))
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.precursor_neutral_mass)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.precursor_mz)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.retention_time_minutes)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.aligned_retention_time_minutes)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.ion_mobility)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.spectrum_q)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.peptide_q)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(entry, _)| entry.supporting_psms as i32)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| match fragment.kind {
+                    Kind::A => "a".into(),
+                    Kind::B => "b".into(),
+                    Kind::C => "c".into(),
+                    Kind::X => "x".into(),
+                    Kind::Y => "y".into(),
+                    Kind::Z => "z".into(),
+                })
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| fragment.ordinal)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| fragment.charge)
+                .collect::<Vec<_>>(),
+            Int32Type
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| fragment.neutral_loss)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| fragment.mz)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            rows.iter()
+                .map(|(_, fragment)| fragment.relative_intensity)
+                .collect::<Vec<_>>(),
+            FloatType
+        );
+        rg.close()?;
+    }
+    writer.into_inner().map(|bytes| bytes.to_vec())
 }
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
@@ -1283,7 +1750,11 @@ mod ptm_tests {
     use super::*;
     use parquet::file::reader::{FileReader, SerializedFileReader};
     use sage_core::database::PeptideIx;
+    use sage_core::ion_series::Kind;
     use sage_core::peptide::Peptide;
+    use sage_core::spectral_library::{
+        LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings,
+    };
     use std::sync::Arc;
 
     #[test]
@@ -1335,6 +1806,88 @@ mod ptm_tests {
         assert_eq!(values(&rows[0])["ms2_confirmed"], &Field::Bool(true));
         assert_eq!(values(&rows[1])["intensity"], &Field::Null);
         assert_eq!(values(&rows[1])["ms2_confirmed"], &Field::Bool(false));
+        Ok(())
+    }
+
+    #[test]
+    fn spectral_library_has_versioned_long_form_rows() -> parquet::errors::Result<()> {
+        let entry = SpectralLibraryEntry {
+            library_entry_id: "PEPTIDE/2".into(),
+            source_psm_id: 42,
+            source_file: "sample.mzML".into(),
+            source_spectrum: "scan=42".into(),
+            modified_peptide: "PEPTIDE".into(),
+            proforma: "PEPTIDE".into(),
+            stripped_peptide: "PEPTIDE".into(),
+            proteins: "P12345".into(),
+            precursor_charge: 2,
+            precursor_neutral_mass: 798.3854,
+            precursor_mz: 400.2,
+            retention_time_minutes: 12.5,
+            aligned_retention_time_minutes: 11.8,
+            ion_mobility: 1.1,
+            spectrum_q: 0.001,
+            peptide_q: 0.002,
+            supporting_psms: 3,
+            fragments: vec![
+                LibraryFragment {
+                    kind: Kind::B,
+                    ordinal: 2,
+                    charge: 1,
+                    neutral_loss: 0.0,
+                    mz: 200.1,
+                    relative_intensity: 0.5,
+                },
+                LibraryFragment {
+                    kind: Kind::Y,
+                    ordinal: 4,
+                    charge: 2,
+                    neutral_loss: 18.010_565,
+                    mz: 350.2,
+                    relative_intensity: 1.0,
+                },
+            ],
+        };
+        let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
+        let search_entries = deserialize_spectral_library(bytes.clone())?;
+        assert_eq!(search_entries.len(), 1);
+        assert_eq!(search_entries[0].library_entry_id, "PEPTIDE/2");
+        assert_eq!(search_entries[0].source_file, "sample.mzML");
+        assert_eq!(search_entries[0].source_spectrum, "scan=42");
+        assert_eq!(search_entries[0].fragments.len(), 2);
+        assert!(!search_entries[0].is_decoy);
+
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        assert_eq!(reader.metadata().file_metadata().num_rows(), 2);
+        assert_eq!(
+            reader
+                .metadata()
+                .file_metadata()
+                .schema_descr()
+                .num_columns(),
+            23
+        );
+        let metadata = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .expect("spectral-library schema metadata");
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.name" && entry.value.as_deref() == Some("spectral_library")
+        }));
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
+        }));
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let first = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.as_str(), field))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(first["library_entry_id"], &Field::Str("PEPTIDE/2".into()));
+        assert_eq!(first["fragment_type"], &Field::Str("b".into()));
+        assert_eq!(first["relative_intensity"], &Field::Float(0.5));
         Ok(())
     }
 

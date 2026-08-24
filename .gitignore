@@ -8,6 +8,7 @@ data/
 *.tsv
 *.gz
 *.json
+!tests/config_spectral_library.json
 *.ms2
 *.fasta
 *.fas

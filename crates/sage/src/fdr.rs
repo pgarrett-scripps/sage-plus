@@ -125,9 +125,20 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     for feat in features.iter() {
         let peptide = &db[feat.peptide_idx];
         // Only reverse the peptide sequence if we generated decoys ourselves
-        let key = match db.generate_decoys && peptide.decoy {
-            true => peptide.reverse().to_string(),
-            false => peptide.to_string(),
+        let key = if peptide.decoy {
+            db.decoy_pairing
+                .get(feat.peptide_idx.0 as usize)
+                .and_then(|paired| db.peptides.get(paired.0 as usize))
+                .map(ToString::to_string)
+                .unwrap_or_else(|| {
+                    if db.generate_decoys {
+                        peptide.reverse().to_string()
+                    } else {
+                        peptide.to_string()
+                    }
+                })
+        } else {
+            peptide.to_string()
         };
 
         let entry = map.entry(key).or_default();
