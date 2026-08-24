@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Consensus spectral-library generation with median RT, mobility, and normalized fragment intensities.
+- Regularized library-search rescoring using spectral, mass-error, isotope, RT, and mobility evidence.
+
 ## [v0.16.0-beta.1]
 ### Added
 - Additive protein-specific cleavage-site TSV or Parquet input with optional FASTA sequence-context validation.

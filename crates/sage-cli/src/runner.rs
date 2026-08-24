@@ -162,6 +162,8 @@ pub struct ModelRunStats {
     /// Library-reference ion-mobility alignment, separate from sequence models.
     pub library_ion_mobility_alignment: Option<String>,
     pub library_ion_mobility_files_aligned: usize,
+    /// Final scoring model used for library-search PSMs.
+    pub library_rescoring: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -1122,14 +1124,14 @@ impl Runner {
 
         let annotate_matches = self.parameters.annotate_matches;
         let localize = self.parameters.ptm_localization.enabled;
-        let library_selections = spectral_library::select_best_psms(
+        let library_selections = spectral_library::select_psms(
             features,
             &self.database,
             &self.parameters.spectral_library,
         );
         let library_annotation_indices = library_selections
             .iter()
-            .map(|selection| selection.feature_index)
+            .flat_map(|selection| selection.feature_indices.iter().copied())
             .collect::<HashSet<_>>();
         let annotate_fragments = annotate_matches || !library_annotation_indices.is_empty();
         if !annotate_fragments && !localize {
@@ -1684,6 +1686,7 @@ impl Runner {
             let bytes = spectral_library::serialize_mzspeclib(
                 &library_entries,
                 self.parameters.version.as_str(),
+                self.parameters.spectral_library.strategy,
             );
             let path = self.make_path("spectral_library.mzspeclib.txt");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -1767,7 +1770,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 5,
+            schema_version: 6,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1847,6 +1850,7 @@ impl Runner {
                 transitions: library_transitions,
                 strategy: match self.parameters.spectral_library.strategy {
                     SpectralLibraryStrategy::BestPsm => "best_psm".into(),
+                    SpectralLibraryStrategy::Consensus => "consensus".into(),
                 },
                 psm_q_value: self.parameters.spectral_library.psm_q_value,
                 peptide_q_value: self.parameters.spectral_library.peptide_q_value,
@@ -3029,6 +3033,7 @@ mod tests {
         assert_eq!(summary.models.library_retention_time_files_aligned, 0);
         assert_eq!(summary.models.library_ion_mobility_alignment, None);
         assert_eq!(summary.models.library_ion_mobility_files_aligned, 0);
+        assert_eq!(summary.models.library_rescoring, None);
         assert_eq!(summary.quantification.lfq_features, 0);
     }
 }

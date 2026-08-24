@@ -31,7 +31,9 @@ use sage_core::ion_series::Kind;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::ptm_library::{PtmLibrary, PtmLibrarySite};
 use sage_core::scoring::Feature;
-use sage_core::spectral_library::{LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings};
+use sage_core::spectral_library::{
+    LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings, SpectralLibraryStrategy,
+};
 use sage_core::spectral_library_search::{DdaLibraryEntry, DdaLibraryIndex};
 use sage_core::tmt::TmtQuant;
 
@@ -1345,7 +1347,13 @@ pub fn serialize_spectral_library(
             KeyValue::new("sage.schema.version".into(), Some("1".into())),
             KeyValue::new(
                 "sage.spectral_library.strategy".into(),
-                Some("best_psm".into()),
+                Some(
+                    match settings.strategy {
+                        SpectralLibraryStrategy::BestPsm => "best_psm",
+                        SpectralLibraryStrategy::Consensus => "consensus",
+                    }
+                    .into(),
+                ),
             ),
             KeyValue::new(
                 "sage.spectral_library.psm_q_max".into(),
@@ -1354,6 +1362,14 @@ pub fn serialize_spectral_library(
             KeyValue::new(
                 "sage.spectral_library.peptide_q_max".into(),
                 Some(settings.peptide_q_value.to_string()),
+            ),
+            KeyValue::new(
+                "sage.spectral_library.min_consensus_psms".into(),
+                Some(settings.min_consensus_psms.to_string()),
+            ),
+            KeyValue::new(
+                "sage.spectral_library.min_fragment_frequency".into(),
+                Some(settings.min_fragment_frequency.to_string()),
             ),
         ]))
         .build();
@@ -1848,7 +1864,11 @@ mod ptm_tests {
                 },
             ],
         };
-        let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
+        let settings = SpectralLibrarySettings {
+            strategy: SpectralLibraryStrategy::Consensus,
+            ..SpectralLibrarySettings::default()
+        };
+        let bytes = serialize_spectral_library(&[entry], &settings)?;
         let search_entries = deserialize_spectral_library(bytes.clone())?;
         assert_eq!(search_entries.len(), 1);
         assert_eq!(search_entries[0].library_entry_id, "PEPTIDE/2");
@@ -1874,6 +1894,10 @@ mod ptm_tests {
             .expect("spectral-library schema metadata");
         assert!(metadata.iter().any(|entry| {
             entry.key == "sage.schema.name" && entry.value.as_deref() == Some("spectral_library")
+        }));
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.spectral_library.strategy"
+                && entry.value.as_deref() == Some("consensus")
         }));
         assert!(metadata.iter().any(|entry| {
             entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")

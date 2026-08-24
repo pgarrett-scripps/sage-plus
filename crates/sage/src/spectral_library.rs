@@ -22,6 +22,7 @@ pub enum SpectralLibraryFormat {
 pub enum SpectralLibraryStrategy {
     #[default]
     BestPsm,
+    Consensus,
 }
 
 fn default_psm_q_value() -> f32 {
@@ -44,6 +45,14 @@ fn default_min_relative_intensity() -> f32 {
     0.01
 }
 
+fn default_min_consensus_psms() -> usize {
+    1
+}
+
+fn default_min_fragment_frequency() -> f32 {
+    0.5
+}
+
 fn default_formats() -> Vec<SpectralLibraryFormat> {
     vec![
         SpectralLibraryFormat::SageParquet,
@@ -62,6 +71,8 @@ pub struct SpectralLibrarySettings {
     pub min_matched_peaks: u32,
     pub max_fragments: usize,
     pub min_relative_intensity: f32,
+    pub min_consensus_psms: usize,
+    pub min_fragment_frequency: f32,
     pub include_chimeric: bool,
     pub formats: Vec<SpectralLibraryFormat>,
 }
@@ -76,6 +87,8 @@ impl Default for SpectralLibrarySettings {
             min_matched_peaks: default_min_matched_peaks(),
             max_fragments: default_max_fragments(),
             min_relative_intensity: default_min_relative_intensity(),
+            min_consensus_psms: default_min_consensus_psms(),
+            min_fragment_frequency: default_min_fragment_frequency(),
             include_chimeric: false,
             formats: default_formats(),
         }
@@ -101,6 +114,18 @@ impl SpectralLibrarySettings {
         {
             return Err("spectral_library.min_relative_intensity must be between 0 and 1".into());
         }
+        if self.min_consensus_psms == 0 {
+            return Err("spectral_library.min_consensus_psms must be greater than zero".into());
+        }
+        if !self.min_fragment_frequency.is_finite()
+            || !(0.0..=1.0).contains(&self.min_fragment_frequency)
+            || self.min_fragment_frequency == 0.0
+        {
+            return Err(
+                "spectral_library.min_fragment_frequency must be greater than zero and at most one"
+                    .into(),
+            );
+        }
         if self.enabled && self.formats.is_empty() {
             return Err("spectral_library.formats must not be empty when enabled".into());
         }
@@ -116,10 +141,11 @@ impl SpectralLibrarySettings {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LibrarySelection {
     pub feature_index: usize,
     pub supporting_psms: usize,
+    pub feature_indices: Vec<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -208,8 +234,8 @@ fn better_candidate(candidate: &Feature, incumbent: &Feature) -> bool {
         .is_lt()
 }
 
-/// Select one deterministic best PSM for each exact peptidoform and charge.
-pub fn select_best_psms(
+/// Select deterministic supporting PSMs for each exact peptidoform and charge.
+pub fn select_psms(
     features: &[Feature],
     database: &IndexedDatabase,
     settings: &SpectralLibrarySettings,
@@ -218,27 +244,45 @@ pub fn select_best_psms(
         return Vec::new();
     }
 
-    let mut groups: HashMap<(PeptideIx, u8), (usize, usize)> = HashMap::new();
+    let mut groups: HashMap<(PeptideIx, u8), Vec<usize>> = HashMap::new();
     for (feature_index, feature) in features.iter().enumerate() {
         if !eligible(feature, settings) {
             continue;
         }
         groups
             .entry((feature.peptide_idx, feature.charge))
-            .and_modify(|(best_index, count)| {
-                *count += 1;
-                if better_candidate(feature, &features[*best_index]) {
-                    *best_index = feature_index;
-                }
-            })
-            .or_insert((feature_index, 1));
+            .or_default()
+            .push(feature_index);
     }
 
     let mut selected = groups
         .into_values()
-        .map(|(feature_index, supporting_psms)| LibrarySelection {
-            feature_index,
-            supporting_psms,
+        .filter(|feature_indices| {
+            settings.strategy == SpectralLibraryStrategy::BestPsm
+                || feature_indices.len() >= settings.min_consensus_psms
+        })
+        .map(|feature_indices| {
+            let feature_index = feature_indices
+                .iter()
+                .copied()
+                .reduce(|best, candidate| {
+                    if better_candidate(&features[candidate], &features[best]) {
+                        candidate
+                    } else {
+                        best
+                    }
+                })
+                .expect("library PSM group is not empty");
+            let supporting_psms = feature_indices.len();
+            let feature_indices = match settings.strategy {
+                SpectralLibraryStrategy::BestPsm => vec![feature_index],
+                SpectralLibraryStrategy::Consensus => feature_indices,
+            };
+            LibrarySelection {
+                feature_index,
+                supporting_psms,
+                feature_indices,
+            }
         })
         .collect::<Vec<_>>();
     selected.sort_unstable_by(|a, b| {
@@ -251,6 +295,15 @@ pub fn select_best_psms(
             .then_with(|| left.psm_id.cmp(&right.psm_id))
     });
     selected
+}
+
+/// Compatibility wrapper for callers that previously selected best PSMs directly.
+pub fn select_best_psms(
+    features: &[Feature],
+    database: &IndexedDatabase,
+    settings: &SpectralLibrarySettings,
+) -> Vec<LibrarySelection> {
+    select_psms(features, database, settings)
 }
 
 /// Render an unambiguous mass-delta ProForma peptidoform.
@@ -272,6 +325,131 @@ pub fn mass_delta_proforma(peptide: &Peptide) -> String {
     output
 }
 
+fn median(mut values: Vec<f32>) -> Option<f32> {
+    values.retain(|value| value.is_finite());
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_unstable_by(f32::total_cmp);
+    let middle = values.len() / 2;
+    if values.len().is_multiple_of(2) {
+        Some((values[middle - 1] + values[middle]) / 2.0)
+    } else {
+        Some(values[middle])
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct FragmentKey {
+    kind: Kind,
+    ordinal: i32,
+    charge: i32,
+    neutral_loss_bits: u32,
+}
+
+fn build_consensus_fragments(
+    features: &[&Feature],
+    settings: &SpectralLibrarySettings,
+) -> Result<Vec<LibraryFragment>, String> {
+    let mut fragments_by_key = HashMap::<FragmentKey, (f32, Vec<f32>)>::new();
+    for feature in features {
+        let fragments = feature.fragments.as_ref().ok_or_else(|| {
+            format!(
+                "PSM {} was selected for the spectral library but was not annotated",
+                feature.psm_id
+            )
+        })?;
+        let lengths = [
+            fragments.kinds.len(),
+            fragments.fragment_ordinals.len(),
+            fragments.charges.len(),
+            fragments.neutral_losses.len(),
+            fragments.mz_calculated.len(),
+            fragments.intensities.len(),
+        ];
+        if lengths.iter().any(|length| *length != lengths[0]) {
+            return Err(format!(
+                "PSM {} has inconsistent fragment annotation lengths",
+                feature.psm_id
+            ));
+        }
+        let max_intensity = fragments
+            .intensities
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .max_by(f32::total_cmp)
+            .ok_or_else(|| format!("PSM {} has no positive fragment intensity", feature.psm_id))?;
+        let mut spectrum_fragments = HashMap::<FragmentKey, (f32, f32)>::new();
+        for index in 0..lengths[0] {
+            let intensity = fragments.intensities[index];
+            if !intensity.is_finite() || intensity <= 0.0 {
+                continue;
+            }
+            let key = FragmentKey {
+                kind: fragments.kinds[index],
+                ordinal: fragments.fragment_ordinals[index],
+                charge: fragments.charges[index],
+                neutral_loss_bits: fragments.neutral_losses[index].to_bits(),
+            };
+            let candidate = (fragments.mz_calculated[index], intensity / max_intensity);
+            spectrum_fragments
+                .entry(key)
+                .and_modify(|current| {
+                    if candidate.1 > current.1 {
+                        *current = candidate;
+                    }
+                })
+                .or_insert(candidate);
+        }
+        for (key, (mz, intensity)) in spectrum_fragments {
+            fragments_by_key
+                .entry(key)
+                .or_insert_with(|| (mz, Vec::new()))
+                .1
+                .push(intensity);
+        }
+    }
+
+    let support = features.len() as f32;
+    let mut fragments = fragments_by_key
+        .into_iter()
+        .filter_map(|(key, (mz, intensities))| {
+            let frequency = intensities.len() as f32 / support;
+            (frequency >= settings.min_fragment_frequency).then(|| LibraryFragment {
+                kind: key.kind,
+                ordinal: key.ordinal,
+                charge: key.charge,
+                neutral_loss: f32::from_bits(key.neutral_loss_bits),
+                mz,
+                relative_intensity: median(intensities).unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let max_intensity = fragments
+        .iter()
+        .map(|fragment| fragment.relative_intensity)
+        .max_by(f32::total_cmp)
+        .unwrap_or_default();
+    if max_intensity <= 0.0 {
+        return Ok(Vec::new());
+    }
+    fragments.iter_mut().for_each(|fragment| {
+        fragment.relative_intensity /= max_intensity;
+    });
+    fragments.retain(|fragment| fragment.relative_intensity >= settings.min_relative_intensity);
+    fragments.sort_unstable_by(|a, b| {
+        b.relative_intensity
+            .total_cmp(&a.relative_intensity)
+            .then_with(|| a.mz.total_cmp(&b.mz))
+            .then_with(|| a.ordinal.cmp(&b.ordinal))
+            .then_with(|| a.charge.cmp(&b.charge))
+    });
+    fragments.truncate(settings.max_fragments);
+    fragments.sort_unstable_by(|a, b| a.mz.total_cmp(&b.mz));
+    Ok(fragments)
+}
+
 pub fn build_entries(
     features: &[Feature],
     database: &IndexedDatabase,
@@ -291,69 +469,51 @@ pub fn build_entries(
             .get(feature.file_id)
             .ok_or_else(|| format!("missing source filename for file {}", feature.file_id))?;
         let peptide = &database[feature.peptide_idx];
-        let fragments = feature.fragments.as_ref().ok_or_else(|| {
-            format!(
-                "PSM {} was selected for the spectral library but was not annotated",
-                feature.psm_id
-            )
-        })?;
-        let max_intensity = fragments
-            .intensities
+        let supporting_features = selection
+            .feature_indices
             .iter()
-            .copied()
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .max_by(f32::total_cmp)
-            .ok_or_else(|| format!("PSM {} has no positive fragment intensity", feature.psm_id))?;
-
-        let lengths = [
-            fragments.kinds.len(),
-            fragments.fragment_ordinals.len(),
-            fragments.charges.len(),
-            fragments.neutral_losses.len(),
-            fragments.mz_calculated.len(),
-            fragments.intensities.len(),
-        ];
-        if lengths.iter().any(|length| *length != lengths[0]) {
-            return Err(format!(
-                "PSM {} has inconsistent fragment annotation lengths",
-                feature.psm_id
-            ));
-        }
-
-        let mut selected_fragments = (0..lengths[0])
-            .filter_map(|index| {
-                let intensity = fragments.intensities[index];
-                let relative_intensity = intensity / max_intensity;
-                (intensity.is_finite() && relative_intensity >= settings.min_relative_intensity)
-                    .then_some(LibraryFragment {
-                        kind: fragments.kinds[index],
-                        ordinal: fragments.fragment_ordinals[index],
-                        charge: fragments.charges[index],
-                        neutral_loss: fragments.neutral_losses[index],
-                        mz: fragments.mz_calculated[index],
-                        relative_intensity,
-                    })
+            .map(|index| {
+                features.get(*index).ok_or_else(|| {
+                    format!("spectral-library selection references missing feature {index}")
+                })
             })
-            .collect::<Vec<_>>();
-        selected_fragments.sort_unstable_by(|a, b| {
-            b.relative_intensity
-                .total_cmp(&a.relative_intensity)
-                .then_with(|| a.mz.total_cmp(&b.mz))
-                .then_with(|| a.ordinal.cmp(&b.ordinal))
-                .then_with(|| a.charge.cmp(&b.charge))
-        });
-        selected_fragments.truncate(settings.max_fragments);
-        selected_fragments.sort_unstable_by(|a, b| a.mz.total_cmp(&b.mz));
+            .collect::<Result<Vec<_>, _>>()?;
+        let selected_fragments = build_consensus_fragments(&supporting_features, settings)?;
         if selected_fragments.is_empty() {
             continue;
         }
 
         let proforma = mass_delta_proforma(peptide);
-        let aligned_rt = if feature.aligned_rt.is_finite() && feature.aligned_rt > 0.0 {
-            feature.aligned_rt
-        } else {
-            feature.rt
-        };
+        let retention_time_minutes = median(
+            supporting_features
+                .iter()
+                .map(|feature| feature.rt)
+                .filter(|rt| *rt > 0.0)
+                .collect(),
+        )
+        .unwrap_or(feature.rt);
+        let aligned_retention_time_minutes = median(
+            supporting_features
+                .iter()
+                .map(|feature| {
+                    if feature.aligned_rt.is_finite() && feature.aligned_rt > 0.0 {
+                        feature.aligned_rt
+                    } else {
+                        feature.rt
+                    }
+                })
+                .filter(|rt| *rt > 0.0)
+                .collect(),
+        )
+        .unwrap_or(retention_time_minutes);
+        let ion_mobility = median(
+            supporting_features
+                .iter()
+                .map(|feature| feature.ims)
+                .filter(|mobility| *mobility > 0.0)
+                .collect(),
+        )
+        .unwrap_or_default();
         entries.push(SpectralLibraryEntry {
             library_entry_id: format!("{proforma}/{}", feature.charge),
             source_psm_id: feature.psm_id,
@@ -366,9 +526,9 @@ pub fn build_entries(
             precursor_charge: feature.charge,
             precursor_neutral_mass: feature.calcmass,
             precursor_mz: feature.calcmass / feature.charge as f32 + PROTON,
-            retention_time_minutes: feature.rt,
-            aligned_retention_time_minutes: aligned_rt,
-            ion_mobility: feature.ims,
+            retention_time_minutes,
+            aligned_retention_time_minutes,
+            ion_mobility,
             spectrum_q: feature.spectrum_q,
             peptide_q: feature.peptide_q,
             supporting_psms: selection.supporting_psms,
@@ -378,9 +538,17 @@ pub fn build_entries(
     Ok(entries)
 }
 
-/// Serialize the empirical singleton entries using mzSpecLib 1.0 text syntax.
-pub fn serialize_mzspeclib(entries: &[SpectralLibraryEntry], sage_version: &str) -> Vec<u8> {
+/// Serialize empirical entries using mzSpecLib 1.0 text syntax.
+pub fn serialize_mzspeclib(
+    entries: &[SpectralLibraryEntry],
+    sage_version: &str,
+    strategy: SpectralLibraryStrategy,
+) -> Vec<u8> {
     let mut output = String::new();
+    let (description, strategy_name) = match strategy {
+        SpectralLibraryStrategy::BestPsm => ("Best-PSM", "best_psm"),
+        SpectralLibraryStrategy::Consensus => ("Consensus", "consensus"),
+    };
     writeln!(output, "<mzSpecLib>").unwrap();
     writeln!(output, "MS:1003186|library format version=1.0").unwrap();
     writeln!(output, "MS:1003190|library version={sage_version}").unwrap();
@@ -396,12 +564,12 @@ pub fn serialize_mzspeclib(entries: &[SpectralLibraryEntry], sage_version: &str)
     .unwrap();
     writeln!(
         output,
-        "MS:1003189|library description=Best-PSM empirical library generated by Sage Plus"
+        "MS:1003189|library description={description} empirical library generated by Sage Plus"
     )
     .unwrap();
     writeln!(
         output,
-        "MS:1003206|library creation log=Sage Plus {sage_version}; strategy=best_psm"
+        "MS:1003206|library creation log=Sage Plus {sage_version}, strategy={strategy_name}"
     )
     .unwrap();
 
@@ -415,10 +583,16 @@ pub fn serialize_mzspeclib(entries: &[SpectralLibraryEntry], sage_version: &str)
         )
         .unwrap();
         writeln!(output, "MS:1000511|ms level=2").unwrap();
-        writeln!(
-            output,
-            "MS:1003065|spectrum aggregation type=MS:1003066|singleton spectrum"
-        )
+        match strategy {
+            SpectralLibraryStrategy::BestPsm => writeln!(
+                output,
+                "MS:1003065|spectrum aggregation type=MS:1003066|singleton spectrum"
+            ),
+            SpectralLibraryStrategy::Consensus => writeln!(
+                output,
+                "MS:1003065|spectrum aggregation type=MS:1003067|consensus spectrum"
+            ),
+        }
         .unwrap();
         writeln!(
             output,
@@ -577,6 +751,7 @@ mod tests {
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].feature_index, 2);
         assert_eq!(selected[0].supporting_psms, 3);
+        assert_eq!(selected[0].feature_indices, vec![2]);
     }
 
     #[test]
@@ -603,11 +778,71 @@ mod tests {
         assert_eq!(entries[0].fragments[1].relative_intensity, 1.0);
         assert_eq!(entries[0].fragments[1].annotation(), "y3-H2O");
 
-        let text = String::from_utf8(serialize_mzspeclib(&entries, "0.16.0-beta.1")).unwrap();
+        let text = String::from_utf8(serialize_mzspeclib(
+            &entries,
+            "0.16.0-beta.1",
+            SpectralLibraryStrategy::BestPsm,
+        ))
+        .unwrap();
         assert!(text.starts_with("<mzSpecLib>\n"));
         assert!(text.contains("<Spectrum=1>"));
         assert!(text.contains("MS:1003270|proforma peptidoform ion notation=PEPTIDE/2"));
         assert!(text.contains("300.000000\t10000.000000\ty3-H2O"));
+    }
+
+    #[test]
+    fn consensus_uses_median_properties_and_reproducible_fragments() {
+        let database = database();
+        let settings = SpectralLibrarySettings {
+            enabled: true,
+            strategy: SpectralLibraryStrategy::Consensus,
+            min_fragment_frequency: 0.66,
+            ..Default::default()
+        };
+        let mut features = vec![
+            feature(0, 1, 0.001, 8.0),
+            feature(0, 2, 0.002, 7.0),
+            feature(0, 3, 0.003, 6.0),
+        ];
+        features[0].rt = 10.0;
+        features[0].aligned_rt = 9.0;
+        features[0].ims = 1.0;
+        features[0].fragments.as_mut().unwrap().intensities = vec![25.0, 100.0, 0.0];
+        features[1].rt = 12.0;
+        features[1].aligned_rt = 11.0;
+        features[1].ims = 1.2;
+        features[1].fragments.as_mut().unwrap().intensities = vec![50.0, 100.0, 0.0];
+        features[2].rt = 30.0;
+        features[2].aligned_rt = 25.0;
+        features[2].ims = 1.4;
+        features[2].fragments.as_mut().unwrap().intensities = vec![75.0, 0.0, 100.0];
+
+        let selected = select_psms(&features, &database, &settings);
+        assert_eq!(selected[0].feature_indices, vec![0, 1, 2]);
+        let entries = build_entries(
+            &features,
+            &database,
+            &["one.mzML".into()],
+            &selected,
+            &settings,
+        )
+        .unwrap();
+        assert_eq!(entries[0].supporting_psms, 3);
+        assert_eq!(entries[0].retention_time_minutes, 12.0);
+        assert_eq!(entries[0].aligned_retention_time_minutes, 11.0);
+        assert_eq!(entries[0].ion_mobility, 1.2);
+        assert_eq!(entries[0].fragments.len(), 2);
+        assert_eq!(entries[0].fragments[0].relative_intensity, 0.5);
+        assert_eq!(entries[0].fragments[1].relative_intensity, 1.0);
+
+        let text = String::from_utf8(serialize_mzspeclib(
+            &entries,
+            "0.16.0-beta.1",
+            SpectralLibraryStrategy::Consensus,
+        ))
+        .unwrap();
+        assert!(text.contains("MS:1003067|consensus spectrum"));
+        assert!(text.contains("strategy=consensus"));
     }
 
     #[test]
@@ -619,6 +854,9 @@ mod tests {
         settings.max_fragments = 0;
         assert!(settings.validate().is_err());
         settings.max_fragments = 10;
+        settings.min_fragment_frequency = 0.0;
+        assert!(settings.validate().is_err());
+        settings.min_fragment_frequency = 0.5;
         settings.formats.push(SpectralLibraryFormat::MzSpecLib);
         assert!(settings.validate().is_err());
     }

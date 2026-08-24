@@ -25,7 +25,10 @@ For every target, Sage Plus generates a deterministic composition-preserving shu
 precursor mass, charge, terminal modifications, protein pairing, and intensity vector are retained;
 fragment m/z values are recalculated after moving residue/modification tokens. Several shuffles are
 evaluated and the candidate with the lowest target-fragment overlap is selected. Targets and decoys
-then use the same precursor filtering and spectral-angle scorer.
+then use the same precursor filtering and initial spectral-angle scorer. Final q-values use a
+regularized target-decoy model over spectral angle, explained intensity, calibrated mass errors,
+isotope error, and aligned retention-time and mobility residuals. Searches with fewer than 20
+targets or decoys retain spectral-angle scoring and emit `library_rescoring_fallback`.
 
 The mode writes the normal `results.sage.parquet`, `results.json`, and `run-summary.json` outputs.
 Spectrum, peptide, protein, and protein-group q-values are calculated within the library-search
