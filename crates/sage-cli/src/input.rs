@@ -634,7 +634,9 @@ mod test {
         enzyme::EnzymeParameters,
         ml::retention_alignment::AlignmentMethod,
         ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
-        spectral_library::{SpectralLibraryFormat, SpectralLibrarySettings},
+        spectral_library::{
+            SpectralLibraryFormat, SpectralLibrarySettings, SpectralLibraryStrategy,
+        },
     };
 
     #[test]
@@ -680,13 +682,19 @@ mod test {
     fn deserialize_spectral_library_settings() -> Result<(), serde_json::Error> {
         let configured: SpectralLibrarySettings = serde_json::from_value(serde_json::json!({
             "enabled": true,
+            "strategy": "consensus",
             "max_fragments": 12,
+            "min_consensus_psms": 2,
+            "min_fragment_frequency": 0.6,
             "formats": ["sage_parquet", "mzspeclib"]
         }))?;
         assert!(configured.enabled);
         assert_eq!(configured.psm_q_value, 0.01);
         assert_eq!(configured.peptide_q_value, 0.01);
+        assert_eq!(configured.strategy, SpectralLibraryStrategy::Consensus);
         assert_eq!(configured.max_fragments, 12);
+        assert_eq!(configured.min_consensus_psms, 2);
+        assert_eq!(configured.min_fragment_frequency, 0.6);
         assert_eq!(
             configured.formats,
             vec![

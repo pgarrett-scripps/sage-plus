@@ -629,6 +629,8 @@ values or defaults.
   "min_matched_peaks": 6,
   "max_fragments": 20,
   "min_relative_intensity": 0.01,
+  "min_consensus_psms": 1,
+  "min_fragment_frequency": 0.5,
   "include_chimeric": false,
   "formats": ["sage_parquet", "mzspeclib"]
 }
@@ -639,6 +641,12 @@ precursor charge, then chooses one representative deterministically: lowest spec
 lowest peptide q-value, highest discriminant score, highest hyperscore, and finally lowest PSM
 ID. By default, only rank-one PSMs are eligible. `include_chimeric: true` also permits later
 chimera ranks. The PSM and peptide cutoffs are independent of `output_filter.psm_q_value`.
+
+The `consensus` strategy combines every eligible PSM in each peptidoform and charge group.
+Retention time, aligned retention time, ion mobility, and normalized fragment intensities use
+robust medians. `min_consensus_psms` controls the minimum group size. Groups of one remain valid
+by default. `min_fragment_frequency` controls the fraction of supporting spectra in which a
+fragment must appear before it enters the consensus spectrum.
 
 For the selected spectrum, Sage retains matched fragments at or above
 `min_relative_intensity`, keeps at most `max_fragments` by observed intensity, and reports them
@@ -655,11 +663,10 @@ Available formats are:
   theoretical fragment m/z, and relative intensity. Its versioned schema is in
   `schemas/spectral_library.sage.v1.parquet.schema`.
 - `mzspeclib`: `spectral_library.mzspeclib.txt`, a PSI mzSpecLib 1.0 text library containing
-  observed singleton spectra and mzPAF peak annotations.
+  singleton or consensus spectra and mzPAF peak annotations.
 
-This is an empirical export, not a consensus builder: one best observed PSM represents each
-peptidoform/charge pair. It is also distinct from `database.ptm_library`, which restricts which
-protein modification sites are searched and is not a spectral library.
+This empirical export is distinct from `database.ptm_library`, which restricts which protein
+modification sites are searched and is not a spectral library.
 
 - **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.

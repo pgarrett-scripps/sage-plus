@@ -12,7 +12,7 @@ Within a schema major version, fields may be added only when existing readers ca
 
 `results.sage.parquet` and `matched_fragments.sage.parquet` also embed the inclusive output cutoff as `sage.output_filter.spectrum_q_max`. Every fragment row belongs to a PSM retained in `results.sage.parquet` under that cutoff.
 
-The spectral-library table contains one row per selected fragment transition and embeds its
-schema version, selection strategy, PSM q-value cutoff, and peptide q-value cutoff in Parquet
-metadata. `library_entry_id` groups transitions belonging to the same exact peptidoform and
-precursor charge.
+The spectral-library table contains one row per selected fragment transition. Its Parquet metadata
+records the schema version, selection strategy, PSM and peptide q-value cutoffs, minimum consensus
+support, and minimum fragment frequency. `library_entry_id` groups transitions belonging to the
+same exact peptidoform and precursor charge.

@@ -606,9 +606,27 @@ impl Runner {
         outputs.features.par_sort_unstable_by(|left, right| {
             right.discriminant_score.total_cmp(&left.discriminant_score)
         });
-        let q_spectrum = sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+        sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
         let (library_rt_alignments, rt_files_aligned, mobility_files_aligned) =
             self.align_library_properties(&mut outputs.features);
+        let library_rescoring_fitted =
+            sage_core::ml::linear_discriminant::score_library_psms(&mut outputs.features).is_some();
+        if library_rescoring_fitted {
+            self.events.emit(EventKind::LdaScoringCompleted);
+        } else {
+            let message =
+                "insufficient target-decoy evidence for library rescoring, using spectral angle"
+                    .to_string();
+            log::warn!("{message}");
+            self.events.emit(EventKind::Warning {
+                code: "library_rescoring_fallback".into(),
+                message,
+            });
+        }
+        outputs.features.par_sort_unstable_by(|left, right| {
+            right.discriminant_score.total_cmp(&left.discriminant_score)
+        });
+        let q_spectrum = sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
 
         let q_peptide = assign_entity_q_values(
             &mut outputs.features,
@@ -771,7 +789,7 @@ impl Runner {
             .as_ref()
             .map(|settings| settings.path.clone());
         let summary = RunSummary {
-            schema_version: 5,
+            schema_version: 6,
             runtime_secs,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: 0,
@@ -792,6 +810,11 @@ impl Runner {
                 library_ion_mobility_alignment: (mobility_files_aligned > 0)
                     .then(|| "linear".into()),
                 library_ion_mobility_files_aligned: mobility_files_aligned,
+                library_rescoring: Some(if library_rescoring_fitted {
+                    "linear_discriminant".into()
+                } else {
+                    "spectral_angle_fallback".into()
+                }),
                 ..ModelRunStats::default()
             },
             quantification: QuantificationRunStats {

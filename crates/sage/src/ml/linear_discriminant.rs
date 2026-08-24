@@ -65,6 +65,16 @@ impl LinearDiscriminantAnalysis {
         decoy: &[bool],
         feat_fn: impl Fn(&T) -> [f64; D],
     ) -> Option<LinearDiscriminantAnalysis> {
+        Self::train_regularized(items, decoy, feat_fn, 0.0)
+    }
+
+    /// Fit LDA with diagonal regularization for correlated or sparse features.
+    pub fn train_regularized<T, const D: usize>(
+        items: &[T],
+        decoy: &[bool],
+        feat_fn: impl Fn(&T) -> [f64; D],
+        regularization: f64,
+    ) -> Option<LinearDiscriminantAnalysis> {
         assert_eq!(items.len(), decoy.len());
 
         // Pass 1: per-class sums -> per-class means.
@@ -108,6 +118,16 @@ impl LinearDiscriminantAnalysis {
         for c in 0..2 {
             scatter_within += scatter_per_class[c].clone() / class_count[c] as f64;
         }
+        if regularization > 0.0 {
+            let scale = (0..D)
+                .map(|index| scatter_within[(index, index)])
+                .sum::<f64>()
+                / D as f64;
+            let ridge = scale.max(1.0) * regularization;
+            for index in 0..D {
+                scatter_within[(index, index)] += ridge;
+            }
+        }
 
         // For two-class LDA, Sb is rank-1 in the direction of (mu_t - mu_d), so
         // the dominant eigenvector of Sw^-1 Sb is parallel to Sw^-1 (mu_t - mu_d).
@@ -128,6 +148,86 @@ impl LinearDiscriminantAnalysis {
         debug_assert_eq!(row.len(), self.coef.len());
         self.coef.iter().zip(row).map(|(w, x)| w * x).sum()
     }
+}
+
+const LIBRARY_FEATURES: usize = 12;
+
+fn library_feature_row(feature: &Feature) -> [f64; LIBRARY_FEATURES] {
+    let finite = |value: f32| {
+        if value.is_finite() {
+            f64::from(value)
+        } else {
+            0.0
+        }
+    };
+    let positive = |value: f32| finite(value.max(0.0));
+    let rt_available = feature.predicted_rt.is_finite() && feature.predicted_rt > 0.0;
+    let mobility_available = feature.ims.is_finite()
+        && feature.ims > 0.0
+        && feature.predicted_ims.is_finite()
+        && feature.predicted_ims > 0.0;
+    [
+        positive(feature.spectral_angle),
+        positive(feature.delta_next as f32),
+        positive(feature.explained_library_intensity),
+        positive(feature.explained_query_intensity),
+        positive(feature.matched_peaks as f32).ln_1p(),
+        finite(feature.aligned_delta_mass.abs()).ln_1p(),
+        finite(feature.aligned_average_ppm.abs()).ln_1p(),
+        finite(feature.isotope_error.abs()).ln_1p(),
+        if rt_available {
+            positive(feature.delta_rt_model)
+        } else {
+            0.0
+        },
+        if rt_available { 1.0 } else { 0.0 },
+        if mobility_available {
+            positive(feature.delta_ims_model)
+        } else {
+            0.0
+        },
+        if mobility_available { 1.0 } else { 0.0 },
+    ]
+}
+
+/// Rescore library PSMs using library-specific target-decoy evidence.
+pub fn score_library_psms(scores: &mut [Feature]) -> Option<()> {
+    let decoys = scores
+        .iter()
+        .map(|score| score.label == -1)
+        .collect::<Vec<_>>();
+    let decoy_count = decoys.iter().filter(|decoy| **decoy).count();
+    let target_count = decoys.len() - decoy_count;
+    if target_count < 20 || decoy_count < 20 {
+        return None;
+    }
+
+    let lda = LinearDiscriminantAnalysis::train_regularized::<_, LIBRARY_FEATURES>(
+        scores,
+        &decoys,
+        library_feature_row,
+        1e-3,
+    )?;
+    if !lda.coef.iter().all(|coefficient| coefficient.is_finite()) {
+        return None;
+    }
+    log::trace!("library linear model coefficients: {:?}", lda.coef);
+    let discriminants = scores
+        .par_iter()
+        .map(|score| lda.score(&library_feature_row(score)))
+        .collect::<Vec<_>>();
+    let kde = super::kde::Builder::default().build(&discriminants, &decoys);
+    scores
+        .par_iter_mut()
+        .zip(discriminants)
+        .for_each(|(feature, score)| {
+            feature.discriminant_score = score as f32;
+            feature.posterior_error = kde.posterior_error(score).log10() as f32;
+            if feature.posterior_error.is_infinite() {
+                feature.posterior_error = -324.0;
+            }
+        });
+    Some(())
 }
 
 pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()> {
@@ -285,5 +385,52 @@ mod test {
             scores,
             expected
         );
+    }
+
+    #[test]
+    fn library_rescoring_separates_synthetic_targets_and_decoys() {
+        let mut features = (0..80)
+            .map(|index| {
+                let decoy = index >= 40;
+                let variation = (index % 7) as f32 / 100.0;
+                Feature {
+                    label: if decoy { -1 } else { 1 },
+                    spectral_angle: if decoy {
+                        0.25 + variation
+                    } else {
+                        0.80 + variation
+                    },
+                    delta_next: if decoy { 0.02 } else { 0.25 } + f64::from(variation),
+                    explained_library_intensity: if decoy { 0.30 } else { 0.85 },
+                    explained_query_intensity: if decoy { 0.25 } else { 0.80 },
+                    matched_peaks: if decoy { 5 } else { 14 } + index % 3,
+                    aligned_delta_mass: if decoy { 8.0 } else { 0.5 } + variation,
+                    aligned_average_ppm: if decoy { 7.0 } else { 0.7 } + variation,
+                    isotope_error: if decoy { 1.003 } else { 0.0 },
+                    predicted_rt: 0.5,
+                    delta_rt_model: if decoy { 0.35 } else { 0.02 } + variation,
+                    ims: 1.0,
+                    predicted_ims: 1.0,
+                    delta_ims_model: if decoy { 0.25 } else { 0.01 } + variation,
+                    ..Feature::default()
+                }
+            })
+            .collect::<Vec<_>>();
+
+        score_library_psms(&mut features).expect("library model should fit");
+        let target_mean = features[..40]
+            .iter()
+            .map(|feature| feature.discriminant_score)
+            .sum::<f32>()
+            / 40.0;
+        let decoy_mean = features[40..]
+            .iter()
+            .map(|feature| feature.discriminant_score)
+            .sum::<f32>()
+            / 40.0;
+        assert!(target_mean > decoy_mean);
+        assert!(features
+            .iter()
+            .all(|feature| feature.posterior_error.is_finite()));
     }
 }

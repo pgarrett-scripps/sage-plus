@@ -72,6 +72,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     )?)?;
     config["write_pin"] = true.into();
     config["write_report"] = true.into();
+    config["spectral_library"]["strategy"] = "consensus".into();
     std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
 
     let output = Command::new(env!("CARGO_BIN_EXE_sage"))
@@ -96,13 +97,15 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     let text = std::fs::read_to_string(mzspeclib)?;
     assert!(text.contains("<Spectrum=1>"));
     assert!(text.contains("MS:1003270|proforma peptidoform ion notation="));
+    assert!(text.contains("MS:1003067|consensus spectrum"));
 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
-    assert_eq!(summary["schema_version"], 5);
+    assert_eq!(summary["schema_version"], 6);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 20);
+    assert_eq!(summary["spectral_library"]["strategy"], "consensus");
     assert_eq!(
         summary["spectral_library"]["formats"],
         serde_json::json!(["sage_parquet", "mzspeclib"])
@@ -189,10 +192,18 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
     assert_eq!(summary["quantification"]["lfq_enabled"], true);
     assert_eq!(summary["quantification"]["tmt"], "tmt6");
     assert_eq!(summary["quantification"]["tmt_features"], 1);
+    assert_eq!(
+        summary["models"]["library_rescoring"],
+        "spectral_angle_fallback"
+    );
     let events = std::fs::read_to_string(events_path)?;
     assert!(events.lines().any(|line| {
         serde_json::from_str::<serde_json::Value>(line)
             .is_ok_and(|event| event["code"] == "library_source_overlap")
+    }));
+    assert!(events.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .is_ok_and(|event| event["code"] == "library_rescoring_fallback")
     }));
 
     std::fs::remove_dir_all(root)?;
