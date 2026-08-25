@@ -84,7 +84,7 @@ jobs:
         run: cargo llvm-cov report --lcov --output-path coverage/lcov.info
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sage-coverage
           path: coverage
