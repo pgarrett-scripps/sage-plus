@@ -31,8 +31,15 @@ General guidelines before submitting a PR:
 
 - Run `cargo fmt` 
 - Run `cargo test` 
+- Run `cargo llvm-cov --workspace --summary-only` to inspect coverage locally.
+- CI requires at least 80% workspace line coverage and publishes an HTML coverage artifact.
 - If it makes sense to do so, please add additional tests that cover any new features
 - Document code as needed
+
+Keep test implementations outside production source files. Unit tests belong in
+`crates/<crate>/tests/unit/` and are connected to their source module with a
+`#[cfg(test)]` and `#[path = "..."]` declaration. Black-box integration tests
+belong directly in `crates/<crate>/tests/`.
 
 ## Contact
 

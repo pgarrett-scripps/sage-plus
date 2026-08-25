@@ -65,3 +65,27 @@ jobs:
             --disable-telemetry-i-dont-want-to-improve-sage \
             tests/config-cli.json \
             tests/*.mzML
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust 1.97.1 with coverage tools
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Enforce workspace line coverage
+        run: cargo llvm-cov --workspace --locked --html --output-dir coverage --fail-under-lines 80
+      - name: Export LCOV data
+        run: cargo llvm-cov report --lcov --output-path coverage/lcov.info
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sage-coverage
+          path: coverage
+          if-no-files-found: warn
