@@ -8,6 +8,12 @@ The server deliberately separates inspection from execution. `start_search` requ
 outputs are forced into a server-managed job directory. Job manifests and JSONL events are
 persistent and are restored when the server restarts.
 
+Searches run in dedicated worker processes. A worker panic, abort, signal, or memory-limit exit
+is recorded as a job failure without terminating the MCP server. Cancellation first writes a
+cooperative request that the worker observes between Sage stages. If the worker does not stop
+within two seconds, the server forcefully terminates only that worker. Job manifests include the
+worker PID and exit code when one is available.
+
 ## Build
 
 Sage and the official MCP Rust SDK require Rust 1.88 or newer. The repository pins Rust

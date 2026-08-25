@@ -115,6 +115,7 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         )
         .await?;
     assert_eq!(started.is_error, Some(false));
+    assert!(started.structured_content.as_ref().unwrap()["worker_pid"].is_u64());
     let job_id = started.structured_content.as_ref().unwrap()["job_id"]
         .as_str()
         .unwrap()

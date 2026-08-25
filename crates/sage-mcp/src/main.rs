@@ -1,7 +1,15 @@
 use anyhow::{bail, Context};
 use rmcp::{transport::stdio, ServiceExt};
-use sage_mcp::SageMcp;
+use sage_mcp::{run_worker, SageMcp};
 use std::path::PathBuf;
+
+enum Mode {
+    Server {
+        root: PathBuf,
+        jobs_dir: Option<PathBuf>,
+    },
+    Worker(PathBuf),
+}
 
 fn usage() -> &'static str {
     "Usage: sage-mcp [--root PATH] [--jobs-dir PATH]\n\
@@ -11,10 +19,18 @@ fn usage() -> &'static str {
      -V, --version    Print version information"
 }
 
-fn arguments() -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
+fn arguments() -> anyhow::Result<Mode> {
     let mut root = std::env::current_dir()?;
     let mut jobs_dir = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
+    if args.peek().map(String::as_str) == Some("--worker") {
+        args.next();
+        let request = PathBuf::from(args.next().context("--worker requires a request path")?);
+        if let Some(unknown) = args.next() {
+            bail!("unexpected worker argument `{unknown}`");
+        }
+        return Ok(Mode::Worker(request));
+    }
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => {
@@ -36,14 +52,22 @@ fn arguments() -> anyhow::Result<(PathBuf, Option<PathBuf>)> {
             unknown => bail!("unknown argument `{unknown}`\n{}", usage()),
         }
     }
-    Ok((root, jobs_dir))
+    Ok(Mode::Server { root, jobs_dir })
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let (root, jobs_dir) = arguments()?;
-    let server = SageMcp::new(root, jobs_dir)?;
-    let service = server.serve(stdio()).await?;
-    service.waiting().await?;
-    Ok(())
+fn main() -> anyhow::Result<()> {
+    match arguments()? {
+        Mode::Worker(request) => run_worker(&request),
+        Mode::Server { root, jobs_dir } => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(async move {
+                let server = SageMcp::new(root, jobs_dir)?;
+                let shutdown = server.clone();
+                let service = server.serve(stdio()).await?;
+                service.waiting().await?;
+                shutdown.shutdown_workers();
+                Ok(())
+            }),
+    }
 }

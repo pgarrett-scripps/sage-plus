@@ -19,13 +19,27 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, BufWriter},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, RwLock,
+    },
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use sysinfo::{PidExt, System, SystemExt};
 use uuid::Uuid;
+
+const MEMORY_LIMIT_EXIT_CODE: i32 = 137;
+const PARENT_EXIT_CODE: i32 = 75;
+#[cfg(not(test))]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(100);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -51,13 +65,43 @@ pub struct JobRecord {
     pub updated_at_unix: u64,
     pub summary: Option<RunSummary>,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_exit_code: Option<i32>,
 }
 
 #[derive(Clone)]
 struct JobEntry {
     record: JobRecord,
-    cancellation: Option<CancellationToken>,
+    worker: Option<WorkerHandle>,
     memory_limited: bool,
+}
+
+#[derive(Clone)]
+struct WorkerHandle {
+    child: Arc<Mutex<Child>>,
+    cancel_path: PathBuf,
+    cancellation_requested: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkerRequest {
+    root: PathBuf,
+    config_path: PathBuf,
+    output_directory: PathBuf,
+    events_path: PathBuf,
+    result_path: PathBuf,
+    cancel_path: PathBuf,
+    batch_size: Option<usize>,
+    parallel: usize,
+    parent_pid: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkerOutcome {
+    summary: Option<RunSummary>,
+    error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -66,6 +110,7 @@ struct State {
     jobs_dir: PathBuf,
     jobs: Arc<RwLock<HashMap<String, JobEntry>>>,
     start_lock: Arc<std::sync::Mutex<()>>,
+    worker_executable: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,8 +159,51 @@ struct ResultQuery {
     rows: Vec<serde_json::Value>,
 }
 
+impl WorkerHandle {
+    fn request_cancellation(&self) -> anyhow::Result<()> {
+        self.cancellation_requested.store(true, Ordering::Release);
+        let request = fs::write(&self.cancel_path, b"cancel\n").with_context(|| {
+            format!(
+                "failed to write worker cancellation request `{}`",
+                self.cancel_path.display()
+            )
+        });
+
+        let child = self.child.clone();
+        thread::Builder::new()
+            .name("sage-worker-cancellation".into())
+            .spawn(move || {
+                thread::sleep(CANCEL_GRACE_PERIOD);
+                let mut child = child.lock().expect("worker process lock poisoned");
+                if child.try_wait().ok().flatten().is_none() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            })?;
+        request
+    }
+
+    fn force_kill(&self) {
+        self.cancellation_requested.store(true, Ordering::Release);
+        if let Ok(mut child) = self.child.lock() {
+            if child.try_wait().ok().flatten().is_none() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
 impl State {
     fn new(root: PathBuf, jobs_dir: Option<PathBuf>) -> anyhow::Result<Self> {
+        Self::new_with_worker_executable(root, jobs_dir, std::env::current_exe()?)
+    }
+
+    fn new_with_worker_executable(
+        root: PathBuf,
+        jobs_dir: Option<PathBuf>,
+        worker_executable: PathBuf,
+    ) -> anyhow::Result<Self> {
         let root = root
             .canonicalize()
             .with_context(|| format!("cannot access MCP root `{}`", root.display()))?;
@@ -139,6 +227,7 @@ impl State {
             jobs_dir,
             jobs: Arc::new(RwLock::new(HashMap::new())),
             start_lock: Arc::new(std::sync::Mutex::new(())),
+            worker_executable,
         };
         state.restore_jobs()?;
         Ok(state)
@@ -153,7 +242,7 @@ impl State {
                         record.job_id.clone(),
                         JobEntry {
                             record,
-                            cancellation: None,
+                            worker: None,
                             memory_limited: false,
                         },
                     );
@@ -200,58 +289,8 @@ impl State {
         Ok(Some(record))
     }
 
-    fn resolve_existing(&self, value: &str) -> anyhow::Result<PathBuf> {
-        ensure!(
-            !value.contains("://"),
-            "remote URLs are disabled by sage-mcp"
-        );
-        let requested = Path::new(value);
-        let path = if requested.is_absolute() {
-            requested.to_path_buf()
-        } else {
-            self.root.join(requested)
-        };
-        let path = path
-            .canonicalize()
-            .with_context(|| format!("cannot access `{}`", path.display()))?;
-        ensure!(
-            path.starts_with(&self.root),
-            "path `{}` is outside the configured MCP root",
-            path.display()
-        );
-        Ok(path)
-    }
-
     fn load_config(&self, config_path: &str) -> anyhow::Result<(PathBuf, Input)> {
-        let config_path = self.resolve_existing(config_path)?;
-        ensure!(config_path.is_file(), "configuration path must be a file");
-        let mut input = Input::load(config_path.to_string_lossy())?;
-        input.validate()?;
-
-        if let Some(database) = input.database.as_mut() {
-            if let Some(fasta) = database.fasta.as_mut() {
-                *fasta = self.resolve_existing(fasta)?.to_string_lossy().into_owned();
-            }
-            if let Some(peptides) = database.peptides.as_mut() {
-                *peptides = self
-                    .resolve_existing(peptides)?
-                    .to_string_lossy()
-                    .into_owned();
-            }
-        }
-        if let Some(library) = input.library_search.as_mut() {
-            library.path = self
-                .resolve_existing(&library.path)?
-                .to_string_lossy()
-                .into_owned();
-        }
-        for spectra in input.mzml_paths.iter_mut().flatten() {
-            *spectra = self
-                .resolve_existing(spectra)?
-                .to_string_lossy()
-                .into_owned();
-        }
-        Ok((config_path, input))
+        load_config_under(&self.root, config_path)
     }
 
     fn validate_config(&self, config_path: &str) -> anyhow::Result<ConfigValidation> {
@@ -415,22 +454,22 @@ impl State {
             "batch_size must be greater than zero"
         );
         let _start_guard = self.start_lock.lock().expect("job start lock poisoned");
-        let (config_path, mut input) = self.load_config(&args.config_path)?;
-        if let Some(batch_size) = args.batch_size {
-            input.batch_size = Some(batch_size);
-        }
+        let (config_path, input) = self.load_config(&args.config_path)?;
         let memory_limited = input.memory_limits()?.is_enabled();
         self.ensure_memory_execution_available(memory_limited)?;
         let job_id = Uuid::new_v4().to_string();
         let job_dir = self.jobs_dir.join(&job_id);
         let output_dir = job_dir.join("output");
         fs::create_dir_all(&output_dir)?;
-        input.output_directory = Some(output_dir.to_string_lossy().into_owned());
         let events_path = job_dir.join("events.jsonl");
-        let events = EventEmitter::from_writer(BufWriter::new(File::create(&events_path)?));
-        let cancellation = CancellationToken::default();
+        File::create(&events_path)?;
+        let result_path = job_dir.join("worker-result.json");
+        let request_path = job_dir.join("worker-request.json");
+        let cancel_path = job_dir.join("cancel.requested");
+        let stdout_path = job_dir.join("worker.stdout.log");
+        let stderr_path = job_dir.join("worker.stderr.log");
         let timestamp = now();
-        let record = JobRecord {
+        let mut record = JobRecord {
             job_id: job_id.clone(),
             status: JobStatus::Queued,
             config_path: config_path.to_string_lossy().into_owned(),
@@ -441,66 +480,89 @@ impl State {
             updated_at_unix: timestamp,
             summary: None,
             error: None,
+            worker_pid: None,
+            worker_exit_code: None,
         };
+        let parallel = (num_cpus() / 2).max(1);
+        let request = WorkerRequest {
+            root: self.root.clone(),
+            config_path: config_path.clone(),
+            output_directory: output_dir.clone(),
+            events_path: events_path.clone(),
+            result_path: result_path.clone(),
+            cancel_path: cancel_path.clone(),
+            batch_size: args.batch_size,
+            parallel,
+            parent_pid: std::process::id(),
+        };
+        fs::write(&request_path, serde_json::to_vec_pretty(&request)?)?;
+        let stdout = File::create(&stdout_path)?;
+        let stderr = File::create(&stderr_path)?;
         write_record(&record)?;
+
+        let child = Command::new(&self.worker_executable)
+            .arg("--worker")
+            .arg(&request_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
+            .spawn();
+        let mut child = match child {
+            Ok(child) => child,
+            Err(error) => {
+                let message = format!(
+                    "failed to start isolated Sage worker `{}`: {error}",
+                    self.worker_executable.display()
+                );
+                record.status = JobStatus::Failed;
+                record.error = Some(message.clone());
+                record.updated_at_unix = now();
+                write_record(&record)?;
+                self.jobs.write().expect("job registry poisoned").insert(
+                    job_id,
+                    JobEntry {
+                        record,
+                        worker: None,
+                        memory_limited,
+                    },
+                );
+                anyhow::bail!(message);
+            }
+        };
+        record.status = JobStatus::Running;
+        record.worker_pid = Some(child.id());
+        record.updated_at_unix = now();
+        if let Err(error) = write_record(&record) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error).context("failed to persist running Sage worker state");
+        }
+
+        let worker = WorkerHandle {
+            child: Arc::new(Mutex::new(child)),
+            cancel_path,
+            cancellation_requested: Arc::new(AtomicBool::new(false)),
+        };
         self.jobs.write().expect("job registry poisoned").insert(
             job_id.clone(),
             JobEntry {
                 record: record.clone(),
-                cancellation: Some(cancellation.clone()),
+                worker: Some(worker.clone()),
                 memory_limited,
             },
         );
 
         let jobs = self.jobs.clone();
-        let parallel = (num_cpus() / 2).max(1);
-        let spawn = std::thread::Builder::new()
-            .name(format!("sage-job-{job_id}"))
-            .spawn(move || {
-                update_job(&jobs, &job_id, |entry| {
-                    entry.record.status = JobStatus::Running;
-                });
-                let result = catch_job_panic(|| {
-                    SageRunner::new(
-                        input,
-                        JobOptions {
-                            parallel,
-                            events,
-                            cancellation: cancellation.clone(),
-                            terminate_on_memory_limit: false,
-                        },
-                    )
-                    .run()
-                });
-                update_job(&jobs, &job_id, |entry| {
-                    entry.cancellation = None;
-                    match result {
-                        Ok(Ok(result)) => {
-                            entry.record.status = JobStatus::Completed;
-                            entry.record.summary = Some(result.summary);
-                        }
-                        Ok(Err(error))
-                            if cancellation.is_cancelled() && !cancellation.is_memory_limit() =>
-                        {
-                            entry.record.status = JobStatus::Cancelled;
-                            entry.record.error = Some(error.to_string());
-                        }
-                        Ok(Err(error)) => {
-                            entry.record.status = JobStatus::Failed;
-                            entry.record.error = Some(error.to_string());
-                        }
-                        Err(error) => {
-                            entry.record.status = JobStatus::Failed;
-                            entry.record.error = Some(format!("Sage worker panicked: {error}"));
-                        }
-                    }
-                });
-            });
-        if let Err(error) = spawn {
+        if let Err(error) = thread::Builder::new()
+            .name(format!("sage-worker-supervisor-{job_id}"))
+            .spawn(move || supervise_worker(jobs, job_id, worker, result_path, stderr_path))
+        {
             update_job(&self.jobs, &record.job_id, |entry| {
-                entry.cancellation = None;
+                if let Some(worker) = entry.worker.take() {
+                    worker.force_kill();
+                }
                 entry.record.status = JobStatus::Failed;
-                entry.record.error = Some(format!("failed to start search thread: {error}"));
+                entry.record.error = Some(format!("failed to supervise Sage worker: {error}"));
             });
             return Err(error.into());
         }
@@ -564,15 +626,35 @@ impl State {
             matches!(entry.record.status, JobStatus::Queued | JobStatus::Running),
             "job is not running"
         );
-        entry
-            .cancellation
-            .as_ref()
-            .context("job cannot be cancelled after server restart")?
-            .cancel();
+        let worker = entry
+            .worker
+            .clone()
+            .context("job cannot be cancelled after server restart")?;
         entry.record.status = JobStatus::Cancelling;
         entry.record.updated_at_unix = now();
         write_record(&entry.record)?;
-        Ok(entry.record.clone())
+        let record = entry.record.clone();
+        drop(jobs);
+        worker.request_cancellation()?;
+        Ok(record)
+    }
+
+    fn shutdown_workers(&self) {
+        let mut jobs = self.jobs.write().expect("job registry poisoned");
+        let mut workers = Vec::new();
+        for entry in jobs.values_mut() {
+            if let Some(worker) = entry.worker.take() {
+                entry.record.status = JobStatus::Interrupted;
+                entry.record.error = Some("MCP server stopped while the worker was running".into());
+                entry.record.updated_at_unix = now();
+                let _ = write_record(&entry.record);
+                workers.push(worker);
+            }
+        }
+        drop(jobs);
+        for worker in workers {
+            worker.force_kill();
+        }
     }
 
     fn events(&self, args: JobEventsArgs) -> anyhow::Result<Vec<serde_json::Value>> {
@@ -741,6 +823,258 @@ impl State {
     }
 }
 
+fn resolve_existing_under(root: &Path, value: &str) -> anyhow::Result<PathBuf> {
+    ensure!(
+        !value.contains("://"),
+        "remote URLs are disabled by sage-mcp"
+    );
+    let requested = Path::new(value);
+    let path = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        root.join(requested)
+    };
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("cannot access `{}`", path.display()))?;
+    ensure!(
+        path.starts_with(root),
+        "path `{}` is outside the configured MCP root",
+        path.display()
+    );
+    Ok(path)
+}
+
+fn load_config_under(root: &Path, config_path: &str) -> anyhow::Result<(PathBuf, Input)> {
+    let config_path = resolve_existing_under(root, config_path)?;
+    ensure!(config_path.is_file(), "configuration path must be a file");
+    let mut input = Input::load(config_path.to_string_lossy())?;
+    input.validate()?;
+
+    if let Some(database) = input.database.as_mut() {
+        if let Some(fasta) = database.fasta.as_mut() {
+            *fasta = resolve_existing_under(root, fasta)?
+                .to_string_lossy()
+                .into_owned();
+        }
+        if let Some(peptides) = database.peptides.as_mut() {
+            *peptides = resolve_existing_under(root, peptides)?
+                .to_string_lossy()
+                .into_owned();
+        }
+        if let Some(custom_cleavages) = database.custom_cleavage_sites.as_mut() {
+            *custom_cleavages = resolve_existing_under(root, custom_cleavages)?
+                .to_string_lossy()
+                .into_owned();
+        }
+        if let Some(ptm_library) = database.ptm_library.as_mut() {
+            ptm_library.path = resolve_existing_under(root, &ptm_library.path)?
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
+    if let Some(library) = input.library_search.as_mut() {
+        library.path = resolve_existing_under(root, &library.path)?
+            .to_string_lossy()
+            .into_owned();
+    }
+    for spectra in input.mzml_paths.iter_mut().flatten() {
+        *spectra = resolve_existing_under(root, spectra)?
+            .to_string_lossy()
+            .into_owned();
+    }
+    Ok((config_path, input))
+}
+
+pub fn run_worker(request_path: &Path) -> anyhow::Result<()> {
+    let request: WorkerRequest =
+        serde_json::from_slice(&fs::read(request_path).with_context(|| {
+            format!("cannot read worker request `{}`", request_path.display())
+        })?)?;
+    let root = request.root.canonicalize()?;
+    ensure!(root.is_dir(), "worker root must be a directory");
+    for path in [
+        &request.config_path,
+        &request.output_directory,
+        &request.events_path,
+        &request.result_path,
+        &request.cancel_path,
+    ] {
+        ensure!(
+            path.is_absolute() && path.starts_with(&root),
+            "worker path `{}` is outside the configured root",
+            path.display()
+        );
+    }
+
+    spawn_parent_watchdog(request.parent_pid)?;
+    let cancellation = CancellationToken::default();
+    spawn_cancellation_watcher(request.cancel_path.clone(), cancellation.clone())?;
+
+    let result = (|| -> anyhow::Result<RunSummary> {
+        let (_, mut input) = load_config_under(&root, &request.config_path.to_string_lossy())?;
+        if let Some(batch_size) = request.batch_size {
+            input.batch_size = Some(batch_size);
+        }
+        input.output_directory = Some(request.output_directory.to_string_lossy().into_owned());
+        let events = EventEmitter::from_writer(BufWriter::new(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&request.events_path)?,
+        ));
+        SageRunner::new(
+            input,
+            JobOptions {
+                parallel: request.parallel,
+                events,
+                cancellation,
+                terminate_on_memory_limit: true,
+            },
+        )
+        .run()
+        .map(|result| result.summary)
+    })();
+
+    let outcome = match &result {
+        Ok(summary) => WorkerOutcome {
+            summary: Some(summary.clone()),
+            error: None,
+        },
+        Err(error) => WorkerOutcome {
+            summary: None,
+            error: Some(format!("{error:#}")),
+        },
+    };
+    fs::write(&request.result_path, serde_json::to_vec_pretty(&outcome)?)?;
+    result.map(|_| ())
+}
+
+fn spawn_parent_watchdog(parent_pid: u32) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("sage-worker-parent-watchdog".into())
+        .spawn(move || {
+            let parent_pid = sysinfo::Pid::from_u32(parent_pid);
+            let mut system = System::new();
+            loop {
+                thread::sleep(Duration::from_millis(250));
+                system.refresh_process(parent_pid);
+                if system.process(parent_pid).is_none() {
+                    std::process::exit(PARENT_EXIT_CODE);
+                }
+            }
+        })?;
+    Ok(())
+}
+
+fn spawn_cancellation_watcher(
+    cancel_path: PathBuf,
+    cancellation: CancellationToken,
+) -> std::io::Result<()> {
+    thread::Builder::new()
+        .name("sage-worker-cancellation-watch".into())
+        .spawn(move || loop {
+            if cancel_path.exists() {
+                cancellation.cancel();
+                return;
+            }
+            thread::sleep(PROCESS_POLL_INTERVAL);
+        })?;
+    Ok(())
+}
+
+fn supervise_worker(
+    jobs: Arc<RwLock<HashMap<String, JobEntry>>>,
+    job_id: String,
+    worker: WorkerHandle,
+    result_path: PathBuf,
+    stderr_path: PathBuf,
+) {
+    let status = loop {
+        let result = worker
+            .child
+            .lock()
+            .expect("worker process lock poisoned")
+            .try_wait();
+        match result {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) => thread::sleep(PROCESS_POLL_INTERVAL),
+            Err(error) => break Err(error),
+        }
+    };
+    let outcome = fs::read(&result_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<WorkerOutcome>(&bytes).ok());
+    let stderr = read_log_tail(&stderr_path, 8 * 1024);
+    let cancellation_requested = worker.cancellation_requested.load(Ordering::Acquire);
+
+    update_job(&jobs, &job_id, |entry| {
+        entry.worker = None;
+        if entry.record.status == JobStatus::Interrupted {
+            return;
+        }
+        match status {
+            Ok(status) => {
+                entry.record.worker_exit_code = status.code();
+                if cancellation_requested {
+                    entry.record.status = JobStatus::Cancelled;
+                    entry.record.error = outcome
+                        .as_ref()
+                        .and_then(|outcome| outcome.error.clone())
+                        .or_else(|| Some("Sage worker was cancelled".into()));
+                } else if status.success() {
+                    match outcome.and_then(|outcome| outcome.summary) {
+                        Some(summary) => {
+                            entry.record.status = JobStatus::Completed;
+                            entry.record.summary = Some(summary);
+                            entry.record.error = None;
+                        }
+                        None => {
+                            entry.record.status = JobStatus::Failed;
+                            entry.record.error =
+                                Some("Sage worker exited without a result summary".into());
+                        }
+                    }
+                } else {
+                    entry.record.status = JobStatus::Failed;
+                    entry.record.error = Some(worker_failure_message(status, outcome, stderr));
+                }
+            }
+            Err(error) => {
+                entry.record.status = JobStatus::Failed;
+                entry.record.error = Some(format!("failed to monitor Sage worker: {error}"));
+            }
+        }
+    });
+}
+
+fn worker_failure_message(
+    status: ExitStatus,
+    outcome: Option<WorkerOutcome>,
+    stderr: Option<String>,
+) -> String {
+    if status.code() == Some(MEMORY_LIMIT_EXIT_CODE) {
+        return "Sage worker reached its configured memory limit and was terminated".into();
+    }
+    if let Some(error) = outcome.and_then(|outcome| outcome.error) {
+        return error;
+    }
+    let reason = status
+        .code()
+        .map(|code| format!("Sage worker exited with code {code}"))
+        .unwrap_or_else(|| "Sage worker was terminated by a signal".into());
+    match stderr.filter(|stderr| !stderr.trim().is_empty()) {
+        Some(stderr) => format!("{reason}: {}", stderr.trim()),
+        None => reason,
+    }
+}
+
+fn read_log_tail(path: &Path, limit: usize) -> Option<String> {
+    let bytes = fs::read(path).ok()?;
+    let start = bytes.len().saturating_sub(limit);
+    Some(String::from_utf8_lossy(&bytes[start..]).into_owned())
+}
+
 fn add_estimate(totals: &mut [u64; 6], estimate: sage_core::database::DatabaseMemoryEstimate) {
     totals[0] = totals[0].saturating_add(estimate.unmodified_peptides);
     totals[1] = totals[1].saturating_add(estimate.modified_peptides);
@@ -784,16 +1118,6 @@ fn update_job(
             entry.record.error = Some(format!("failed to persist job state: {error}"));
         }
     }
-}
-
-fn catch_job_panic<T>(run: impl FnOnce() -> T) -> Result<T, String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).map_err(|payload| {
-        payload
-            .downcast_ref::<&str>()
-            .map(|message| (*message).to_string())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "unknown panic payload".into())
-    })
 }
 
 fn num_cpus() -> usize {
@@ -924,6 +1248,10 @@ impl SageMcp {
             state: State::new(root, jobs_dir)?,
         })
     }
+
+    pub fn shutdown_workers(&self) {
+        self.state.shutdown_workers();
+    }
 }
 
 #[tool_router]
@@ -938,7 +1266,9 @@ impl SageMcp {
                 "requires_explicit_approval": true,
                 "remote_urls_allowed": false,
                 "persistent_jobs": true,
-                "cooperative_cancellation": true
+                "cooperative_cancellation": true,
+                "process_isolation": true,
+                "forced_cancellation_after_grace_period": true
             },
             "sage_plus": [
                 "memory estimation and runtime limits",
@@ -1015,7 +1345,9 @@ impl SageMcp {
         tool_result(Ok(self.state.list_jobs()))
     }
 
-    #[tool(description = "Cooperatively cancel a queued or running Sage search")]
+    #[tool(
+        description = "Cancel a queued or running isolated Sage worker, escalating to forced termination after a grace period"
+    )]
     fn cancel_search(
         &self,
         Parameters(args): Parameters<JobIdArgs>,
