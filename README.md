@@ -59,6 +59,9 @@ Prebuilt binaries are available from [Sage Plus releases](https://github.com/pga
 and versioned Linux AMD64 container images are published as
 `ghcr.io/pgarrett-scripps/sage-plus:<release-tag>`.
 
+Sage Plus uses its own version sequence, beginning with `v0.1.0-beta.1`, independently of
+upstream Sage releases.
+
 ## Documentation
 
 - [Sage Plus configuration and outputs](DOCS.md)

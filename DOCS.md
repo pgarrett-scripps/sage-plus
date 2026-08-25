@@ -356,8 +356,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.16.0-beta.1
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.16.0-beta.1 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.1
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.1 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 

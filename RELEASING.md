@@ -15,6 +15,7 @@ Keep the repository's default Actions token permission read-only. The release wo
 Protect `main` and require these Rust workflow checks before merging:
 
 - `Format and release build`
+- `Coverage`
 - `Test Rust 1.88.0`
 - `Test Rust 1.97.1`
 
@@ -49,8 +50,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.16.0-beta.1 -m "Sage Plus v0.16.0-beta.1"
-git push origin v0.16.0-beta.1
+git tag -a v0.1.0-beta.1 -m "Sage Plus v0.1.0-beta.1"
+git push origin v0.1.0-beta.1
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark

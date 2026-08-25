@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Sage Plus uses an independent release sequence beginning with `v0.1.0-beta.1`. Earlier Sage
+entries are retained below for provenance.
+
 ## [Unreleased]
+
+## [v0.1.0-beta.1] - 2026-08-25
 
 ### Added
 - **DDA spectral-library search:** Search Sage Parquet or PSI mzSpecLib libraries without a FASTA. Deterministic composition-preserving decoys feed standard spectrum, peptide, protein, and protein-group FDR.
@@ -31,8 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skip invalid historical MCP job records during server startup and report invalid local output URLs directly.
 - Use portable release-version checks that do not require `ripgrep`.
 
-## [v0.16.0-beta.1]
-### Added
+### Earlier additions
 - Additive protein-specific cleavage-site TSV or Parquet input with optional FASTA sequence-context validation.
 - Optional `max_memory_gb` and `min_free_memory_gb` safeguards that preflight unmodified peptides, variable-modification expansion, and fragment indexes, then monitor the running process to stop Sage before configured limits are crossed.
 - A top-level `batch_size` configuration option; the existing `--batch-size` command-line option takes precedence.
@@ -57,12 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic empirical spectral-library generation from FDR-filtered target PSMs, with
   canonical long-form Parquet and PSI mzSpecLib text output.
 
-### Changed
+### Earlier changes
 - **Breaking:** Parquet is now the canonical analytical output. Sage no longer emits TSV variants of PSM, LFQ, matched-fragment, or PTM-site result tables, and the `--parquet` option has been removed. Purpose-specific `.pin`, JSON, HTML, and PTM-library interchange outputs are unchanged.
 - LFQ remains a separate long-form `lfq.parquet`. Missing integrated signals are encoded as Parquet nulls instead of zero; each precursor/file row now includes `ms2_confirmed`, plus the LFQ peak `score` and `spectral_angle`.
 - MCP result queries now scan canonical Parquet result files and return typed JSON values.
 - PSM and matched-fragment Parquet output now share `output_filter.psm_q_value` (default `0.1`), an inclusive spectrum-level q-value cutoff. The effective cutoff is embedded in both files' Parquet metadata; setting it to `1.0` retains all scored PSMs.
 - Matched-fragment details are now reconstructed only for retained PSMs in a batched post-FDR MS2 pass. This removes fragment-detail allocation from candidate scoring, preserves rank-ordered chimera peak removal, and shares spectrum rereads with PTM localization when both are enabled.
+
+The entries below predate independent Sage Plus versioning and are retained from upstream Sage.
 
 ## [v0.15.0]
 ### Added

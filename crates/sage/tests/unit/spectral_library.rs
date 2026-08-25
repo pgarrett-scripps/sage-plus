@@ -88,7 +88,7 @@ fn builds_normalized_top_fragments_and_mzspeclib() {
 
     let text = String::from_utf8(serialize_mzspeclib(
         &entries,
-        "0.16.0-beta.1",
+        "0.1.0-beta.1",
         SpectralLibraryStrategy::BestPsm,
     ))
     .unwrap();
@@ -150,7 +150,7 @@ fn consensus_uses_median_properties_and_reproducible_fragments() {
 
     let text = String::from_utf8(serialize_mzspeclib(
         &entries,
-        "0.16.0-beta.1",
+        "0.1.0-beta.1",
         SpectralLibraryStrategy::Consensus,
     ))
     .unwrap();
