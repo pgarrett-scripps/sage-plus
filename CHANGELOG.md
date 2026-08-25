@@ -7,18 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Consensus spectral-library generation with median RT, mobility, and normalized fragment intensities.
-- Regularized library-search rescoring using spectral, mass-error, isotope, RT, and mobility evidence.
-- Coherent modification channels for SILAC, dimethyl, and custom precursor mass labels.
-- Label-aware LFQ extraction, reference ratios, FDR grouping, property models, and database-to-library metadata round trips.
+- **DDA spectral-library search:** Search Sage Parquet or PSI mzSpecLib libraries without a FASTA. Deterministic composition-preserving decoys feed standard spectrum, peptide, protein, and protein-group FDR.
+- **Library calibration and quantification:** Library search supports isotope-error windows, matched-fragment export, per-file precursor and fragment calibration, RT and mobility alignment, LFQ, and TMT.
+- **Library rescoring:** A regularized target-decoy model combines spectral angle, explained intensity, isotope, mass-error, RT, and mobility evidence. Small searches fall back safely to spectral-angle scoring and emit a structured warning.
+- **Consensus library generation:** Combine supporting PSMs with median RT, mobility, and normalized fragment intensities. Minimum PSM support and fragment frequency are configurable.
+- **Modification-defined label channels:** Structured static and variable modifications can define coherent `channel_offsets` for SILAC, dimethyl, and custom precursor labels.
+- **Channel-aware LFQ and outputs:** Identified channels seed exact-mass partner extraction and reference ratios. Version 2 results, LFQ, and spectral-library schemas preserve channel and label-group metadata through export and library search.
+- **MCP worker isolation:** Searches run in dedicated processes. Panics, signals, and memory-limit exits fail only the affected job, while cancellation escalates from a cooperative request to worker termination.
+- **Library FDR validation:** Added a held-out and entrapment validation guide, a reporting script, and warnings when query files overlap library source files.
 
 ### Changed
-- **Breaking:** Replaced `database.labels` with optional `channel_offsets` dictionaries on structured static and variable modifications. Static or variable placement now controls occupancy, while channel offsets control coherent precursor states.
+- **Breaking:** Replaced `database.labels` with `channel_offsets` on structured static and variable modifications. Placement controls occupancy, while channel offsets define coherent precursor states.
 - Pre-digested peptide TSV input now receives configured static, variable, and channel-aware modifications like FASTA-derived peptides.
+- Embedded runner jobs now report memory-limit failures through cancellation and structured events. CLI and MCP worker processes retain exit-code 137 protection.
+- Moved unit tests out of production modules and added an 80% workspace line-coverage requirement in CI.
 
 ### Fixed
 - Assign equal-score PSMs as one FDR threshold group and use deterministic feature ordering for repeatable PSM identifiers and library selection.
 - Preserve site-specific modification names in ambiguity annotations when labels share a mass, and serialize LFQ rows deterministically.
+- Reject nonfinite, negative, or out-of-range LFQ tolerances and thresholds instead of silently normalizing them.
+- Stop searches on empty, unreadable, or malformed spectrum files and emit a structured `file_failed` event. MGF errors now identify invalid fields, missing markers, and line numbers.
+- Skip unavailable HTML QC plots and nonfinite plot values instead of failing report generation.
+- Skip invalid historical MCP job records during server startup and report invalid local output URLs directly.
+- Use portable release-version checks that do not require `ripgrep`.
 
 ## [v0.16.0-beta.1]
 ### Added

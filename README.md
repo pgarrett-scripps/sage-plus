@@ -24,6 +24,8 @@ agent-facing capabilities.
 - Faster, lower-memory searching with compact peptide/spectrum storage and optional bitmap preliminary scoring.
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
 - Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
+- Modification-defined SILAC, dimethyl, and custom precursor channels on required static or optional variable modifications.
+- Channel-aware LFQ with exact-mass partner extraction, reference ratios, label-aware FDR, and spectral-library round trips.
 - Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
 - Configurable LFQ match-between-runs retention-time tolerance.
 - PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
@@ -31,10 +33,11 @@ agent-facing capabilities.
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
-- Deterministic empirical spectral-library export as canonical long-form Parquet and PSI
-  mzSpecLib text.
+- Empirical spectral-library export in canonical Parquet and PSI mzSpecLib formats, using either a deterministic best PSM or robust consensus spectra.
+- Standalone DDA library search with shuffled decoys, isotope-aware matching, per-file mass calibration, RT and mobility alignment, matched-fragment export, LFQ, and TMT.
+- Regularized library rescoring with spectrum, peptide, protein, and protein-group FDR reporting.
 - A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
-- A root-bounded MCP server for AI-assisted configuration, estimation, execution, monitoring, analysis, and result queries.
+- A root-bounded MCP server with persistent jobs and isolated search workers for configuration, estimation, safe execution, cancellation, monitoring, analysis, and result queries.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
 
