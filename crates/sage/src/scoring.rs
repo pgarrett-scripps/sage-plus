@@ -1267,21 +1267,17 @@ mod tests {
     fn isotope_offsets_are_honored_for_labeled_precursors() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {
-                        "name": "heavy",
-                        "static_mods": {
-                            "R": {"mass": 10.008269, "name": "Arg10"}
-                        }
-                    }
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "name": "SILAC-R",
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }))
         .unwrap();
         let parameters = builder.make_parameters();
-        parameters.validate_labels().unwrap();
+        parameters.validate_channels().unwrap();
         let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
         let heavy = peptides
             .iter()
@@ -1347,6 +1343,7 @@ mod tests {
             name: Some(Arc::from("TestMod")),
             neutral_losses: Arc::from([10.0]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         });
         let peptide = Peptide::try_from(Digest {
             sequence: "AMK".into(),

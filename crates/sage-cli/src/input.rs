@@ -410,7 +410,7 @@ impl Input {
             database
                 .clone()
                 .make_parameters()
-                .validate_labels()
+                .validate_channels()
                 .map_err(anyhow::Error::msg)?;
         }
         if let Some(library) = &self.library_search {
@@ -507,7 +507,7 @@ impl Input {
         let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self.database.map(Builder::make_parameters);
         if let Some(database) = &database {
-            database.validate_labels().map_err(anyhow::Error::msg)?;
+            database.validate_channels().map_err(anyhow::Error::msg)?;
             database
                 .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
                 .map_err(anyhow::Error::msg)?;
@@ -778,34 +778,38 @@ mod test {
     }
 
     #[test]
-    fn label_channels_are_validated_before_search() {
+    fn modification_channel_offsets_are_validated_before_search() {
         let valid = base_search_space(serde_json::json!({
             "fasta": "test.fasta",
-            "labels": {
-                "reference": "light",
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"R": 10.008269}}
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }));
         assert!(valid.validate().is_ok());
 
         let invalid = base_search_space(serde_json::json!({
             "fasta": "test.fasta",
-            "variable_mods": {"R": [14.0]},
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"R": 10.008269}}
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
+            },
+            "variable_mods": {
+                "K": [{
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
+                }]
             }
         }));
         assert!(invalid
             .validate()
             .unwrap_err()
             .to_string()
-            .contains("overlaps a variable modification"));
+            .contains("same channel names"));
     }
 
     #[test]

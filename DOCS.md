@@ -464,49 +464,48 @@ Example:
     }
     ```
 
-#### Precursor label channels
+#### Modification channels
 
-`database.labels` defines complete precursor-resolved labeling states next to the existing static
-and variable modifications. Channel modifications use the same structured static-modification
-format, including `mass`, `name`, `neutral_losses`, and `neutral_loss_mode`.
+Structured static and variable modifications may define `channel_offsets`. The effective mass is
+the modification's `mass` plus the selected channel offset. Static versus variable placement keeps
+its normal meaning, while every channel-aware modification on a peptide resolves to one coherent
+channel.
 
 ```json
 "database": {
   "static_mods": {
-    "C": {"mass": 57.021464, "name": "Carbamidomethyl"}
+    "C": {"mass": 57.021464, "name": "Carbamidomethyl"},
+    "K": {
+      "mass": 0.0,
+      "name": "SILAC-K",
+      "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
+    },
+    "R": {
+      "mass": 0.0,
+      "name": "SILAC-R",
+      "channel_offsets": {"light": 0.0, "medium": 6.020129, "heavy": 10.008269}
+    }
   },
   "variable_mods": {
     "M": [{"mass": 15.994915, "name": "Oxidation"}]
-  },
-  "labels": {
-    "reference": "light",
-    "channels": [
-      {
-        "name": "light",
-        "static_mods": {}
-      },
-      {
-        "name": "heavy",
-        "static_mods": {
-          "K": {"mass": 8.014199, "name": "Lys8"},
-          "R": {"mass": 10.008269, "name": "Arg10"}
-        }
-      }
-    ]
   }
 }
 ```
 
-Every compatible site is labeled as one coherent channel state. Label modifications do not consume
-the variable-modification or combination limits. Channel names must be unique, at least two
-chemically distinct channels are required, and label targets may not overlap variable-modification
-targets. Ordinary static modifications may stack with labels, which permits combined SILAC and TMT
-workflows.
+The same field is valid on a variable modification. For example, an optional two-channel lysine
+label can be written as `{"mass": 0.0, "name": "Optional-Lys8", "max_count": 2,
+"channel_offsets": {"light": 0.0, "heavy": 8.014199}}`.
+
+All `channel_offsets` dictionaries must contain exactly the same channel names and at least two
+chemically distinct channels. A unique channel whose offsets are all zero is inferred as the
+reference channel. Variable channel modifications consume the existing variable-modification and
+combination limits. Chemically identical zero-offset variants are searched once, while their full
+set of channel partners is retained for LFQ extraction.
 
 When `quant.lfq` is enabled, one identified channel can seed extraction of its configured channel
 partners at their exact precursor masses. `lfq.parquet` schema version 2 records `label_channel`,
-`label_group`, and `ratio_to_reference`. Without `database.labels`, Sage retains the existing LFQ
-behavior and writes schema version 1.
+`label_group`, and `ratio_to_reference`. Without channel-aware modifications, Sage retains the
+existing LFQ behavior and writes schema version 1.
 
 Current label channels assume complete incorporation with fixed site mass shifts. Partial
 incorporation, whole-proteome nitrogen labeling, NeuCode resolution, and isotope-purity correction
@@ -572,17 +571,17 @@ modifications; either file can be supplied to a later search through `ptm_librar
 
 ## Quantification
 
-The quant section is optional and should be specified only if TMT or LFQ is used. Precursor label
-chemistry remains under `database.labels`. LFQ automatically becomes channel-aware when labels are
-configured.
+The quant section is optional and should be specified only if TMT or LFQ is used. Precursor channel
+chemistry remains on modification definitions through `channel_offsets`. LFQ automatically becomes
+channel-aware when these offsets are configured.
 
 
 - **tmt**: String. One of "Tmt6", "Tmt10", "Tmt11", "Tmt16", or "Tmt18" (default: null).
 - **tmt_settings**: Object containing TMT-specific settings.
   - **level**: Integer. The MS-level to perform TMT quantification on (default: 3).
   - **sn**: Boolean. Use Signal/Noise instead of intensity for TMT quantification. Requires noise values in mzML (default: false).
-- **lfq**: Boolean. Perform MS1 feature quantification. This is label-free without
-  `database.labels` and channel-aware when labels are configured (default: null).
+- **lfq**: Boolean. Perform MS1 feature quantification. This is label-free without channel-aware
+  modifications and channel-aware when `channel_offsets` are configured (default: null).
 - **lfq_settings**: Object containing LFQ-specific settings.
   - **peak_scoring**: String. The method used for scoring peaks in LFQ, one of: "Hybrid", "RetentionTime", "SpectralAngle" (default: "Hybrid").
   - **integration**: String. The method used for integrating peak intensities, either "Sum" or "Max" (default: "Sum").

@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::{Display, Write},
     str::FromStr,
     sync::Arc,
@@ -41,6 +41,7 @@ fn validate_details<E: de::Error>(
     name: &Option<String>,
     neutral_losses: &[f32],
     neutral_loss_mode: NeutralLossMode,
+    channel_offsets: &BTreeMap<String, f32>,
 ) -> Result<(), E> {
     if !mass.is_finite() {
         return Err(E::custom("modification mass must be finite"));
@@ -61,6 +62,26 @@ fn validate_details<E: de::Error>(
             "neutral_loss_mode `required` requires at least one neutral loss",
         ));
     }
+    for (channel, offset) in channel_offsets {
+        if channel.is_empty() || channel.trim() != channel {
+            return Err(E::custom(
+                "channel offset names must be non-empty and contain no surrounding whitespace",
+            ));
+        }
+        if channel
+            .chars()
+            .any(|character| matches!(character, '\r' | '\n' | '=' | ';'))
+        {
+            return Err(E::custom(format!(
+                "channel offset name `{channel}` contains an unsupported character"
+            )));
+        }
+        if !offset.is_finite() {
+            return Err(E::custom(format!(
+                "channel offset `{channel}` must be finite"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -76,6 +97,8 @@ pub struct StaticModification {
     pub neutral_losses: Vec<f32>,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channel_offsets: BTreeMap<String, f32>,
 }
 
 impl<'de> Deserialize<'de> for StaticModification {
@@ -93,6 +116,8 @@ impl<'de> Deserialize<'de> for StaticModification {
             neutral_losses: Vec<f32>,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
+            #[serde(default)]
+            channel_offsets: BTreeMap<String, f32>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -101,12 +126,14 @@ impl<'de> Deserialize<'de> for StaticModification {
             &raw.name,
             &raw.neutral_losses,
             raw.neutral_loss_mode,
+            &raw.channel_offsets,
         )?;
         Ok(Self {
             mass: raw.mass,
             name: raw.name,
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
+            channel_offsets: raw.channel_offsets,
         })
     }
 }
@@ -127,6 +154,8 @@ pub struct VariableModification {
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "is_exhaustive")]
     pub site_mode: SiteMode,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub channel_offsets: BTreeMap<String, f32>,
 }
 
 fn is_exhaustive(mode: &SiteMode) -> bool {
@@ -152,6 +181,8 @@ impl<'de> Deserialize<'de> for VariableModification {
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
             site_mode: SiteMode,
+            #[serde(default)]
+            channel_offsets: BTreeMap<String, f32>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -160,6 +191,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             &raw.name,
             &raw.neutral_losses,
             raw.neutral_loss_mode,
+            &raw.channel_offsets,
         )?;
         Ok(Self {
             mass: raw.mass,
@@ -168,6 +200,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
             site_mode: raw.site_mode,
+            channel_offsets: raw.channel_offsets,
         })
     }
 }
@@ -178,6 +211,7 @@ pub struct ModificationDefinition {
     pub name: Option<Arc<str>>,
     pub neutral_losses: Arc<[f32]>,
     pub neutral_loss_mode: NeutralLossMode,
+    pub channel_offsets: Arc<BTreeMap<Arc<str>, f32>>,
 }
 
 impl ModificationDefinition {
@@ -187,6 +221,7 @@ impl ModificationDefinition {
             name: None,
             neutral_losses: Arc::from([]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         }
     }
 
@@ -195,12 +230,29 @@ impl ModificationDefinition {
         name: &Option<String>,
         neutral_losses: &[f32],
         neutral_loss_mode: NeutralLossMode,
+        channel_offsets: &BTreeMap<String, f32>,
     ) -> Self {
         Self {
             mass,
             name: name.as_deref().map(Arc::from),
             neutral_losses: Arc::from(neutral_losses),
             neutral_loss_mode,
+            channel_offsets: Arc::new(
+                channel_offsets
+                    .iter()
+                    .map(|(channel, offset)| (Arc::from(channel.as_str()), *offset))
+                    .collect(),
+            ),
+        }
+    }
+
+    pub fn with_mass(&self, mass: f32) -> Self {
+        Self {
+            mass,
+            name: self.name.clone(),
+            neutral_losses: self.neutral_losses.clone(),
+            neutral_loss_mode: self.neutral_loss_mode,
+            channel_offsets: self.channel_offsets.clone(),
         }
     }
 }
@@ -231,6 +283,17 @@ impl Ord for ModificationDefinition {
                     .cmp(other.neutral_losses.iter().map(|loss| loss.to_bits()))
             })
             .then_with(|| self.neutral_loss_mode.cmp(&other.neutral_loss_mode))
+            .then_with(|| {
+                self.channel_offsets
+                    .iter()
+                    .map(|(channel, offset)| (channel, offset.to_bits()))
+                    .cmp(
+                        other
+                            .channel_offsets
+                            .iter()
+                            .map(|(channel, offset)| (channel, offset.to_bits())),
+                    )
+            })
     }
 }
 
@@ -293,6 +356,7 @@ impl StaticModEntry {
                 &modification.name,
                 &modification.neutral_losses,
                 modification.neutral_loss_mode,
+                &modification.channel_offsets,
             ),
         }
     }
@@ -397,6 +461,7 @@ impl VarModEntry {
                 &modification.name,
                 &modification.neutral_losses,
                 modification.neutral_loss_mode,
+                &modification.channel_offsets,
             ),
         }
     }
@@ -405,6 +470,30 @@ impl VarModEntry {
         match self {
             VarModEntry::Mass(_) => SiteMode::Exhaustive,
             VarModEntry::Detailed(modification) => modification.site_mode,
+        }
+    }
+
+    pub fn channel_offsets(&self) -> &BTreeMap<String, f32> {
+        match self {
+            VarModEntry::Mass(_) => {
+                static EMPTY: std::sync::OnceLock<BTreeMap<String, f32>> =
+                    std::sync::OnceLock::new();
+                EMPTY.get_or_init(BTreeMap::new)
+            }
+            VarModEntry::Detailed(modification) => &modification.channel_offsets,
+        }
+    }
+}
+
+impl StaticModEntry {
+    pub fn channel_offsets(&self) -> &BTreeMap<String, f32> {
+        match self {
+            StaticModEntry::Mass(_) => {
+                static EMPTY: std::sync::OnceLock<BTreeMap<String, f32>> =
+                    std::sync::OnceLock::new();
+                EMPTY.get_or_init(BTreeMap::new)
+            }
+            StaticModEntry::Detailed(modification) => &modification.channel_offsets,
         }
     }
 }
@@ -599,6 +688,7 @@ mod test {
             neutral_losses: vec![],
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode: SiteMode::Exhaustive,
+            channel_offsets: Default::default(),
         });
         assert_eq!(entry.mass(), 15.9949);
         assert_eq!(entry.max_count(), Some(1));
@@ -677,6 +767,39 @@ mod test {
     }
 
     #[test]
+    fn channel_offsets_round_trip_on_static_and_variable_modifications() {
+        let static_entry: StaticModEntry = serde_json::from_value(serde_json::json!({
+            "mass": 0.0,
+            "name": "SILAC-K",
+            "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+        }))
+        .unwrap();
+        assert_eq!(static_entry.channel_offsets()["heavy"], 8.014199);
+
+        let variable_entry: VarModEntry = serde_json::from_value(serde_json::json!({
+            "mass": 0.0,
+            "name": "Optional-Lys8",
+            "max_count": 2,
+            "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+        }))
+        .unwrap();
+        assert_eq!(variable_entry.channel_offsets()["light"], 0.0);
+        let serialized = serde_json::to_value(&variable_entry).unwrap();
+        let heavy = serialized["channel_offsets"]["heavy"].as_f64().unwrap();
+        assert!((heavy - 8.014199).abs() < 1e-6);
+    }
+
+    #[test]
+    fn channel_offsets_reject_invalid_names_and_masses() {
+        for json in [
+            r#"{"mass": 0.0, "channel_offsets": {" heavy": 8.0, "light": 0.0}}"#,
+            r#"{"mass": 0.0, "channel_offsets": {"heavy": 1e999, "light": 0.0}}"#,
+        ] {
+            assert!(serde_json::from_str::<VarModEntry>(json).is_err());
+        }
+    }
+
+    #[test]
     fn reject_invalid_neutral_loss_configuration() {
         for json in [
             r#"{"mass": 79.9663, "name": ""}"#,
@@ -717,6 +840,7 @@ mod test {
                     neutral_losses: vec![],
                     neutral_loss_mode: NeutralLossMode::Optional,
                     site_mode: SiteMode::Exhaustive,
+                    channel_offsets: Default::default(),
                 }),
             ],
         );
@@ -729,6 +853,7 @@ mod test {
                 neutral_losses: vec![],
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Exhaustive,
+                channel_offsets: Default::default(),
             })],
         );
         let result = validate_var_mods(Some(raw));

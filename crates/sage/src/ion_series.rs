@@ -211,6 +211,7 @@ mod test {
             name: Some(Arc::from("TestMod")),
             neutral_losses: Arc::from([10.0]),
             neutral_loss_mode: mode,
+            channel_offsets: Arc::default(),
         });
         peptide("AMK")
             .apply(
@@ -499,6 +500,7 @@ mod test {
             name: Some(Arc::from("TestMod")),
             neutral_losses: Arc::from([10.0]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         });
         let peptide = peptide("MMK")
             .apply(
@@ -531,6 +533,7 @@ mod test {
             name: Some(Arc::from("TerminalMod")),
             neutral_losses: Arc::from([10.0]),
             neutral_loss_mode: NeutralLossMode::Required,
+            channel_offsets: Arc::default(),
         });
         let peptide = peptide("AMK")
             .apply(

@@ -275,8 +275,7 @@ impl State {
                     "max_variable_mods": database.get("max_variable_mods"),
                     "max_total_variable_mods": database.get("max_total_variable_mods"),
                     "max_combinations": database.get("max_combinations"),
-                    "ptm_library": database.get("ptm_library"),
-                    "labels": database.get("labels")
+                    "ptm_library": database.get("ptm_library")
                 }))
         });
         Ok(ConfigInspection {

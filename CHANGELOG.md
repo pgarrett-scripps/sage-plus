@@ -9,8 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Consensus spectral-library generation with median RT, mobility, and normalized fragment intensities.
 - Regularized library-search rescoring using spectral, mass-error, isotope, RT, and mobility evidence.
-- Coherent `database.labels` modification channels for SILAC, dimethyl, and custom precursor mass labels.
+- Coherent modification channels for SILAC, dimethyl, and custom precursor mass labels.
 - Label-aware LFQ extraction, reference ratios, FDR grouping, property models, and database-to-library metadata round trips.
+
+### Changed
+- **Breaking:** Replaced `database.labels` with optional `channel_offsets` dictionaries on structured static and variable modifications. Static or variable placement now controls occupancy, while channel offsets control coherent precursor states.
+- Pre-digested peptide TSV input now receives configured static, variable, and channel-aware modifications like FASTA-derived peptides.
+
+### Fixed
+- Assign equal-score PSMs as one FDR threshold group and use deterministic feature ordering for repeatable PSM identifiers and library selection.
+- Preserve site-specific modification names in ambiguity annotations when labels share a mass, and serialize LFQ rows deterministically.
 
 ## [v0.16.0-beta.1]
 ### Added

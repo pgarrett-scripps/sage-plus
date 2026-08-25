@@ -351,6 +351,7 @@ mod tests {
                 name: None,
                 neutral_losses: Arc::from([5.0]),
                 neutral_loss_mode: NeutralLossMode::Optional,
+                channel_offsets: Arc::default(),
             }),
             kind: ModificationKind::Ordinary,
         }]);
@@ -362,6 +363,7 @@ mod tests {
                 name: None,
                 neutral_losses: Arc::from([6.0]),
                 neutral_loss_mode: NeutralLossMode::Optional,
+                channel_offsets: Arc::default(),
             }),
             kind: ModificationKind::Ordinary,
         }]);

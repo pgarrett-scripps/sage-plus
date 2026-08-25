@@ -247,7 +247,12 @@ impl Peptide {
 
     /// Apply all variable mods in `sites` to self
     fn apply_site(&mut self, site: Site, modification: Arc<ModificationDefinition>) {
-        self.apply_site_with_kind(site, modification, ModificationKind::Ordinary, false);
+        let kind = if modification.channel_offsets.is_empty() {
+            ModificationKind::Ordinary
+        } else {
+            ModificationKind::ChannelBase
+        };
+        self.apply_site_with_kind(site, modification, kind, false);
     }
 
     fn apply_site_with_kind(
@@ -289,28 +294,27 @@ impl Peptide {
         }
     }
 
-    /// Apply one complete precursor-label channel after ordinary variable and
-    /// static modifications. Label masses may stack with ordinary static
-    /// modifications, which supports combined precursor and isobaric labeling.
-    pub(crate) fn apply_label_channel(
-        mut self,
-        channel: Arc<str>,
-        modifications: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-    ) -> Self {
+    /// Resolve every channel-aware modification on this peptidoform to one
+    /// coherent precursor channel.
+    pub(crate) fn apply_label_channel(mut self, channel: Arc<str>) -> Self {
         let before = self.modification_mass();
-        for (target, modification) in modifications {
-            let mut sites = Vec::new();
-            self.push_resi(&mut sites, *target, modification.mass, 0);
-            for (site, _, _) in sites {
-                if modification.mass != 0.0 {
-                    self.apply_site_with_kind(
-                        site,
-                        modification.clone(),
-                        ModificationKind::Label,
-                        true,
-                    );
-                }
+        let applied = Arc::make_mut(&mut self.applied_modifications);
+        for modification in applied.iter_mut() {
+            if modification.kind != ModificationKind::ChannelBase {
+                continue;
             }
+            let offset = modification.modification.channel_offsets[&channel];
+            match modification.site {
+                Site::Nterm => self.nterm = Some(self.nterm.unwrap_or_default() + offset),
+                Site::Cterm => self.cterm = Some(self.cterm.unwrap_or_default() + offset),
+                Site::Sequence(index) => self.modifications[index as usize] += offset,
+            }
+            modification.modification = Arc::new(
+                modification
+                    .modification
+                    .with_mass(modification.modification.mass + offset),
+            );
+            modification.kind = ModificationKind::Label;
         }
         self.monoisotopic += self.modification_mass() - before;
         self.label_channel = Some(channel);
@@ -329,35 +333,33 @@ impl Peptide {
             return self.to_string();
         }
         let mut base = self.clone();
-        let label_modifications = base
-            .applied_modifications
-            .iter()
-            .filter(|applied| applied.kind == ModificationKind::Label)
-            .cloned()
-            .collect::<Vec<_>>();
-        for applied in &label_modifications {
+        let channel = base.label_channel.clone().unwrap();
+        let label_modifications = Arc::make_mut(&mut base.applied_modifications);
+        for applied in label_modifications.iter_mut() {
+            if applied.kind != ModificationKind::Label {
+                continue;
+            }
+            let offset = applied.modification.channel_offsets[&channel];
             match applied.site {
-                Site::Nterm => {
-                    base.nterm =
-                        nonzero_mass(base.nterm.unwrap_or_default() - applied.modification.mass)
-                }
-                Site::Cterm => {
-                    base.cterm =
-                        nonzero_mass(base.cterm.unwrap_or_default() - applied.modification.mass)
-                }
+                Site::Nterm => base.nterm = nonzero_mass(base.nterm.unwrap_or_default() - offset),
+                Site::Cterm => base.cterm = nonzero_mass(base.cterm.unwrap_or_default() - offset),
                 Site::Sequence(index) => {
                     if let Some(mass) = base.modifications.get_mut(index as usize) {
-                        *mass -= applied.modification.mass;
+                        *mass -= offset;
                         if mass.abs() < 1e-5 {
                             *mass = 0.0;
                         }
                     }
                 }
             }
-            base.monoisotopic -= applied.modification.mass;
+            base.monoisotopic -= offset;
+            applied.modification = Arc::new(
+                applied
+                    .modification
+                    .with_mass(applied.modification.mass - offset),
+            );
+            applied.kind = ModificationKind::ChannelBase;
         }
-        Arc::make_mut(&mut base.applied_modifications)
-            .retain(|applied| applied.kind != ModificationKind::Label);
         base.label_channel = None;
         base.label_group_override = None;
         base.to_string()
@@ -669,7 +671,7 @@ impl Peptide {
         pep
     }
 
-    fn fmt_mod(&self, f: &mut std::fmt::Formatter<'_>, site: Site, mass: f32) -> std::fmt::Result {
+    pub(crate) fn modification_tag(&self, site: Site, mass: f32) -> String {
         let applied = self
             .applied_modifications
             .iter()
@@ -680,17 +682,22 @@ impl Peptide {
             .map(|applied| applied.modification.mass)
             .sum::<f32>();
         if !applied.is_empty() && (represented_mass - mass).abs() < 1e-4 {
+            let mut tag = String::new();
             for applied in applied {
                 if let Some(name) = applied.modification.name.as_deref() {
-                    write!(f, "[{name}]")?;
+                    tag.push_str(&format!("[{name}]"));
                 } else {
-                    write!(f, "[{:+}]", applied.modification.mass)?;
+                    tag.push_str(&format!("[{:+}]", applied.modification.mass));
                 }
             }
-            Ok(())
+            tag
         } else {
-            write!(f, "[{mass:+}]")
+            format!("[{mass:+}]")
         }
+    }
+
+    fn fmt_mod(&self, f: &mut std::fmt::Formatter<'_>, site: Site, mass: f32) -> std::fmt::Result {
+        f.write_str(&self.modification_tag(site, mass))
     }
 }
 
@@ -790,6 +797,7 @@ pub struct AppliedModification {
 pub enum ModificationKind {
     #[default]
     Ordinary,
+    ChannelBase,
     Label,
 }
 
@@ -918,6 +926,7 @@ mod test {
             name: Some(Arc::from(name)),
             neutral_losses: Arc::from(neutral_losses),
             neutral_loss_mode,
+            channel_offsets: Arc::default(),
         })
     }
 
@@ -1512,12 +1521,14 @@ mod test {
             name: Some(Arc::from("Phospho")),
             neutral_losses: Arc::from([]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         });
         let oxidation = Arc::new(ModificationDefinition {
             mass: 15.9949,
             name: Some(Arc::from("Oxidation")),
             neutral_losses: Arc::from([]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         });
         let rules = vec![
             VariableRule {
@@ -1573,6 +1584,7 @@ mod test {
             name: Some(Arc::from("Phospho")),
             neutral_losses: Arc::from([]),
             neutral_loss_mode: NeutralLossMode::Optional,
+            channel_offsets: Arc::default(),
         });
         let rules = (*b"ST").map(|residue| VariableRule {
             specificity: ModificationSpecificity::Residue(residue),

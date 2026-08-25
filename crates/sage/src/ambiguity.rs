@@ -16,7 +16,7 @@
 //! matches what the external tool produces; the doctests from the reference are
 //! reproduced verbatim as unit tests to lock the port to that behavior.
 
-use crate::peptide::Peptide;
+use crate::peptide::{Peptide, Site};
 
 /// PSMs whose `|expmass - calcmass|` is within this many ppm of zero are treated
 /// as having no mass shift (matches the reference tool's `--mass_error` default).
@@ -223,7 +223,7 @@ fn render(peptide: &Peptide, amb: &[(usize, usize)], shift: &Shift) -> String {
     }
 
     if let Some(m) = peptide.nterm {
-        out.push_str(&mod_tag(m));
+        out.push_str(&peptide.modification_tag(Site::Nterm, m));
         out.push('-');
     }
 
@@ -247,7 +247,7 @@ fn render(peptide: &Peptide, amb: &[(usize, usize)], shift: &Shift) -> String {
         out.push(peptide.sequence[i] as char);
         let m = peptide.modification_at(i);
         if m != 0.0 {
-            out.push_str(&mod_tag(m));
+            out.push_str(&peptide.modification_tag(Site::Sequence(i as u32), m));
         }
 
         if let Shift::Site(pos, mass) = shift {
@@ -273,7 +273,7 @@ fn render(peptide: &Peptide, amb: &[(usize, usize)], shift: &Shift) -> String {
 
     if let Some(m) = peptide.cterm {
         out.push('-');
-        out.push_str(&mod_tag(m));
+        out.push_str(&peptide.modification_tag(Site::Cterm, m));
     }
 
     out
@@ -379,6 +379,42 @@ mod test {
         let a = annotate(&p, &cov, &cov, None);
         assert_eq!(a.sequence, "PEPTIDE");
         assert_eq!(a.mass_shift, 0.0);
+    }
+
+    #[test]
+    fn equal_mass_labels_keep_their_site_specific_names() {
+        let builder: crate::database::Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "static_mods": {
+                "K": {
+                    "mass": 0.0,
+                    "name": "Lys6",
+                    "channel_offsets": {"light": 0.0, "heavy": 6.020129}
+                },
+                "R": {
+                    "mass": 0.0,
+                    "name": "Arg6",
+                    "channel_offsets": {"light": 0.0, "heavy": 6.020129}
+                }
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEK\nPEPTIDER\n");
+        let database = parameters.build_from_peptides(peptides);
+
+        for expected in ["PEPTIDEK[Lys6]", "PEPTIDER[Arg6]"] {
+            let peptide = database
+                .peptides
+                .iter()
+                .find(|peptide| peptide.to_string() == expected)
+                .unwrap();
+            let coverage = vec![1; peptide.sequence.len()];
+            assert_eq!(
+                annotate(peptide, &coverage, &coverage, None).sequence,
+                expected
+            );
+        }
     }
 
     #[test]

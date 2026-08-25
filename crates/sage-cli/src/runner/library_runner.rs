@@ -615,9 +615,7 @@ impl Runner {
         let mut outputs = self.batch_library_files(parallel, &uncalibrated, false);
         self.cancellation.check()?;
         self.events.check()?;
-        outputs.features.par_sort_unstable_by(|left, right| {
-            right.discriminant_score.total_cmp(&left.discriminant_score)
-        });
+        sort_features_by_discriminant(&mut outputs.features);
         sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
         let calibrations = self.fit_library_mass_calibrations(&outputs.features);
         let mass_alignment_applied = calibrations
@@ -633,12 +631,8 @@ impl Runner {
         self.events.emit(EventKind::MassAlignmentCompleted {
             files: self.parameters.mzml_paths.len(),
         });
-        for (index, feature) in outputs.features.iter_mut().enumerate() {
-            feature.psm_id = index + 1;
-        }
-        outputs.features.par_sort_unstable_by(|left, right| {
-            right.discriminant_score.total_cmp(&left.discriminant_score)
-        });
+        sort_features_by_discriminant(&mut outputs.features);
+        assign_psm_ids(&mut outputs.features);
         sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
         let (library_rt_alignments, rt_files_aligned, mobility_files_aligned) =
             self.align_library_properties(&mut outputs.features);
@@ -656,9 +650,7 @@ impl Runner {
                 message,
             });
         }
-        outputs.features.par_sort_unstable_by(|left, right| {
-            right.discriminant_score.total_cmp(&left.discriminant_score)
-        });
+        sort_features_by_discriminant(&mut outputs.features);
         let q_spectrum = sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
 
         let q_peptide = assign_entity_q_values(

@@ -8,7 +8,7 @@ use crate::modification::{
     validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity, SiteMode,
     StaticModEntry, VarModEntry,
 };
-use crate::peptide::{AppliedModification, LibrarySite, Peptide, VariableRule};
+use crate::peptide::{AppliedModification, LibrarySite, ModificationKind, Peptide, VariableRule};
 use crate::ptm_library::PtmLibrary;
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
@@ -89,9 +89,6 @@ pub struct Builder {
     /// Each entry is either a bare mass (`15.9949`) or a structured object with
     /// mass, limits, display name, and optional neutral-loss behavior.
     pub variable_mods: Option<HashMap<String, Vec<VarModEntry>>>,
-    /// Coherent precursor-label channels. Each channel is applied as a complete
-    /// static modification state after ordinary peptide modifications.
-    pub labels: Option<LabelSettingsBuilder>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
     /// Hard cap on the total peptide variants generated per input peptide,
@@ -111,8 +108,7 @@ pub struct Builder {
     pub fasta: Option<String>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
-    /// Ordinary variable and static mods are not applied. Configured precursor
-    /// label channels are applied so peptide TSV and FASTA inputs behave alike.
+    /// Configured static, variable, and channel-aware modifications are applied.
     pub peptides: Option<String>,
     /// Path to a protein-specific custom cleavage-site TSV or Parquet file.
     /// Required columns: `protein`, `position`; optional column: `context`.
@@ -145,7 +141,6 @@ impl Builder {
             enzyme: self.enzyme.unwrap_or_default(),
             static_mods: validate_mods(self.static_mods),
             variable_mods: validate_var_mods(self.variable_mods),
-            labels: self.labels.map(LabelSettingsBuilder::make_settings),
             max_variable_mods,
             max_combinations: self.max_combinations.map(|x| x.max(1)),
             max_total_variable_mods,
@@ -178,8 +173,6 @@ pub struct Parameters {
     pub min_ion_index: usize,
     pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
     pub variable_mods: HashMap<ModificationSpecificity, Vec<VarModEntry>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub labels: Option<LabelSettings>,
     pub max_variable_mods: usize,
     pub max_combinations: Option<usize>,
     pub max_total_variable_mods: usize,
@@ -200,55 +193,6 @@ pub struct Parameters {
     pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct LabelSettingsBuilder {
-    pub reference: Option<String>,
-    pub channels: Vec<LabelChannelBuilder>,
-}
-
-#[derive(Deserialize, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct LabelChannelBuilder {
-    pub name: String,
-    #[serde(default)]
-    pub static_mods: HashMap<String, StaticModEntry>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct LabelSettings {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reference: Option<String>,
-    pub channels: Vec<LabelChannel>,
-}
-
-#[derive(Serialize, Clone, Debug)]
-pub struct LabelChannel {
-    pub name: String,
-    pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
-}
-
-type ResolvedLabelChannel = (
-    Arc<str>,
-    HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-);
-
-impl LabelSettingsBuilder {
-    fn make_settings(self) -> LabelSettings {
-        LabelSettings {
-            reference: self.reference,
-            channels: self
-                .channels
-                .into_iter()
-                .map(|channel| LabelChannel {
-                    name: channel.name,
-                    static_mods: validate_mods(Some(channel.static_mods)),
-                })
-                .collect(),
-        }
-    }
-}
-
 #[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct PtmLibrarySettings {
@@ -259,34 +203,6 @@ pub struct PtmLibrarySettings {
 
 fn default_true() -> bool {
     true
-}
-
-fn specificities_overlap(left: ModificationSpecificity, right: ModificationSpecificity) -> bool {
-    use ModificationSpecificity::*;
-    let residue = |specificity| match specificity {
-        Residue(residue)
-        | PeptideN(Some(residue))
-        | PeptideC(Some(residue))
-        | ProteinN(Some(residue))
-        | ProteinC(Some(residue)) => Some(residue),
-        _ => None,
-    };
-    let is_nterm = |specificity| matches!(specificity, PeptideN(_) | ProteinN(_));
-    let is_cterm = |specificity| matches!(specificity, PeptideC(_) | ProteinC(_));
-
-    match (left, right) {
-        (Residue(left), Residue(right)) => left == right,
-        _ if is_nterm(left) && is_nterm(right) || is_cterm(left) && is_cterm(right) => {
-            match (residue(left), residue(right)) {
-                (Some(left), Some(right)) => left == right,
-                _ => true,
-            }
-        }
-        (Residue(left), other) | (other, Residue(left)) => {
-            residue(other).is_none_or(|right| left == right)
-        }
-        _ => false,
-    }
 }
 
 /// Conservative peak-memory estimates for the major database-build stages.
@@ -301,126 +217,77 @@ pub struct DatabaseMemoryEstimate {
 }
 
 impl Parameters {
-    pub fn validate_labels(&self) -> Result<(), String> {
-        let Some(labels) = &self.labels else {
+    pub fn validate_channels(&self) -> Result<(), String> {
+        let definitions = self.channel_definitions();
+        let Some(first) = definitions.first() else {
             return Ok(());
         };
-        if labels.channels.len() < 2 {
-            return Err("database.labels requires at least two channels".into());
+        let expected = first.channel_offsets.keys().cloned().collect::<Vec<_>>();
+        if expected.len() < 2 {
+            return Err(
+                "channel_offsets must define at least two channels on every channel-aware modification"
+                    .into(),
+            );
         }
-        let mut names = HashSet::new();
-        for channel in &labels.channels {
-            let name = channel.name.trim();
-            if name.is_empty() {
-                return Err("database.labels channel names must not be empty".into());
-            }
-            if name != channel.name {
-                return Err(format!(
-                    "database.labels channel name `{}` must not contain surrounding whitespace",
-                    channel.name
-                ));
-            }
-            if name
-                .chars()
-                .any(|character| matches!(character, '\r' | '\n' | '='))
-            {
-                return Err(format!(
-                    "database.labels channel name `{name}` contains an unsupported character"
-                ));
-            }
-            if !names.insert(name) {
-                return Err(format!(
-                    "database.labels channel name `{name}` is duplicated"
-                ));
+        for definition in definitions.iter().skip(1) {
+            if definition.channel_offsets.keys().ne(expected.iter()) {
+                return Err(
+                    "all channel_offsets dictionaries must use exactly the same channel names"
+                        .into(),
+                );
             }
         }
-        if let Some(reference) = labels.reference.as_deref() {
-            if reference.trim() != reference || reference.is_empty() {
-                return Err("database.labels.reference must be a non-empty channel name".into());
-            }
-            if !names.contains(reference) {
-                return Err(format!(
-                    "database.labels.reference `{reference}` is not a configured channel"
-                ));
-            }
-        }
-
-        let targets = labels
-            .channels
-            .iter()
-            .flat_map(|channel| channel.static_mods.keys().copied())
-            .collect::<HashSet<_>>();
-        if targets.is_empty() {
-            return Err("database.labels must define at least one label modification".into());
-        }
-        if labels.channels.iter().all(|channel| {
-            channel
-                .static_mods
+        if definitions.iter().all(|definition| {
+            definition
+                .channel_offsets
                 .values()
-                .all(|entry| entry.definition().mass == 0.0)
+                .all(|offset| *offset == 0.0)
         }) {
-            return Err("database.labels must contain at least one non-zero channel mass".into());
+            return Err("channel_offsets must contain at least one non-zero offset".into());
         }
-
         let mut signatures = HashSet::new();
-        let mut ordered_targets = targets.iter().copied().collect::<Vec<_>>();
-        ordered_targets.sort_unstable();
-        for channel in &labels.channels {
-            let signature = ordered_targets
+        for channel in &expected {
+            let signature = definitions
                 .iter()
-                .map(|target| {
-                    channel
-                        .static_mods
-                        .get(target)
-                        .map(|entry| entry.definition().mass.to_bits())
-                        .unwrap_or_default()
-                })
+                .map(|definition| definition.channel_offsets[channel].to_bits())
                 .collect::<Vec<_>>();
             if !signatures.insert(signature) {
                 return Err(format!(
-                    "database.labels channel `{}` is chemically identical to another channel",
-                    channel.name
-                ));
-            }
-        }
-
-        for label_target in targets {
-            if self
-                .variable_mods
-                .keys()
-                .copied()
-                .any(|variable_target| specificities_overlap(label_target, variable_target))
-            {
-                return Err(format!(
-                    "database.labels target `{label_target}` overlaps a variable modification target"
+                    "channel `{channel}` is chemically identical to another configured channel"
                 ));
             }
         }
         Ok(())
     }
 
-    fn label_channels(&self) -> Vec<ResolvedLabelChannel> {
-        self.labels
-            .as_ref()
-            .map(|labels| {
-                labels
-                    .channels
-                    .iter()
-                    .map(|channel| {
-                        (
-                            Arc::<str>::from(channel.name.as_str()),
-                            channel
-                                .static_mods
-                                .iter()
-                                .map(|(specificity, entry)| {
-                                    (*specificity, Arc::new(entry.definition()))
-                                })
-                                .collect(),
-                        )
-                    })
-                    .collect()
-            })
+    fn channel_definitions(&self) -> Vec<ModificationDefinition> {
+        self.static_mods
+            .values()
+            .map(StaticModEntry::definition)
+            .chain(
+                self.variable_mods
+                    .values()
+                    .flatten()
+                    .map(VarModEntry::definition),
+            )
+            .filter(|definition| !definition.channel_offsets.is_empty())
+            .collect()
+    }
+
+    fn label_channels(&self) -> Vec<Arc<str>> {
+        self.channel_definitions()
+            .first()
+            .map(|definition| definition.channel_offsets.keys().cloned().collect())
             .unwrap_or_default()
+    }
+
+    fn label_reference(&self) -> Option<Arc<str>> {
+        let definitions = self.channel_definitions();
+        self.label_channels().into_iter().find(|channel| {
+            definitions
+                .iter()
+                .all(|definition| definition.channel_offsets[channel] == 0.0)
+        })
     }
 
     /// Flatten variable modifications into a stable order. This matters when
@@ -872,11 +739,7 @@ impl Parameters {
         let variable_variants = self
             .max_combinations
             .map_or(variants, |cap| variants.min(cap as u64));
-        variable_variants.saturating_mul(
-            self.labels
-                .as_ref()
-                .map_or(1, |labels| labels.channels.len() as u64),
-        )
+        variable_variants.saturating_mul(self.label_channels().len().max(1) as u64)
     }
 
     pub fn auto_calculate_prefilter_chunk_size(
@@ -928,6 +791,7 @@ impl Parameters {
         let mods = self.variable_modifications();
         let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
+        let label_reference = self.label_reference();
         let library = self.loaded_ptm_library.as_deref();
 
         let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
@@ -959,10 +823,8 @@ impl Parameters {
                             } else {
                                 label_channels
                                     .iter()
-                                    .map(|(channel, modifications)| {
-                                        peptide
-                                            .clone()
-                                            .apply_label_channel(channel.clone(), modifications)
+                                    .map(|channel| {
+                                        peptide.clone().apply_label_channel(channel.clone())
                                     })
                                     .collect()
                             }
@@ -1025,7 +887,7 @@ impl Parameters {
             })
             .collect::<Vec<_>>();
 
-        Self::reorder_peptides(&mut target_decoys);
+        Self::reorder_peptides_with_reference(&mut target_decoys, label_reference.as_deref());
 
         target_decoys
     }
@@ -1043,6 +905,10 @@ impl Parameters {
     }
 
     pub fn reorder_peptides(target_decoys: &mut Vec<Peptide>) {
+        Self::reorder_peptides_with_reference(target_decoys, None);
+    }
+
+    fn reorder_peptides_with_reference(target_decoys: &mut Vec<Peptide>, reference: Option<&str>) {
         log::trace!("sorting and deduplicating peptides");
 
         let init_size = target_decoys.len();
@@ -1055,13 +921,25 @@ impl Parameters {
         target_decoys.dedup_by(|remove, keep| {
             if remove.monoisotopic == keep.monoisotopic
                 && remove.sequence == keep.sequence
-                && remove.modifications == keep.modifications
-                && remove.nterm == keep.nterm
-                && remove.cterm == keep.cterm
-                && remove.applied_modifications == keep.applied_modifications
+                && chemical_modifications_eq(remove, keep)
+                && (remove.applied_modifications == keep.applied_modifications
+                    || channel_zero_provenance_eq(remove, keep))
             {
                 if remove.label_channel != keep.label_channel {
-                    keep.label_channel = None;
+                    let has_channel_site = keep
+                        .applied_modifications
+                        .iter()
+                        .chain(remove.applied_modifications.iter())
+                        .any(|applied| applied.kind == ModificationKind::Label);
+                    keep.label_channel = has_channel_site
+                        .then(|| {
+                            preferred_channel(
+                                keep.label_channel.as_deref(),
+                                remove.label_channel.as_deref(),
+                                reference,
+                            )
+                        })
+                        .flatten();
                 }
                 keep.proteins.extend(remove.proteins.iter().cloned());
                 // When merging peptides from different Fastas,
@@ -1088,8 +966,8 @@ impl Parameters {
     /// Build a `Vec<Peptide>` from a pre-digested TSV file.
     ///
     /// The TSV must have a header row. The `sequence` column is required;
-    /// `protein` and `decoy` are optional. Ordinary variable and static
-    /// modifications are not applied. Configured label channels are applied.
+    /// `protein` and `decoy` are optional. Configured static, variable, and
+    /// channel-aware modifications are applied.
     /// Decoys are generated by reversal when `self.generate_decoys` is true,
     /// subject to the same deduplication as the normal FASTA digest path.
     pub fn peptides_from_tsv(&self, content: &str) -> Vec<Peptide> {
@@ -1151,20 +1029,29 @@ impl Parameters {
             })
             .collect();
 
+        let variable_mods = self.variable_modifications();
+        let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
+        let label_reference = self.label_reference();
         let raw = raw
             .into_iter()
+            .flat_map(|peptide| {
+                peptide.apply_rules(
+                    &variable_mods,
+                    &[],
+                    &static_mods,
+                    self.max_variable_mods,
+                    self.max_total_variable_mods,
+                    self.max_combinations,
+                )
+            })
             .flat_map(|peptide| {
                 if label_channels.is_empty() {
                     vec![peptide]
                 } else {
                     label_channels
                         .iter()
-                        .map(|(channel, modifications)| {
-                            peptide
-                                .clone()
-                                .apply_label_channel(channel.clone(), modifications)
-                        })
+                        .map(|channel| peptide.clone().apply_label_channel(channel.clone()))
                         .collect()
                 }
             })
@@ -1197,7 +1084,7 @@ impl Parameters {
             })
             .collect();
 
-        Self::reorder_peptides(&mut result);
+        Self::reorder_peptides_with_reference(&mut result, label_reference.as_deref());
         result
     }
 
@@ -1316,44 +1203,73 @@ impl Parameters {
             for entry in entries {
                 let definition = entry.definition();
                 if let Some(name) = definition.name.as_deref() {
-                    crate::unimod::register_label(definition.mass, name);
+                    if definition.mass.abs() >= 1e-5 {
+                        crate::unimod::register_label(definition.mass, name);
+                    }
+                    for offset in definition.channel_offsets.values() {
+                        let mass = definition.mass + offset;
+                        if mass.abs() >= 1e-5 {
+                            crate::unimod::register_label(mass, name);
+                        }
+                    }
                 }
             }
         }
-
-        if let Some(labels) = &self.labels {
-            for channel in &labels.channels {
-                for entry in channel.static_mods.values() {
-                    let definition = entry.definition();
-                    if let Some(name) = definition.name.as_deref() {
-                        crate::unimod::register_label(definition.mass, name);
+        for entry in self.static_mods.values() {
+            let definition = entry.definition();
+            if let Some(name) = definition.name.as_deref() {
+                for offset in definition.channel_offsets.values() {
+                    let mass = definition.mass + offset;
+                    if mass.abs() >= 1e-5 {
+                        crate::unimod::register_label(mass, name);
                     }
                 }
             }
         }
 
-        let potential_mods = self
+        let mut potential_mods = self
             .variable_mods
             .iter()
             .flat_map(|(specificity, entries)| {
-                entries.iter().map(|entry| (*specificity, entry.mass()))
+                entries.iter().flat_map(move |entry| {
+                    let definition = entry.definition();
+                    let mut masses = vec![(*specificity, definition.mass)];
+                    masses.extend(
+                        definition
+                            .channel_offsets
+                            .values()
+                            .map(|offset| (*specificity, definition.mass + offset)),
+                    );
+                    masses
+                })
             })
             .collect::<Vec<(ModificationSpecificity, f32)>>();
+        potential_mods.sort_unstable_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.total_cmp(&right.1))
+        });
+        potential_mods.dedup();
         let mut model_mods = potential_mods.clone();
-        if let Some(labels) = &self.labels {
-            model_mods.extend(labels.channels.iter().flat_map(|channel| {
-                channel
-                    .static_mods
-                    .iter()
-                    .map(|(specificity, entry)| (*specificity, entry.definition().mass))
-            }));
-            model_mods.sort_unstable_by(|left, right| {
-                left.0
-                    .cmp(&right.0)
-                    .then_with(|| left.1.total_cmp(&right.1))
-            });
-            model_mods.dedup();
-        }
+        model_mods.extend(
+            self.static_mods
+                .iter()
+                .filter(|(_, entry)| !entry.channel_offsets().is_empty())
+                .flat_map(|(specificity, entry)| {
+                    let definition = entry.definition();
+                    definition
+                        .channel_offsets
+                        .values()
+                        .map(|offset| (*specificity, definition.mass + offset))
+                        .collect::<Vec<_>>()
+                }),
+        );
+        model_mods.sort_unstable_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.total_cmp(&right.1))
+        });
+        model_mods.dedup();
 
         let bitmap_index = if self.use_bitmap {
             BitmapIndex::build(
@@ -1367,6 +1283,8 @@ impl Parameters {
             BitmapIndex::default()
         };
 
+        let label_reference = self.label_reference();
+        let label_channels = self.label_channels();
         IndexedDatabase {
             peptides: target_decoys,
             fragments,
@@ -1376,22 +1294,8 @@ impl Parameters {
             generate_decoys: self.generate_decoys,
             potential_mods,
             model_mods,
-            label_reference: self
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.reference.as_deref())
-                .map(Arc::from),
-            label_channels: self
-                .labels
-                .as_ref()
-                .map(|labels| {
-                    labels
-                        .channels
-                        .iter()
-                        .map(|channel| Arc::from(channel.name.as_str()))
-                        .collect()
-                })
-                .unwrap_or_default(),
+            label_reference,
+            label_channels,
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
             bitmap_index,
@@ -1403,6 +1307,44 @@ fn with_estimation_margin(bytes: u64) -> u64 {
     // Parallel collection, allocator size classes, and sorting create overhead that
     // cannot be derived exactly from item counts. Use a conservative 50% margin.
     bytes.saturating_add(bytes / 2)
+}
+
+fn channel_zero_provenance_eq(left: &Peptide, right: &Peptide) -> bool {
+    let retained = |peptide: &Peptide| {
+        peptide
+            .applied_modifications
+            .iter()
+            .filter(|applied| {
+                !(applied.kind == ModificationKind::Label && applied.modification.mass == 0.0)
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    retained(left) == retained(right)
+}
+
+fn chemical_modifications_eq(left: &Peptide, right: &Peptide) -> bool {
+    left.nterm.unwrap_or_default() == right.nterm.unwrap_or_default()
+        && left.cterm.unwrap_or_default() == right.cterm.unwrap_or_default()
+        && (0..left.sequence.len())
+            .all(|index| left.modification_at(index) == right.modification_at(index))
+}
+
+fn preferred_channel(
+    left: Option<&str>,
+    right: Option<&str>,
+    reference: Option<&str>,
+) -> Option<Arc<str>> {
+    if let Some(reference) = reference {
+        if left == Some(reference) || right == Some(reference) {
+            return Some(Arc::from(reference));
+        }
+    }
+    match (left, right) {
+        (Some(left), Some(right)) => Some(Arc::from(left.min(right))),
+        (Some(channel), None) | (None, Some(channel)) => Some(Arc::from(channel)),
+        (None, None) => None,
+    }
 }
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
@@ -1703,32 +1645,28 @@ mod test {
     }
 
     #[test]
-    fn label_configuration_generates_complete_channels() {
+    fn channel_offsets_generate_complete_static_channels() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "fasta": "none",
             "generate_decoys": false,
-            "labels": {
-                "reference": "light",
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {
-                        "name": "heavy",
-                        "static_mods": {
-                            "K": {"mass": 8.014199, "name": "Lys8"},
-                            "R": {
-                                "mass": 10.008269,
-                                "name": "Arg10",
-                                "neutral_losses": [17.026549],
-                                "neutral_loss_mode": "required"
-                            }
-                        }
-                    }
-                ]
+            "static_mods": {
+                "K": {
+                    "mass": 0.0,
+                    "name": "SILAC-K",
+                    "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                },
+                "R": {
+                    "mass": 0.0,
+                    "name": "SILAC-R",
+                    "neutral_losses": [17.026549],
+                    "neutral_loss_mode": "required",
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }))
         .unwrap();
         let params = builder.make_parameters();
-        params.validate_labels().unwrap();
+        params.validate_channels().unwrap();
 
         let peptides = params.peptides_from_tsv("sequence\nPEPKR\n");
         assert_eq!(peptides.len(), 2);
@@ -1742,11 +1680,11 @@ mod test {
             .unwrap();
         assert!((heavy.monoisotopic - light.monoisotopic - 18.022468).abs() < 1e-4);
         assert_eq!(light.label_group(), heavy.label_group());
-        assert_eq!(heavy.to_string(), "PEPK[Lys8]R[Arg10]");
+        assert_eq!(heavy.to_string(), "PEPK[SILAC-K]R[SILAC-R]");
         let arg10 = heavy
             .applied_modifications
             .iter()
-            .find(|applied| applied.modification.name.as_deref() == Some("Arg10"))
+            .find(|applied| applied.modification.name.as_deref() == Some("SILAC-R"))
             .unwrap();
         assert_eq!(&*arg10.modification.neutral_losses, &[17.026549]);
         assert_eq!(
@@ -1756,19 +1694,19 @@ mod test {
     }
 
     #[test]
-    fn labels_deduplicate_peptides_without_label_sites() {
+    fn channels_deduplicate_peptides_without_channel_sites() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"K": 8.014199}}
-                ]
+            "static_mods": {
+                "K": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                }
             }
         }))
         .unwrap();
         let params = builder.make_parameters();
-        params.validate_labels().unwrap();
+        params.validate_channels().unwrap();
 
         let peptides = params.peptides_from_tsv("sequence\nPEPTIDE\n");
         assert_eq!(peptides.len(), 1);
@@ -1776,46 +1714,48 @@ mod test {
     }
 
     #[test]
-    fn labels_reject_overlapping_variable_modifications() {
+    fn variable_channel_offsets_preserve_site_variants_and_shared_light() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
-            "variable_mods": {"K": [42.0106]},
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"K": 8.014199}}
-                ]
-            }
+            "generate_decoys": false,
+            "max_variable_mods": 2,
+            "variable_mods": {"K": [{
+                "mass": 0.0,
+                "name": "SILAC-K",
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+            }]}
         }))
         .unwrap();
         let params = builder.make_parameters();
-        assert!(params
-            .validate_labels()
-            .unwrap_err()
-            .contains("overlaps a variable modification"));
+        params.validate_channels().unwrap();
+        let peptides = params.peptides_from_tsv("sequence\nPEPTIDEKK\n");
+        assert_eq!(peptides.len(), 4);
+        assert_eq!(
+            peptides
+                .iter()
+                .filter(|peptide| peptide.label_channel.as_deref() == Some("light"))
+                .count(),
+            1
+        );
+        assert!(peptides
+            .iter()
+            .all(|peptide| peptide.label_group() == "PEPTIDEKK"));
     }
 
     #[test]
-    fn label_modifications_stack_with_ordinary_static_modifications() {
+    fn channel_offsets_add_to_the_modification_base_mass() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
             "static_mods": {
-                "K": {"mass": 229.162932, "name": "TMT"}
-            },
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {
-                        "name": "heavy",
-                        "static_mods": {
-                            "K": {"mass": 8.014199, "name": "Lys8"}
-                        }
-                    }
-                ]
+                "K": {
+                    "mass": 229.162932,
+                    "name": "TMT-SILAC-K",
+                    "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                }
             }
         }))
         .unwrap();
         let params = builder.make_parameters();
-        params.validate_labels().unwrap();
+        params.validate_channels().unwrap();
         let digest = Digest {
             sequence: "PEPTIDEK".into(),
             ..Digest::default()
@@ -1831,14 +1771,14 @@ mod test {
             .iter()
             .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
             .unwrap();
-        assert!(heavy.to_string().ends_with("K[Lys8][TMT]"));
+        assert!(heavy.to_string().ends_with("K[TMT-SILAC-K]"));
         assert_eq!(
             heavy
                 .applied_modifications
                 .iter()
                 .filter(|applied| applied.site == crate::peptide::Site::Sequence(7))
                 .count(),
-            2
+            1
         );
     }
 
@@ -1917,7 +1857,6 @@ mod test {
             )]
             .into_iter()
             .collect(),
-            labels: None,
             max_variable_mods: 2,
             max_total_variable_mods: 2,
             max_combinations: None,
@@ -2082,6 +2021,7 @@ mod test {
                     neutral_losses: vec![97.9769],
                     neutral_loss_mode: NeutralLossMode::Optional,
                     site_mode: SiteMode::Both,
+                    channel_offsets: Default::default(),
                 })],
             )])),
             ..Default::default()
@@ -2133,6 +2073,7 @@ mod test {
                     neutral_losses: vec![],
                     neutral_loss_mode: NeutralLossMode::Optional,
                     site_mode: SiteMode::Library,
+                    channel_offsets: Default::default(),
                 })],
             )])),
             ..Default::default()

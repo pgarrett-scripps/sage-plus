@@ -786,16 +786,16 @@ mod tests {
     fn one_identified_label_channel_seeds_all_channel_precursors() {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
-            "labels": {
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"R": 10.008269}}
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }))
         .unwrap();
         let parameters = builder.make_parameters();
-        parameters.validate_labels().unwrap();
+        parameters.validate_channels().unwrap();
         let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
         let db = parameters.build_from_peptides(peptides);
         let light = db
@@ -822,5 +822,49 @@ mod tests {
             .map(|range| range.peptide)
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(seeded.len(), 2);
+    }
+
+    #[test]
+    fn shared_light_variable_channel_seeds_every_heavy_site_pattern() {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "max_variable_mods": 2,
+            "variable_mods": {
+                "K": [{
+                    "mass": 0.0,
+                    "name": "Optional-Lys8",
+                    "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                }]
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_channels().unwrap();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEKK\n");
+        let db = parameters.build_from_peptides(peptides);
+        let light = db
+            .peptides
+            .iter()
+            .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+            .unwrap();
+        let feature = Feature {
+            peptide_idx: crate::database::PeptideIx(light as u32),
+            peptide_q: 0.0,
+            label: 1,
+            aligned_rt: 0.5,
+            ims: 1.0,
+            calcmass: db.peptides[light].monoisotopic,
+            charge: 2,
+            ..Feature::default()
+        };
+
+        let map = build_feature_map(LfqSettings::default(), (2, 2), &[feature], &db);
+        let seeded = map
+            .ranges
+            .iter()
+            .filter(|range| !range.decoy && range.isotope == 0)
+            .map(|range| range.peptide)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(seeded.len(), 4);
     }
 }

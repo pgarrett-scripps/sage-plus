@@ -21,6 +21,7 @@ use sage_core::spectral_library::{
     self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
 };
 use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
 use std::sync::Arc;
@@ -261,6 +262,30 @@ fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
 
 fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
     feature.spectrum_q <= psm_q_value
+}
+
+fn feature_identity_cmp(left: &Feature, right: &Feature) -> Ordering {
+    left.file_id
+        .cmp(&right.file_id)
+        .then_with(|| left.spec_id.cmp(&right.spec_id))
+        .then_with(|| left.rank.cmp(&right.rank))
+        .then_with(|| left.peptide_idx.cmp(&right.peptide_idx))
+        .then_with(|| left.charge.cmp(&right.charge))
+}
+
+fn sort_features_by_discriminant(features: &mut [Feature]) {
+    features.par_sort_unstable_by(|left, right| {
+        right
+            .discriminant_score
+            .total_cmp(&left.discriminant_score)
+            .then_with(|| feature_identity_cmp(left, right))
+    });
+}
+
+fn assign_psm_ids(features: &mut [Feature]) {
+    for (index, feature) in features.iter_mut().enumerate() {
+        feature.psm_id = index + 1;
+    }
 }
 
 #[derive(Default)]
@@ -806,7 +831,7 @@ impl Runner {
                 feat.discriminant_score = (-feat.poisson as f32).ln_1p() + feat.longest_y_pct / 3.0
             });
         }
-        features.par_sort_unstable_by(|a, b| b.discriminant_score.total_cmp(&a.discriminant_score));
+        sort_features_by_discriminant(features);
         sage_core::ml::qvalue::spectrum_q_value(features)
     }
 
@@ -1446,10 +1471,15 @@ impl Runner {
         // Establish provisional q-values from the search-only Poisson feature,
         // then use confident PSMs for mass-error alignment and property-model
         // training before final FDR fitting.
-        outputs
-            .features
-            .par_sort_unstable_by(|a, b| a.poisson.total_cmp(&b.poisson));
-        sage_core::ml::qvalue::spectrum_q_value(&mut outputs.features);
+        outputs.features.par_sort_unstable_by(|left, right| {
+            left.poisson
+                .total_cmp(&right.poisson)
+                .then_with(|| feature_identity_cmp(left, right))
+        });
+        assign_psm_ids(&mut outputs.features);
+        sage_core::ml::qvalue::spectrum_q_value_by(&mut outputs.features, |feature| {
+            feature.poisson
+        });
         self.align_mass_errors(&mut outputs.features);
         self.events.emit(EventKind::MassAlignmentCompleted {
             files: self.parameters.mzml_paths.len(),
@@ -2983,8 +3013,39 @@ impl Runner {
 
 #[cfg(test)]
 mod tests {
-    use super::{passes_localization_filter, passes_output_filter, RunSummary};
+    use super::{
+        assign_psm_ids, passes_localization_filter, passes_output_filter,
+        sort_features_by_discriminant, RunSummary,
+    };
+    use sage_core::database::PeptideIx;
     use sage_core::scoring::Feature;
+
+    #[test]
+    fn tied_features_receive_repeatable_psm_ids() {
+        let feature = |file_id, spec_id: &str, peptide_idx| Feature {
+            file_id,
+            spec_id: spec_id.into(),
+            rank: 1,
+            peptide_idx: PeptideIx(peptide_idx),
+            discriminant_score: 5.0,
+            ..Feature::default()
+        };
+        let mut forward = vec![feature(1, "scan=2", 2), feature(0, "scan=1", 1)];
+        let mut reversed = forward.iter().cloned().rev().collect::<Vec<_>>();
+
+        sort_features_by_discriminant(&mut forward);
+        assign_psm_ids(&mut forward);
+        sort_features_by_discriminant(&mut reversed);
+        assign_psm_ids(&mut reversed);
+
+        let identities = |features: &[Feature]| {
+            features
+                .iter()
+                .map(|feature| (feature.file_id, feature.spec_id.clone(), feature.psm_id))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(identities(&forward), identities(&reversed));
+    }
 
     #[test]
     fn localization_filter_requires_passing_target_psm() {

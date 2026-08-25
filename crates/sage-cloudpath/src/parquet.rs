@@ -1691,6 +1691,8 @@ pub fn serialize_lfq<H: BuildHasher>(
             filenames.len()
         )));
     }
+    let mut rows = areas.iter().collect::<Vec<_>>();
+    rows.sort_unstable_by(|left, right| left.0.cmp(right.0));
     let has_labels = !database.label_channels.is_empty();
     let schema = build_lfq_schema_version(has_labels)?;
     let reference_intensities = database
@@ -1734,8 +1736,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     let mut rg = writer.next_row_group()?;
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|((id, _), _)| {
                 let peptide_idx = match id {
                     PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
@@ -1751,8 +1754,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|((id, _), _)| {
                 let peptide_idx = match id {
                     PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
@@ -1769,8 +1773,9 @@ pub fn serialize_lfq<H: BuildHasher>(
 
     if has_labels {
         if let Some(mut col) = rg.next_column()? {
-            let values = areas
+            let values = rows
                 .iter()
+                .copied()
                 .flat_map(|((id, _), _)| {
                     let peptide_idx = match id {
                         PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
@@ -1789,8 +1794,9 @@ pub fn serialize_lfq<H: BuildHasher>(
         }
 
         if let Some(mut col) = rg.next_column()? {
-            let values = areas
+            let values = rows
                 .iter()
+                .copied()
                 .flat_map(|((id, _), _)| {
                     let peptide_idx = match id {
                         PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
@@ -1809,7 +1815,7 @@ pub fn serialize_lfq<H: BuildHasher>(
         let mut values = Vec::with_capacity(areas.len() * filenames.len());
         let mut def_levels = Vec::with_capacity(areas.len() * filenames.len());
 
-        for ((id, _), _) in areas.iter() {
+        for ((id, _), _) in rows.iter().copied() {
             match id {
                 PrecursorId::Combined(_) => {
                     def_levels.extend(std::iter::repeat(0).take(filenames.len()));
@@ -1827,8 +1833,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|((id, _), _)| {
                 let peptide_idx = match id {
                     PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
@@ -1847,8 +1854,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|((_, decoy), _)| std::iter::repeat(*decoy).take(filenames.len()))
             .collect::<Vec<_>>();
 
@@ -1857,8 +1865,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|(_, quantified)| {
                 std::iter::repeat(quantified.peak.q_value).take(filenames.len())
             })
@@ -1869,8 +1878,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|(_, quantified)| {
                 std::iter::repeat(quantified.peak.score).take(filenames.len())
             })
@@ -1881,8 +1891,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
+            .copied()
             .flat_map(|(_, quantified)| {
                 std::iter::repeat(quantified.peak.spectral_angle).take(filenames.len())
             })
@@ -1893,7 +1904,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
+        let values = rows
             .iter()
             .flat_map(|_| filenames.iter().map(|filename| filename.as_bytes().into()))
             .collect::<Vec<_>>();
@@ -1907,7 +1918,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     if let Some(mut col) = rg.next_column()? {
         let mut values = Vec::with_capacity(areas.len() * filenames.len());
         let mut def_levels = Vec::with_capacity(areas.len() * filenames.len());
-        for quantified in areas.values() {
+        for (_, quantified) in rows.iter().copied() {
             for intensity in &quantified.intensities {
                 if let Some(intensity) = intensity {
                     values.push(*intensity);
@@ -1927,7 +1938,7 @@ pub fn serialize_lfq<H: BuildHasher>(
         if let Some(mut col) = rg.next_column()? {
             let mut values = Vec::new();
             let mut def_levels = Vec::with_capacity(areas.len() * filenames.len());
-            for ((id, decoy), quantified) in areas {
+            for ((id, decoy), quantified) in rows.iter().copied() {
                 let (peptide_idx, charge) = match id {
                     PrecursorId::Combined(peptide_idx) => (*peptide_idx, None),
                     PrecursorId::Charged((peptide_idx, charge)) => (*peptide_idx, Some(*charge)),
@@ -1961,8 +1972,9 @@ pub fn serialize_lfq<H: BuildHasher>(
     }
 
     if let Some(mut col) = rg.next_column()? {
-        let values = areas
-            .values()
+        let values = rows
+            .iter()
+            .map(|(_, quantified)| *quantified)
             .flat_map(|quantified| quantified.ms2_confirmed.iter().copied())
             .collect::<Vec<_>>();
 
@@ -2039,20 +2051,69 @@ mod ptm_tests {
     }
 
     #[test]
+    fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::errors::Result<()>
+    {
+        let mut database = IndexedDatabase::default();
+        for sequence in [b"PEPTIDE".as_slice(), b"SEQUENCE".as_slice()] {
+            database.peptides.push(Peptide {
+                sequence: Arc::from(sequence),
+                proteins: vec![Arc::from("P12345")],
+                ..Peptide::default()
+            });
+        }
+
+        let first_key = (PrecursorId::Charged((PeptideIx(0), 2)), false);
+        let second_key = (PrecursorId::Charged((PeptideIx(1), 3)), false);
+        let first_peak = || QuantifiedPeak {
+            peak: sage_core::lfq::Peak {
+                score: 12.5,
+                spectral_angle: 0.91,
+                q_value: 0.005,
+                ..Default::default()
+            },
+            intensities: vec![Some(42.0)],
+            ms2_confirmed: vec![true],
+        };
+        let second_peak = || QuantifiedPeak {
+            peak: sage_core::lfq::Peak {
+                score: 9.0,
+                spectral_angle: 0.75,
+                q_value: 0.01,
+                ..Default::default()
+            },
+            intensities: vec![Some(21.0)],
+            ms2_confirmed: vec![false],
+        };
+
+        let mut forward = HashMap::new();
+        forward.insert(first_key, first_peak());
+        forward.insert(second_key, second_peak());
+        let mut reverse = HashMap::new();
+        reverse.insert(second_key, second_peak());
+        reverse.insert(first_key, first_peak());
+
+        let filenames = ["run-a".into()];
+        assert_eq!(
+            serialize_lfq(&forward, &filenames, &database)?,
+            serialize_lfq(&reverse, &filenames, &database)?
+        );
+        Ok(())
+    }
+
+    #[test]
     fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors::Result<()> {
         let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
-            "labels": {
-                "reference": "light",
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"R": 10.008269}}
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }))
         .unwrap();
         let parameters = builder.make_parameters();
-        parameters.validate_labels().unwrap();
+        parameters.validate_channels().unwrap();
         let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
         let database = parameters.build_from_peptides(peptides);
         let mut areas = HashMap::new();
@@ -2109,12 +2170,11 @@ mod ptm_tests {
     fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<()> {
         let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
-            "labels": {
-                "reference": "light",
-                "channels": [
-                    {"name": "light", "static_mods": {}},
-                    {"name": "heavy", "static_mods": {"R": 10.008269}}
-                ]
+            "static_mods": {
+                "R": {
+                    "mass": 0.0,
+                    "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                }
             }
         }))
         .unwrap();

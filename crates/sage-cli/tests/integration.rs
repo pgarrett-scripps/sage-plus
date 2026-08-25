@@ -225,18 +225,15 @@ fn labeled_database_and_library_search_round_trip_channel_metadata() -> anyhow::
     let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(
         workspace.join("tests/config_spectral_library.json"),
     )?)?;
-    config["database"]["labels"] = serde_json::json!({
-        "reference": "light",
-        "channels": [
-            {"name": "light", "static_mods": {}},
-            {
-                "name": "heavy",
-                "static_mods": {
-                    "K": {"mass": 8.014199, "name": "Lys8"},
-                    "R": {"mass": 10.008269, "name": "Arg10"}
-                }
-            }
-        ]
+    config["database"]["static_mods"]["K"] = serde_json::json!({
+        "mass": 0.0,
+        "name": "SILAC-K",
+        "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+    });
+    config["database"]["static_mods"]["R"] = serde_json::json!({
+        "mass": 0.0,
+        "name": "SILAC-R",
+        "channel_offsets": {"light": 0.0, "heavy": 10.008269}
     });
     config["quant"] = serde_json::json!({"lfq": true});
     let export_config = root.join("export.json");

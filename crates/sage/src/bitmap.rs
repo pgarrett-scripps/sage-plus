@@ -279,6 +279,7 @@ mod tests {
             name: None,
             neutral_losses: Arc::from([10.0]),
             neutral_loss_mode: NeutralLossMode::Required,
+            channel_offsets: Arc::default(),
         });
         let peptide = Peptide::try_from(Digest {
             sequence: "AMK".into(),
