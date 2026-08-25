@@ -12,9 +12,11 @@ pub mod retention_model;
 
 #[allow(dead_code)]
 fn all_close(lhs: &[f64], rhs: &[f64], eps: f64) -> bool {
-    lhs.iter()
-        .zip(rhs.iter())
-        .all(|(l, r)| (l - r).abs() <= eps)
+    lhs.len() == rhs.len()
+        && lhs
+            .iter()
+            .zip(rhs.iter())
+            .all(|(l, r)| (l - r).abs() <= eps)
 }
 
 pub fn norm(slice: &[f64]) -> f64 {
@@ -30,3 +32,7 @@ pub fn std(slice: &[f64]) -> f64 {
     let x = slice.iter().fold(0.0, |acc, x| acc + (x - mean).powi(2));
     (x / slice.len() as f64).sqrt()
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/ml/mod.rs"]
+mod tests;

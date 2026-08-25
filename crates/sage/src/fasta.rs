@@ -1,9 +1,10 @@
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
+use crate::mass::VALID_AA;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Fasta {
     pub targets: Vec<(Arc<str>, String)>,
     decoy_tag: String,
@@ -14,46 +15,68 @@ pub struct Fasta {
 
 impl Fasta {
     // Parse a string into a fasta database
-    pub fn parse<S: Into<String>>(contents: String, decoy_tag: S, generate_decoys: bool) -> Fasta {
+    pub fn parse<S: Into<String>>(
+        contents: String,
+        decoy_tag: S,
+        generate_decoys: bool,
+    ) -> Result<Fasta, FastaError> {
         let decoy_tag = decoy_tag.into();
 
         let mut targets = Vec::new();
-        let mut last_id = "";
+        let mut last_id: Option<(&str, usize)> = None;
         let mut s = String::new();
 
-        for line in contents.as_str().lines() {
+        for (line_index, line) in contents.as_str().lines().enumerate() {
+            let line_number = line_index + 1;
+            let line = line.trim();
             if line.is_empty() {
                 continue;
             }
-            let line = line.trim();
             if let Some(id) = line.strip_prefix('>') {
                 if !s.is_empty() {
-                    let acc: Arc<str> =
-                        Arc::from(last_id.split_ascii_whitespace().next().unwrap().to_string());
+                    let (last_id, header_line) =
+                        last_id.ok_or(FastaError::MissingHeader { line: line_number })?;
+                    let acc = accession(last_id, header_line)?;
                     let seq = std::mem::take(&mut s);
                     if !acc.contains(&decoy_tag) || !generate_decoys {
                         targets.push((acc, seq));
                     }
                 }
-                last_id = id;
+                accession(id, line_number)?;
+                last_id = Some((id, line_number));
             } else {
+                if last_id.is_none() {
+                    return Err(FastaError::MissingHeader { line: line_number });
+                }
+                if let Some(residue) = line.bytes().find(|residue| !VALID_AA.contains(residue)) {
+                    return Err(FastaError::InvalidResidue {
+                        line: line_number,
+                        residue: residue as char,
+                    });
+                }
                 s.push_str(line);
             }
         }
 
         if !s.is_empty() {
-            let acc: Arc<str> =
-                Arc::from(last_id.split_ascii_whitespace().next().unwrap().to_string());
+            let (last_id, header_line) = last_id.ok_or(FastaError::MissingHeader {
+                line: contents.lines().count().max(1),
+            })?;
+            let acc = accession(last_id, header_line)?;
             if !acc.contains(&decoy_tag) || !generate_decoys {
                 targets.push((acc, s));
             }
         }
 
-        Fasta {
+        if targets.is_empty() {
+            return Err(FastaError::NoSequences);
+        }
+
+        Ok(Fasta {
             targets,
             decoy_tag,
             generate_decoys,
-        }
+        })
     }
 
     pub fn digest(&self, enzyme: &EnzymeParameters) -> Vec<Digest> {
@@ -100,3 +123,46 @@ impl Fasta {
             })
     }
 }
+
+fn accession(id: &str, line: usize) -> Result<Arc<str>, FastaError> {
+    id.split_ascii_whitespace()
+        .next()
+        .filter(|accession| !accession.is_empty())
+        .map(Arc::from)
+        .ok_or(FastaError::MissingIdentifier { line })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum FastaError {
+    NoSequences,
+    MissingHeader { line: usize },
+    MissingIdentifier { line: usize },
+    InvalidResidue { line: usize, residue: char },
+}
+
+impl std::fmt::Display for FastaError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSequences => write!(formatter, "FASTA contains no usable protein sequences"),
+            Self::MissingHeader { line } => {
+                write!(
+                    formatter,
+                    "FASTA sequence at line {line} appears before its header"
+                )
+            }
+            Self::MissingIdentifier { line } => {
+                write!(formatter, "FASTA header at line {line} has no identifier")
+            }
+            Self::InvalidResidue { line, residue } => write!(
+                formatter,
+                "FASTA sequence at line {line} contains invalid residue `{residue}`"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FastaError {}
+
+#[cfg(test)]
+#[path = "../tests/unit/fasta.rs"]
+mod tests;

@@ -182,6 +182,7 @@ fn main() -> anyhow::Result<()> {
             parallel,
             events,
             cancellation: CancellationToken::default(),
+            terminate_on_memory_limit: true,
         },
     );
 

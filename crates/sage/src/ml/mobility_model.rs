@@ -594,56 +594,5 @@ fn apply_ptm_offsets(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ion_mobility_settings_have_safe_defaults() {
-        let settings = IonMobilitySettings::default();
-        assert!(settings.enabled);
-        assert_eq!(settings.features, IonMobilityFeatureSet::Basic);
-        assert_eq!(settings.folds, 3);
-        assert_eq!(settings.ptm_regularization, 25.0);
-        assert_eq!(settings.min_training_psms, 200);
-    }
-
-    #[test]
-    fn enriched_embedding_is_finite_and_charge_aware() {
-        let map = amino_acid_map();
-        let peptide = Peptide {
-            sequence: b"ACDEFGHIK".to_vec().into(),
-            modifications: vec![0.0; 9],
-            monoisotopic: 1000.0,
-            ..Peptide::default()
-        };
-        let charge_two = enriched_embed(&peptide, 2, &map);
-        let charge_three = enriched_embed(&peptide, 3, &map);
-        assert!(charge_two.iter().all(|value| value.is_finite()));
-        assert_ne!(charge_two, charge_three);
-        assert_eq!(charge_two.len(), ENRICHED_FEATURES);
-    }
-
-    #[test]
-    fn zero_mobility_is_not_a_training_observation() {
-        let mut feature = Feature::default();
-        assert!(!valid_mobility(&feature));
-        feature.ims = 1.1;
-        assert!(valid_mobility(&feature));
-        feature.ims = f32::NAN;
-        assert!(!valid_mobility(&feature));
-    }
-
-    #[test]
-    fn ptm_row_has_global_and_charge_specific_effects() {
-        let peptide = Peptide {
-            sequence: b"AMPEPTIDEK".to_vec().into(),
-            modifications: vec![0.0, 15.994_915, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            ..Peptide::default()
-        };
-        let keys = [(ModificationSpecificity::Residue(b'M'), 15.994_915)];
-        assert_eq!(
-            MobilityPtmOffsetModel::row(&peptide, 2, &keys, &[2, 3]),
-            vec![1.0, 1.0, 0.0]
-        );
-    }
-}
+#[path = "../../tests/unit/ml/mobility_model.rs"]
+mod tests;

@@ -244,3 +244,7 @@ pub fn quantify(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/tmt.rs"]
+mod tests;

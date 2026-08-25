@@ -73,7 +73,9 @@ pub fn read_spectra(
         FileFormat::MGF => read_mgf(url, file_id),
         FileFormat::TDF => read_tdf(url, file_id, bruker_processor, requires_ms1),
         FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn),
-        FileFormat::Unidentified => panic!("Unable to get type for '{}'", url), // read_mzml(path, file_id, sn),
+        FileFormat::Unidentified => Err(Error::Unsupported(format!(
+            "unable to determine the spectra format for `{url}`"
+        ))),
     }
 }
 
@@ -182,7 +184,7 @@ where
             contents,
             decoy_tag.as_ref(),
             generate_decoys,
-        ))
+        )?)
     })
 }
 
@@ -216,28 +218,5 @@ where
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_identify_format() {
-        assert_eq!(FileFormat::from("foo.mzml"), FileFormat::MzML);
-        assert_eq!(FileFormat::from("foo.mzML"), FileFormat::MzML);
-        assert_eq!(FileFormat::from("foo.mgf"), FileFormat::MGF);
-        assert_eq!(FileFormat::from("foo.mgf.gz"), FileFormat::MGF);
-        assert_eq!(FileFormat::from("foo.tdf"), FileFormat::TDF);
-        assert_eq!(FileFormat::from("./tomato/foo.d"), FileFormat::TDF);
-        assert_eq!(FileFormat::from("./tomato/foo.d/"), FileFormat::TDF);
-        assert_eq!(FileFormat::from("foo.raw"), FileFormat::ThermoRaw);
-        assert_eq!(FileFormat::from("foo.RAW"), FileFormat::ThermoRaw);
-    }
-
-    #[test]
-    fn thermoraw_rejects_signal_to_noise_mode() {
-        let url = Url::parse("file:///tmp/example.raw").unwrap();
-        assert!(matches!(
-            read_thermoraw(&url, 0, Some(2)),
-            Err(Error::Unsupported(_))
-        ));
-    }
-}
+#[path = "../tests/unit/util.rs"]
+mod test;

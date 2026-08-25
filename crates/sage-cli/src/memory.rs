@@ -4,14 +4,47 @@
 //! complexity and contention to hot paths, so these limits are enforced by periodically
 //! sampling the process resident set and the memory available to the whole system.
 
+use crate::events::CancellationToken;
 use anyhow::{bail, ensure, Context, Result};
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use sysinfo::{ProcessExt, System, SystemExt};
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MEMORY_LIMIT_EXIT_CODE: i32 = 137;
+
+#[derive(Clone)]
+pub enum MemoryLimitBehavior {
+    TerminateProcess,
+    CancelJob(CancellationToken),
+}
+
+pub struct MemoryGuard {
+    stop: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<String>>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl MemoryGuard {
+    pub fn failure(&self) -> Option<String> {
+        self.failure.lock().ok().and_then(|failure| failure.clone())
+    }
+}
+
+impl Drop for MemoryGuard {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            thread.thread().unpark();
+            if thread.join().is_err() {
+                log::error!("memory guard thread panicked while stopping");
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemoryLimits {
@@ -118,24 +151,48 @@ fn bytes_to_gib(bytes: u64) -> f64 {
     bytes as f64 / GIB
 }
 
-/// Start a detached monitor before Sage performs its large allocations.
-pub fn spawn_memory_guard(limits: MemoryLimits) -> std::io::Result<()> {
+/// Start a monitor before Sage performs its large allocations.
+pub fn spawn_memory_guard(
+    limits: MemoryLimits,
+    behavior: MemoryLimitBehavior,
+) -> std::io::Result<MemoryGuard> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let failure = Arc::new(Mutex::new(None));
     if !limits.is_enabled() {
-        return Ok(());
+        return Ok(MemoryGuard {
+            stop,
+            failure,
+            thread: None,
+        });
     }
 
-    thread::Builder::new()
+    let guard_stop = stop.clone();
+    let guard_failure = failure.clone();
+    let thread = thread::Builder::new()
         .name("sage-memory-guard".into())
-        .spawn(move || guard_loop(limits))?;
-    Ok(())
+        .spawn(move || guard_loop(limits, behavior, guard_stop, guard_failure))?;
+    Ok(MemoryGuard {
+        stop,
+        failure,
+        thread: Some(thread),
+    })
 }
 
-fn guard_loop(limits: MemoryLimits) {
+fn guard_loop(
+    limits: MemoryLimits,
+    behavior: MemoryLimitBehavior,
+    stop: Arc<AtomicBool>,
+    failure: Arc<Mutex<Option<String>>>,
+) {
     let pid = match sysinfo::get_current_pid() {
         Ok(pid) => pid,
         Err(error) => {
-            log::error!("memory guard could not determine the Sage process ID: {error}");
-            std::process::exit(MEMORY_LIMIT_EXIT_CODE);
+            trigger(
+                &behavior,
+                &failure,
+                format!("memory guard could not determine the Sage process ID: {error}"),
+            );
+            return;
         }
     };
 
@@ -146,39 +203,58 @@ fn guard_loop(limits: MemoryLimits) {
     );
 
     let mut system = System::new();
-    loop {
+    while !stop.load(Ordering::Acquire) {
         system.refresh_memory();
         system.refresh_process(pid);
 
         let rss = match system.process(pid) {
             Some(process) => process.memory(),
             None => {
-                log::error!("memory guard could not inspect the Sage process");
-                std::process::exit(MEMORY_LIMIT_EXIT_CODE);
+                trigger(
+                    &behavior,
+                    &failure,
+                    "memory guard could not inspect the Sage process".into(),
+                );
+                return;
             }
         };
         let available = system.available_memory();
 
         if process_limit_reached(limits, rss) {
-            log::error!(
+            let message = format!(
                 "Sage reached its configured memory limit: {:.2} GiB used, {:.2} GiB allowed. Aborting to keep the system responsive. Reduce `batch_size`, reduce database complexity, or increase `max_memory_gb`.",
                 bytes_to_gib(rss),
                 bytes_to_gib(limits.max_bytes.unwrap_or_default()),
             );
-            std::process::exit(MEMORY_LIMIT_EXIT_CODE);
+            trigger(&behavior, &failure, message);
+            return;
         }
 
         if reserve_limit_reached(limits, available, system.total_memory()) {
-            log::error!(
+            let message = format!(
                 "System available memory reached Sage's configured reserve: {:.2} GiB available, {:.2} GiB required. Sage is using {:.2} GiB. Aborting to keep the system responsive.",
                 bytes_to_gib(available),
                 bytes_to_gib(limits.min_free_bytes.unwrap_or_default()),
                 bytes_to_gib(rss),
             );
-            std::process::exit(MEMORY_LIMIT_EXIT_CODE);
+            trigger(&behavior, &failure, message);
+            return;
         }
 
-        thread::sleep(POLL_INTERVAL);
+        thread::park_timeout(POLL_INTERVAL);
+    }
+}
+
+fn trigger(behavior: &MemoryLimitBehavior, failure: &Mutex<Option<String>>, message: String) {
+    log::error!("{message}");
+    match behavior {
+        MemoryLimitBehavior::TerminateProcess => std::process::exit(MEMORY_LIMIT_EXIT_CODE),
+        MemoryLimitBehavior::CancelJob(cancellation) => {
+            if let Ok(mut stored) = failure.lock() {
+                *stored = Some(message);
+            }
+            cancellation.cancel_for_memory_limit();
+        }
     }
 }
 
@@ -201,74 +277,5 @@ fn display_limit(bytes: Option<u64>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn converts_memory_limits() {
-        let limits = MemoryLimits::from_gib(Some(8.5), Some(2.0)).unwrap();
-        assert_eq!(limits.max_bytes, Some((8.5 * GIB) as u64));
-        assert_eq!(limits.min_free_bytes, Some((2.0 * GIB) as u64));
-        assert_eq!(limits.max_gib(), Some(8.5));
-        assert_eq!(limits.min_free_gib(), Some(2.0));
-    }
-
-    #[test]
-    fn zero_and_missing_limits_are_disabled() {
-        let limits = MemoryLimits::from_gib(Some(0.0), None).unwrap();
-        assert_eq!(limits, MemoryLimits::default());
-        assert!(!limits.is_enabled());
-    }
-
-    #[test]
-    fn rejects_invalid_limits() {
-        assert!(MemoryLimits::from_gib(Some(-1.0), None).is_err());
-        assert!(MemoryLimits::from_gib(Some(f64::NAN), None).is_err());
-        assert!(MemoryLimits::from_gib(None, Some(f64::INFINITY)).is_err());
-    }
-
-    #[test]
-    fn detects_configured_thresholds() {
-        let limits = MemoryLimits::from_gib(Some(8.0), Some(2.0)).unwrap();
-        assert!(!process_limit_reached(limits, 7 * GIB as u64));
-        assert!(process_limit_reached(limits, 8 * GIB as u64));
-        assert!(!reserve_limit_reached(
-            limits,
-            3 * GIB as u64,
-            16 * GIB as u64
-        ));
-        assert!(reserve_limit_reached(
-            limits,
-            2 * GIB as u64,
-            16 * GIB as u64
-        ));
-        assert!(!reserve_limit_reached(limits, 0, 0));
-    }
-
-    #[test]
-    fn rejects_estimates_that_cross_limits() {
-        let limits = MemoryLimits::from_gib(Some(8.0), Some(2.0)).unwrap();
-        assert!(!estimate_exceeds_process_limit(
-            limits,
-            2 * GIB as u64,
-            5 * GIB as u64
-        ));
-        assert!(estimate_exceeds_process_limit(
-            limits,
-            2 * GIB as u64,
-            6 * GIB as u64
-        ));
-        assert!(!estimate_exceeds_reserve(
-            limits,
-            10 * GIB as u64,
-            16 * GIB as u64,
-            7 * GIB as u64
-        ));
-        assert!(estimate_exceeds_reserve(
-            limits,
-            9 * GIB as u64,
-            16 * GIB as u64,
-            7 * GIB as u64
-        ));
-    }
-}
+#[path = "../tests/unit/memory.rs"]
+mod tests;

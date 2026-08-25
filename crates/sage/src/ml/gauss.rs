@@ -163,3 +163,7 @@ impl Gauss {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/ml/gauss.rs"]
+mod tests;

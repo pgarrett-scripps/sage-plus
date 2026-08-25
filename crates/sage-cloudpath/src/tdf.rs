@@ -392,3 +392,7 @@ impl PeakBuffer {
             .unzip()
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/tdf.rs"]
+mod tests;

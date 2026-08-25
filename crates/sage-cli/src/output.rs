@@ -39,3 +39,7 @@ impl FromIterator<SageResults> for SageResults {
             .fold(SageResults::default(), SageResults::fold)
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/output.rs"]
+mod tests;

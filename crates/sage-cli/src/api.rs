@@ -9,6 +9,7 @@ pub struct JobOptions {
     pub parallel: usize,
     pub events: EventEmitter,
     pub cancellation: CancellationToken,
+    pub terminate_on_memory_limit: bool,
 }
 
 impl Default for JobOptions {
@@ -17,6 +18,7 @@ impl Default for JobOptions {
             parallel: (num_cpus::get() / 2).max(1),
             events: EventEmitter::disabled(),
             cancellation: CancellationToken::default(),
+            terminate_on_memory_limit: false,
         }
     }
 }
@@ -74,51 +76,46 @@ impl SageRunner {
             parallel,
             events,
             cancellation,
+            terminate_on_memory_limit,
         } = self.options;
-        memory::spawn_memory_guard(self.input.memory_limits()?)?;
-        if let Err(error) = cancellation.check() {
-            events.emit(EventKind::JobCancelled);
-            return Err(error);
+        let behavior = if terminate_on_memory_limit {
+            memory::MemoryLimitBehavior::TerminateProcess
+        } else {
+            memory::MemoryLimitBehavior::CancelJob(cancellation.clone())
+        };
+        let memory_guard = memory::spawn_memory_guard(self.input.memory_limits()?, behavior)?;
+        let result = (|| -> anyhow::Result<JobResult> {
+            cancellation.check()?;
+            let search = self.input.build()?;
+            let runner =
+                Runner::new_with_control(search, parallel, events.clone(), cancellation.clone())?;
+            let (telemetry, summary) = runner.run_with_summary(parallel)?;
+            Ok(JobResult { telemetry, summary })
+        })();
+        if let Some(message) = memory_guard.failure() {
+            events.emit(EventKind::JobFailed {
+                message: message.clone(),
+            });
+            return Err(anyhow::anyhow!(message));
         }
-        let search = match self.input.build() {
-            Ok(search) => search,
+        match result {
+            Ok(result) => Ok(result),
             Err(error) => {
-                events.emit(EventKind::JobFailed {
-                    message: error.to_string(),
-                });
-                return Err(error);
-            }
-        };
-        let runner = match Runner::new_with_control(
-            search,
-            parallel,
-            events.clone(),
-            cancellation.clone(),
-        ) {
-            Ok(runner) => runner,
-            Err(error) => {
-                events.emit(if cancellation.is_cancelled() {
-                    EventKind::JobCancelled
-                } else {
-                    EventKind::JobFailed {
-                        message: error.to_string(),
-                    }
-                });
-                return Err(error);
-            }
-        };
-        match runner.run_with_summary(parallel) {
-            Ok((telemetry, summary)) => Ok(JobResult { telemetry, summary }),
-            Err(error) => {
-                events.emit(if cancellation.is_cancelled() {
-                    EventKind::JobCancelled
-                } else {
-                    EventKind::JobFailed {
-                        message: error.to_string(),
-                    }
-                });
+                events.emit(
+                    if cancellation.is_cancelled() && !cancellation.is_memory_limit() {
+                        EventKind::JobCancelled
+                    } else {
+                        EventKind::JobFailed {
+                            message: error.to_string(),
+                        }
+                    },
+                );
                 Err(error)
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/api.rs"]
+mod tests;

@@ -146,6 +146,8 @@ impl Estimator {
     /// Calculate the posterior error probability for a given score, under the
     /// pre-fit non-parametric probability model.
     pub fn posterior_error(&self, score: f64) -> f64 {
+        let max_score = self.min_score + self.score_step * self.bins.len().saturating_sub(1) as f64;
+        let score = score.clamp(self.min_score, max_score);
         let bin_lo = self
             .bins
             .len()
@@ -167,3 +169,7 @@ impl Estimator {
         lower + (delta * linear)
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/ml/kde.rs"]
+mod tests;

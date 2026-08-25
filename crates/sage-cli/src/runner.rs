@@ -42,7 +42,10 @@ enum OutputTarget {
 
 impl OutputTarget {
     fn new(path: &Url) -> anyhow::Result<Self> {
-        if let Ok(local_path) = path.to_file_path() {
+        if path.scheme() == "file" {
+            let local_path = path
+                .to_file_path()
+                .map_err(|_| anyhow::anyhow!("invalid local output URL `{path}`"))?;
             if let Some(parent) = local_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -91,6 +94,57 @@ fn finish_csv_writer(mut writer: csv::Writer<OutputTarget>, path: &Url) -> anyho
         .into_inner()
         .map_err(|error| anyhow::anyhow!("failed to flush CSV output: {}", error.error()))?;
     output.finish(path)
+}
+
+fn median_finite(values: impl IntoIterator<Item = f32>) -> Option<f32> {
+    let mut values = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    values.sort_by(f32::total_cmp);
+    let middle = values.len() / 2;
+    match values.len() {
+        0 => None,
+        length if length % 2 == 0 => Some((values[middle - 1] + values[middle]) / 2.0),
+        _ => Some(values[middle]),
+    }
+}
+
+fn average_finite(values: impl IntoIterator<Item = f32>) -> Option<f32> {
+    let values = values
+        .into_iter()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then(|| values.iter().sum::<f32>() / values.len() as f32)
+}
+
+fn normalize_finite(values: Vec<f64>) -> Vec<f64> {
+    if values.is_empty() {
+        return values;
+    }
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let range = max - min;
+    if !range.is_finite() || range <= f64::EPSILON {
+        return vec![0.0; values.len()];
+    }
+    values
+        .into_iter()
+        .map(|value| (value - min) / range)
+        .collect()
+}
+
+fn labeled_finite_values(
+    features: &[Feature],
+    value: impl Fn(&Feature) -> f64,
+) -> (Vec<f64>, Vec<i32>) {
+    features
+        .iter()
+        .filter_map(|feature| {
+            let value = value(feature);
+            (value.is_finite() && matches!(feature.label, -1 | 1)).then_some((value, feature.label))
+        })
+        .unzip()
 }
 
 pub struct Runner {
@@ -609,7 +663,7 @@ impl Runner {
                             events: events.clone(),
                             cancellation: cancellation.clone(),
                         };
-                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)
+                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?
                     }
                 }
             }
@@ -677,11 +731,11 @@ impl Runner {
         parallel: usize,
         fasta: Fasta,
         custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
-    ) -> Vec<Peptide> {
+    ) -> anyhow::Result<Vec<Peptide>> {
         let spectra: Option<Vec<ProcessedSpectrum>> =
             match parallel >= self.parameters.mzml_paths.len() {
                 true => Some(
-                    self.read_processed_spectra(&self.parameters.mzml_paths, 0, 0)
+                    self.read_processed_spectra(&self.parameters.mzml_paths, 0, 0)?
                         .1,
                 ),
                 false => None,
@@ -695,89 +749,88 @@ impl Runner {
         //
         // db_params.generate_decoys = false;
 
-        let mut all_peptides: Vec<Peptide> = fasta
+        let mut all_peptides = Vec::new();
+        for (chunk_id, fasta_chunk) in fasta
             .iter_chunks(self.database_parameters.prefilter_chunk_size)
             .enumerate()
-            .flat_map(|(chunk_id, fasta_chunk)| {
-                let start = Instant::now();
-                info!("pre-filtering fasta chunk {}", chunk_id,);
-                let mut db = db_params
-                    .clone()
-                    .build_with_custom_cleavages(fasta_chunk, custom_cleavages.as_ref());
+        {
+            let start = Instant::now();
+            info!("pre-filtering fasta chunk {}", chunk_id,);
+            let mut db = db_params
+                .clone()
+                .build_with_custom_cleavages(fasta_chunk, custom_cleavages.as_ref());
 
-                info!(
-                    "generated {} fragments, {} peptides in {}ms",
-                    db.fragments.len(),
-                    db.peptides.len(),
-                    (Instant::now() - start).as_millis()
-                );
+            info!(
+                "generated {} fragments, {} peptides in {}ms",
+                db.fragments.len(),
+                db.peptides.len(),
+                (Instant::now() - start).as_millis()
+            );
 
-                let scorer = Scorer {
-                    db: &db,
-                    precursor_tol: self.parameters.precursor_tol,
-                    fragment_tol: self.parameters.fragment_tol,
-                    min_matched_peaks: self.parameters.min_matched_peaks,
-                    min_isotope_err: self.parameters.isotope_errors.0,
-                    max_isotope_err: self.parameters.isotope_errors.1,
-                    min_precursor_charge: self.parameters.precursor_charge.0,
-                    max_precursor_charge: self.parameters.precursor_charge.1,
-                    override_precursor_charge: self.parameters.override_precursor_charge,
-                    max_fragment_charge: self.parameters.max_fragment_charge,
-                    chimera: self.parameters.chimera,
-                    report_psms: self.parameters.report_psms + 1, // Q: Why is 1 being added here? (JSPP: Feb 2024)
-                    wide_window: self.parameters.wide_window,
-                    annotate_matches: false,
-                    mass_shift_ppm: self.parameters.mass_shift_ppm,
-                    score_type: self.parameters.score_type,
-                    use_bitmap: self.parameters.use_bitmap,
-                };
+            let scorer = Scorer {
+                db: &db,
+                precursor_tol: self.parameters.precursor_tol,
+                fragment_tol: self.parameters.fragment_tol,
+                min_matched_peaks: self.parameters.min_matched_peaks,
+                min_isotope_err: self.parameters.isotope_errors.0,
+                max_isotope_err: self.parameters.isotope_errors.1,
+                min_precursor_charge: self.parameters.precursor_charge.0,
+                max_precursor_charge: self.parameters.precursor_charge.1,
+                override_precursor_charge: self.parameters.override_precursor_charge,
+                max_fragment_charge: self.parameters.max_fragment_charge,
+                chimera: self.parameters.chimera,
+                report_psms: self.parameters.report_psms + 1, // Q: Why is 1 being added here? (JSPP: Feb 2024)
+                wide_window: self.parameters.wide_window,
+                annotate_matches: false,
+                mass_shift_ppm: self.parameters.mass_shift_ppm,
+                score_type: self.parameters.score_type,
+                use_bitmap: self.parameters.use_bitmap,
+            };
 
-                // Allocate an array of booleans indicating whether a peptide was identified in a
-                // preliminary pass of the data
-                let keep = (0..db.peptides.len())
-                    .map(|_| std::sync::atomic::AtomicBool::new(false))
-                    .collect::<Vec<_>>();
+            // Allocate an array of booleans indicating whether a peptide was identified in a
+            // preliminary pass of the data
+            let keep = (0..db.peptides.len())
+                .map(|_| std::sync::atomic::AtomicBool::new(false))
+                .collect::<Vec<_>>();
 
-                match &spectra {
-                    Some(spectra) => self.peptide_filter_processed_spectra(&scorer, spectra, &keep),
-                    None => self
-                        .parameters
-                        .mzml_paths
-                        .chunks(parallel)
-                        .enumerate()
-                        .for_each(|(chunk_idx, chunk)| {
-                            let spectra_chunk =
-                                self.read_processed_spectra(chunk, chunk_idx, parallel).1;
-                            self.peptide_filter_processed_spectra(&scorer, &spectra_chunk, &keep)
-                        }),
-                };
+            match &spectra {
+                Some(spectra) => self.peptide_filter_processed_spectra(&scorer, spectra, &keep),
+                None => {
+                    for (chunk_idx, chunk) in
+                        self.parameters.mzml_paths.chunks(parallel).enumerate()
+                    {
+                        let spectra_chunk =
+                            self.read_processed_spectra(chunk, chunk_idx, parallel)?.1;
+                        self.peptide_filter_processed_spectra(&scorer, &spectra_chunk, &keep);
+                    }
+                }
+            };
 
-                // Retain only peptides where `keep[ix] = true`
-                let peptides = db
-                    .peptides
-                    .drain(..)
-                    .enumerate()
-                    .filter_map(|(ix, peptide)| {
-                        let val = keep[ix].load(std::sync::atomic::Ordering::Relaxed);
-                        if val {
-                            Some(peptide)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
+            // Retain only peptides where `keep[ix] = true`
+            let peptides = db
+                .peptides
+                .drain(..)
+                .enumerate()
+                .filter_map(|(ix, peptide)| {
+                    let val = keep[ix].load(std::sync::atomic::Ordering::Relaxed);
+                    if val {
+                        Some(peptide)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
 
-                info!(
-                    "found {} pre-filtered peptides for fasta chunk {}",
-                    peptides.len(),
-                    chunk_id,
-                );
-                peptides
-            })
-            .collect();
+            info!(
+                "found {} pre-filtered peptides for fasta chunk {}",
+                peptides.len(),
+                chunk_id,
+            );
+            all_peptides.extend(peptides);
+        }
 
         Parameters::reorder_peptides(&mut all_peptides);
-        all_peptides
+        Ok(all_peptides)
     }
 
     fn peptide_filter_processed_spectra(
@@ -1008,10 +1061,10 @@ impl Runner {
         chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
-    ) -> SageResults {
-        let spectra = self.read_processed_spectra(chunk, chunk_idx, batch_size);
+    ) -> anyhow::Result<SageResults> {
+        let spectra = self.read_processed_spectra(chunk, chunk_idx, batch_size)?;
         let features = self.search_processed_spectra(scorer, &spectra.1);
-        self.complete_features(spectra.1, spectra.0, features)
+        Ok(self.complete_features(spectra.1, spectra.0, features))
     }
 
     fn read_processed_spectra(
@@ -1019,7 +1072,7 @@ impl Runner {
         chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
-    ) -> (Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>) {
+    ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
         self.read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, self.requires_ms1())
     }
 
@@ -1029,7 +1082,7 @@ impl Runner {
         chunk_idx: usize,
         batch_size: usize,
         requires_ms1: bool,
-    ) -> (Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>) {
+    ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
         // Read all of the spectra at once - this can help prevent memory over-consumption issues
         info!(
             "processing files {} .. {} ",
@@ -1082,6 +1135,15 @@ impl Runner {
 
             match res {
                 Ok(s) => {
+                    if s.is_empty() {
+                        let message = "input contains no spectra".to_string();
+                        self.events.emit(EventKind::FileFailed {
+                            file_id,
+                            path: path.to_string(),
+                            message: message.clone(),
+                        });
+                        anyhow::bail!("failed to read spectra file `{path}`: {message}");
+                    }
                     log::trace!("- {}: read {} spectra", path, s.len());
                     let spectra = s
                         .into_par_iter()
@@ -1096,23 +1158,32 @@ impl Runner {
                 }
                 Err(e) => {
                     log::error!("- {}: {}", path, e);
-                    Err(e)
+                    self.events.emit(EventKind::FileFailed {
+                        file_id,
+                        path: path.to_string(),
+                        message: e.to_string(),
+                    });
+                    Err(anyhow::Error::new(e)
+                        .context(format!("failed to read spectra file `{path}`")))
                 }
             }
         };
 
         let spectra: SpectrumAccumulator = if file_serial_read {
-            chunk
-                .iter()
-                .enumerate()
-                .flat_map(inner_closure)
-                .fold(SpectrumAccumulator::default(), SpectrumAccumulator::reduce)
+            chunk.iter().enumerate().map(inner_closure).try_fold(
+                SpectrumAccumulator::default(),
+                |accumulator, spectra| {
+                    Ok::<_, anyhow::Error>(SpectrumAccumulator::reduce(accumulator, spectra?))
+                },
+            )?
         } else {
             chunk
                 .par_iter()
                 .enumerate()
-                .flat_map(inner_closure)
-                .reduce(SpectrumAccumulator::default, SpectrumAccumulator::reduce)
+                .map(inner_closure)
+                .try_reduce(SpectrumAccumulator::default, |left, right| {
+                    Ok(SpectrumAccumulator::reduce(left, right))
+                })?
         };
 
         let has_ims = spectra.ms1.iter().any(|x| !x.mobilities.is_empty());
@@ -1134,7 +1205,7 @@ impl Runner {
         let io_time = Instant::now() - start;
         info!("- file IO: {:8} ms", io_time.as_millis());
 
-        (spectra.ms1, spectra.msn)
+        Ok((spectra.ms1, spectra.msn))
     }
 
     /// Re-read only the MS2 files needed for post-FDR work. Detailed matched
@@ -1262,7 +1333,7 @@ impl Runner {
             }
 
             let spectra = self
-                .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)
+                .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)?
                 .1;
             let results = spectra
                 .par_iter()
@@ -1411,8 +1482,9 @@ impl Runner {
         })
     }
 
-    pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> SageResults {
-        self.parameters
+    pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> anyhow::Result<SageResults> {
+        let results = self
+            .parameters
             .mzml_paths
             .chunks(batch_size)
             .enumerate()
@@ -1425,7 +1497,8 @@ impl Runner {
                 });
                 results
             })
-            .collect::<SageResults>()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(results.into_iter().collect())
     }
 
     pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
@@ -1464,7 +1537,7 @@ impl Runner {
         };
 
         //Collect all results into a single container
-        let mut outputs = self.batch_files(&scorer, parallel);
+        let mut outputs = self.batch_files(&scorer, parallel)?;
         self.cancellation.check()?;
         self.events.check()?;
 
@@ -2562,30 +2635,13 @@ impl Runner {
             let median_ms1_mass_accuracy_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut accuracies = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        accuracies.push(feature.delta_mass);
-                    }
-                    accuracies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    let mid = accuracies.len() / 2;
-
-                    if accuracies.is_empty() {
-                        return f32::NAN;
-                    }
-
-                    if accuracies.len() % 2 == 0 {
-                        if mid > 0 {
-                            (accuracies[mid - 1] + accuracies[mid]) / 2.0
-                        } else {
-                            accuracies[mid]
-                        }
-                    } else {
-                        accuracies[mid]
-                    }
+                    median_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.delta_mass)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2593,30 +2649,13 @@ impl Runner {
             let median_ms2_mass_accuracy_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut accuracies = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        accuracies.push(feature.average_ppm);
-                    }
-                    accuracies.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    let mid = accuracies.len() / 2;
-
-                    if accuracies.is_empty() {
-                        return f32::NAN;
-                    }
-
-                    if accuracies.len() % 2 == 0 {
-                        if mid > 0 {
-                            (accuracies[mid - 1] + accuracies[mid]) / 2.0
-                        } else {
-                            accuracies[mid]
-                        }
-                    } else {
-                        accuracies[mid]
-                    }
+                    median_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.average_ppm)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2624,30 +2663,13 @@ impl Runner {
             let median_rt_deviation_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut deviations = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        deviations.push(feature.delta_rt_model);
-                    }
-                    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    let mid = deviations.len() / 2;
-
-                    if deviations.is_empty() {
-                        return f32::NAN;
-                    }
-
-                    if deviations.len() % 2 == 0 {
-                        if mid > 0 {
-                            (deviations[mid - 1] + deviations[mid]) / 2.0
-                        } else {
-                            deviations[mid]
-                        }
-                    } else {
-                        deviations[mid]
-                    }
+                    median_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.delta_rt_model)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2655,30 +2677,13 @@ impl Runner {
             let median_im_deviation_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut deviations = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        deviations.push(feature.delta_ims_model);
-                    }
-                    deviations.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                    let mid = deviations.len() / 2;
-
-                    if deviations.is_empty() {
-                        return f32::NAN;
-                    }
-
-                    if deviations.len() % 2 == 0 {
-                        if mid > 0 {
-                            (deviations[mid - 1] + deviations[mid]) / 2.0
-                        } else {
-                            deviations[mid]
-                        }
-                    } else {
-                        deviations[mid]
-                    }
+                    median_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.delta_ims_model)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2686,15 +2691,13 @@ impl Runner {
             let avg_peptide_length_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut lengths = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        lengths.push(feature.peptide_len as f32);
-                    }
-                    lengths.iter().sum::<f32>() / lengths.len() as f32
+                    average_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.peptide_len as f32)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2702,15 +2705,13 @@ impl Runner {
             let avg_peptide_charge_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut charges = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        charges.push(feature.charge as f32);
-                    }
-                    charges.iter().sum::<f32>() / charges.len() as f32
+                    average_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.charge as f32)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2718,15 +2719,13 @@ impl Runner {
             let avg_matched_peaks_per_file: Vec<f32> = filenames
                 .iter()
                 .map(|filename| {
-                    let mut peaks = Vec::new();
-                    for feature in features.iter().filter(|f| {
-                        filenames[f.file_id] == *filename
-                            && f.label == 1
-                            && f.spectrum_q <= global_q_value_filter
-                    }) {
-                        peaks.push(feature.matched_peaks as f32);
-                    }
-                    peaks.iter().sum::<f32>() / peaks.len() as f32
+                    average_finite(features.iter().filter_map(|feature| {
+                        (filenames[feature.file_id] == *filename
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.matched_peaks as f32)
+                    }))
+                    .unwrap_or(f32::NAN)
                 })
                 .collect();
 
@@ -2785,22 +2784,25 @@ impl Runner {
                     for ((_id, decoy), quantified) in &areas {
                         if !decoy && quantified.peak.q_value <= global_q_value_filter {
                             if let Some(intensity) = quantified.intensities[i] {
-                                intensities.push(intensity.log2());
+                                if intensity.is_finite() && intensity > 0.0 {
+                                    intensities.push(intensity.log2());
+                                }
                             }
                         }
                     }
                     lfq_intensities.push(intensities);
                 }
 
-                let lfq_boxplot = plot_boxplot(
+                match plot_boxplot(
                     &lfq_intensities,
                     filenames.to_vec(),
                     &format!("LFQ Intensities ({:?}% Q-value)", global_q_value_filter),
                     "Run",
                     "Log2(Intensity)",
-                )
-                .unwrap();
-                intro_section.add_plot(lfq_boxplot);
+                ) {
+                    Ok(lfq_boxplot) => intro_section.add_plot(lfq_boxplot),
+                    Err(error) => log::warn!("skipping LFQ report plot: {error}"),
+                }
             }
 
             report.add_section(intro_section);
@@ -2815,64 +2817,51 @@ impl Runner {
             });
 
             // Extract sage_discriminant_score and label from features
-            let (scores, labels): (Vec<f64>, Vec<i32>) = features
-                .iter()
-                .map(|f| (f.discriminant_score as f64, f.label))
-                .unzip();
+            let (scores, labels) =
+                labeled_finite_values(features, |feature| feature.discriminant_score as f64);
+            let has_targets = labels.contains(&1);
+            let has_decoys = labels.contains(&-1);
 
-            if !scores.is_empty() && scores.len() > 100 {
-                let score_histogram =
-                    plot_score_histogram(&scores, &labels, "LDA Score", "Score").unwrap();
+            if scores.len() > 100 && has_targets && has_decoys {
+                match plot_score_histogram(&scores, &labels, "LDA Score", "Score") {
+                    Ok(score_histogram) => scoring_section.add_plot(score_histogram),
+                    Err(error) => log::warn!("skipping LDA score report plot: {error}"),
+                }
 
-                scoring_section.add_plot(score_histogram);
+                match plot_pp(&scores, &labels, "PP Plot") {
+                    Ok(pp_plot) => {
+                        scoring_section.add_content(html! {
+                            "The Probability-Probability (PP) plot is a diagnostic tool that can be used to assess the quality of the scoring model. It plots the empirical cumulative distribution function (ECDF) of the target distribution against the ECDF of the decoy distribution. See: Debrie, E. et. al. (2023) Journal of Proteome Research. for more information."
+                        });
+                        scoring_section.add_plot(pp_plot);
+                    }
+                    Err(error) => log::warn!("skipping PP report plot: {error}"),
+                }
 
-                let pp_plot = plot_pp(&scores, &labels, "PP Plot").unwrap();
-
-                scoring_section.add_content(html! {
-                    "The Probability-Probability (PP) plot is a diagnostic tool that can be used to assess the quality of the scoring model. It plots the empirical cumulative distribution function (ECDF) of the target distribution against the ECDF of the decoy distribution. See: Debrie, E. et. al. (2023) Journal of Proteome Research. for more information."
-                });
-                scoring_section.add_plot(pp_plot);
-
-                let spectrum_q_histogram = plot_score_histogram(
-                    &features
-                        .iter()
-                        .map(|f| f.spectrum_q as f64)
-                        .collect::<Vec<f64>>(),
-                    &labels,
-                    "Spectrum Q-value",
-                    "Q-value",
-                )
-                .unwrap();
-                scoring_section.add_plot(spectrum_q_histogram);
-
-                let peptide_q_histogram = plot_score_histogram(
-                    &features
-                        .iter()
-                        .map(|f| f.peptide_q as f64)
-                        .collect::<Vec<f64>>(),
-                    &labels,
-                    "Peptide Q-value",
-                    "Q-value",
-                )
-                .unwrap();
-                scoring_section.add_plot(peptide_q_histogram);
-
-                let protein_q_histogram = plot_score_histogram(
-                    &features
-                        .iter()
-                        .map(|f| f.protein_q as f64)
-                        .collect::<Vec<f64>>(),
-                    &labels,
-                    "Protein Q-value",
-                    "Q-value",
-                )
-                .unwrap();
-                scoring_section.add_plot(protein_q_histogram);
+                for (title, values) in [
+                    (
+                        "Spectrum Q-value",
+                        labeled_finite_values(features, |feature| feature.spectrum_q as f64),
+                    ),
+                    (
+                        "Peptide Q-value",
+                        labeled_finite_values(features, |feature| feature.peptide_q as f64),
+                    ),
+                    (
+                        "Protein Q-value",
+                        labeled_finite_values(features, |feature| feature.protein_q as f64),
+                    ),
+                ] {
+                    match plot_score_histogram(&values.0, &values.1, title, "Q-value") {
+                        Ok(histogram) => scoring_section.add_plot(histogram),
+                        Err(error) => log::warn!("skipping {title} report plot: {error}"),
+                    }
+                }
             } else {
                 scoring_section.add_content(html! {
                     div style="margin-top: 10px; margin-bottom: 10px; padding: 15px; background-color: #ffe6e6; border: 1px solid #ff9999; color: #cc0000; border-radius: 5px; white-space: pre-line;" {
                         p {
-                            "There are not enough scores to plot the scoring quality control plots."
+                            "Scoring quality control plots require more than 100 finite scores with both target and decoy observations."
                         }
                     }
                 });
@@ -2891,91 +2880,68 @@ impl Runner {
 
             // Normalized experimental RT per file
             let mut rt_per_file: Vec<Vec<f64>> = Vec::new();
-            for i in 0..filenames.len() {
-                let mut rts = Vec::new();
-                for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.spectrum_q <= predict_section_q_value_filter
-                        && filenames[f.file_id] == filenames[i]
-                }) {
-                    rts.push(feature.rt as f64);
-                }
-
-                let min_rt = rts.iter().cloned().fold(f64::INFINITY, f64::min);
-                let max_rt = rts.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                rts = rts
-                    .iter()
-                    .map(|rt| (rt - min_rt) / (max_rt - min_rt))
-                    .collect();
-
-                rt_per_file.push(rts);
-            }
-
-            // Predicted RT per file
             let mut predicted_rt_per_file: Vec<Vec<f64>> = Vec::new();
             for i in 0..filenames.len() {
-                let mut predicted_rts = Vec::new();
-                for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.spectrum_q <= predict_section_q_value_filter
-                        && filenames[f.file_id] == filenames[i]
-                }) {
-                    predicted_rts.push(feature.predicted_rt as f64);
-                }
+                let (rts, predicted_rts): (Vec<_>, Vec<_>) = features
+                    .iter()
+                    .filter(|feature| {
+                        feature.label == 1
+                            && feature.spectrum_q <= predict_section_q_value_filter
+                            && filenames[feature.file_id] == filenames[i]
+                            && feature.rt.is_finite()
+                            && feature.predicted_rt.is_finite()
+                    })
+                    .map(|feature| (feature.rt as f64, feature.predicted_rt as f64))
+                    .unzip();
+                rt_per_file.push(normalize_finite(rts));
                 predicted_rt_per_file.push(predicted_rts);
             }
 
-            let rt_scatter = plot_scatter(
-                &rt_per_file,
-                &predicted_rt_per_file,
-                filenames.to_vec(),
-                "Retention Time LR Model",
-                "Retention Time",
-                "Predicted Retention Time",
-            )
-            .unwrap();
-            predicted_properties_section.add_plot(rt_scatter);
+            if !filenames.is_empty() && rt_per_file.iter().any(|values| !values.is_empty()) {
+                match plot_scatter(
+                    &rt_per_file,
+                    &predicted_rt_per_file,
+                    filenames.to_vec(),
+                    "Retention Time LR Model",
+                    "Retention Time",
+                    "Predicted Retention Time",
+                ) {
+                    Ok(rt_scatter) => predicted_properties_section.add_plot(rt_scatter),
+                    Err(error) => log::warn!("skipping retention-time report plot: {error}"),
+                }
+            }
 
             // Experimental IMS per file
             let mut ims_per_file: Vec<Vec<f64>> = Vec::new();
-            for i in 0..filenames.len() {
-                let mut imss = Vec::new();
-                for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.spectrum_q <= predict_section_q_value_filter
-                        && filenames[f.file_id] == filenames[i]
-                }) {
-                    imss.push(feature.ims as f64);
-                }
-
-                ims_per_file.push(imss);
-            }
-
-            // Predicted IMS per file
             let mut predicted_ims_per_file: Vec<Vec<f64>> = Vec::new();
             for i in 0..filenames.len() {
-                let mut predicted_imss = Vec::new();
-                for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.spectrum_q <= predict_section_q_value_filter
-                        && filenames[f.file_id] == filenames[i]
-                }) {
-                    predicted_imss.push(feature.predicted_ims as f64);
-                }
+                let (imss, predicted_imss): (Vec<_>, Vec<_>) = features
+                    .iter()
+                    .filter(|feature| {
+                        feature.label == 1
+                            && feature.spectrum_q <= predict_section_q_value_filter
+                            && filenames[feature.file_id] == filenames[i]
+                            && feature.ims.is_finite()
+                            && feature.predicted_ims.is_finite()
+                    })
+                    .map(|feature| (feature.ims as f64, feature.predicted_ims as f64))
+                    .unzip();
+                ims_per_file.push(imss);
                 predicted_ims_per_file.push(predicted_imss);
             }
 
-            if !ims_per_file.is_empty() && !predicted_ims_per_file.is_empty() {
-                let ims_scatter = plot_scatter(
+            if !filenames.is_empty() && ims_per_file.iter().any(|values| !values.is_empty()) {
+                match plot_scatter(
                     &ims_per_file,
                     &predicted_ims_per_file,
                     filenames.to_vec(),
                     "Ion Mobility LR Model",
                     "Ion Mobility",
                     "Predicted Ion Mobility",
-                )
-                .unwrap();
-                predicted_properties_section.add_plot(ims_scatter);
+                ) {
+                    Ok(ims_scatter) => predicted_properties_section.add_plot(ims_scatter),
+                    Err(error) => log::warn!("skipping ion-mobility report plot: {error}"),
+                }
             }
 
             report.add_section(predicted_properties_section);
@@ -3012,107 +2978,5 @@ impl Runner {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        assign_psm_ids, passes_localization_filter, passes_output_filter,
-        sort_features_by_discriminant, RunSummary,
-    };
-    use sage_core::database::PeptideIx;
-    use sage_core::scoring::Feature;
-
-    #[test]
-    fn tied_features_receive_repeatable_psm_ids() {
-        let feature = |file_id, spec_id: &str, peptide_idx| Feature {
-            file_id,
-            spec_id: spec_id.into(),
-            rank: 1,
-            peptide_idx: PeptideIx(peptide_idx),
-            discriminant_score: 5.0,
-            ..Feature::default()
-        };
-        let mut forward = vec![feature(1, "scan=2", 2), feature(0, "scan=1", 1)];
-        let mut reversed = forward.iter().cloned().rev().collect::<Vec<_>>();
-
-        sort_features_by_discriminant(&mut forward);
-        assign_psm_ids(&mut forward);
-        sort_features_by_discriminant(&mut reversed);
-        assign_psm_ids(&mut reversed);
-
-        let identities = |features: &[Feature]| {
-            features
-                .iter()
-                .map(|feature| (feature.file_id, feature.spec_id.clone(), feature.psm_id))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(identities(&forward), identities(&reversed));
-    }
-
-    #[test]
-    fn localization_filter_requires_passing_target_psm() {
-        let passing = Feature {
-            label: 1,
-            spectrum_q: 0.01,
-            ..Default::default()
-        };
-        assert!(passes_localization_filter(&passing, 0.01));
-
-        let failing = Feature {
-            spectrum_q: 0.011,
-            ..passing.clone()
-        };
-        assert!(!passes_localization_filter(&failing, 0.01));
-
-        let decoy = Feature {
-            label: -1,
-            ..passing
-        };
-        assert!(!passes_localization_filter(&decoy, 0.01));
-    }
-
-    #[test]
-    fn output_filter_is_inclusive_and_applies_to_targets_and_decoys() {
-        let target = Feature {
-            label: 1,
-            spectrum_q: 0.1,
-            ..Default::default()
-        };
-        assert!(passes_output_filter(&target, 0.1));
-
-        let decoy = Feature {
-            label: -1,
-            ..target.clone()
-        };
-        assert!(passes_output_filter(&decoy, 0.1));
-
-        let failing = Feature {
-            spectrum_q: 0.100_001,
-            ..target
-        };
-        assert!(!passes_output_filter(&failing, 0.1));
-    }
-
-    #[test]
-    fn older_run_summaries_receive_compatible_defaults() {
-        let summary: RunSummary = serde_json::from_value(serde_json::json!({
-            "runtime_secs": 1,
-            "files": 1,
-            "peptides_in_database": 10,
-            "fragments_in_database": 20,
-            "psms_at_one_percent_fdr": 2,
-            "peptides_at_one_percent_fdr": 1,
-            "proteins_at_one_percent_fdr": 1,
-            "protein_groups_at_one_percent_fdr": 1,
-            "output_paths": []
-        }))
-        .unwrap();
-
-        assert_eq!(summary.schema_version, 1);
-        assert!(!summary.ptm_localization.enabled);
-        assert_eq!(summary.models.library_retention_time_alignment, None);
-        assert_eq!(summary.models.library_retention_time_files_aligned, 0);
-        assert_eq!(summary.models.library_ion_mobility_alignment, None);
-        assert_eq!(summary.models.library_ion_mobility_files_aligned, 0);
-        assert_eq!(summary.models.library_rescoring, None);
-        assert_eq!(summary.quantification.lfq_features, 0);
-    }
-}
+#[path = "../tests/unit/runner.rs"]
+mod tests;

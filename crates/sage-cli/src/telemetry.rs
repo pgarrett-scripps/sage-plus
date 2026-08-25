@@ -70,3 +70,7 @@ impl Telemetry {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/telemetry.rs"]
+mod tests;

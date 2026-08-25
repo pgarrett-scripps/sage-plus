@@ -22,7 +22,7 @@ fn mk_database(bucket_size: usize) -> IndexedDatabase {
         fasta: Some("static".into()),
         ..Default::default()
     };
-    let fasta = Fasta::parse(FASTA.into(), "rev_", false);
+    let fasta = Fasta::parse(FASTA.into(), "rev_", false).unwrap();
 
     builder.make_parameters().build(fasta)
 }

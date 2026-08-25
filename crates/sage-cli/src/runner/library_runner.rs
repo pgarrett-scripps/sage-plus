@@ -399,8 +399,9 @@ impl Runner {
         batch_size: usize,
         calibrations: &[LibraryMassCalibration],
         collect_quantification: bool,
-    ) -> SageResults {
-        self.parameters
+    ) -> anyhow::Result<SageResults> {
+        let results = self
+            .parameters
             .mzml_paths
             .chunks(batch_size)
             .enumerate()
@@ -410,7 +411,7 @@ impl Runner {
                     chunk_idx,
                     batch_size,
                     collect_quantification && self.requires_ms1(),
-                );
+                )?;
                 let features = spectra
                     .1
                     .par_iter()
@@ -434,16 +435,18 @@ impl Runner {
                         .min(self.parameters.mzml_paths.len()),
                     files_total: self.parameters.mzml_paths.len(),
                 });
-                if collect_quantification {
+                let result = if collect_quantification {
                     self.complete_features(spectra.1, spectra.0, features)
                 } else {
                     SageResults {
                         features,
                         ..SageResults::default()
                     }
-                }
+                };
+                Ok(result)
             })
-            .collect()
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(results.into_iter().collect())
     }
 
     fn fit_library_mass_calibrations(&self, features: &[Feature]) -> Vec<LibraryMassCalibration> {
@@ -612,7 +615,7 @@ impl Runner {
             .expect("library runtime checked before dispatch");
         let uncalibrated =
             vec![LibraryMassCalibration::default(); self.parameters.mzml_paths.len()];
-        let mut outputs = self.batch_library_files(parallel, &uncalibrated, false);
+        let mut outputs = self.batch_library_files(parallel, &uncalibrated, false)?;
         self.cancellation.check()?;
         self.events.check()?;
         sort_features_by_discriminant(&mut outputs.features);
@@ -624,7 +627,7 @@ impl Runner {
         let quantification_enabled =
             self.parameters.quant.lfq || self.parameters.quant.tmt.is_some();
         if mass_alignment_applied || quantification_enabled {
-            outputs = self.batch_library_files(parallel, &calibrations, true);
+            outputs = self.batch_library_files(parallel, &calibrations, true)?;
             self.cancellation.check()?;
             self.events.check()?;
         }
@@ -907,19 +910,5 @@ impl Runner {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::source_basename;
-
-    #[test]
-    fn source_basename_normalizes_platform_paths() {
-        assert_eq!(
-            source_basename("runs/One.mzML").as_deref(),
-            Some("one.mzml")
-        );
-        assert_eq!(
-            source_basename(r"C:\\runs\\Two.RAW").as_deref(),
-            Some("two.raw")
-        );
-        assert_eq!(source_basename(""), None);
-    }
-}
+#[path = "../../tests/unit/runner/library_runner.rs"]
+mod tests;

@@ -57,6 +57,7 @@ pub struct JobRecord {
 struct JobEntry {
     record: JobRecord,
     cancellation: Option<CancellationToken>,
+    memory_limited: bool,
 }
 
 #[derive(Clone)]
@@ -64,6 +65,7 @@ struct State {
     root: PathBuf,
     jobs_dir: PathBuf,
     jobs: Arc<RwLock<HashMap<String, JobEntry>>>,
+    start_lock: Arc<std::sync::Mutex<()>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -136,6 +138,7 @@ impl State {
             root,
             jobs_dir,
             jobs: Arc::new(RwLock::new(HashMap::new())),
+            start_lock: Arc::new(std::sync::Mutex::new(())),
         };
         state.restore_jobs()?;
         Ok(state)
@@ -144,38 +147,57 @@ impl State {
     fn restore_jobs(&self) -> anyhow::Result<()> {
         let mut restored = HashMap::new();
         for entry in fs::read_dir(&self.jobs_dir)? {
-            let job_dir = entry?.path().canonicalize()?;
-            if !job_dir.starts_with(&self.jobs_dir) {
-                continue;
+            match self.restore_job(entry) {
+                Ok(Some(record)) => {
+                    restored.insert(
+                        record.job_id.clone(),
+                        JobEntry {
+                            record,
+                            cancellation: None,
+                            memory_limited: false,
+                        },
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => eprintln!("skipping invalid historical Sage job: {error:#}"),
             }
-            let manifest = job_dir.join("job.json");
-            if !manifest.is_file() {
-                continue;
-            }
-            let bytes = fs::read(&manifest)?;
-            let mut record: JobRecord = serde_json::from_slice(&bytes)
-                .with_context(|| format!("invalid job manifest `{}`", manifest.display()))?;
-            record.job_directory = job_dir.to_string_lossy().into_owned();
-            record.events_path = job_dir.join("events.jsonl").to_string_lossy().into_owned();
-            record.output_directory = job_dir.join("output").to_string_lossy().into_owned();
-            if matches!(
-                record.status,
-                JobStatus::Queued | JobStatus::Running | JobStatus::Cancelling
-            ) {
-                record.status = JobStatus::Interrupted;
-                record.updated_at_unix = now();
-                write_record(&record)?;
-            }
-            restored.insert(
-                record.job_id.clone(),
-                JobEntry {
-                    record,
-                    cancellation: None,
-                },
-            );
         }
         *self.jobs.write().expect("job registry poisoned") = restored;
         Ok(())
+    }
+
+    fn restore_job(
+        &self,
+        entry: std::io::Result<fs::DirEntry>,
+    ) -> anyhow::Result<Option<JobRecord>> {
+        let job_dir = entry?.path().canonicalize()?;
+        if !job_dir.starts_with(&self.jobs_dir) {
+            return Ok(None);
+        }
+        let manifest = job_dir.join("job.json");
+        if !manifest.is_file() {
+            return Ok(None);
+        }
+        let bytes = fs::read(&manifest)?;
+        let mut record: JobRecord = serde_json::from_slice(&bytes)
+            .with_context(|| format!("invalid job manifest `{}`", manifest.display()))?;
+        record.job_directory = job_dir.to_string_lossy().into_owned();
+        record.events_path = job_dir.join("events.jsonl").to_string_lossy().into_owned();
+        record.output_directory = job_dir.join("output").to_string_lossy().into_owned();
+        if matches!(
+            record.status,
+            JobStatus::Queued | JobStatus::Running | JobStatus::Cancelling
+        ) {
+            record.status = JobStatus::Interrupted;
+            record.updated_at_unix = now();
+            if let Err(error) = write_record(&record) {
+                eprintln!(
+                    "failed to persist interrupted state for historical job `{}`: {error}",
+                    record.job_id
+                );
+            }
+        }
+        Ok(Some(record))
     }
 
     fn resolve_existing(&self, value: &str) -> anyhow::Result<PathBuf> {
@@ -392,10 +414,13 @@ impl State {
             args.batch_size.unwrap_or(1) > 0,
             "batch_size must be greater than zero"
         );
+        let _start_guard = self.start_lock.lock().expect("job start lock poisoned");
         let (config_path, mut input) = self.load_config(&args.config_path)?;
         if let Some(batch_size) = args.batch_size {
             input.batch_size = Some(batch_size);
         }
+        let memory_limited = input.memory_limits()?.is_enabled();
+        self.ensure_memory_execution_available(memory_limited)?;
         let job_id = Uuid::new_v4().to_string();
         let job_dir = self.jobs_dir.join(&job_id);
         let output_dir = job_dir.join("output");
@@ -423,6 +448,7 @@ impl State {
             JobEntry {
                 record: record.clone(),
                 cancellation: Some(cancellation.clone()),
+                memory_limited,
             },
         );
 
@@ -434,29 +460,38 @@ impl State {
                 update_job(&jobs, &job_id, |entry| {
                     entry.record.status = JobStatus::Running;
                 });
-                let result = SageRunner::new(
-                    input,
-                    JobOptions {
-                        parallel,
-                        events,
-                        cancellation: cancellation.clone(),
-                    },
-                )
-                .run();
+                let result = catch_job_panic(|| {
+                    SageRunner::new(
+                        input,
+                        JobOptions {
+                            parallel,
+                            events,
+                            cancellation: cancellation.clone(),
+                            terminate_on_memory_limit: false,
+                        },
+                    )
+                    .run()
+                });
                 update_job(&jobs, &job_id, |entry| {
                     entry.cancellation = None;
                     match result {
-                        Ok(result) => {
+                        Ok(Ok(result)) => {
                             entry.record.status = JobStatus::Completed;
                             entry.record.summary = Some(result.summary);
                         }
-                        Err(error) if cancellation.is_cancelled() => {
+                        Ok(Err(error))
+                            if cancellation.is_cancelled() && !cancellation.is_memory_limit() =>
+                        {
                             entry.record.status = JobStatus::Cancelled;
+                            entry.record.error = Some(error.to_string());
+                        }
+                        Ok(Err(error)) => {
+                            entry.record.status = JobStatus::Failed;
                             entry.record.error = Some(error.to_string());
                         }
                         Err(error) => {
                             entry.record.status = JobStatus::Failed;
-                            entry.record.error = Some(error.to_string());
+                            entry.record.error = Some(format!("Sage worker panicked: {error}"));
                         }
                     }
                 });
@@ -470,6 +505,33 @@ impl State {
             return Err(error.into());
         }
         Ok(record)
+    }
+
+    fn ensure_memory_execution_available(&self, memory_limited: bool) -> anyhow::Result<()> {
+        {
+            let jobs = self.jobs.read().expect("job registry poisoned");
+            let active = jobs
+                .values()
+                .filter(|entry| {
+                    matches!(
+                        entry.record.status,
+                        JobStatus::Queued | JobStatus::Running | JobStatus::Cancelling
+                    )
+                })
+                .collect::<Vec<_>>();
+            if memory_limited {
+                ensure!(
+                    active.is_empty(),
+                    "memory-limited searches require exclusive MCP execution"
+                );
+            } else {
+                ensure!(
+                    !active.iter().any(|entry| entry.memory_limited),
+                    "a memory-limited search is already running exclusively"
+                );
+            }
+        }
+        Ok(())
     }
 
     fn job(&self, job_id: &str) -> anyhow::Result<JobRecord> {
@@ -722,6 +784,16 @@ fn update_job(
             entry.record.error = Some(format!("failed to persist job state: {error}"));
         }
     }
+}
+
+fn catch_job_panic<T>(run: impl FnOnce() -> T) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).map_err(|payload| {
+        payload
+            .downcast_ref::<&str>()
+            .map(|message| (*message).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic payload".into())
+    })
 }
 
 fn num_cpus() -> usize {
@@ -1057,36 +1129,5 @@ impl ServerHandler for SageMcp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_paths_outside_root() {
-        let temp = std::env::temp_dir().join(format!("sage-mcp-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&temp).unwrap();
-        let state = State::new(temp.clone(), None).unwrap();
-        let error = state
-            .resolve_existing("../outside")
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("cannot access") || error.contains("outside"));
-        fs::remove_dir_all(temp).unwrap();
-    }
-
-    #[test]
-    fn explicit_approval_is_required_before_input_access() {
-        let temp = std::env::temp_dir().join(format!("sage-mcp-test-{}", Uuid::new_v4()));
-        fs::create_dir_all(&temp).unwrap();
-        let state = State::new(temp.clone(), None).unwrap();
-        let error = state
-            .start_search(StartSearchArgs {
-                config_path: "missing.json".into(),
-                approved: false,
-                batch_size: None,
-            })
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("explicit approval"));
-        fs::remove_dir_all(temp).unwrap();
-    }
-}
+#[path = "../tests/unit/lib.rs"]
+mod tests;

@@ -56,6 +56,42 @@ fn integration() -> anyhow::Result<()> {
 }
 
 #[test]
+fn empty_spectra_inputs_fail_instead_of_writing_successful_summaries() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-empty-input-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root)?;
+
+    for extension in ["mgf", "mzML"] {
+        let input = root.join(format!("empty.{extension}"));
+        let output_directory = root.join(format!("output-{extension}"));
+        std::fs::File::create(&input)?;
+        let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+            .current_dir(&workspace)
+            .arg(workspace.join("tests/config.json"))
+            .arg("--output_directory")
+            .arg(&output_directory)
+            .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+            .arg(&input)
+            .output()?;
+
+        assert!(
+            !output.status.success(),
+            "empty {extension} unexpectedly passed"
+        );
+        assert!(!output_directory.join("run-summary.json").exists());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("failed to read spectra file"), "{stderr}");
+    }
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();

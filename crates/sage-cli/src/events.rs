@@ -1,25 +1,38 @@
 use serde::Serialize;
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 /// A cooperative cancellation handle for a running Sage job.
 #[derive(Clone, Default)]
-pub struct CancellationToken(Arc<AtomicBool>);
+pub struct CancellationToken(Arc<AtomicU8>);
 
 impl CancellationToken {
     pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
+        let _ = self
+            .0
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    pub(crate) fn cancel_for_memory_limit(&self) {
+        self.0.store(2, Ordering::Release);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.load(Ordering::Acquire) != 0
+    }
+
+    pub fn is_memory_limit(&self) -> bool {
+        self.0.load(Ordering::Acquire) == 2
     }
 
     pub(crate) fn check(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.is_cancelled(), "Sage job cancelled");
-        Ok(())
+        match self.0.load(Ordering::Acquire) {
+            0 => Ok(()),
+            2 => anyhow::bail!("Sage job cancelled after reaching a memory limit"),
+            _ => anyhow::bail!("Sage job cancelled"),
+        }
     }
 }
 
@@ -57,6 +70,11 @@ pub enum EventKind {
         file_id: usize,
         path: String,
         spectra: usize,
+    },
+    FileFailed {
+        file_id: usize,
+        path: String,
+        message: String,
     },
     SpectraProcessed {
         ms1_spectra: usize,
@@ -219,43 +237,5 @@ impl EventEmitter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Clone, Default)]
-    struct SharedWriter(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for SharedWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn emits_versioned_json_lines() {
-        let writer = SharedWriter::default();
-        let output = writer.0.clone();
-        let emitter = EventEmitter::from_writer(writer);
-        emitter.emit(EventKind::ConfigurationValidated { spectra_files: 2 });
-        emitter.emit(EventKind::DatabaseStarted);
-        emitter.check().unwrap();
-
-        let bytes = output.lock().unwrap().clone();
-        let lines = String::from_utf8(bytes).unwrap();
-        let values = lines
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(values.len(), 2);
-        assert_eq!(values[0]["schema_version"], 1);
-        assert_eq!(values[0]["sequence"], 0);
-        assert_eq!(values[0]["event"], "configuration_validated");
-        assert_eq!(values[1]["sequence"], 1);
-    }
-}
+#[path = "../tests/unit/events.rs"]
+mod tests;
