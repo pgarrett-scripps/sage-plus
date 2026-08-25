@@ -9,6 +9,10 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Clarified that Bioconda installs upstream Sage rather than Sage Plus.
+- Added low-noise monthly dependency checks for Cargo and GitHub Actions.
+
 ## [v0.1.0-beta.1] - 2026-08-25
 
 ### Added

@@ -1,6 +1,8 @@
-# Sage Documentation
+# Sage Plus Documentation
 
-The most up-to-date documentation now lives [here](https://sage-docs.vercel.app/docs).
+This document covers Sage Plus configuration, outputs, and downstream features. The
+[upstream Sage documentation](https://sage-docs.vercel.app/docs) remains the reference for
+general Sage concepts.
 
 
 ## Features & Information
@@ -23,11 +25,14 @@ The most up-to-date documentation now lives [here](https://sage-docs.vercel.app/
 
 ## Installation
 
-Sage is distributed as source code, and as a standalone executable file.
+Sage Plus is distributed as source code, prebuilt release archives, and a versioned container.
+It is not currently published through Conda.
 
-### Installing via conda
+### Installing upstream Sage via Conda
 
-Sage can be installed from [bioconda](https://anaconda.org/bioconda/sage-proteomics):
+The [Bioconda package](https://anaconda.org/bioconda/sage-proteomics) installs upstream Sage, not
+Sage Plus. It does not include the downstream features documented here. Use it only when you
+specifically want the upstream distribution:
 
 ```
 $ conda install -c bioconda -c conda-forge sage-proteomics
@@ -38,7 +43,7 @@ $ sage --help
 
 1. Install the [Rust programming language compiler](https://rustup.rs/)
 2. Download Sage Plus source code via git: `git clone https://github.com/pgarrett-scripps/sage-plus.git` or by [zip file](https://github.com/pgarrett-scripps/sage-plus/archive/refs/heads/main.zip)
-3. Compile: `cargo build --release`
+3. Compile: `cargo build --release --workspace`
 4. Run: `./target/release/sage config.json`
 
 Once you have Rust installed, you can copy and paste the following lines into your terminal to complete the above instructions, and run Sage on the example mzML provided in the repository (a single scan from PXD016766)
@@ -49,15 +54,15 @@ cd sage-plus
 cargo run --release tests/config.json 
 ```
 
-### Downloading the latest release
+### Downloading a Sage Plus release
 
-1. Visit the [Sage Plus releases](https://github.com/pgarrett-scripps/sage-plus/releases/latest) website.
+1. Visit the [Sage Plus releases](https://github.com/pgarrett-scripps/sage-plus/releases) website.
 2. Download the correct pre-compiled binary for your operating system.
 3. Run: `sage <path/to/config.json>`
 
 ### Interfacing with AWS S3
 
-Sage is capable of natively reading & writing files to AWS S3:
+Sage Plus can natively read and write files through AWS S3:
 
 - S3 paths should be specified as `s3://bucket/prefix/key.mzML.gz` or `s3://bucket/prefix` for output folder
 - See [AWS docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) for configuring your credentials
