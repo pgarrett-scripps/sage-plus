@@ -295,7 +295,7 @@ For additional information about configuration options and output file formats, 
       "level": 3,           // Optional[int] {default=3}, MS-level to perform TMT quantification on
       "sn": false           // Optional[bool] {default=false}, use Signal/Noise instead of intensity for TMT quant. Requires noise values in mzML
     },
-    "lfq": true,            // Optional[bool] {default=null}, perform label-free quantification
+    "lfq": true,            // Optional[bool] {default=null}, perform MS1 feature quantification
     "lfq_settings": {
       "peak_scoring": "Hybrid", // See DOCS.md for details - recommend that you do not change this setting
       "integration": "Sum",   // Optional["Sum" | "Apex"], use sum of MS1 traces in peak, or MS1 intensity at peak apex
@@ -464,6 +464,54 @@ Example:
     }
     ```
 
+#### Precursor label channels
+
+`database.labels` defines complete precursor-resolved labeling states next to the existing static
+and variable modifications. Channel modifications use the same structured static-modification
+format, including `mass`, `name`, `neutral_losses`, and `neutral_loss_mode`.
+
+```json
+"database": {
+  "static_mods": {
+    "C": {"mass": 57.021464, "name": "Carbamidomethyl"}
+  },
+  "variable_mods": {
+    "M": [{"mass": 15.994915, "name": "Oxidation"}]
+  },
+  "labels": {
+    "reference": "light",
+    "channels": [
+      {
+        "name": "light",
+        "static_mods": {}
+      },
+      {
+        "name": "heavy",
+        "static_mods": {
+          "K": {"mass": 8.014199, "name": "Lys8"},
+          "R": {"mass": 10.008269, "name": "Arg10"}
+        }
+      }
+    ]
+  }
+}
+```
+
+Every compatible site is labeled as one coherent channel state. Label modifications do not consume
+the variable-modification or combination limits. Channel names must be unique, at least two
+chemically distinct channels are required, and label targets may not overlap variable-modification
+targets. Ordinary static modifications may stack with labels, which permits combined SILAC and TMT
+workflows.
+
+When `quant.lfq` is enabled, one identified channel can seed extraction of its configured channel
+partners at their exact precursor masses. `lfq.parquet` schema version 2 records `label_channel`,
+`label_group`, and `ratio_to_reference`. Without `database.labels`, Sage retains the existing LFQ
+behavior and writes schema version 1.
+
+Current label channels assume complete incorporation with fixed site mass shifts. Partial
+incorporation, whole-proteome nitrogen labeling, NeuCode resolution, and isotope-purity correction
+are not yet modeled.
+
 #### PTM site libraries
 
 A PTM library is a Parquet or TSV table containing observed locations only. Modification
@@ -524,14 +572,17 @@ modifications; either file can be supplied to a later search through `ptm_librar
 
 ## Quantification
 
-The quant section is optional and should be specified only if TMT or LFQ is used.
+The quant section is optional and should be specified only if TMT or LFQ is used. Precursor label
+chemistry remains under `database.labels`. LFQ automatically becomes channel-aware when labels are
+configured.
 
 
 - **tmt**: String. One of "Tmt6", "Tmt10", "Tmt11", "Tmt16", or "Tmt18" (default: null).
 - **tmt_settings**: Object containing TMT-specific settings.
   - **level**: Integer. The MS-level to perform TMT quantification on (default: 3).
   - **sn**: Boolean. Use Signal/Noise instead of intensity for TMT quantification. Requires noise values in mzML (default: false).
-- **lfq**: Boolean. Perform label-free quantification (default: null).
+- **lfq**: Boolean. Perform MS1 feature quantification. This is label-free without
+  `database.labels` and channel-aware when labels are configured (default: null).
 - **lfq_settings**: Object containing LFQ-specific settings.
   - **peak_scoring**: String. The method used for scoring peaks in LFQ, one of: "Hybrid", "RetentionTime", "SpectralAngle" (default: "Hybrid").
   - **integration**: String. The method used for integrating peak intensities, either "Sum" or "Max" (default: "Sum").

@@ -715,6 +715,14 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     ))
 }
 
+fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
+    parquet::schema::parser::parse_message_type(if has_labels {
+        include_str!("../../../schemas/results.sage.v2.parquet.schema")
+    } else {
+        include_str!("../../../schemas/results.sage.v1.parquet.schema")
+    })
+}
+
 /// Caller must guarantee that `reporter_ions` is not an empty slice
 fn write_reporter_ions(
     mut column: SerializedColumnWriter,
@@ -767,13 +775,17 @@ pub fn serialize_features(
     database: &IndexedDatabase,
     output_psm_q_value: f32,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
-    let schema = build_schema()?;
+    let has_labels = !database.label_channels.is_empty();
+    let schema = build_results_schema(has_labels)?;
 
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
-            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.schema.version".into(),
+                Some(if has_labels { "2" } else { "1" }.into()),
+            ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
                 Some(output_psm_q_value.to_string()),
@@ -831,6 +843,20 @@ pub fn serialize_features(
             |f: &&Feature| database[f.peptide_idx].sequence.as_ref().into(),
             ByteArrayType
         );
+        if has_labels {
+            write_col!(
+                |f: &&Feature| database[f.peptide_idx]
+                    .label_channel
+                    .as_deref()
+                    .unwrap_or("")
+                    .into(),
+                ByteArrayType
+            );
+            write_col!(
+                |f: &&Feature| database[f.peptide_idx].label_group().as_bytes().into(),
+                ByteArrayType
+            );
+        }
         write_col!(
             |f: &&Feature| database[f.peptide_idx]
                 .proteins(&database.decoy_tag, database.generate_decoys)
@@ -1091,9 +1117,17 @@ pub fn build_spectral_library_schema() -> parquet::errors::Result<Type> {
     ))
 }
 
+fn build_spectral_library_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(if has_labels {
+        include_str!("../../../schemas/spectral_library.sage.v2.parquet.schema")
+    } else {
+        include_str!("../../../schemas/spectral_library.sage.v1.parquet.schema")
+    })
+}
+
 /// Read Sage's canonical long-form empirical library into DDA search entries.
 ///
-/// The v1 export contains target entries only. `is_decoy` therefore remains
+/// Sage exports contain target entries only. `is_decoy` therefore remains
 /// false until a future schema defines portable decoy provenance.
 pub fn deserialize_spectral_library(
     bytes: Vec<u8>,
@@ -1183,11 +1217,16 @@ pub fn deserialize_spectral_library(
                 .any(|entry| entry.key == key && entry.value.as_deref() == Some(value))
         })
     };
-    if !has_metadata("sage.schema.name", "spectral_library")
-        || !has_metadata("sage.schema.version", "1")
-    {
+    let schema_version = if has_metadata("sage.schema.version", "2") {
+        2
+    } else if has_metadata("sage.schema.version", "1") {
+        1
+    } else {
+        0
+    };
+    if !has_metadata("sage.schema.name", "spectral_library") || schema_version == 0 {
         return Err(ParquetError::General(
-            "input is not a Sage spectral_library schema version 1 Parquet file".into(),
+            "input is not a supported Sage spectral_library Parquet file".into(),
         ));
     }
 
@@ -1216,6 +1255,36 @@ pub fn deserialize_spectral_library(
             "proteins",
             row_number,
         )?;
+        let label_channel = (schema_version >= 2)
+            .then(|| {
+                text(
+                    required(&row, "label_channel", row_number)?,
+                    "label_channel",
+                    row_number,
+                )
+            })
+            .transpose()?
+            .filter(|channel| !channel.is_empty());
+        let label_group = (schema_version >= 2)
+            .then(|| {
+                text(
+                    required(&row, "label_group", row_number)?,
+                    "label_group",
+                    row_number,
+                )
+            })
+            .transpose()?
+            .filter(|group| !group.is_empty());
+        let label_reference = (schema_version >= 2)
+            .then(|| {
+                text(
+                    required(&row, "label_reference", row_number)?,
+                    "label_reference",
+                    row_number,
+                )
+            })
+            .transpose()?
+            .filter(|reference| !reference.is_empty());
         let source_file = text(
             required(&row, "source_file", row_number)?,
             "source_file",
@@ -1263,6 +1332,9 @@ pub fn deserialize_spectral_library(
                 if existing.proforma != proforma
                     || existing.precursor_charge != precursor_charge
                     || existing.precursor_neutral_mass != precursor_neutral_mass
+                    || existing.label_channel != label_channel
+                    || existing.label_group != label_group
+                    || existing.label_reference != label_reference
                 {
                     return Err(ParquetError::General(format!(
                         "spectral-library entry `{id}` has inconsistent precursor metadata"
@@ -1280,6 +1352,9 @@ pub fn deserialize_spectral_library(
                     proforma,
                     stripped_peptide,
                     proteins,
+                    label_channel,
+                    label_group,
+                    label_reference,
                     precursor_charge,
                     precursor_neutral_mass,
                     precursor_mz,
@@ -1339,12 +1414,16 @@ pub fn serialize_spectral_library(
     entries: &[SpectralLibraryEntry],
     settings: &SpectralLibrarySettings,
 ) -> parquet::errors::Result<Vec<u8>> {
-    let schema = build_spectral_library_schema()?;
+    let has_labels = entries.iter().any(|entry| entry.label_channel.is_some());
+    let schema = build_spectral_library_schema_version(has_labels)?;
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("spectral_library".into())),
-            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.schema.version".into(),
+                Some(if has_labels { "2" } else { "1" }.into()),
+            ),
             KeyValue::new(
                 "sage.spectral_library.strategy".into(),
                 Some(
@@ -1442,6 +1521,29 @@ pub fn serialize_spectral_library(
                 .collect::<Vec<ByteArray>>(),
             ByteArrayType
         );
+        if has_labels {
+            write_required_column!(
+                rg,
+                rows.iter()
+                    .map(|(entry, _)| entry.label_channel.as_deref().unwrap_or("").into())
+                    .collect::<Vec<ByteArray>>(),
+                ByteArrayType
+            );
+            write_required_column!(
+                rg,
+                rows.iter()
+                    .map(|(entry, _)| entry.label_group.as_deref().unwrap_or("").into())
+                    .collect::<Vec<ByteArray>>(),
+                ByteArrayType
+            );
+            write_required_column!(
+                rg,
+                rows.iter()
+                    .map(|(entry, _)| entry.label_reference.as_deref().unwrap_or("").into())
+                    .collect::<Vec<ByteArray>>(),
+                ByteArrayType
+            );
+        }
         write_required_column!(
             rg,
             rows.iter()
@@ -1565,6 +1667,14 @@ pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     ))
 }
 
+fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(if has_labels {
+        include_str!("../../../schemas/lfq.v2.parquet.schema")
+    } else {
+        include_str!("../../../schemas/lfq.v1.parquet.schema")
+    })
+}
+
 pub fn serialize_lfq<H: BuildHasher>(
     areas: &HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
     filenames: &[String],
@@ -1581,13 +1691,41 @@ pub fn serialize_lfq<H: BuildHasher>(
             filenames.len()
         )));
     }
-    let schema = build_lfq_schema()?;
+    let has_labels = !database.label_channels.is_empty();
+    let schema = build_lfq_schema_version(has_labels)?;
+    let reference_intensities = database
+        .label_reference
+        .as_deref()
+        .map(|reference| {
+            areas
+                .iter()
+                .filter_map(|((id, decoy), quantified)| {
+                    let (peptide_idx, charge) = match id {
+                        PrecursorId::Combined(peptide_idx) => (*peptide_idx, None),
+                        PrecursorId::Charged((peptide_idx, charge)) => {
+                            (*peptide_idx, Some(*charge))
+                        }
+                    };
+                    let peptide = &database[peptide_idx];
+                    (peptide.label_channel.as_deref() == Some(reference)).then(|| {
+                        (
+                            (peptide.label_group(), charge, *decoy),
+                            quantified.intensities.as_slice(),
+                        )
+                    })
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
 
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("lfq".into())),
-            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.schema.version".into(),
+                Some(if has_labels { "2" } else { "1" }.into()),
+            ),
         ]))
         .build();
 
@@ -1627,6 +1765,44 @@ pub fn serialize_lfq<H: BuildHasher>(
         col.typed::<ByteArrayType>()
             .write_batch(&values, None, None)?;
         col.close()?;
+    }
+
+    if has_labels {
+        if let Some(mut col) = rg.next_column()? {
+            let values = areas
+                .iter()
+                .flat_map(|((id, _), _)| {
+                    let peptide_idx = match id {
+                        PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
+                    };
+                    let value: ByteArray = database[*peptide_idx]
+                        .label_channel
+                        .as_deref()
+                        .unwrap_or("")
+                        .into();
+                    std::iter::repeat(value).take(filenames.len())
+                })
+                .collect::<Vec<_>>();
+            col.typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            col.close()?;
+        }
+
+        if let Some(mut col) = rg.next_column()? {
+            let values = areas
+                .iter()
+                .flat_map(|((id, _), _)| {
+                    let peptide_idx = match id {
+                        PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
+                    };
+                    let value: ByteArray = database[*peptide_idx].label_group().as_bytes().into();
+                    std::iter::repeat(value).take(filenames.len())
+                })
+                .collect::<Vec<_>>();
+            col.typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            col.close()?;
+        }
     }
 
     if let Some(mut col) = rg.next_column()? {
@@ -1747,6 +1923,43 @@ pub fn serialize_lfq<H: BuildHasher>(
         col.close()?;
     }
 
+    if has_labels {
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut def_levels = Vec::with_capacity(areas.len() * filenames.len());
+            for ((id, decoy), quantified) in areas {
+                let (peptide_idx, charge) = match id {
+                    PrecursorId::Combined(peptide_idx) => (*peptide_idx, None),
+                    PrecursorId::Charged((peptide_idx, charge)) => (*peptide_idx, Some(*charge)),
+                };
+                let reference = reference_intensities.get(&(
+                    database[peptide_idx].label_group(),
+                    charge,
+                    *decoy,
+                ));
+                for file_id in 0..filenames.len() {
+                    let ratio = quantified.intensities[file_id].zip(
+                        reference
+                            .and_then(|intensities| intensities.get(file_id))
+                            .copied()
+                            .flatten(),
+                    );
+                    if let Some((intensity, reference)) =
+                        ratio.filter(|(_, reference)| *reference > 0.0)
+                    {
+                        values.push(intensity / reference);
+                        def_levels.push(1);
+                    } else {
+                        def_levels.push(0);
+                    }
+                }
+            }
+            col.typed::<DoubleType>()
+                .write_batch(&values, Some(&def_levels), None)?;
+            col.close()?;
+        }
+    }
+
     if let Some(mut col) = rg.next_column()? {
         let values = areas
             .values()
@@ -1826,6 +2039,121 @@ mod ptm_tests {
     }
 
     #[test]
+    fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors::Result<()> {
+        let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "labels": {
+                "reference": "light",
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {"name": "heavy", "static_mods": {"R": 10.008269}}
+                ]
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_labels().unwrap();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
+        let database = parameters.build_from_peptides(peptides);
+        let mut areas = HashMap::new();
+        for (index, peptide) in database.peptides.iter().enumerate() {
+            let intensity = match peptide.label_channel.as_deref() {
+                Some("light") => 10.0,
+                Some("heavy") => 30.0,
+                _ => continue,
+            };
+            areas.insert(
+                (PrecursorId::Charged((PeptideIx(index as u32), 2)), false),
+                QuantifiedPeak {
+                    peak: sage_core::lfq::Peak::default(),
+                    intensities: vec![Some(intensity)],
+                    ms2_confirmed: vec![true],
+                },
+            );
+        }
+
+        let bytes = serialize_lfq(&areas, &["run-a".into()], &database)?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let metadata = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .unwrap();
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        }));
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        assert_eq!(rows.len(), 2);
+        for row in rows {
+            let values = row
+                .get_column_iter()
+                .map(|(name, field)| (name.as_str(), field))
+                .collect::<HashMap<_, _>>();
+            assert_eq!(values["label_group"], &Field::Str("PEPTIDER".into()));
+            match values["label_channel"] {
+                Field::Str(channel) if channel == "light" => {
+                    assert_eq!(values["ratio_to_reference"], &Field::Double(1.0));
+                }
+                Field::Str(channel) if channel == "heavy" => {
+                    assert_eq!(values["ratio_to_reference"], &Field::Double(3.0));
+                }
+                channel => panic!("unexpected label channel {channel}"),
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<()> {
+        let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "labels": {
+                "reference": "light",
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {"name": "heavy", "static_mods": {"R": 10.008269}}
+                ]
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
+        let database = parameters.build_from_peptides(peptides);
+        let light = database
+            .peptides
+            .iter()
+            .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+            .unwrap();
+        let feature = Feature {
+            peptide_idx: PeptideIx(light as u32),
+            label: 1,
+            ..Feature::default()
+        };
+        let bytes = serialize_features(&[&feature], &[], &["run-a".into()], &database, 1.0)?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let metadata = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .unwrap();
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        }));
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let values = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.as_str(), field))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(values["label_channel"], &Field::Str("light".into()));
+        assert_eq!(values["label_group"], &Field::Str("PEPTIDER".into()));
+        Ok(())
+    }
+
+    #[test]
     fn spectral_library_has_versioned_long_form_rows() -> parquet::errors::Result<()> {
         let entry = SpectralLibraryEntry {
             library_entry_id: "PEPTIDE/2".into(),
@@ -1836,6 +2164,9 @@ mod ptm_tests {
             proforma: "PEPTIDE".into(),
             stripped_peptide: "PEPTIDE".into(),
             proteins: "P12345".into(),
+            label_channel: None,
+            label_group: None,
+            label_reference: None,
             precursor_charge: 2,
             precursor_neutral_mass: 798.3854,
             precursor_mz: 400.2,
@@ -1912,6 +2243,46 @@ mod ptm_tests {
         assert_eq!(first["library_entry_id"], &Field::Str("PEPTIDE/2".into()));
         assert_eq!(first["fragment_type"], &Field::Str("b".into()));
         assert_eq!(first["relative_intensity"], &Field::Float(0.5));
+        Ok(())
+    }
+
+    #[test]
+    fn labeled_spectral_library_round_trips_channel_metadata() -> parquet::errors::Result<()> {
+        let entry = SpectralLibraryEntry {
+            library_entry_id: "PEPTIDER[+10.008269]/2".into(),
+            source_psm_id: 1,
+            source_file: "sample.mzML".into(),
+            source_spectrum: "scan=1".into(),
+            modified_peptide: "PEPTIDER[Arg10]".into(),
+            proforma: "PEPTIDER[+10.008269]".into(),
+            stripped_peptide: "PEPTIDER".into(),
+            proteins: "P1".into(),
+            label_channel: Some("heavy".into()),
+            label_group: Some("PEPTIDER".into()),
+            label_reference: Some("light".into()),
+            precursor_charge: 2,
+            precursor_neutral_mass: 966.0,
+            precursor_mz: 484.0,
+            retention_time_minutes: 10.0,
+            aligned_retention_time_minutes: 10.0,
+            ion_mobility: 1.0,
+            spectrum_q: 0.001,
+            peptide_q: 0.001,
+            supporting_psms: 1,
+            fragments: vec![LibraryFragment {
+                kind: Kind::Y,
+                ordinal: 3,
+                charge: 1,
+                neutral_loss: 0.0,
+                mz: 400.0,
+                relative_intensity: 1.0,
+            }],
+        };
+        let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
+        let entries = deserialize_spectral_library(bytes)?;
+        assert_eq!(entries[0].label_channel.as_deref(), Some("heavy"));
+        assert_eq!(entries[0].label_group.as_deref(), Some("PEPTIDER"));
+        assert_eq!(entries[0].label_reference.as_deref(), Some("light"));
         Ok(())
     }
 

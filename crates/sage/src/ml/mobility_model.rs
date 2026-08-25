@@ -450,7 +450,7 @@ impl MobilityPtmOffsetModel {
     ) -> Option<Self> {
         use super::{gauss::Gauss, matrix::Matrix};
 
-        let mut keys = db.potential_mods.clone();
+        let mut keys = db.model_mods.clone();
         keys.sort_unstable_by(|(a_spec, a_mass), (b_spec, b_mass)| {
             a_spec.cmp(b_spec).then_with(|| a_mass.total_cmp(b_mass))
         });
@@ -542,7 +542,7 @@ fn apply_ptm_offsets(
     if !settings.ptm_regularization.is_finite() || settings.ptm_regularization <= 0.0 {
         return Err("ptm_regularization must be finite and greater than zero".into());
     }
-    if db.potential_mods.is_empty() {
+    if db.model_mods.is_empty() {
         return Err("no variable modifications are configured".into());
     }
     let training = features

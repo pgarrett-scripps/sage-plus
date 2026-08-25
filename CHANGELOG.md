@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Consensus spectral-library generation with median RT, mobility, and normalized fragment intensities.
 - Regularized library-search rescoring using spectral, mass-error, isotope, RT, and mobility evidence.
+- Coherent `database.labels` modification channels for SILAC, dimethyl, and custom precursor mass labels.
+- Label-aware LFQ extraction, reference ratios, FDR grouping, property models, and database-to-library metadata round trips.
 
 ## [v0.16.0-beta.1]
 ### Added
@@ -24,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Requires deisotoped spectra** (`deisotope: true`); each peak must carry a resolved neutral monoisotopic mass.
 - **Pre-digested peptide file input** (`database.peptides`): supply a TSV of peptide sequences instead of (or in addition to) a FASTA file.
   - TSV must have a header row with a required `sequence` column; optional `protein` and `decoy` columns are also supported.
-  - Sequences are used as-is — no variable or static modifications are applied from config.
+  - Ordinary variable and static modifications are not applied from config. Precursor label channels are applied when configured.
   - Decoys are still generated automatically by reversal when `generate_decoys: true`.
 - If both `database.fasta` and `database.peptides` are provided, peptides from both sources are merged and deduplicated before building the index.
 - Supports cloud paths (S3, GCS) via the same mechanism as FASTA loading.

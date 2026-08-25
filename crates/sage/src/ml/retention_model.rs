@@ -501,7 +501,7 @@ impl PtmOffsetModel {
     ) -> Option<Self> {
         use super::{gauss::Gauss, matrix::Matrix as SageMatrix};
 
-        let mut keys = db.potential_mods.clone();
+        let mut keys = db.model_mods.clone();
         keys.sort_unstable_by(|(a_spec, a_mass), (b_spec, b_mass)| {
             a_spec.cmp(b_spec).then_with(|| a_mass.total_cmp(b_mass))
         });

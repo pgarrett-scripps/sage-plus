@@ -172,6 +172,10 @@ pub struct QuantificationRunStats {
     pub lfq_features: usize,
     pub tmt: Option<String>,
     pub tmt_features: usize,
+    #[serde(default)]
+    pub ms1_label_channels: usize,
+    #[serde(default)]
+    pub ms1_label_reference: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -198,6 +202,10 @@ pub struct ModificationRunStats {
     pub max_total_variable_mods: usize,
     pub max_combinations: Option<usize>,
     pub ptm_library_sites: usize,
+    #[serde(default)]
+    pub label_channels: usize,
+    #[serde(default)]
+    pub labeled_peptides: usize,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -1590,6 +1598,7 @@ impl Runner {
                     self.parameters.quant.lfq_settings,
                     self.parameters.precursor_charge,
                     &outputs.features,
+                    &self.database,
                 )
                 .quantify(&self.database, &outputs.ms1, &alignments);
 
@@ -1770,7 +1779,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 6,
+            schema_version: 7,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -1818,6 +1827,8 @@ impl Runner {
                     .as_ref()
                     .map(|tmt| format!("{tmt:?}").to_lowercase()),
                 tmt_features,
+                ms1_label_channels: self.database.label_channels.len(),
+                ms1_label_reference: self.database.label_reference.as_deref().map(str::to_owned),
             },
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
@@ -1843,6 +1854,13 @@ impl Runner {
                     .loaded_ptm_library
                     .as_deref()
                     .map_or(0, |library| library.len()),
+                label_channels: self.database.label_channels.len(),
+                labeled_peptides: self
+                    .database
+                    .peptides
+                    .iter()
+                    .filter(|peptide| !peptide.decoy && peptide.label_channel.is_some())
+                    .count(),
             },
             spectral_library: SpectralLibraryRunStats {
                 enabled: self.parameters.spectral_library.enabled,

@@ -40,6 +40,12 @@ are validated explicitly: library search does not yet support chimera/DIA wide-w
 bitmap search, PTM localization, or spectral-library re-export. Library matches support matched
 fragment export, direct library RT/mobility alignment, LFQ, and TMT quantification.
 
+Sage-generated labeled libraries preserve the precursor label channel, label-stripped peptidoform
+group, and reference channel in Sage Parquet version 2 and in Sage extension attributes within
+mzSpecLib text. Library search restores this metadata so LFQ remains channel-aware. External
+libraries without these attributes remain searchable, but Sage does not guess channel identities
+from mass deltas.
+
 Sage Parquet libraries retain each entry's source file and spectrum. When a query filename matches
 a recorded library source filename, Sage emits a `library_source_overlap` warning because that run
 is useful for regression testing but not independent FDR validation.

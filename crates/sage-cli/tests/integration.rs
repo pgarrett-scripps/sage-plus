@@ -101,7 +101,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
-    assert_eq!(summary["schema_version"], 6);
+    assert_eq!(summary["schema_version"], 7);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 20);
@@ -205,6 +205,103 @@ fn spectral_library_search_runs_without_database_config() -> anyhow::Result<()> 
         serde_json::from_str::<serde_json::Value>(line)
             .is_ok_and(|event| event["code"] == "library_rescoring_fallback")
     }));
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn labeled_database_and_library_search_round_trip_channel_metadata() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-label-round-trip-{}-{nonce}",
+        std::process::id()
+    ));
+    let export_directory = root.join("export");
+    let search_directory = root.join("search");
+    std::fs::create_dir_all(&root)?;
+
+    let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        workspace.join("tests/config_spectral_library.json"),
+    )?)?;
+    config["database"]["labels"] = serde_json::json!({
+        "reference": "light",
+        "channels": [
+            {"name": "light", "static_mods": {}},
+            {
+                "name": "heavy",
+                "static_mods": {
+                    "K": {"mass": 8.014199, "name": "Lys8"},
+                    "R": {"mass": 10.008269, "name": "Arg10"}
+                }
+            }
+        ]
+    });
+    config["quant"] = serde_json::json!({"lfq": true});
+    let export_config = root.join("export.json");
+    std::fs::write(&export_config, serde_json::to_vec_pretty(&config)?)?;
+
+    let export = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(&export_config)
+        .arg("--output_directory")
+        .arg(&export_directory)
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        export.status.success(),
+        "labeled export failed:\n{}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(export_directory.join("run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 7);
+    assert_eq!(summary["modifications"]["label_channels"], 2);
+    assert_eq!(summary["quantification"]["ms1_label_reference"], "light");
+    let mzspeclib =
+        std::fs::read_to_string(export_directory.join("spectral_library.mzspeclib.txt"))?;
+    assert!(mzspeclib.contains("SAGE:1000001|label channel=light"));
+    assert!(mzspeclib.contains("SAGE:1000003|label reference=light"));
+
+    let library_path = export_directory.join("spectral_library.sage.parquet");
+    let library_entries =
+        sage_cloudpath::parquet::deserialize_spectral_library(std::fs::read(&library_path)?)?;
+    assert_eq!(library_entries[0].label_channel.as_deref(), Some("light"));
+    assert_eq!(library_entries[0].label_reference.as_deref(), Some("light"));
+
+    let search_config = root.join("search.json");
+    std::fs::write(
+        &search_config,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "library_search": {"path": library_path},
+            "deisotope": true,
+            "quant": {"lfq": true},
+            "max_fragment_charge": 1,
+            "report_psms": 1,
+            "output_filter": {"psm_q_value": 1.0},
+            "precursor_tol": {"ppm": [-50, 50]},
+            "fragment_tol": {"ppm": [-10, 10]},
+            "mzml_paths": [workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML")]
+        }))?,
+    )?;
+    let search = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(&search_config)
+        .arg("--output_directory")
+        .arg(&search_directory)
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        search.status.success(),
+        "labeled library search failed:\n{}",
+        String::from_utf8_lossy(&search.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(search_directory.join("run-summary.json"))?)?;
+    assert_eq!(summary["library_search"]["enabled"], true);
+    assert_eq!(summary["quantification"]["ms1_label_channels"], 1);
+    assert_eq!(summary["quantification"]["ms1_label_reference"], "light");
 
     std::fs::remove_dir_all(root)?;
     Ok(())

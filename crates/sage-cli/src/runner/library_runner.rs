@@ -123,6 +123,8 @@ fn library_peptide(
         sequence: Arc::from(parsed.sequence.into_boxed_slice()),
         modifications: parsed.modifications,
         applied_modifications: Arc::default(),
+        label_channel: entry.label_channel.as_deref().map(Arc::from),
+        label_group_override: entry.label_group.as_deref().map(Arc::from),
         nterm: parsed.nterm,
         cterm: parsed.cterm,
         monoisotopic: entry.precursor_neutral_mass,
@@ -147,6 +149,35 @@ pub(super) fn load_library_search(
             .map_err(anyhow::Error::msg)?
     };
     anyhow::ensure!(!targets.is_empty(), "spectral library contains no entries");
+    let label_reference = targets
+        .iter()
+        .find_map(|entry| entry.label_reference.as_deref())
+        .map(Arc::from);
+    let mut label_channels = Vec::<Arc<str>>::new();
+    for channel in targets
+        .iter()
+        .filter_map(|entry| entry.label_channel.as_deref())
+    {
+        if !label_channels
+            .iter()
+            .any(|configured| configured.as_ref() == channel)
+        {
+            label_channels.push(Arc::from(channel));
+        }
+    }
+    if !label_channels.is_empty() {
+        anyhow::ensure!(
+            targets.iter().all(|entry| {
+                if entry.label_channel.is_some() {
+                    entry.label_group.is_some()
+                        && entry.label_reference.as_deref() == label_reference.as_deref()
+                } else {
+                    entry.label_group.is_none() && entry.label_reference.is_none()
+                }
+            }),
+            "spectral library contains inconsistent label metadata"
+        );
+    }
     let target_entries = targets.len();
     let target_transitions = targets.iter().map(|entry| entry.fragments.len()).sum();
     let source_files = targets
@@ -214,6 +245,8 @@ pub(super) fn load_library_search(
         generate_decoys: true,
         decoy_tag: settings.decoy_tag.clone(),
         decoy_pairing,
+        label_reference,
+        label_channels,
         ..IndexedDatabase::default()
     };
     Ok((
@@ -637,7 +670,7 @@ impl Runner {
                     .get(feature.peptide_idx.0 as usize)
                     .copied()
                     .unwrap_or(feature.peptide_idx);
-                Some(self.database[peptide_idx].to_string())
+                Some(self.database[peptide_idx].label_group())
             },
             |feature, q| feature.peptide_q = q,
         );
@@ -684,6 +717,7 @@ impl Runner {
                 self.parameters.quant.lfq_settings,
                 self.parameters.precursor_charge,
                 &outputs.features,
+                &self.database,
             )
             .quantify(&self.database, &outputs.ms1, &library_rt_alignments);
             let q_precursor = sage_core::fdr::picked_precursor(&mut areas);
@@ -789,7 +823,7 @@ impl Runner {
             .as_ref()
             .map(|settings| settings.path.clone());
         let summary = RunSummary {
-            schema_version: 6,
+            schema_version: 7,
             runtime_secs,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: 0,
@@ -827,6 +861,8 @@ impl Runner {
                     .as_ref()
                     .map(|tmt| format!("{tmt:?}").to_lowercase()),
                 tmt_features: outputs.quant.len(),
+                ms1_label_channels: self.database.label_channels.len(),
+                ms1_label_reference: self.database.label_reference.as_deref().map(str::to_owned),
             },
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
@@ -836,7 +872,16 @@ impl Runner {
                 min_free_memory_gb: self.parameters.min_free_memory_gb,
             },
             inputs: input_stats,
-            modifications: ModificationRunStats::default(),
+            modifications: ModificationRunStats {
+                label_channels: self.database.label_channels.len(),
+                labeled_peptides: self
+                    .database
+                    .peptides
+                    .iter()
+                    .filter(|peptide| !peptide.decoy && peptide.label_channel.is_some())
+                    .count(),
+                ..ModificationRunStats::default()
+            },
             spectral_library: SpectralLibraryRunStats::default(),
             library_search: LibrarySearchRunStats {
                 enabled: true,

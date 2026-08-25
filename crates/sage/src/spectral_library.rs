@@ -199,6 +199,9 @@ pub struct SpectralLibraryEntry {
     pub proforma: String,
     pub stripped_peptide: String,
     pub proteins: String,
+    pub label_channel: Option<String>,
+    pub label_group: Option<String>,
+    pub label_reference: Option<String>,
     pub precursor_charge: u8,
     pub precursor_neutral_mass: f32,
     pub precursor_mz: f32,
@@ -523,6 +526,16 @@ pub fn build_entries(
             proforma,
             stripped_peptide: String::from_utf8_lossy(&peptide.sequence).into_owned(),
             proteins: peptide.proteins(&database.decoy_tag, database.generate_decoys),
+            label_channel: peptide.label_channel.as_deref().map(str::to_owned),
+            label_group: peptide
+                .label_channel
+                .as_ref()
+                .map(|_| peptide.label_group()),
+            label_reference: peptide
+                .label_channel
+                .as_ref()
+                .and(database.label_reference.as_deref())
+                .map(str::to_owned),
             precursor_charge: feature.charge,
             precursor_neutral_mass: feature.calcmass,
             precursor_mz: feature.calcmass / feature.charge as f32 + PROTON,
@@ -665,6 +678,15 @@ pub fn serialize_mzspeclib(
             )
             .unwrap();
         }
+        if let Some(channel) = &entry.label_channel {
+            writeln!(output, "SAGE:1000001|label channel={channel}").unwrap();
+        }
+        if let Some(group) = &entry.label_group {
+            writeln!(output, "SAGE:1000002|label group={group}").unwrap();
+        }
+        if let Some(reference) = &entry.label_reference {
+            writeln!(output, "SAGE:1000003|label reference={reference}").unwrap();
+        }
 
         writeln!(output).unwrap();
         writeln!(output, "<Interpretation=1>").unwrap();
@@ -764,7 +786,7 @@ mod tests {
         };
         let features = vec![feature(0, 1, 0.001, 8.0)];
         let selected = select_best_psms(&features, &database, &settings);
-        let entries = build_entries(
+        let mut entries = build_entries(
             &features,
             &database,
             &["sample.mzML".into()],
@@ -777,6 +799,9 @@ mod tests {
         assert_eq!(entries[0].fragments[0].relative_intensity, 0.25);
         assert_eq!(entries[0].fragments[1].relative_intensity, 1.0);
         assert_eq!(entries[0].fragments[1].annotation(), "y3-H2O");
+        entries[0].label_channel = Some("heavy".into());
+        entries[0].label_group = Some("PEPTIDE".into());
+        entries[0].label_reference = Some("light".into());
 
         let text = String::from_utf8(serialize_mzspeclib(
             &entries,
@@ -788,6 +813,11 @@ mod tests {
         assert!(text.contains("<Spectrum=1>"));
         assert!(text.contains("MS:1003270|proforma peptidoform ion notation=PEPTIDE/2"));
         assert!(text.contains("300.000000\t10000.000000\ty3-H2O"));
+        assert!(text.contains("SAGE:1000001|label channel=heavy"));
+        let parsed = crate::spectral_library_search::deserialize_mzspeclib(&text).unwrap();
+        assert_eq!(parsed[0].label_channel.as_deref(), Some("heavy"));
+        assert_eq!(parsed[0].label_group.as_deref(), Some("PEPTIDE"));
+        assert_eq!(parsed[0].label_reference.as_deref(), Some("light"));
     }
 
     #[test]

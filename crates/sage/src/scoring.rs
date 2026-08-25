@@ -1264,6 +1264,83 @@ mod tests {
     }
 
     #[test]
+    fn isotope_offsets_are_honored_for_labeled_precursors() {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "labels": {
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {
+                        "name": "heavy",
+                        "static_mods": {
+                            "R": {"mass": 10.008269, "name": "Arg10"}
+                        }
+                    }
+                ]
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_labels().unwrap();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
+        let heavy = peptides
+            .iter()
+            .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+            .unwrap()
+            .clone();
+        let fragment_masses = [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| IonSeries::new(&heavy, kind))
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+        let database = parameters.build_from_peptides(peptides);
+        let precursor_charge = 2;
+        let precursor = Precursor {
+            mz: (heavy.monoisotopic + NEUTRON) / precursor_charge as f32 + PROTON,
+            charge: Some(precursor_charge),
+            ..Precursor::default()
+        };
+        let mut query = ProcessedSpectrum {
+            level: 2,
+            id: "labeled-isotope-test".into(),
+            precursors: vec![precursor],
+            masses: fragment_masses.clone(),
+            intensities: vec![1.0; fragment_masses.len()],
+            charges: vec![1; fragment_masses.len()],
+            total_ion_current: fragment_masses.len() as f32,
+            ..ProcessedSpectrum::default()
+        };
+        query.masses.sort_by(f32::total_cmp);
+        let scorer = Scorer {
+            db: &database,
+            precursor_tol: Tolerance::Da(-0.01, 0.01),
+            fragment_tol: Tolerance::Da(-0.01, 0.01),
+            min_matched_peaks: 1,
+            min_isotope_err: 1,
+            max_isotope_err: 1,
+            min_precursor_charge: 2,
+            max_precursor_charge: 2,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera: false,
+            report_psms: 1,
+            wide_window: false,
+            annotate_matches: false,
+            mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+            score_type: ScoreType::SageHyperScore,
+            use_bitmap: false,
+        };
+
+        let features = scorer.score(&query);
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0].isotope_error, NEUTRON);
+        assert_eq!(
+            database[features[0].peptide_idx].label_channel.as_deref(),
+            Some("heavy")
+        );
+    }
+
+    #[test]
     fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         let modification = Arc::new(ModificationDefinition {
             mass: 20.0,

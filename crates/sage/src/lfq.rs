@@ -124,6 +124,7 @@ pub fn build_feature_map(
     settings: LfqSettings,
     precursor_charge: (u8, u8),
     features: &[Feature],
+    db: &IndexedDatabase,
 ) -> FeatureMap {
     let rt_tol = settings.rt_tolerance();
     let ms2_confirmed = features
@@ -139,12 +140,38 @@ pub fn build_feature_map(
         })
         .collect::<FnvHashSet<_>>();
     let map: DashMap<PeptideIx, PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
+    let label_groups = db
+        .peptides
+        .iter()
+        .enumerate()
+        .filter(|(_, peptide)| !peptide.decoy && peptide.label_channel.is_some())
+        .fold(
+            HashMap::<String, Vec<PeptideIx>, fnv::FnvBuildHasher>::default(),
+            |mut groups, (index, peptide)| {
+                groups
+                    .entry(peptide.label_group())
+                    .or_default()
+                    .push(PeptideIx(index as u32));
+                groups
+            },
+        );
     features
         .iter()
         .filter(|feat| feat.peptide_q <= settings.peptide_q_value && feat.label == 1)
         .for_each(|feat| {
-            // `features` is sorted by confidence, so just take the first entry
-            if !map.contains_key(&feat.peptide_idx) {
+            let peptide = &db[feat.peptide_idx];
+            let members = peptide
+                .label_channel
+                .as_ref()
+                .and_then(|_| label_groups.get(&peptide.label_group()))
+                .map(Vec::as_slice)
+                .unwrap_or(std::slice::from_ref(&feat.peptide_idx));
+            for peptide_idx in members {
+                // `features` is sorted by confidence, so take the first anchor
+                // for each exact channel precursor.
+                if map.contains_key(peptide_idx) {
+                    continue;
+                }
                 // let mass = if feat.isotope_error > 0.0 || feat.delta_mass >= settings.ppm_tolerance * 3.0 {
                 //    feat.expmass - feat.isotope_error
                 // } else {
@@ -156,12 +183,12 @@ pub fn build_feature_map(
                 )
                 .bounds(feat.ims);
                 map.insert(
-                    feat.peptide_idx,
+                    *peptide_idx,
                     PrecursorRange {
                         rt: feat.aligned_rt,
-                        mass_lo: feat.calcmass,
+                        mass_lo: db[*peptide_idx].monoisotopic,
                         mass_hi: 0.0,
-                        peptide: feat.peptide_idx,
+                        peptide: *peptide_idx,
                         charge: feat.charge,
                         isotope: 0,
                         file_id: feat.file_id,
@@ -741,7 +768,8 @@ impl Query<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::LfqSettings;
+    use super::{build_feature_map, LfqSettings};
+    use crate::{database::Builder, scoring::Feature};
 
     #[test]
     fn default_rt_tolerance_preserves_existing_window() {
@@ -752,5 +780,47 @@ mod tests {
 
         settings.rt_pct_tolerance = 1.25;
         assert_eq!(settings.rt_tolerance(), 0.0125);
+    }
+
+    #[test]
+    fn one_identified_label_channel_seeds_all_channel_precursors() {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "labels": {
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {"name": "heavy", "static_mods": {"R": 10.008269}}
+                ]
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_labels().unwrap();
+        let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
+        let db = parameters.build_from_peptides(peptides);
+        let light = db
+            .peptides
+            .iter()
+            .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+            .unwrap();
+        let feature = Feature {
+            peptide_idx: crate::database::PeptideIx(light as u32),
+            peptide_q: 0.0,
+            label: 1,
+            aligned_rt: 0.5,
+            ims: 1.0,
+            calcmass: db.peptides[light].monoisotopic,
+            charge: 2,
+            ..Feature::default()
+        };
+
+        let map = build_feature_map(LfqSettings::default(), (2, 2), &[feature], &db);
+        let seeded = map
+            .ranges
+            .iter()
+            .filter(|range| !range.decoy && range.isotope == 0)
+            .map(|range| range.peptide)
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(seeded.len(), 2);
     }
 }

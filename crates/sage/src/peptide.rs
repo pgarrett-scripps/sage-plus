@@ -19,6 +19,12 @@ pub struct Peptide {
     /// Identity and fragmentation metadata for applied modifications. Masses
     /// remain in the fields above for compatibility and fast mass arithmetic.
     pub applied_modifications: Arc<Vec<AppliedModification>>,
+    /// Precursor-resolved labeling channel, when this peptide was generated
+    /// from a coherent database label definition.
+    pub label_channel: Option<Arc<str>>,
+    /// Library-provided base peptidoform identity when applied modification
+    /// provenance is unavailable after parsing ProForma mass deltas.
+    pub label_group_override: Option<Arc<str>>,
     /// Modification on peptide C-terminus
     pub nterm: Option<f32>,
     /// Modification on peptide C-terminus
@@ -105,6 +111,7 @@ impl Peptide {
                     .unwrap_or(Ordering::Equal)
             })
             .then_with(|| self.applied_modifications.cmp(&other.applied_modifications))
+            .then_with(|| self.label_channel.cmp(&other.label_channel))
     }
 }
 
@@ -153,6 +160,50 @@ impl Peptide {
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
+        if !self.applied_modifications.is_empty() {
+            return self
+                .applied_modifications
+                .iter()
+                .filter(|applied| applied.modification.mass == mass)
+                .filter(|applied| match (target, applied.site, self.position) {
+                    (ModificationSpecificity::PeptideN(None), Site::Nterm, _) => true,
+                    (ModificationSpecificity::PeptideC(None), Site::Cterm, _) => true,
+                    (
+                        ModificationSpecificity::ProteinN(None),
+                        Site::Nterm,
+                        Position::Nterm | Position::Full,
+                    ) => true,
+                    (
+                        ModificationSpecificity::ProteinC(None),
+                        Site::Cterm,
+                        Position::Cterm | Position::Full,
+                    ) => true,
+                    (ModificationSpecificity::PeptideN(Some(residue)), Site::Sequence(0), _)
+                    | (
+                        ModificationSpecificity::ProteinN(Some(residue)),
+                        Site::Sequence(0),
+                        Position::Nterm | Position::Full,
+                    ) => self.sequence.first() == Some(&residue),
+                    (
+                        ModificationSpecificity::PeptideC(Some(residue)),
+                        Site::Sequence(index),
+                        _,
+                    )
+                    | (
+                        ModificationSpecificity::ProteinC(Some(residue)),
+                        Site::Sequence(index),
+                        Position::Cterm | Position::Full,
+                    ) => {
+                        index as usize == self.sequence.len().saturating_sub(1)
+                            && self.sequence.last() == Some(&residue)
+                    }
+                    (ModificationSpecificity::Residue(residue), Site::Sequence(index), _) => {
+                        self.sequence.get(index as usize) == Some(&residue)
+                    }
+                    _ => false,
+                })
+                .count();
+        }
         match target {
             ModificationSpecificity::PeptideN(r) | ModificationSpecificity::ProteinN(r) => {
                 if r.map(|resi| resi == *self.sequence.first().unwrap_or(&0))
@@ -196,33 +247,120 @@ impl Peptide {
 
     /// Apply all variable mods in `sites` to self
     fn apply_site(&mut self, site: Site, modification: Arc<ModificationDefinition>) {
+        self.apply_site_with_kind(site, modification, ModificationKind::Ordinary, false);
+    }
+
+    fn apply_site_with_kind(
+        &mut self,
+        site: Site,
+        modification: Arc<ModificationDefinition>,
+        kind: ModificationKind,
+        stack: bool,
+    ) {
         let mass = modification.mass;
         let mut applied = false;
         match site {
             Site::Nterm => {
-                if self.nterm.is_none() {
-                    self.nterm = self.nterm.or(Some(0.0)).map(|x| x + mass);
+                if stack || self.nterm.is_none() {
+                    self.nterm = Some(self.nterm.unwrap_or_default() + mass);
                     applied = true;
                 }
             }
             Site::Cterm => {
-                if self.cterm.is_none() {
-                    self.cterm = self.cterm.or(Some(0.0)).map(|x| x + mass);
+                if stack || self.cterm.is_none() {
+                    self.cterm = Some(self.cterm.unwrap_or_default() + mass);
                     applied = true;
                 }
             }
             Site::Sequence(index) => {
                 self.ensure_dense_modifications();
-                if self.modifications[index as usize] == 0.0 {
+                if stack || self.modifications[index as usize] == 0.0 {
                     self.modifications[index as usize] += mass;
                     applied = true;
                 }
             }
         }
         if applied {
-            Arc::make_mut(&mut self.applied_modifications)
-                .push(AppliedModification { site, modification });
+            Arc::make_mut(&mut self.applied_modifications).push(AppliedModification {
+                site,
+                modification,
+                kind,
+            });
         }
+    }
+
+    /// Apply one complete precursor-label channel after ordinary variable and
+    /// static modifications. Label masses may stack with ordinary static
+    /// modifications, which supports combined precursor and isobaric labeling.
+    pub(crate) fn apply_label_channel(
+        mut self,
+        channel: Arc<str>,
+        modifications: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+    ) -> Self {
+        let before = self.modification_mass();
+        for (target, modification) in modifications {
+            let mut sites = Vec::new();
+            self.push_resi(&mut sites, *target, modification.mass, 0);
+            for (site, _, _) in sites {
+                if modification.mass != 0.0 {
+                    self.apply_site_with_kind(
+                        site,
+                        modification.clone(),
+                        ModificationKind::Label,
+                        true,
+                    );
+                }
+            }
+        }
+        self.monoisotopic += self.modification_mass() - before;
+        self.label_channel = Some(channel);
+        Arc::make_mut(&mut self.applied_modifications).sort_unstable();
+        self
+    }
+
+    /// Exact peptidoform identity with precursor-label modifications removed.
+    /// This is used for channel grouping, peptide-level FDR, and protein
+    /// inference without collapsing ordinary biological modifications.
+    pub fn label_group(&self) -> String {
+        if let Some(group) = &self.label_group_override {
+            return group.to_string();
+        }
+        if self.label_channel.is_none() {
+            return self.to_string();
+        }
+        let mut base = self.clone();
+        let label_modifications = base
+            .applied_modifications
+            .iter()
+            .filter(|applied| applied.kind == ModificationKind::Label)
+            .cloned()
+            .collect::<Vec<_>>();
+        for applied in &label_modifications {
+            match applied.site {
+                Site::Nterm => {
+                    base.nterm =
+                        nonzero_mass(base.nterm.unwrap_or_default() - applied.modification.mass)
+                }
+                Site::Cterm => {
+                    base.cterm =
+                        nonzero_mass(base.cterm.unwrap_or_default() - applied.modification.mass)
+                }
+                Site::Sequence(index) => {
+                    if let Some(mass) = base.modifications.get_mut(index as usize) {
+                        *mass -= applied.modification.mass;
+                        if mass.abs() < 1e-5 {
+                            *mass = 0.0;
+                        }
+                    }
+                }
+            }
+            base.monoisotopic -= applied.modification.mass;
+        }
+        Arc::make_mut(&mut base.applied_modifications)
+            .retain(|applied| applied.kind != ModificationKind::Label);
+        base.label_channel = None;
+        base.label_group_override = None;
+        base.to_string()
     }
 
     fn push_resi(
@@ -532,17 +670,32 @@ impl Peptide {
     }
 
     fn fmt_mod(&self, f: &mut std::fmt::Formatter<'_>, site: Site, mass: f32) -> std::fmt::Result {
-        if let Some(name) = self
+        let applied = self
             .applied_modifications
             .iter()
-            .find(|applied| applied.site == site)
-            .and_then(|applied| applied.modification.name.as_deref())
-        {
-            write!(f, "[{name}]")
+            .filter(|applied| applied.site == site)
+            .collect::<Vec<_>>();
+        let represented_mass = applied
+            .iter()
+            .map(|applied| applied.modification.mass)
+            .sum::<f32>();
+        if !applied.is_empty() && (represented_mass - mass).abs() < 1e-4 {
+            for applied in applied {
+                if let Some(name) = applied.modification.name.as_deref() {
+                    write!(f, "[{name}]")?;
+                } else {
+                    write!(f, "[{:+}]", applied.modification.mass)?;
+                }
+            }
+            Ok(())
         } else {
             write!(f, "[{mass:+}]")
         }
     }
+}
+
+fn nonzero_mass(mass: f32) -> Option<f32> {
+    (mass.abs() >= 1e-5).then_some(mass)
 }
 
 fn enumerate_modifications(
@@ -630,6 +783,14 @@ pub enum Site {
 pub struct AppliedModification {
     pub site: Site,
     pub modification: Arc<ModificationDefinition>,
+    pub kind: ModificationKind,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ModificationKind {
+    #[default]
+    Ordinary,
+    Label,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -678,6 +839,8 @@ impl TryFrom<Digest> for Peptide {
             // It is expanded lazily only when a modification is applied.
             modifications: Vec::new(),
             applied_modifications: Arc::default(),
+            label_channel: None,
+            label_group_override: None,
             sequence: Arc::from(value.sequence.into_bytes().into_boxed_slice()),
             monoisotopic: mass,
             nterm: None,

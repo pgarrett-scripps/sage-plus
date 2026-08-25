@@ -7,6 +7,7 @@
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::lfq::{PrecursorId, QuantifiedPeak};
 use crate::ml::kde::Estimator;
+use crate::peptide::Peptide;
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
@@ -124,22 +125,7 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     let mut map: FnvHashMap<String, Competition<PeptideIx>> = FnvHashMap::default();
     for feat in features.iter() {
         let peptide = &db[feat.peptide_idx];
-        // Only reverse the peptide sequence if we generated decoys ourselves
-        let key = if peptide.decoy {
-            db.decoy_pairing
-                .get(feat.peptide_idx.0 as usize)
-                .and_then(|paired| db.peptides.get(paired.0 as usize))
-                .map(ToString::to_string)
-                .unwrap_or_else(|| {
-                    if db.generate_decoys {
-                        peptide.reverse().to_string()
-                    } else {
-                        peptide.to_string()
-                    }
-                })
-        } else {
-            peptide.to_string()
-        };
+        let key = peptide_competition_key(db, feat.peptide_idx);
 
         let entry = map.entry(key).or_default();
         match peptide.decoy {
@@ -155,12 +141,53 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     }
 
     let (scores, passing) = Competition::assign_q_value(map, 0.01);
+    let label_scores = scores
+        .iter()
+        .filter_map(|(peptide_idx, q)| {
+            let peptide = &db[*peptide_idx];
+            peptide.label_channel.as_ref().map(|_| {
+                (
+                    (peptide_competition_key(db, *peptide_idx), peptide.decoy),
+                    *q,
+                )
+            })
+        })
+        .collect::<FnvHashMap<_, _>>();
 
     features.par_iter_mut().for_each(|feat| {
-        feat.peptide_q = scores.get(&feat.peptide_idx).copied().unwrap_or(1.0);
+        let peptide = &db[feat.peptide_idx];
+        feat.peptide_q = peptide
+            .label_channel
+            .as_ref()
+            .and_then(|_| {
+                label_scores
+                    .get(&(peptide_competition_key(db, feat.peptide_idx), peptide.decoy))
+                    .copied()
+            })
+            .or_else(|| scores.get(&feat.peptide_idx).copied())
+            .unwrap_or(1.0);
     });
 
     passing
+}
+
+fn peptide_competition_key(db: &IndexedDatabase, peptide_idx: PeptideIx) -> String {
+    let peptide = &db[peptide_idx];
+    if peptide.decoy {
+        db.decoy_pairing
+            .get(peptide_idx.0 as usize)
+            .and_then(|paired| db.peptides.get(paired.0 as usize))
+            .map(Peptide::label_group)
+            .unwrap_or_else(|| {
+                if db.generate_decoys {
+                    peptide.reverse().label_group()
+                } else {
+                    peptide.label_group()
+                }
+            })
+    } else {
+        peptide.label_group()
+    }
 }
 
 pub fn picked_protein(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
@@ -300,7 +327,7 @@ mod tests {
     use super::*;
     use crate::enzyme::Digest;
     use crate::modification::{ModificationDefinition, NeutralLossMode};
-    use crate::peptide::{AppliedModification, Peptide, Site};
+    use crate::peptide::{AppliedModification, ModificationKind, Peptide, Site};
     use std::sync::Arc;
 
     fn peptide(sequence: &str, decoy: bool) -> Peptide {
@@ -325,6 +352,7 @@ mod tests {
                 neutral_losses: Arc::from([5.0]),
                 neutral_loss_mode: NeutralLossMode::Optional,
             }),
+            kind: ModificationKind::Ordinary,
         }]);
         let mut twin_b = twin_a.clone();
         twin_b.applied_modifications = Arc::new(vec![AppliedModification {
@@ -335,6 +363,7 @@ mod tests {
                 neutral_losses: Arc::from([6.0]),
                 neutral_loss_mode: NeutralLossMode::Optional,
             }),
+            kind: ModificationKind::Ordinary,
         }]);
 
         assert_eq!(twin_a.to_string(), twin_b.to_string());

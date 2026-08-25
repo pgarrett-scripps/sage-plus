@@ -53,6 +53,9 @@ pub struct DdaLibraryEntry {
     pub proforma: String,
     pub stripped_peptide: String,
     pub proteins: String,
+    pub label_channel: Option<String>,
+    pub label_group: Option<String>,
+    pub label_reference: Option<String>,
     pub precursor_charge: u8,
     pub precursor_neutral_mass: f32,
     pub precursor_mz: f32,
@@ -72,6 +75,9 @@ impl DdaLibraryEntry {
             proforma: entry.proforma.clone(),
             stripped_peptide: entry.stripped_peptide.clone(),
             proteins: entry.proteins.clone(),
+            label_channel: entry.label_channel.clone(),
+            label_group: entry.label_group.clone(),
+            label_reference: entry.label_reference.clone(),
             precursor_charge: entry.precursor_charge,
             precursor_neutral_mass: entry.precursor_neutral_mass,
             precursor_mz: entry.precursor_mz,
@@ -503,6 +509,12 @@ pub fn deserialize_mzspeclib(text: &str) -> Result<Vec<DdaLibraryEntry>, String>
                 .map_err(|_| format!("invalid mzSpecLib q-value `{value}`"))?;
         } else if let Some(value) = property_value(line, "MS:1000885|") {
             proteins.push(value.to_string());
+        } else if let Some(value) = property_value(line, "SAGE:1000001|") {
+            entry.label_channel = (!value.is_empty()).then(|| value.to_string());
+        } else if let Some(value) = property_value(line, "SAGE:1000002|") {
+            entry.label_group = (!value.is_empty()).then(|| value.to_string());
+        } else if let Some(value) = property_value(line, "SAGE:1000003|") {
+            entry.label_reference = (!value.is_empty()).then(|| value.to_string());
         }
     }
     if !proteins.is_empty() {
@@ -874,6 +886,9 @@ mod tests {
             proforma: id.into(),
             stripped_peptide: id.into(),
             proteins: "P1".into(),
+            label_channel: None,
+            label_group: None,
+            label_reference: None,
             precursor_charge: charge,
             precursor_neutral_mass: 1_000.0,
             precursor_mz: 1_000.0 / charge as f32 + PROTON,

@@ -407,6 +407,11 @@ impl Input {
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
+            database
+                .clone()
+                .make_parameters()
+                .validate_labels()
+                .map_err(anyhow::Error::msg)?;
         }
         if let Some(library) = &self.library_search {
             library.validate().map_err(anyhow::Error::msg)?;
@@ -502,6 +507,7 @@ impl Input {
         let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self.database.map(Builder::make_parameters);
         if let Some(database) = &database {
+            database.validate_labels().map_err(anyhow::Error::msg)?;
             database
                 .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
                 .map_err(anyhow::Error::msg)?;
@@ -769,6 +775,37 @@ mod test {
             .unwrap_err()
             .to_string()
             .contains("exactly one"));
+    }
+
+    #[test]
+    fn label_channels_are_validated_before_search() {
+        let valid = base_search_space(serde_json::json!({
+            "fasta": "test.fasta",
+            "labels": {
+                "reference": "light",
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {"name": "heavy", "static_mods": {"R": 10.008269}}
+                ]
+            }
+        }));
+        assert!(valid.validate().is_ok());
+
+        let invalid = base_search_space(serde_json::json!({
+            "fasta": "test.fasta",
+            "variable_mods": {"R": [14.0]},
+            "labels": {
+                "channels": [
+                    {"name": "light", "static_mods": {}},
+                    {"name": "heavy", "static_mods": {"R": 10.008269}}
+                ]
+            }
+        }));
+        assert!(invalid
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("overlaps a variable modification"));
     }
 
     #[test]
