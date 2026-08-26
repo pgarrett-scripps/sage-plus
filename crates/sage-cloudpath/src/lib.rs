@@ -10,6 +10,8 @@ pub use url::Url;
 
 pub mod mgf;
 pub mod mzml;
+#[cfg(feature = "mzmlb")]
+pub mod mzmlb;
 pub mod tdf;
 pub mod thermoraw;
 pub mod util;

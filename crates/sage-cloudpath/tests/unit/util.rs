@@ -4,6 +4,7 @@ use super::*;
 fn test_identify_format() {
     assert_eq!(FileFormat::from("foo.mzml"), FileFormat::MzML);
     assert_eq!(FileFormat::from("foo.mzML"), FileFormat::MzML);
+    assert_eq!(FileFormat::from("foo.mzMLb"), FileFormat::MzMLb);
     assert_eq!(FileFormat::from("foo.mgf"), FileFormat::MGF);
     assert_eq!(FileFormat::from("foo.mgf.gz"), FileFormat::MGF);
     assert_eq!(FileFormat::from("foo.tdf"), FileFormat::TDF);
@@ -11,6 +12,16 @@ fn test_identify_format() {
     assert_eq!(FileFormat::from("./tomato/foo.d/"), FileFormat::TDF);
     assert_eq!(FileFormat::from("foo.raw"), FileFormat::ThermoRaw);
     assert_eq!(FileFormat::from("foo.RAW"), FileFormat::ThermoRaw);
+}
+
+#[cfg(not(feature = "mzmlb"))]
+#[test]
+fn mzmlb_without_feature_returns_build_instructions() {
+    let url = Url::parse("file:///tmp/example.mzMLb").unwrap();
+    assert!(matches!(
+        read_spectra(&url, 0, None, BrukerProcessingConfig::default(), false),
+        Err(Error::Unsupported(message)) if message.contains("`mzmlb` feature")
+    ));
 }
 
 #[test]
