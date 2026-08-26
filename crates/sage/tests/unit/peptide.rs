@@ -4,6 +4,22 @@ use crate::modification::NeutralLossMode;
 use super::*;
 
 #[test]
+fn protein_accessions_are_inline_without_growing_peptides() {
+    assert_eq!(
+        std::mem::size_of::<ProteinAccessions>(),
+        std::mem::size_of::<Vec<Arc<str>>>()
+    );
+    #[cfg(target_pointer_width = "64")]
+    assert_eq!(std::mem::size_of::<Peptide>(), 144);
+
+    let mut proteins = ProteinAccessions::new();
+    proteins.push(Arc::from("P1"));
+    assert!(!proteins.spilled());
+    proteins.push(Arc::from("P2"));
+    assert!(proteins.spilled());
+}
+
+#[test]
 fn unmodified_peptides_use_compact_modification_storage() {
     let peptide = Peptide::try_from(Digest {
         sequence: "PEPTIDER".into(),

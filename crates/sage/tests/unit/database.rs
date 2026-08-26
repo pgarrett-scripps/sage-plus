@@ -433,8 +433,8 @@ fn digestion() {
     }
     // Ensure that this mod is uniquely called as the first protein
     assert_eq!(
-        peptides.last().unwrap().proteins,
-        vec!["sp|AAAAA".to_string().into()]
+        peptides.last().unwrap().proteins.as_slice(),
+        &[Arc::<str>::from("sp|AAAAA")]
     );
 }
 

@@ -34,7 +34,7 @@ fn database() -> IndexedDatabase {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
         sequence: Arc::from(&b"PEPTIDE"[..]),
-        proteins: vec![Arc::from("P12345")],
+        proteins: vec![Arc::from("P12345")].into(),
         ..Peptide::default()
     });
     database

@@ -12,7 +12,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
         sequence: Arc::from(&b"PEPTIDE"[..]),
-        proteins: vec![Arc::from("P12345")],
+        proteins: vec![Arc::from("P12345")].into(),
         ..Peptide::default()
     });
     let mut areas = HashMap::new();
@@ -65,7 +65,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
     for sequence in [b"PEPTIDE".as_slice(), b"SEQUENCE".as_slice()] {
         database.peptides.push(Peptide {
             sequence: Arc::from(sequence),
-            proteins: vec![Arc::from("P12345")],
+            proteins: vec![Arc::from("P12345")].into(),
             ..Peptide::default()
         });
     }
@@ -179,7 +179,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
         sequence: Arc::from(&b"PEPTIDE"[..]),
-        proteins: vec![Arc::from("P12345"), Arc::from("P67890")],
+        proteins: vec![Arc::from("P12345"), Arc::from("P67890")].into(),
         protein_sites: Arc::from([
             ProteinOccurrence {
                 protein: Arc::from("P12345"),
