@@ -9,6 +9,7 @@ target/
 *.gz
 *.json
 !tests/config_spectral_library.json
+!schemas/config.schema.json
 *.ms2
 *.fasta
 *.fas
