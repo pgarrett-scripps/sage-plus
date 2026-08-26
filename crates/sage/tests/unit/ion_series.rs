@@ -286,6 +286,15 @@ fn optional_neutral_loss_keeps_retained_fragment() {
 }
 
 #[test]
+fn common_ion_groups_use_inline_variant_storage() {
+    let peptide = peptide("PEPTIDE");
+    assert!(IonGroupSeries::new(&peptide, Kind::B).all(|group| !group.variants.spilled()));
+
+    let peptide = peptide_with_loss(NeutralLossMode::Optional);
+    assert!(IonGroupSeries::new(&peptide, Kind::B).all(|group| !group.variants.spilled()));
+}
+
+#[test]
 fn required_neutral_loss_suppresses_retained_fragment() {
     let peptide = peptide_with_loss(NeutralLossMode::Required);
     let b = IonGroupSeries::new(&peptide, Kind::B).collect::<Vec<_>>();
@@ -325,6 +334,7 @@ fn neutral_losses_combine_across_multiple_modified_sites() {
         .unwrap();
 
     let b2 = IonGroupSeries::new(&peptide, Kind::B).nth(1).unwrap();
+    assert!(b2.variants.spilled());
     let losses = b2
         .variants
         .iter()
