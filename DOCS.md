@@ -438,6 +438,10 @@ Example:
 
 ### Modifications
 
+Peptides may contain at most 255 residues. A database may use at most 255 distinct
+modification definition, site-class, and provenance combinations. Sage validates these limits
+before database construction and reports a configuration error when either is exceeded.
+
 #### Static Modifications
 
 - **static_mods**: Dictionary with characters as keys and bare masses or structured modification objects. Represents static modifications applied to amino acids or termini (default: {}). Static modifications are applied after variable modifications.
@@ -586,6 +590,13 @@ modifications; either file can be supplied to a later search through `ptm_librar
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
+- **prefilter**: Boolean. Build the database in chunks and retain only peptides that can contribute
+  a preliminary fragment match. Targets, paired decoys, and label-channel partners are retained
+  together, so the final search uses the same FDR competition as a full database search.
+- **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per chunk. A value of
+  zero selects the chunk size from the configured memory limit.
+- **prefilter_low_memory**: Deprecated and ignored. Exact prefiltering always uses compact survivor
+  tracking.
 
 ## Quantification
 

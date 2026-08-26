@@ -173,8 +173,17 @@
         "peptides": { "type": "string" },
         "custom_cleavage_sites": { "type": "string" },
         "prefilter_chunk_size": { "type": "integer", "minimum": 0 },
-        "prefilter": { "type": "boolean", "default": false },
-        "prefilter_low_memory": { "type": "boolean", "default": true }
+        "prefilter": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use exact paired target-decoy database prefiltering."
+        },
+        "prefilter_low_memory": {
+          "type": "boolean",
+          "default": true,
+          "deprecated": true,
+          "description": "Deprecated compatibility option. Exact prefiltering ignores this value."
+        }
       }
     },
     "enzyme": {

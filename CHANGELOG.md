@@ -19,6 +19,8 @@ entries are retained below for provenance.
 
 ### Changed
 - **Breaking:** `Peptide::modifications` now uses `CompactModifications` instead of a dense `Vec<f32>`, and applied metadata is exposed through `Peptide::applied_modifications()`. Use `CompactModifications::from_dense`, `from_sparse`, or `from_applied` when constructing peptides directly.
+- Peptide modifications now use two-byte position and definition IDs, modification definitions are shared across the database, and common single-protein mappings remain inline.
+- Linux GNU libc builds return unused database-construction pages to the operating system before searching.
 - Replaced MS2 deconvolution with averagine-scored isotope envelopes. Mass tolerance, charge ceiling, envelope length, isotope score, and intensity-ratio tolerance are configurable. Scored envelopes assign peaks exclusively and preserve charge confidence for charge-aware fragment matching. Boolean `deisotope` settings remain supported, with `true` selecting the scored defaults. mzML and mzMLb fragment charge arrays now constrain envelope assignment and flow into charge-aware matching.
 - Clarified that Bioconda installs upstream Sage rather than Sage Plus.
 - Added low-noise monthly dependency checks for Cargo and GitHub Actions.
@@ -27,7 +29,7 @@ entries are retained below for provenance.
 - Pinned CI actions to immutable commits and added dependency review for new pull requests.
 
 ### Fixed
-- Database prefiltering now searches targets first, then generates paired decoys only for retained targets. User-supplied decoys remain intact when automatic generation is disabled.
+- Database prefiltering now filters targets and paired decoys together, preserves label-channel partners, and uses deterministic score ties. Prefiltered and full searches therefore use the same competition and FDR model.
 - LFQ mass lookup now derives its coarse search margin from configured precursor ranges, avoiding missed matches at wider tolerances. Mobility boundaries remain inclusive and configuration-driven.
 - Updated Bruker TDF parsing for the current `timsrust` API without dropping existing processing configuration.
 
