@@ -60,7 +60,7 @@ fn enriched_embedding_is_finite_and_charge_aware() {
     let map = amino_acid_map();
     let peptide = Peptide {
         sequence: b"ACDEFGHIK".to_vec().into(),
-        modifications: vec![0.0; 9],
+        modifications: crate::peptide::CompactModifications::default(),
         monoisotopic: 1000.0,
         ..Peptide::default()
     };
@@ -85,7 +85,9 @@ fn zero_mobility_is_not_a_training_observation() {
 fn ptm_row_has_global_and_charge_specific_effects() {
     let peptide = Peptide {
         sequence: b"AMPEPTIDEK".to_vec().into(),
-        modifications: vec![0.0, 15.994_915, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        modifications: crate::peptide::CompactModifications::from_dense([
+            0.0, 15.994_915, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ]),
         ..Peptide::default()
     };
     let keys = [(ModificationSpecificity::Residue(b'M'), 15.994_915)];
@@ -100,7 +102,7 @@ fn basic_embedding_tracks_composition_charge_and_mass() {
     let map = amino_acid_map();
     let peptide = Peptide {
         sequence: b"ACDEK".to_vec().into(),
-        modifications: vec![0.0; 5],
+        modifications: crate::peptide::CompactModifications::default(),
         monoisotopic: 1_000.0,
         ..Peptide::default()
     };

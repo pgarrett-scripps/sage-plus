@@ -474,14 +474,7 @@ pub fn target_decoy_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
 /// invariant, so `monoisotopic` does not change.
 fn build_variant(peptide: &Peptide, mass: f32, candidates: &[usize], chosen: &[usize]) -> Peptide {
     let mut variant = peptide.clone();
-    for &pos in candidates {
-        if (variant.modifications[pos] - mass).abs() < MASS_EPS {
-            variant.modifications[pos] = 0.0;
-        }
-    }
-    for &pos in chosen {
-        variant.modifications[pos] = mass;
-    }
+    variant.relocate_modification_mass(mass, candidates, chosen, MASS_EPS);
     variant
 }
 

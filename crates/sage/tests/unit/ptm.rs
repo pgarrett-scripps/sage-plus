@@ -1,15 +1,14 @@
 use super::*;
 use crate::enzyme::Digest;
 use crate::mass::PROTON;
+use crate::peptide::CompactModifications;
 
 fn peptide(seq: &str) -> Peptide {
-    let mut peptide = Peptide::try_from(Digest {
+    Peptide::try_from(Digest {
         sequence: seq.into(),
         ..Default::default()
     })
-    .unwrap();
-    peptide.modifications.resize(peptide.sequence.len(), 0.0);
-    peptide
+    .unwrap()
 }
 
 /// Build a synthetic spectrum from the b/y ions of `peptide` (charge 1),
@@ -66,7 +65,7 @@ fn site_determining_rule() {
 fn localizes_single_phospho_to_correct_residue() {
     // Two candidate sites (S at idx 2, T at idx 5); the true site is the S.
     let mut truth = peptide("AASAATAA");
-    truth.modifications[2] = PHOSPHO;
+    truth.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
     let spectrum = synthetic_spectrum(&truth);
 
     // The peptide handed to the localizer carries the phospho on the S as
@@ -112,7 +111,7 @@ fn localizes_single_phospho_to_correct_residue() {
 fn unambiguous_when_single_candidate() {
     // Only one S in the peptide: the phospho is trivially localized.
     let mut truth = peptide("AAASAAA");
-    truth.modifications[3] = PHOSPHO;
+    truth.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
     let spectrum = synthetic_spectrum(&truth);
     let potential = [(ModificationSpecificity::Residue(b'S'), PHOSPHO)];
 
@@ -158,7 +157,7 @@ fn no_localization_without_target_mod() {
 
 fn truth_with_phospho() -> Peptide {
     let mut peptide = peptide("AASAATAA");
-    peptide.modifications[2] = PHOSPHO;
+    peptide.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
     peptide
 }
 
@@ -169,7 +168,7 @@ fn label_is_populated_when_registered() {
     let unique_mass = 3131.31313_f32;
     crate::unimod::register_label(unique_mass, "TestPTM");
     let mut truth = peptide("AAASAAA");
-    truth.modifications[3] = unique_mass;
+    truth.modifications = CompactModifications::from_sparse([(3, unique_mass)]);
     let spectrum = synthetic_spectrum(&truth);
     let potential = [(ModificationSpecificity::Residue(b'S'), unique_mass)];
     let loc = localize(

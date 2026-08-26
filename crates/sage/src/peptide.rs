@@ -13,6 +13,7 @@ use crate::{
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
 use smallvec::SmallVec;
+use std::sync::OnceLock;
 
 pub const INLINE_PROTEINS: usize = 1;
 
@@ -20,16 +21,460 @@ pub const INLINE_PROTEINS: usize = 1;
 /// Shared peptides transparently spill to heap storage.
 pub type ProteinAccessions = SmallVec<[Arc<str>; INLINE_PROTEINS]>;
 
+const MAX_COMPACT_DEFINITIONS: usize = u8::MAX as usize;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum SiteClass {
+    Nterm,
+    Cterm,
+    Residue,
+}
+
+impl SiteClass {
+    fn from_specificity(specificity: ModificationSpecificity) -> Self {
+        match specificity {
+            ModificationSpecificity::PeptideN(None) | ModificationSpecificity::ProteinN(None) => {
+                Self::Nterm
+            }
+            ModificationSpecificity::PeptideC(None) | ModificationSpecificity::ProteinC(None) => {
+                Self::Cterm
+            }
+            _ => Self::Residue,
+        }
+    }
+
+    fn from_site(site: Site) -> Self {
+        match site {
+            Site::Nterm => Self::Nterm,
+            Site::Cterm => Self::Cterm,
+            Site::Sequence(_) => Self::Residue,
+        }
+    }
+
+    fn site(self, position: u8) -> Site {
+        match self {
+            Self::Nterm => Site::Nterm,
+            Self::Cterm => Site::Cterm,
+            Self::Residue => Site::Sequence(position as u32),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LookupKey {
+    site: SiteClass,
+    kind: ModificationKind,
+    definition: ModificationDefinition,
+}
+
+#[derive(Clone, Debug)]
+struct LookupRecord {
+    site: SiteClass,
+    kind: ModificationKind,
+    definition: Arc<ModificationDefinition>,
+}
+
+/// Shared metadata addressed by the compact one-byte modification IDs stored
+/// in each peptide.
+#[derive(Clone, Debug, Default)]
+pub struct ModificationLookup {
+    records: Vec<LookupRecord>,
+    ids: BTreeMap<LookupKey, u8>,
+    pointer_ids: FnvHashMap<(usize, SiteClass, ModificationKind), u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModificationLookupError {
+    pub definitions: usize,
+}
+
+impl std::fmt::Display for ModificationLookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "compact modification encoding supports at most {MAX_COMPACT_DEFINITIONS} distinct definition and site variants, but {} are required",
+            self.definitions
+        )
+    }
+}
+
+impl std::error::Error for ModificationLookupError {}
+
+impl ModificationLookup {
+    fn from_records(
+        records: impl IntoIterator<Item = LookupRecord>,
+    ) -> Result<Arc<Self>, ModificationLookupError> {
+        let mut unique = BTreeMap::<LookupKey, Arc<ModificationDefinition>>::new();
+        let mut pointers = Vec::new();
+        for record in records {
+            let key = LookupKey {
+                site: record.site,
+                kind: record.kind,
+                definition: record.definition.as_ref().clone(),
+            };
+            pointers.push((Arc::as_ptr(&record.definition) as usize, key.clone()));
+            unique.entry(key).or_insert(record.definition);
+        }
+        if unique.len() > MAX_COMPACT_DEFINITIONS {
+            return Err(ModificationLookupError {
+                definitions: unique.len(),
+            });
+        }
+
+        let mut lookup = Self::default();
+        for (key, definition) in unique {
+            let id = lookup.records.len() as u8;
+            lookup.records.push(LookupRecord {
+                site: key.site,
+                kind: key.kind,
+                definition,
+            });
+            lookup.ids.insert(key, id);
+        }
+        for (pointer, key) in pointers {
+            lookup.pointer_ids.insert(
+                (pointer, key.site, key.kind),
+                *lookup.ids.get(&key).expect("compact lookup key is missing"),
+            );
+        }
+        Ok(Arc::new(lookup))
+    }
+
+    pub fn from_definitions(
+        definitions: impl IntoIterator<Item = (Site, Arc<ModificationDefinition>, ModificationKind)>,
+    ) -> Result<Arc<Self>, ModificationLookupError> {
+        Self::from_records(
+            definitions
+                .into_iter()
+                .map(|(site, definition, kind)| LookupRecord {
+                    site: SiteClass::from_site(site),
+                    kind,
+                    definition,
+                }),
+        )
+    }
+
+    fn id(
+        &self,
+        site: SiteClass,
+        definition: &Arc<ModificationDefinition>,
+        kind: ModificationKind,
+    ) -> Option<u8> {
+        self.pointer_ids
+            .get(&(Arc::as_ptr(definition) as usize, site, kind))
+            .copied()
+            .or_else(|| self.id_value(site, definition, kind))
+    }
+
+    fn id_value(
+        &self,
+        site: SiteClass,
+        definition: &ModificationDefinition,
+        kind: ModificationKind,
+    ) -> Option<u8> {
+        self.ids
+            .get(&LookupKey {
+                site,
+                kind,
+                definition: definition.clone(),
+            })
+            .copied()
+    }
+
+    fn record(&self, id: u8) -> &LookupRecord {
+        &self.records[id as usize]
+    }
+}
+
+fn empty_modification_lookup() -> Arc<ModificationLookup> {
+    static EMPTY: OnceLock<Arc<ModificationLookup>> = OnceLock::new();
+    EMPTY
+        .get_or_init(|| Arc::new(ModificationLookup::default()))
+        .clone()
+}
+
+/// A residue position and shared modification-definition ID.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct EncodedModification {
+    pub position: u8,
+    pub modification_id: u8,
+}
+
+/// Compact peptide-local modification sites plus shared full metadata.
+///
+/// Four entries are stored inline. Larger collections spill to one allocation.
+#[derive(Clone, Debug)]
+pub struct CompactModifications {
+    entries: SmallVec<[EncodedModification; 4]>,
+    lookup: Arc<ModificationLookup>,
+}
+
+impl Default for CompactModifications {
+    fn default() -> Self {
+        Self {
+            entries: SmallVec::new(),
+            lookup: empty_modification_lookup(),
+        }
+    }
+}
+
+impl PartialEq for CompactModifications {
+    fn eq(&self, other: &Self) -> bool {
+        self.semantic_cmp(other) == Ordering::Equal
+    }
+}
+
+impl CompactModifications {
+    pub fn from_dense(masses: impl IntoIterator<Item = f32>) -> Self {
+        Self::from_sparse(
+            masses
+                .into_iter()
+                .enumerate()
+                .filter(|(_, mass)| *mass != 0.0),
+        )
+    }
+
+    pub fn from_sparse(masses: impl IntoIterator<Item = (usize, f32)>) -> Self {
+        let masses = masses.into_iter().collect::<Vec<_>>();
+        let records = masses
+            .iter()
+            .enumerate()
+            .map(|(_, (position, mass))| {
+                (
+                    Site::Sequence(*position as u32),
+                    Arc::new(ModificationDefinition::bare(*mass)),
+                    ModificationKind::Ordinary,
+                )
+            })
+            .collect::<Vec<_>>();
+        let lookup = ModificationLookup::from_definitions(records.clone())
+            .expect("dense modification array exceeds compact definition limit");
+        let mut compact = Self {
+            entries: SmallVec::new(),
+            lookup,
+        };
+        for (site, definition, kind) in records {
+            compact.push(site, &definition, kind);
+        }
+        compact.sort();
+        compact
+    }
+
+    pub fn from_applied(
+        modifications: impl IntoIterator<Item = AppliedModification>,
+    ) -> Result<Self, ModificationLookupError> {
+        let modifications = modifications.into_iter().collect::<Vec<_>>();
+        let lookup = ModificationLookup::from_definitions(
+            modifications
+                .iter()
+                .map(|applied| (applied.site, applied.modification.clone(), applied.kind)),
+        )?;
+        let mut compact = Self {
+            entries: SmallVec::new(),
+            lookup,
+        };
+        for applied in modifications {
+            compact.push(applied.site, &applied.modification, applied.kind);
+        }
+        compact.sort();
+        Ok(compact)
+    }
+
+    fn install_lookup(&mut self, lookup: Arc<ModificationLookup>) {
+        if self.entries.is_empty() {
+            self.lookup = lookup;
+            return;
+        }
+        if Arc::ptr_eq(&self.lookup, &lookup) {
+            return;
+        }
+
+        let old_lookup = self.lookup.clone();
+        let records = old_lookup
+            .records
+            .iter()
+            .chain(lookup.records.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let merged =
+            ModificationLookup::from_records(records).unwrap_or_else(|error| panic!("{error}"));
+        for encoded in &mut self.entries {
+            let record = old_lookup.record(encoded.modification_id);
+            encoded.modification_id = merged
+                .id(record.site, &record.definition, record.kind)
+                .expect("existing modification is missing from merged compact lookup");
+        }
+        self.lookup = merged;
+    }
+
+    fn push(
+        &mut self,
+        site: Site,
+        definition: &Arc<ModificationDefinition>,
+        kind: ModificationKind,
+    ) {
+        let class = SiteClass::from_site(site);
+        let id = self.lookup.id(class, definition, kind).unwrap_or_else(|| {
+            panic!("modification definition was not registered in the shared compact lookup")
+        });
+        let position = match site {
+            Site::Sequence(position) => u8::try_from(position)
+                .expect("peptide residue position exceeds compact modification encoding"),
+            Site::Nterm | Site::Cterm => 0,
+        };
+        self.entries.push(EncodedModification {
+            position,
+            modification_id: id,
+        });
+    }
+
+    fn applied(&self) -> impl ExactSizeIterator<Item = AppliedModificationRef<'_>> {
+        self.entries.iter().map(|encoded| {
+            let record = self.lookup.record(encoded.modification_id);
+            AppliedModificationRef {
+                site: record.site.site(encoded.position),
+                modification: record.definition.as_ref(),
+                kind: record.kind,
+            }
+        })
+    }
+
+    fn mass_at(&self, position: usize) -> f32 {
+        self.entries
+            .iter()
+            .filter_map(|encoded| {
+                let record = self.lookup.record(encoded.modification_id);
+                (record.site == SiteClass::Residue && encoded.position as usize == position)
+                    .then_some(record.definition.mass)
+            })
+            .sum()
+    }
+
+    /// Read all modifications at the next residue in a forward sequence scan.
+    ///
+    /// Compact entries are sorted by site, so callers such as ion generation
+    /// can visit every entry once instead of searching the collection for each
+    /// residue.
+    pub(crate) fn mass_at_with_cursor(&self, position: usize, cursor: &mut usize) -> f32 {
+        let mut mass = 0.0;
+        while let Some(encoded) = self.entries.get(*cursor) {
+            let record = self.lookup.record(encoded.modification_id);
+            if record.site != SiteClass::Residue {
+                *cursor += 1;
+                continue;
+            }
+
+            match (encoded.position as usize).cmp(&position) {
+                Ordering::Less => *cursor += 1,
+                Ordering::Equal => {
+                    mass += record.definition.mass;
+                    *cursor += 1;
+                }
+                Ordering::Greater => break,
+            }
+        }
+        mass
+    }
+
+    fn total_mass(&self) -> f32 {
+        self.entries
+            .iter()
+            .map(|encoded| self.lookup.record(encoded.modification_id).definition.mass)
+            .sum()
+    }
+
+    fn sort(&mut self) {
+        let lookup = self.lookup.clone();
+        self.entries.sort_unstable_by(|left, right| {
+            let left_record = lookup.record(left.modification_id);
+            let right_record = lookup.record(right.modification_id);
+            left_record
+                .site
+                .site(left.position)
+                .cmp(&right_record.site.site(right.position))
+                .then_with(|| left_record.definition.cmp(&right_record.definition))
+                .then_with(|| left_record.kind.cmp(&right_record.kind))
+        });
+    }
+
+    fn semantic_cmp(&self, other: &Self) -> Ordering {
+        self.applied()
+            .map(|applied| (applied.site, applied.modification, applied.kind))
+            .cmp(
+                other
+                    .applied()
+                    .map(|applied| (applied.site, applied.modification, applied.kind)),
+            )
+    }
+
+    fn reverse_internal(&mut self, last: usize) {
+        let lookup = self.lookup.clone();
+        for encoded in &mut self.entries {
+            if lookup.record(encoded.modification_id).site != SiteClass::Residue {
+                continue;
+            }
+            let position = encoded.position as usize;
+            if (1..last).contains(&position) {
+                encoded.position = (last - position) as u8;
+            }
+        }
+        self.sort();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn spilled(&self) -> bool {
+        self.entries.spilled()
+    }
+
+    pub(crate) fn heap_bytes(&self) -> usize {
+        usize::from(self.entries.spilled())
+            * self.entries.capacity()
+            * std::mem::size_of::<EncodedModification>()
+    }
+
+    fn relocate_mass(&mut self, mass: f32, candidates: &[usize], chosen: &[usize], epsilon: f32) {
+        let selected_id = self.entries.iter().find_map(|encoded| {
+            let record = self.lookup.record(encoded.modification_id);
+            (record.site == SiteClass::Residue
+                && candidates.contains(&(encoded.position as usize))
+                && (record.definition.mass - mass).abs() < epsilon)
+                .then_some(encoded.modification_id)
+        });
+        let Some(modification_id) = selected_id else {
+            return;
+        };
+        let lookup = self.lookup.clone();
+        self.entries.retain(|encoded| {
+            let record = lookup.record(encoded.modification_id);
+            !(record.site == SiteClass::Residue
+                && candidates.contains(&(encoded.position as usize))
+                && (record.definition.mass - mass).abs() < epsilon)
+        });
+        self.entries.extend(
+            chosen.iter().map(|position| EncodedModification {
+                position: u8::try_from(*position)
+                    .expect("PTM position exceeds compact modification encoding"),
+                modification_id,
+            }),
+        );
+        self.sort();
+    }
+}
+
 #[derive(Clone, PartialEq, Default)]
 pub struct Peptide {
     pub decoy: bool,
     pub sequence: Arc<[u8]>,
-    /// Per-residue modification masses. An empty vector represents an
-    /// unmodified peptide and is expanded lazily when a modification is applied.
-    pub modifications: Vec<f32>,
-    /// Identity and fragmentation metadata for applied modifications. Masses
-    /// remain in the fields above for compatibility and fast mass arithmetic.
-    pub applied_modifications: Arc<Vec<AppliedModification>>,
+    /// Compact modification sites with shared definition metadata.
+    pub modifications: CompactModifications,
     /// Precursor-resolved labeling channel, when this peptide was generated
     /// from a coherent database label definition.
     pub label_channel: Option<Arc<str>>,
@@ -117,6 +562,50 @@ impl LabelModificationCache {
     }
 }
 
+impl ModificationLookup {
+    pub(crate) fn for_rules(
+        variable_mods: &[VariableRule],
+        static_mods: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+        channels: &[Arc<str>],
+        labels: &LabelModificationCache,
+    ) -> Result<Arc<Self>, ModificationLookupError> {
+        let mut records = Vec::new();
+        for (specificity, definition) in variable_mods
+            .iter()
+            .map(|rule| (rule.specificity, &rule.modification))
+            .chain(
+                static_mods
+                    .iter()
+                    .map(|(specificity, definition)| (*specificity, definition)),
+            )
+        {
+            let site = SiteClass::from_specificity(specificity);
+            let kind = if definition.channel_offsets.is_empty() {
+                ModificationKind::Ordinary
+            } else {
+                ModificationKind::ChannelBase
+            };
+            records.push(LookupRecord {
+                site,
+                kind,
+                definition: definition.clone(),
+            });
+            if kind == ModificationKind::ChannelBase {
+                for channel in channels {
+                    if let Some(definition) = labels.resolve(definition, channel) {
+                        records.push(LookupRecord {
+                            site,
+                            kind: ModificationKind::Label,
+                            definition,
+                        });
+                    }
+                }
+            }
+        }
+        Self::from_records(records)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct LibrarySite {
     pub position: u32,
@@ -145,21 +634,36 @@ impl ModificationSource for Arc<ModificationDefinition> {
 impl Peptide {
     #[inline]
     pub fn modification_at(&self, index: usize) -> f32 {
-        self.modifications.get(index).copied().unwrap_or_default()
+        self.modifications.mass_at(index)
     }
 
-    fn ensure_dense_modifications(&mut self) {
-        if self.modifications.is_empty() {
-            self.modifications.resize(self.sequence.len(), 0.0);
-        }
+    pub fn applied_modifications(
+        &self,
+    ) -> impl ExactSizeIterator<Item = AppliedModificationRef<'_>> {
+        self.modifications.applied()
+    }
+
+    pub(crate) fn relocate_modification_mass(
+        &mut self,
+        mass: f32,
+        candidates: &[usize],
+        chosen: &[usize],
+        epsilon: f32,
+    ) {
+        self.modifications
+            .relocate_mass(mass, candidates, chosen, epsilon);
     }
 
     pub fn initial_sort(&self, other: &Self) -> std::cmp::Ordering {
         self.sequence
             .cmp(&other.sequence)
             .then_with(|| {
-                self.modifications
-                    .partial_cmp(&other.modifications)
+                (0..self.sequence.len())
+                    .find_map(|index| {
+                        let left = self.modification_at(index);
+                        let right = other.modification_at(index);
+                        (left != right).then(|| left.partial_cmp(&right).unwrap_or(Ordering::Equal))
+                    })
                     .unwrap_or(Ordering::Equal)
             })
             .then_with(|| {
@@ -172,7 +676,7 @@ impl Peptide {
                     .partial_cmp(&other.cterm)
                     .unwrap_or(Ordering::Equal)
             })
-            .then_with(|| self.applied_modifications.cmp(&other.applied_modifications))
+            .then_with(|| self.modifications.semantic_cmp(&other.modifications))
             .then_with(|| self.label_channel.cmp(&other.label_channel))
     }
 }
@@ -189,7 +693,10 @@ impl Debug for Peptide {
             )
             .field("nterm", &self.nterm)
             .field("cterm", &self.cterm)
-            .field("applied_modifications", &self.applied_modifications)
+            .field(
+                "applied_modifications",
+                &self.applied_modifications().collect::<Vec<_>>(),
+            )
             .field("monoisotopic", &self.monoisotopic)
             .field("missed_cleavages", &self.missed_cleavages)
             .field("position", &self.position)
@@ -223,10 +730,9 @@ impl Peptide {
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
-        if !self.applied_modifications.is_empty() {
+        if !self.modifications.is_empty() {
             return self
-                .applied_modifications
-                .iter()
+                .applied_modifications()
                 .filter(|applied| applied.modification.mass == mass)
                 .filter(|applied| match (target, applied.site, self.position) {
                     (ModificationSpecificity::PeptideN(None), Site::Nterm, _) => true,
@@ -291,20 +797,20 @@ impl Peptide {
             ModificationSpecificity::Residue(resi) => self
                 .sequence
                 .iter()
-                .zip(self.modifications.iter())
-                .filter(|(&r, &m)| resi == r && mass == m)
+                .enumerate()
+                .filter(|(index, residue)| {
+                    resi == **residue && mass == self.modification_at(*index)
+                })
                 .count(),
         }
     }
 
     fn modification_mass(&self) -> f32 {
-        self.modifications.iter().sum::<f32>()
-            + self.nterm.unwrap_or(0.0)
-            + self.cterm.unwrap_or(0.0)
+        self.modifications.total_mass()
     }
 
     fn finalize_modifications(&mut self) {
-        Arc::make_mut(&mut self.applied_modifications).sort_unstable();
+        self.modifications.sort();
         self.monoisotopic += self.modification_mass();
     }
 
@@ -341,19 +847,13 @@ impl Peptide {
                 }
             }
             Site::Sequence(index) => {
-                self.ensure_dense_modifications();
-                if stack || self.modifications[index as usize] == 0.0 {
-                    self.modifications[index as usize] += mass;
+                if stack || self.modification_at(index as usize) == 0.0 {
                     applied = true;
                 }
             }
         }
         if applied {
-            Arc::make_mut(&mut self.applied_modifications).push(AppliedModification {
-                site,
-                modification,
-                kind,
-            });
+            self.modifications.push(site, &modification, kind);
         }
     }
 
@@ -365,31 +865,31 @@ impl Peptide {
         cache: &LabelModificationCache,
     ) -> Self {
         let before = self.modification_mass();
-        let applied = Arc::make_mut(&mut self.applied_modifications);
-        for modification in applied.iter_mut() {
-            if modification.kind != ModificationKind::ChannelBase {
+        let lookup = self.modifications.lookup.clone();
+        for encoded in &mut self.modifications.entries {
+            let record = lookup.record(encoded.modification_id);
+            if record.kind != ModificationKind::ChannelBase {
                 continue;
             }
-            let offset = modification.modification.channel_offsets[&channel];
-            match modification.site {
+            let offset = record.definition.channel_offsets[&channel];
+            let site = record.site.site(encoded.position);
+            match site {
                 Site::Nterm => self.nterm = Some(self.nterm.unwrap_or_default() + offset),
                 Site::Cterm => self.cterm = Some(self.cterm.unwrap_or_default() + offset),
-                Site::Sequence(index) => self.modifications[index as usize] += offset,
+                Site::Sequence(_) => {}
             }
-            modification.modification = cache
-                .resolve(&modification.modification, &channel)
+            let resolved = cache
+                .resolve(&record.definition, &channel)
                 .unwrap_or_else(|| {
-                    Arc::new(
-                        modification
-                            .modification
-                            .with_mass(modification.modification.mass + offset),
-                    )
+                    Arc::new(record.definition.with_mass(record.definition.mass + offset))
                 });
-            modification.kind = ModificationKind::Label;
+            encoded.modification_id = lookup
+                .id(record.site, &resolved, ModificationKind::Label)
+                .expect("resolved label definition missing from compact lookup");
         }
         self.monoisotopic += self.modification_mass() - before;
         self.label_channel = Some(channel);
-        Arc::make_mut(&mut self.applied_modifications).sort_unstable();
+        self.modifications.sort();
         self
     }
 
@@ -405,34 +905,27 @@ impl Peptide {
         }
         let mut base = self.clone();
         let channel = base.label_channel.clone().unwrap();
-        let label_modifications = Arc::make_mut(&mut base.applied_modifications);
-        for applied in label_modifications.iter_mut() {
-            if applied.kind != ModificationKind::Label {
+        let lookup = base.modifications.lookup.clone();
+        for encoded in &mut base.modifications.entries {
+            let record = lookup.record(encoded.modification_id);
+            if record.kind != ModificationKind::Label {
                 continue;
             }
-            let offset = applied.modification.channel_offsets[&channel];
-            match applied.site {
+            let offset = record.definition.channel_offsets[&channel];
+            match record.site.site(encoded.position) {
                 Site::Nterm => base.nterm = nonzero_mass(base.nterm.unwrap_or_default() - offset),
                 Site::Cterm => base.cterm = nonzero_mass(base.cterm.unwrap_or_default() - offset),
-                Site::Sequence(index) => {
-                    if let Some(mass) = base.modifications.get_mut(index as usize) {
-                        *mass -= offset;
-                        if mass.abs() < 1e-5 {
-                            *mass = 0.0;
-                        }
-                    }
-                }
+                Site::Sequence(_) => {}
             }
             base.monoisotopic -= offset;
-            applied.modification = Arc::new(
-                applied
-                    .modification
-                    .with_mass(applied.modification.mass - offset),
-            );
-            applied.kind = ModificationKind::ChannelBase;
+            let unresolved = record.definition.with_mass(record.definition.mass - offset);
+            encoded.modification_id = lookup
+                .id_value(record.site, &unresolved, ModificationKind::ChannelBase)
+                .expect("base label definition missing from compact lookup");
         }
         base.label_channel = None;
         base.label_group_override = None;
+        base.modifications.sort();
         base.to_string()
     }
 
@@ -498,67 +991,74 @@ impl Peptide {
         }
     }
 
-    fn static_mods<M: ModificationSource>(
+    fn static_mods_all<M: ModificationSource>(
         &mut self,
-        target: ModificationSpecificity,
-        modification: &M,
+        static_mods: &HashMap<ModificationSpecificity, M>,
     ) {
-        let modification = modification.definition();
-        match (target, self.position) {
-            (ModificationSpecificity::PeptideN(None), _) => {
-                self.apply_site(Site::Nterm, modification)
+        let mut occupied = [false; u8::MAX as usize];
+        for applied in self.applied_modifications() {
+            if let Site::Sequence(position) = applied.site {
+                occupied[position as usize] = true;
             }
-            (ModificationSpecificity::PeptideN(Some(resi)), _)
-                if resi == *self.sequence.first().unwrap_or(&0) =>
-            {
-                self.apply_site(Site::Sequence(0), modification)
-            }
-            (ModificationSpecificity::PeptideC(None), _) => {
-                self.apply_site(Site::Cterm, modification)
-            }
-            (ModificationSpecificity::PeptideC(Some(resi)), _)
-                if resi == *self.sequence.last().unwrap_or(&0) =>
-            {
-                self.apply_site(
-                    Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    modification,
-                )
-            }
-            (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full) => {
-                self.apply_site(Site::Nterm, modification)
-            }
-            (ModificationSpecificity::ProteinN(Some(resi)), Position::Nterm | Position::Full)
-                if resi == *self.sequence.first().unwrap_or(&0) =>
-            {
-                self.apply_site(Site::Sequence(0), modification)
-            }
-            (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full) => {
-                self.apply_site(Site::Cterm, modification)
-            }
-            (ModificationSpecificity::ProteinC(Some(resi)), Position::Cterm | Position::Full)
-                if resi == *self.sequence.last().unwrap_or(&0) =>
-            {
-                self.apply_site(
-                    Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    modification,
-                )
-            }
-            (ModificationSpecificity::Residue(resi), _) if self.sequence.contains(&resi) => {
-                self.ensure_dense_modifications();
-                let sites = self
-                    .sequence
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(idx, residue)| {
-                        (resi == *residue && self.modifications[idx] == 0.0)
-                            .then_some(Site::Sequence(idx as u32))
-                    })
-                    .collect::<Vec<_>>();
-                for site in sites {
-                    self.apply_site(site, modification.clone());
+        }
+        let mut nterm_occupied = self.nterm.is_some();
+        let mut cterm_occupied = self.cterm.is_some();
+
+        for (target, source) in static_mods {
+            let modification = source.definition();
+            let kind = if modification.channel_offsets.is_empty() {
+                ModificationKind::Ordinary
+            } else {
+                ModificationKind::ChannelBase
+            };
+            let mut sites = SmallVec::<[Site; 4]>::new();
+            match (*target, self.position) {
+                (ModificationSpecificity::PeptideN(None), _)
+                | (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full)
+                    if !nterm_occupied =>
+                {
+                    nterm_occupied = true;
+                    sites.push(Site::Nterm);
                 }
+                (ModificationSpecificity::PeptideC(None), _)
+                | (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full)
+                    if !cterm_occupied =>
+                {
+                    cterm_occupied = true;
+                    sites.push(Site::Cterm);
+                }
+                (ModificationSpecificity::PeptideN(Some(residue)), _)
+                | (
+                    ModificationSpecificity::ProteinN(Some(residue)),
+                    Position::Nterm | Position::Full,
+                ) if self.sequence.first() == Some(&residue) && !occupied[0] => {
+                    occupied[0] = true;
+                    sites.push(Site::Sequence(0));
+                }
+                (ModificationSpecificity::PeptideC(Some(residue)), _)
+                | (
+                    ModificationSpecificity::ProteinC(Some(residue)),
+                    Position::Cterm | Position::Full,
+                ) if self.sequence.last() == Some(&residue) => {
+                    let position = self.sequence.len().saturating_sub(1);
+                    if !occupied[position] {
+                        occupied[position] = true;
+                        sites.push(Site::Sequence(position as u32));
+                    }
+                }
+                (ModificationSpecificity::Residue(residue), _) => {
+                    for (position, observed) in self.sequence.iter().copied().enumerate() {
+                        if observed == residue && !occupied[position] {
+                            occupied[position] = true;
+                            sites.push(Site::Sequence(position as u32));
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => {}
+            for site in sites {
+                self.apply_site_with_kind(site, modification.clone(), kind, true);
+            }
         }
     }
 
@@ -589,11 +1089,21 @@ impl Peptide {
         let static_mods = static_mods
             .iter()
             .map(|(specificity, modification)| (*specificity, modification.definition()))
-            .collect();
+            .collect::<HashMap<_, _>>();
+        let labels = LabelModificationCache::new(
+            rules
+                .iter()
+                .map(|rule| &rule.modification)
+                .chain(static_mods.values()),
+            &[],
+        );
+        let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels)
+            .unwrap_or_else(|error| panic!("{error}"));
         self.apply_rules(
             &rules,
             &[],
             &static_mods,
+            lookup,
             combinations,
             combinations,
             max_combinations,
@@ -609,14 +1119,14 @@ impl Peptide {
         variable_mods: &[VariableRule],
         library_sites: &[LibrarySite],
         static_mods: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+        lookup: Arc<ModificationLookup>,
         max_exhaustive_mods: usize,
         max_total_mods: usize,
         max_combinations: Option<usize>,
     ) -> Vec<Peptide> {
+        self.modifications.install_lookup(lookup);
         if variable_mods.is_empty() {
-            for (target, modification) in static_mods {
-                self.static_mods(*target, modification);
-            }
+            self.static_mods_all(static_mods);
             self.finalize_modifications();
             vec![self]
         } else {
@@ -708,9 +1218,7 @@ impl Peptide {
 
             // Apply static mods to all peptides
             for peptide in modified.iter_mut() {
-                for (target, modification) in static_mods {
-                    peptide.static_mods(*target, modification);
-                }
+                peptide.static_mods_all(static_mods);
                 peptide.finalize_modifications();
             }
 
@@ -726,26 +1234,14 @@ impl Peptide {
             let mut s = Vec::from(pep.sequence.as_ref());
             s[1..n].reverse();
             pep.sequence = Arc::from(s.into_boxed_slice());
-            if !pep.modifications.is_empty() {
-                pep.modifications[1..n].reverse();
-            }
-            for applied in Arc::make_mut(&mut pep.applied_modifications) {
-                if let Site::Sequence(index) = &mut applied.site {
-                    let original = *index as usize;
-                    if (1..n).contains(&original) {
-                        *index = (n - original) as u32;
-                    }
-                }
-            }
-            Arc::make_mut(&mut pep.applied_modifications).sort_unstable();
+            pep.modifications.reverse_internal(n);
         }
         pep
     }
 
     pub(crate) fn modification_tag(&self, site: Site, mass: f32) -> String {
         let applied = self
-            .applied_modifications
-            .iter()
+            .applied_modifications()
             .filter(|applied| applied.site == site)
             .collect::<Vec<_>>();
         let represented_mass = applied
@@ -864,7 +1360,14 @@ pub struct AppliedModification {
     pub kind: ModificationKind,
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AppliedModificationRef<'a> {
+    pub site: Site,
+    pub modification: &'a ModificationDefinition,
+    pub kind: ModificationKind,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ModificationKind {
     #[default]
     Ordinary,
@@ -875,7 +1378,22 @@ pub enum ModificationKind {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PeptideError {
     InvalidSequence(String),
+    SequenceTooLong { length: usize, maximum: usize },
 }
+
+impl std::fmt::Display for PeptideError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidSequence(sequence) => write!(f, "invalid peptide sequence: {sequence}"),
+            Self::SequenceTooLong { length, maximum } => write!(
+                f,
+                "peptide has {length} residues, but compact modification encoding supports at most {maximum}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PeptideError {}
 
 impl TryFrom<DigestGroup> for Peptide {
     type Error = PeptideError;
@@ -898,6 +1416,12 @@ impl TryFrom<Digest> for Peptide {
     type Error = PeptideError;
 
     fn try_from(value: Digest) -> Result<Self, Self::Error> {
+        if value.sequence.len() > u8::MAX as usize {
+            return Err(PeptideError::SequenceTooLong {
+                length: value.sequence.len(),
+                maximum: u8::MAX as usize,
+            });
+        }
         let mut mass = H2O;
         let protein_sites: Arc<[ProteinOccurrence]> = value
             .protein_start
@@ -927,10 +1451,7 @@ impl TryFrom<Digest> for Peptide {
         Ok(Peptide {
             decoy: value.decoy,
             position: value.position,
-            // An empty vector is the compact representation for an unmodified peptide.
-            // It is expanded lazily only when a modification is applied.
-            modifications: Vec::new(),
-            applied_modifications: Arc::default(),
+            modifications: CompactModifications::default(),
             label_channel: None,
             label_group_override: None,
             sequence: Arc::from(value.sequence.into_bytes().into_boxed_slice()),

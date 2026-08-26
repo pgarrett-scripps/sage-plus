@@ -69,7 +69,7 @@ fn physicochemical_embedding_has_positional_and_hydrophobic_features() {
     }
     let peptide = Peptide {
         sequence: b"ACDEFGHIK".to_vec().into(),
-        modifications: vec![0.0; 9],
+        modifications: crate::peptide::CompactModifications::default(),
         ..Peptide::default()
     };
     let row =
@@ -94,11 +94,10 @@ fn enriched_embeddings_support_compact_unmodified_peptides() {
     }
     let compact = Peptide {
         sequence: b"ACDEFGHIK".to_vec().into(),
-        modifications: Vec::new(),
+        modifications: crate::peptide::CompactModifications::default(),
         ..Peptide::default()
     };
-    let mut dense = compact.clone();
-    dense.modifications.resize(dense.sequence.len(), 0.0);
+    let dense = compact.clone();
 
     assert_eq!(
         linear_physicochemical_embed(&compact, &map),
@@ -114,9 +113,9 @@ fn enriched_embeddings_support_compact_unmodified_peptides() {
 fn variable_modification_counts_are_site_specific() {
     let peptide = Peptide {
         sequence: b"AMMPEPTIDEK".to_vec().into(),
-        modifications: vec![
+        modifications: crate::peptide::CompactModifications::from_dense([
             0.0, 15.994_915, 15.994_915, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        ],
+        ]),
         ..Peptide::default()
     };
     assert_eq!(
@@ -154,7 +153,7 @@ fn basic_embedding_tracks_terminal_residues_and_global_features() {
 fn terminal_modification_counts_respect_specificity_and_protein_position() {
     let peptide = Peptide {
         sequence: b"ACDK".to_vec().into(),
-        modifications: vec![42.0, 0.0, 0.0, 17.0],
+        modifications: crate::peptide::CompactModifications::from_dense([42.0, 0.0, 0.0, 17.0]),
         nterm: Some(10.0),
         cterm: Some(20.0),
         position: Position::Full,

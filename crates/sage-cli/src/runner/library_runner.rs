@@ -121,8 +121,7 @@ fn library_peptide(
     Ok(Peptide {
         decoy: entry.is_decoy,
         sequence: Arc::from(parsed.sequence.into_boxed_slice()),
-        modifications: parsed.modifications,
-        applied_modifications: Arc::default(),
+        modifications: sage_core::peptide::CompactModifications::from_dense(parsed.modifications),
         label_channel: entry.label_channel.as_deref().map(Arc::from),
         label_group_override: entry.label_group.as_deref().map(Arc::from),
         nterm: parsed.nterm,

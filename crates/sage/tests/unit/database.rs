@@ -1,6 +1,36 @@
 use std::sync::Arc;
 
 use super::*;
+
+#[test]
+fn compact_modification_validation_rejects_long_peptides() {
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"max_len": 256}
+    }))
+    .unwrap();
+    let error = builder
+        .make_parameters()
+        .validate_compact_modifications()
+        .unwrap_err();
+    assert!(error.contains("must not exceed 255 residues"));
+}
+
+#[test]
+fn compact_modification_validation_rejects_too_many_definitions() {
+    let modifications = (0..256)
+        .map(|index| serde_json::Value::from(index as f64 + 0.5))
+        .collect::<Vec<_>>();
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "variable_mods": {"M": modifications}
+    }))
+    .unwrap();
+    let error = builder
+        .make_parameters()
+        .validate_compact_modifications()
+        .unwrap_err();
+    assert!(error.contains("at most 255 distinct definition and site variants"));
+    assert!(error.contains("256 are required"));
+}
 use crate::cleavage::CustomCleavageLibrary;
 
 #[test]
@@ -157,8 +187,7 @@ fn channel_offsets_generate_complete_static_channels() {
     assert_eq!(light.label_group(), heavy.label_group());
     assert_eq!(heavy.to_string(), "PEPK[SILAC-K]R[SILAC-R]");
     let arg10 = heavy
-        .applied_modifications
-        .iter()
+        .applied_modifications()
         .find(|applied| applied.modification.name.as_deref() == Some("SILAC-R"))
         .unwrap();
     assert_eq!(&*arg10.modification.neutral_losses, &[17.026549]);
@@ -251,8 +280,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
     assert!(heavy.to_string().ends_with("K[TMT-SILAC-K]"));
     assert_eq!(
         heavy
-            .applied_modifications
-            .iter()
+            .applied_modifications()
             .filter(|applied| applied.site == crate::peptide::Site::Sequence(7))
             .count(),
         1
@@ -286,12 +314,10 @@ fn channel_resolved_modification_definitions_are_interned() {
                     && peptide.label_channel.as_deref() == Some(channel)
             })
             .unwrap()
-            .applied_modifications
-            .iter()
+            .applied_modifications()
             .find(|applied| applied.modification.name.as_deref() == Some("Labeled-K"))
             .unwrap()
             .modification
-            .clone()
     };
 
     let heavy_peptide = definition(b"PEPTIDEK", "heavy");
@@ -299,9 +325,9 @@ fn channel_resolved_modification_definitions_are_interned() {
     let light_peptide = definition(b"PEPTIDEK", "light");
     let light_alanine = definition(b"AAAAAAK", "light");
 
-    assert!(Arc::ptr_eq(&heavy_peptide, &heavy_alanine));
-    assert!(Arc::ptr_eq(&light_peptide, &light_alanine));
-    assert!(!Arc::ptr_eq(&heavy_peptide, &light_peptide));
+    assert!(std::ptr::eq(heavy_peptide, heavy_alanine));
+    assert!(std::ptr::eq(light_peptide, light_alanine));
+    assert!(!std::ptr::eq(heavy_peptide, light_peptide));
     assert_eq!(
         heavy_peptide.mass.to_bits(),
         (229.16293f32 + 8.014199).to_bits()

@@ -1,17 +1,20 @@
-use sage_core::database::{Builder, Parameters};
-use sage_core::enzyme::Position;
-use sage_core::peptide::Peptide;
-use std::sync::Arc;
+use sage_core::database::Builder;
+use sage_core::fasta::Fasta;
+use sage_core::modification::StaticModEntry;
+use std::collections::HashMap;
+use std::fmt::Write;
 use std::time::Instant;
 
-fn sequence(mut value: usize, len: usize) -> Arc<[u8]> {
-    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+fn sequence(mut value: usize, len: usize) -> String {
+    const RESIDUES: &[u8] = b"DEFGHILMNPQSTVWY";
     let mut sequence = vec![b'A'; len];
-    for residue in &mut sequence {
+    sequence[1] = b'C';
+    for residue in &mut sequence[2..len - 1] {
         *residue = RESIDUES[value % RESIDUES.len()];
         value /= RESIDUES.len();
     }
-    Arc::from(sequence.into_boxed_slice())
+    sequence[len - 1] = b'K';
+    String::from_utf8(sequence).unwrap()
 }
 
 fn main() {
@@ -23,25 +26,49 @@ fn main() {
         .nth(2)
         .and_then(|value| value.parse().ok())
         .unwrap_or(20);
+    let modification_mode = std::env::args().nth(3).unwrap_or_else(|| "normal".into());
 
-    let peptides = (0..count)
-        .map(|idx| Peptide {
-            sequence: sequence(idx, peptide_len),
-            modifications: Vec::new(),
-            monoisotopic: 1_000.0 + idx as f32 / count as f32 * 1_000.0,
-            position: Position::Internal,
-            proteins: vec![Arc::from("benchmark")].into(),
-            ..Peptide::default()
-        })
-        .collect::<Vec<_>>();
+    let mut fasta_text = String::with_capacity(count * (peptide_len + 16));
+    for index in 0..count {
+        writeln!(fasta_text, ">benchmark_{index}").unwrap();
+        writeln!(fasta_text, "{}", sequence(index, peptide_len)).unwrap();
+    }
+    let fasta = Fasta::parse(fasta_text, "rev_", true).unwrap();
 
-    let parameters: Parameters = Builder::default().make_parameters();
-    let started = Instant::now();
+    let residues = match modification_mode.as_str() {
+        "normal" => "AC",
+        "heavy" => "ACDEFGHIKLMNPQRSTVWY",
+        mode => panic!("unknown modification mode {mode}"),
+    };
+    let static_mods = residues
+        .chars()
+        .map(|residue| (residue.to_string(), StaticModEntry::Mass(1.0)))
+        .collect::<HashMap<_, _>>();
+    let parameters = Builder {
+        static_mods: Some(static_mods),
+        generate_decoys: Some(false),
+        ..Builder::default()
+    }
+    .make_parameters();
+
+    let digest_started = Instant::now();
+    let peptides = parameters.digest(&fasta);
+    let digest_ms = digest_started.elapsed().as_millis();
+    let modification_entries = peptides
+        .iter()
+        .map(|peptide| peptide.modifications.len())
+        .sum::<usize>();
+    let spilled_collections = peptides
+        .iter()
+        .filter(|peptide| peptide.modifications.spilled())
+        .count();
+
+    let index_started = Instant::now();
     let database = parameters.build_from_peptides(peptides);
     println!(
-        "peptides={} fragments={} elapsed_ms={}",
+        "mode={modification_mode} peptides={} modifications={modification_entries} spilled={spilled_collections} fragments={} digest_ms={digest_ms} index_ms={}",
         database.peptides.len(),
         database.fragments.len(),
-        started.elapsed().as_millis()
+        index_started.elapsed().as_millis()
     );
 }
