@@ -711,16 +711,47 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../schemas/results.sage.v1.parquet.schema"
+        "../../../schemas/results.sage.v3.parquet.schema"
     ))
 }
 
 fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../schemas/results.sage.v2.parquet.schema")
+        include_str!("../../../schemas/results.sage.v4.parquet.schema")
     } else {
-        include_str!("../../../schemas/results.sage.v1.parquet.schema")
+        include_str!("../../../schemas/results.sage.v3.parquet.schema")
     })
+}
+
+struct OutputProteinSite {
+    protein: ByteArray,
+    start: i32,
+    end: i32,
+    prev_aa: Option<ByteArray>,
+    next_aa: Option<ByteArray>,
+}
+
+fn output_protein_sites(feature: &Feature, database: &IndexedDatabase) -> Vec<OutputProteinSite> {
+    let peptide = &database[feature.peptide_idx];
+    peptide
+        .protein_sites
+        .iter()
+        .filter_map(|site| {
+            let start = site.start?;
+            let protein = if peptide.decoy && database.generate_decoys {
+                format!("{}{}", database.decoy_tag, site.protein)
+            } else {
+                site.protein.to_string()
+            };
+            Some(OutputProteinSite {
+                protein: protein.into_bytes().into(),
+                start: start.saturating_add(1) as i32,
+                end: start.saturating_add(peptide.sequence.len() as u32) as i32,
+                prev_aa: site.prev_aa.map(|aa| vec![aa].into()),
+                next_aa: site.next_aa.map(|aa| vec![aa].into()),
+            })
+        })
+        .collect()
 }
 
 /// Caller must guarantee that `reporter_ions` is not an empty slice
@@ -784,7 +815,7 @@ pub fn serialize_features(
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "2" } else { "1" }.into()),
+                Some(if has_labels { "4" } else { "3" }.into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
@@ -864,6 +895,78 @@ pub fn serialize_features(
                 .into(),
             ByteArrayType
         );
+
+        let protein_sites = features
+            .iter()
+            .map(|feature| output_protein_sites(feature, database))
+            .collect::<Vec<_>>();
+
+        macro_rules! write_required_protein_site_column {
+            ($field:ident, $ty:ident) => {
+                if let Some(mut column) = rg.next_column()? {
+                    let mut values = Vec::new();
+                    let mut definition_levels = Vec::new();
+                    let mut repetition_levels = Vec::new();
+                    for sites in &protein_sites {
+                        if sites.is_empty() {
+                            definition_levels.push(0);
+                            repetition_levels.push(0);
+                        } else {
+                            for (index, site) in sites.iter().enumerate() {
+                                values.push(site.$field.clone());
+                                definition_levels.push(1);
+                                repetition_levels.push(i16::from(index > 0));
+                            }
+                        }
+                    }
+                    column.typed::<$ty>().write_batch(
+                        &values,
+                        Some(&definition_levels),
+                        Some(&repetition_levels),
+                    )?;
+                    column.close()?;
+                }
+            };
+        }
+
+        macro_rules! write_optional_protein_site_column {
+            ($field:ident) => {
+                if let Some(mut column) = rg.next_column()? {
+                    let mut values = Vec::new();
+                    let mut definition_levels = Vec::new();
+                    let mut repetition_levels = Vec::new();
+                    for sites in &protein_sites {
+                        if sites.is_empty() {
+                            definition_levels.push(0);
+                            repetition_levels.push(0);
+                        } else {
+                            for (index, site) in sites.iter().enumerate() {
+                                repetition_levels.push(i16::from(index > 0));
+                                if let Some(value) = &site.$field {
+                                    values.push(value.clone());
+                                    definition_levels.push(2);
+                                } else {
+                                    definition_levels.push(1);
+                                }
+                            }
+                        }
+                    }
+                    column.typed::<ByteArrayType>().write_batch(
+                        &values,
+                        Some(&definition_levels),
+                        Some(&repetition_levels),
+                    )?;
+                    column.close()?;
+                }
+            };
+        }
+
+        write_required_protein_site_column!(protein, ByteArrayType);
+        write_required_protein_site_column!(start, Int32Type);
+        write_required_protein_site_column!(end, Int32Type);
+        write_optional_protein_site_column!(prev_aa);
+        write_optional_protein_site_column!(next_aa);
+
         write_col!(
             |f: &&Feature| f.protein_groups.as_deref().unwrap_or("").into(),
             ByteArrayType

@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteMode};
 use crate::{
-    enzyme::{Digest, DigestGroup, Position},
+    enzyme::{Digest, DigestGroup, Position, ProteinOccurrence},
     mass::{monoisotopic, H2O},
 };
 use fnv::FnvHashSet;
@@ -39,6 +39,8 @@ pub struct Peptide {
     pub position: Position,
 
     pub proteins: Vec<Arc<str>>,
+    /// Protein-coordinate occurrences shared by all modification variants.
+    pub protein_sites: Arc<[ProteinOccurrence]>,
 }
 
 pub trait ModificationSource {
@@ -119,6 +121,7 @@ impl Debug for Peptide {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Peptide")
             .field("proteins", &self.proteins)
+            .field("protein_sites", &self.protein_sites)
             .field("decoy", &self.decoy)
             .field(
                 "sequence",
@@ -811,6 +814,7 @@ impl TryFrom<DigestGroup> for Peptide {
 
     fn try_from(value: DigestGroup) -> Result<Self, Self::Error> {
         let mut pep = Peptide::try_from(value.reference)?;
+        pep.protein_sites = Arc::from(value.origins.clone());
         pep.proteins = value
             .origins
             .into_iter()
@@ -827,6 +831,18 @@ impl TryFrom<Digest> for Peptide {
 
     fn try_from(value: Digest) -> Result<Self, Self::Error> {
         let mut mass = H2O;
+        let protein_sites: Arc<[ProteinOccurrence]> = value
+            .protein_start
+            .map(|start| {
+                vec![ProteinOccurrence {
+                    protein: value.protein.clone(),
+                    start: Some(start),
+                    prev_aa: value.prev_aa,
+                    next_aa: value.next_aa,
+                }]
+                .into()
+            })
+            .unwrap_or_default();
         // This is an important invariant to enforce, that ensures safety
         // while reversing peptide sequences
         if !value.sequence.is_ascii() {
@@ -856,6 +872,7 @@ impl TryFrom<Digest> for Peptide {
             missed_cleavages: value.missed_cleavages,
             semi_enzymatic: value.semi_enzymatic,
             proteins: vec![value.protein],
+            protein_sites,
         })
     }
 }
