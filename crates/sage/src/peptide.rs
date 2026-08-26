@@ -1,12 +1,16 @@
 use std::cmp::Ordering;
-use std::{collections::HashMap, fmt::Debug, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteMode};
 use crate::{
     enzyme::{Digest, DigestGroup, Position, ProteinOccurrence},
     mass::{monoisotopic, H2O},
 };
-use fnv::FnvHashSet;
+use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
 
 #[derive(Clone, PartialEq, Default)]
@@ -55,6 +59,55 @@ pub(crate) struct VariableRule {
     pub site_mode: SiteMode,
     /// Rules with the same named modification share one occurrence counter.
     pub count_group: usize,
+}
+
+/// Channel-resolved modification definitions shared by every peptide produced
+/// during one database expansion.
+pub(crate) struct LabelModificationCache {
+    by_source: FnvHashMap<usize, BTreeMap<Arc<str>, Arc<ModificationDefinition>>>,
+}
+
+impl LabelModificationCache {
+    pub(crate) fn new<'a>(
+        definitions: impl IntoIterator<Item = &'a Arc<ModificationDefinition>>,
+        channels: &[Arc<str>],
+    ) -> Self {
+        let mut by_source: FnvHashMap<usize, BTreeMap<Arc<str>, Arc<ModificationDefinition>>> =
+            FnvHashMap::default();
+        let mut interned: BTreeMap<ModificationDefinition, Arc<ModificationDefinition>> =
+            BTreeMap::new();
+
+        for definition in definitions {
+            if definition.channel_offsets.is_empty() {
+                continue;
+            }
+            let source = Arc::as_ptr(definition) as usize;
+            let resolved_by_channel = by_source.entry(source).or_default();
+            for channel in channels {
+                let offset = definition.channel_offsets[channel];
+                let resolved = definition.with_mass(definition.mass + offset);
+                let shared = interned
+                    .entry(resolved.clone())
+                    .or_insert_with(|| Arc::new(resolved))
+                    .clone();
+                resolved_by_channel.insert(channel.clone(), shared);
+            }
+        }
+
+        Self { by_source }
+    }
+
+    #[inline]
+    fn resolve(
+        &self,
+        definition: &Arc<ModificationDefinition>,
+        channel: &str,
+    ) -> Option<Arc<ModificationDefinition>> {
+        self.by_source
+            .get(&(Arc::as_ptr(definition) as usize))?
+            .get(channel)
+            .cloned()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -299,7 +352,11 @@ impl Peptide {
 
     /// Resolve every channel-aware modification on this peptidoform to one
     /// coherent precursor channel.
-    pub(crate) fn apply_label_channel(mut self, channel: Arc<str>) -> Self {
+    pub(crate) fn apply_label_channel(
+        mut self,
+        channel: Arc<str>,
+        cache: &LabelModificationCache,
+    ) -> Self {
         let before = self.modification_mass();
         let applied = Arc::make_mut(&mut self.applied_modifications);
         for modification in applied.iter_mut() {
@@ -312,11 +369,15 @@ impl Peptide {
                 Site::Cterm => self.cterm = Some(self.cterm.unwrap_or_default() + offset),
                 Site::Sequence(index) => self.modifications[index as usize] += offset,
             }
-            modification.modification = Arc::new(
-                modification
-                    .modification
-                    .with_mass(modification.modification.mass + offset),
-            );
+            modification.modification = cache
+                .resolve(&modification.modification, &channel)
+                .unwrap_or_else(|| {
+                    Arc::new(
+                        modification
+                            .modification
+                            .with_mass(modification.modification.mass + offset),
+                    )
+                });
             modification.kind = ModificationKind::Label;
         }
         self.monoisotopic += self.modification_mass() - before;

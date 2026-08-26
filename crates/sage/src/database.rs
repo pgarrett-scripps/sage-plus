@@ -9,7 +9,10 @@ use crate::modification::{
     validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity, SiteMode,
     StaticModEntry, VarModEntry,
 };
-use crate::peptide::{AppliedModification, LibrarySite, ModificationKind, Peptide, VariableRule};
+use crate::peptide::{
+    AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, Peptide,
+    VariableRule,
+};
 use crate::ptm_library::PtmLibrary;
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
@@ -764,6 +767,12 @@ impl Parameters {
         let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
         let label_reference = self.label_reference();
+        let label_modifications = LabelModificationCache::new(
+            mods.iter()
+                .map(|rule| &rule.modification)
+                .chain(static_mods.values()),
+            &label_channels,
+        );
         let library = self.loaded_ptm_library.as_deref();
 
         let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
@@ -796,7 +805,10 @@ impl Parameters {
                                 label_channels
                                     .iter()
                                     .map(|channel| {
-                                        peptide.clone().apply_label_channel(channel.clone())
+                                        peptide.clone().apply_label_channel(
+                                            channel.clone(),
+                                            &label_modifications,
+                                        )
                                     })
                                     .collect()
                             }
@@ -1050,6 +1062,13 @@ impl Parameters {
         let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
         let label_reference = self.label_reference();
+        let label_modifications = LabelModificationCache::new(
+            variable_mods
+                .iter()
+                .map(|rule| &rule.modification)
+                .chain(static_mods.values()),
+            &label_channels,
+        );
         let raw = raw
             .into_iter()
             .flat_map(|peptide| {
@@ -1068,7 +1087,11 @@ impl Parameters {
                 } else {
                     label_channels
                         .iter()
-                        .map(|channel| peptide.clone().apply_label_channel(channel.clone()))
+                        .map(|channel| {
+                            peptide
+                                .clone()
+                                .apply_label_channel(channel.clone(), &label_modifications)
+                        })
                         .collect()
                 }
             })

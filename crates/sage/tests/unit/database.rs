@@ -260,6 +260,69 @@ fn channel_offsets_add_to_the_modification_base_mass() {
 }
 
 #[test]
+fn channel_resolved_modification_definitions_are_interned() {
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "generate_decoys": false,
+        "static_mods": {
+            "K": {
+                "mass": 229.16293,
+                "name": "Labeled-K",
+                "neutral_losses": [17.02655],
+                "neutral_loss_mode": "required",
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+            }
+        }
+    }))
+    .unwrap();
+    let params = builder.make_parameters();
+    params.validate_channels().unwrap();
+
+    let peptides = params.peptides_from_tsv("sequence\nPEPTIDEK\nAAAAAAK\n");
+    let definition = |sequence: &[u8], channel: &str| {
+        peptides
+            .iter()
+            .find(|peptide| {
+                peptide.sequence.as_ref() == sequence
+                    && peptide.label_channel.as_deref() == Some(channel)
+            })
+            .unwrap()
+            .applied_modifications
+            .iter()
+            .find(|applied| applied.modification.name.as_deref() == Some("Labeled-K"))
+            .unwrap()
+            .modification
+            .clone()
+    };
+
+    let heavy_peptide = definition(b"PEPTIDEK", "heavy");
+    let heavy_alanine = definition(b"AAAAAAK", "heavy");
+    let light_peptide = definition(b"PEPTIDEK", "light");
+    let light_alanine = definition(b"AAAAAAK", "light");
+
+    assert!(Arc::ptr_eq(&heavy_peptide, &heavy_alanine));
+    assert!(Arc::ptr_eq(&light_peptide, &light_alanine));
+    assert!(!Arc::ptr_eq(&heavy_peptide, &light_peptide));
+    assert_eq!(
+        heavy_peptide.mass.to_bits(),
+        (229.16293f32 + 8.014199).to_bits()
+    );
+    assert_eq!(heavy_peptide.name.as_deref(), Some("Labeled-K"));
+    assert_eq!(&*heavy_peptide.neutral_losses, &[17.02655]);
+    assert_eq!(
+        heavy_peptide.neutral_loss_mode,
+        crate::modification::NeutralLossMode::Required
+    );
+    assert_eq!(
+        heavy_peptide.channel_offsets["light"].to_bits(),
+        0.0f32.to_bits()
+    );
+    assert_eq!(
+        heavy_peptide.channel_offsets["heavy"].to_bits(),
+        8.014199f32.to_bits()
+    );
+}
+
+#[test]
 fn ptm_library_configuration_round_trips() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "variable_mods": {
