@@ -28,6 +28,10 @@ agent-facing capabilities.
 - Channel-aware LFQ with exact-mass partner extraction, reference ratios, label-aware FDR, and spectral-library round trips.
 - Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
 - Configurable LFQ match-between-runs retention-time tolerance.
+- Optional LFQ match-between-runs and independent ion-mobility model controls.
+- Optional local mzMLb input through the `mzmlb` Cargo feature.
+- Typed protein occurrence coordinates in the canonical PSM Parquet output.
+- A machine-readable JSON configuration schema, available with `sage --write-config-schema`.
 - PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
 - Enriched linear retention-time features with regularized, cross-validated variable-PTM offsets.
 - Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
