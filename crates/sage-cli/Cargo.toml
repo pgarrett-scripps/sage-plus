@@ -9,6 +9,10 @@ readme = "README.md"
 license = "MIT"
 publish = false
 
+[features]
+default = []
+mzmlb = ["sage-cloudpath/mzmlb"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

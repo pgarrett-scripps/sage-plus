@@ -7,6 +7,7 @@ use url::Url;
 #[derive(Debug, PartialEq, Eq)]
 pub enum FileFormat {
     MzML,
+    MzMLb,
     MGF,
     TDF,
     ThermoRaw,
@@ -22,6 +23,7 @@ impl FileFormat {
     pub fn within_file_parallel(&self) -> bool {
         match self {
             FileFormat::MzML => false,
+            FileFormat::MzMLb => false,
             FileFormat::MGF => false,
             FileFormat::TDF => true,
             FileFormat::ThermoRaw => false,
@@ -39,6 +41,8 @@ impl From<&str> for FileFormat {
             FileFormat::ThermoRaw
         } else if is_bruker(&path_lower) {
             FileFormat::TDF
+        } else if path_lower.ends_with(".mzmlb") {
+            FileFormat::MzMLb
         } else if path_lower.ends_with(".mzml.gz") || path_lower.ends_with(".mzml") {
             FileFormat::MzML
         } else {
@@ -70,6 +74,7 @@ pub fn read_spectra(
 ) -> Result<Vec<RawSpectrum>, Error> {
     match FileFormat::from(url.as_ref()) {
         FileFormat::MzML => read_mzml(url, file_id, sn),
+        FileFormat::MzMLb => read_mzmlb(url, file_id, sn),
         FileFormat::MGF => read_mgf(url, file_id),
         FileFormat::TDF => read_tdf(url, file_id, bruker_processor, requires_ms1),
         FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn),
@@ -77,6 +82,39 @@ pub fn read_spectra(
             "unable to determine the spectra format for `{url}`"
         ))),
     }
+}
+
+#[cfg(feature = "mzmlb")]
+pub fn read_mzmlb(
+    url: &Url,
+    file_id: usize,
+    signal_to_noise: Option<u8>,
+) -> Result<Vec<RawSpectrum>, Error> {
+    if signal_to_noise.is_some() {
+        return Err(Error::Unsupported(
+            "TMT signal-to-noise quantification is not yet available for mzMLb input".into(),
+        ));
+    }
+    if url.scheme() != "file" {
+        return Err(Error::Unsupported(
+            "mzMLb input currently requires a local file because HDF5 needs random access".into(),
+        ));
+    }
+    let path = url.to_file_path().map_err(|_| Error::InvalidUri)?;
+    crate::mzmlb::MzMLbReader::with_file_id(file_id)
+        .parse(path)
+        .map_err(Error::IO)
+}
+
+#[cfg(not(feature = "mzmlb"))]
+pub fn read_mzmlb(
+    _url: &Url,
+    _file_id: usize,
+    _signal_to_noise: Option<u8>,
+) -> Result<Vec<RawSpectrum>, Error> {
+    Err(Error::Unsupported(
+        "mzMLb support is optional. Rebuild Sage with the `mzmlb` feature enabled".into(),
+    ))
 }
 
 pub fn read_thermoraw(
