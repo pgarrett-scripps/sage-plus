@@ -189,6 +189,96 @@ fn select_most_intense_peak_applies_offset() {
 }
 
 #[test]
+fn select_most_intense_peak_includes_bounds_and_uses_later_tie() {
+    let masses = vec![99.99, 100.0, 100.01, 100.02, 100.03];
+    let intensities = vec![100.0, 40.0, 50.0, 50.0, 100.0];
+
+    let idx = select_most_intense_peak(
+        &masses,
+        &intensities,
+        100.01,
+        Tolerance::Da(-0.01, 0.01),
+        None,
+    );
+
+    assert_eq!(idx, Some(3));
+}
+
+#[test]
+fn select_most_intense_peak_matches_two_bound_search_reference() {
+    fn reference(
+        masses: &[f32],
+        intensities: &[f32],
+        center: f32,
+        tolerance: Tolerance,
+        offset: Option<f32>,
+    ) -> Option<usize> {
+        let (lo, hi) = tolerance.bounds(center);
+        let offset = offset.unwrap_or_default();
+        let lo = lo + offset;
+        let hi = hi + offset;
+        let left = masses
+            .partition_point(|mass| mass.total_cmp(&lo).is_lt())
+            .saturating_sub(1);
+        let right = masses[left..].partition_point(|mass| !mass.total_cmp(&hi).is_gt()) + left;
+
+        let mut best_peak = None;
+        let mut max_int = 0.0;
+        for idx in (left..right).filter(|&idx| masses[idx] >= lo && masses[idx] <= hi) {
+            if intensities[idx] >= max_int {
+                max_int = intensities[idx];
+                best_peak = Some(idx);
+            }
+        }
+        best_peak
+    }
+
+    let signed_zero_masses = vec![-0.0, 0.0];
+    let signed_zero_intensities = vec![100.0, 10.0];
+    assert_eq!(
+        select_most_intense_peak(
+            &signed_zero_masses,
+            &signed_zero_intensities,
+            0.0,
+            Tolerance::Da(0.0, 0.0),
+            None,
+        ),
+        reference(
+            &signed_zero_masses,
+            &signed_zero_intensities,
+            0.0,
+            Tolerance::Da(0.0, 0.0),
+            None,
+        )
+    );
+
+    let masses = (0..400)
+        .map(|idx| 50.0 + idx as f32 * 0.037)
+        .collect::<Vec<_>>();
+    let intensities = (0..masses.len())
+        .map(|idx| ((idx * 37) % 101) as f32)
+        .collect::<Vec<_>>();
+    let tolerances = [
+        Tolerance::Da(-0.02, 0.02),
+        Tolerance::Ppm(-20.0, 20.0),
+        Tolerance::Pct(-0.01, 0.01),
+    ];
+
+    for center_step in 0..600 {
+        let center = 49.5 + center_step as f32 * 0.027;
+        for tolerance in tolerances {
+            for offset in [None, Some(-PROTON), Some(0.013)] {
+                assert_eq!(
+                    select_most_intense_peak(&masses, &intensities, center, tolerance, offset,),
+                    reference(&masses, &intensities, center, tolerance, offset,),
+                    "center={center}, tolerance={tolerance:?}, offset={offset:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn process_ms1_without_mobility_builds_empty_mobility_column() {
     let processor = SpectrumProcessor::new(10, false, 0.0);
     let spectrum = RawSpectrum {

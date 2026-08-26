@@ -1,4 +1,3 @@
-use crate::database::binary_search_slice;
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 
 /// A de-isotoped peak, that might have some charge state information
@@ -124,11 +123,22 @@ pub fn select_most_intense_peak(
         hi + offset.unwrap_or_default(),
     );
 
-    let (i, j) = binary_search_slice(masses, |mass, query| mass.total_cmp(query), lo, hi);
+    // Fragment tolerances cover very few peaks, so a second binary search for
+    // the upper bound costs more than scanning forward from the lower bound.
+    // Keep the exact inclusive bounds and later-peak tie breaking used here.
+    let i = masses
+        .partition_point(|mass| mass.total_cmp(&lo).is_lt())
+        .saturating_sub(1);
 
     let mut best_peak = None;
     let mut max_int = 0.0;
-    for idx in (i..j).filter(|&idx| masses[idx] >= lo && masses[idx] <= hi) {
+    for idx in i..masses.len() {
+        if masses[idx].total_cmp(&hi).is_gt() {
+            break;
+        }
+        if masses[idx] < lo || masses[idx] > hi {
+            continue;
+        }
         if intensities[idx] >= max_int {
             max_int = intensities[idx];
             best_peak = Some(idx);
