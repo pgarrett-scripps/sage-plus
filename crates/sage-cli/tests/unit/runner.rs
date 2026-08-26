@@ -1,7 +1,7 @@
 use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
     missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
-    sort_features_by_discriminant, OutputTarget, RunSummary, SpectrumAccumulator,
+    sort_features_by_discriminant, LabelGroupIndex, OutputTarget, RunSummary, SpectrumAccumulator,
 };
 
 #[test]
@@ -14,10 +14,69 @@ fn missing_decoys_produce_an_actionable_warning() {
         .unwrap()
         .contains("non-colliding"));
 }
+
+#[test]
+fn label_group_closure_keeps_every_channel_partner() {
+    let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+        "generate_decoys": false,
+        "static_mods": {
+            "K": {
+                "mass": 0.0,
+                "name": "SILAC-K",
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+            }
+        }
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEK\n");
+    assert_eq!(peptides.len(), 2);
+    let heavy = peptides
+        .iter()
+        .position(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .unwrap();
+    let keep = AtomicBitSet::new(peptides.len());
+    keep.insert(heavy);
+
+    LabelGroupIndex::new(&peptides).close(&keep);
+
+    assert!((0..peptides.len()).all(|index| keep.contains(index)));
+}
+
+#[test]
+fn pair_closure_is_target_decoy_symmetric() {
+    let parameters = sage_core::database::Builder::default().make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
+    let database = parameters.build_from_peptides(peptides);
+    assert_eq!(
+        database
+            .peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy)
+            .count(),
+        1
+    );
+    assert_eq!(
+        database
+            .peptides
+            .iter()
+            .filter(|peptide| peptide.decoy)
+            .count(),
+        1
+    );
+    for selected in 0..database.peptides.len() {
+        let keep = AtomicBitSet::new(database.peptides.len());
+        keep.insert(selected);
+
+        super::close_prefilter_pairs(&database, &keep);
+
+        assert!((0..database.peptides.len()).all(|index| keep.contains(index)));
+    }
+}
 use rayon::prelude::*;
 use sage_cloudpath::Url;
 use sage_core::database::PeptideIx;
-use sage_core::scoring::Feature;
+use sage_core::scoring::{AtomicBitSet, Feature};
 use sage_core::spectrum::ProcessedSpectrum;
 use std::io::Write;
 

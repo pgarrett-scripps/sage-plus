@@ -16,7 +16,7 @@ use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::peptide::Peptide;
-use sage_core::scoring::{Feature, Scorer};
+use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
 use sage_core::spectral_library::{
     self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
 };
@@ -38,6 +38,90 @@ mod library_runner;
 enum OutputTarget {
     Local(BufWriter<std::fs::File>),
     Remote(Box<BufWriter<sage_cloudpath::CloudWriter>>),
+}
+
+/// Numeric channel-group membership used only during prefilter closure. Group
+/// strings are discarded after construction, leaving compact CSR arrays.
+struct LabelGroupIndex {
+    peptide_groups: Vec<u32>,
+    offsets: Vec<u32>,
+    members: Vec<sage_core::database::PeptideIx>,
+}
+
+impl LabelGroupIndex {
+    fn new(peptides: &[Peptide]) -> Self {
+        let mut groups = HashMap::<String, u32>::new();
+        let mut peptide_groups = vec![u32::MAX; peptides.len()];
+        let mut counts = Vec::<u32>::new();
+        for (index, peptide) in peptides.iter().enumerate() {
+            if peptide.label_channel.is_none() && peptide.label_group_override.is_none() {
+                continue;
+            }
+            let next = groups.len() as u32;
+            let group = *groups.entry(peptide.label_group()).or_insert(next);
+            peptide_groups[index] = group;
+            if group as usize == counts.len() {
+                counts.push(0);
+            }
+            counts[group as usize] += 1;
+        }
+
+        let mut offsets = Vec::with_capacity(counts.len() + 1);
+        offsets.push(0);
+        for count in counts {
+            offsets.push(offsets.last().copied().unwrap() + count);
+        }
+        let mut positions = offsets[..offsets.len().saturating_sub(1)].to_vec();
+        let mut members = vec![
+            sage_core::database::PeptideIx::default();
+            offsets.last().copied().unwrap_or(0) as usize
+        ];
+        for (index, &group) in peptide_groups.iter().enumerate() {
+            if group == u32::MAX {
+                continue;
+            }
+            let position = &mut positions[group as usize];
+            members[*position as usize] = sage_core::database::PeptideIx(index as u32);
+            *position += 1;
+        }
+        Self {
+            peptide_groups,
+            offsets,
+            members,
+        }
+    }
+
+    fn close(&self, keep: &AtomicBitSet) {
+        let selected_groups = AtomicBitSet::new(self.offsets.len().saturating_sub(1));
+        for (index, &group) in self.peptide_groups.iter().enumerate() {
+            if group != u32::MAX && keep.contains(index) {
+                selected_groups.insert(group as usize);
+            }
+        }
+        for group in 0..selected_groups.len() {
+            if !selected_groups.contains(group) {
+                continue;
+            }
+            let start = self.offsets[group] as usize;
+            let end = self.offsets[group + 1] as usize;
+            for peptide in &self.members[start..end] {
+                keep.insert(peptide.0 as usize);
+            }
+        }
+    }
+}
+
+fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
+    for index in 0..keep.len() {
+        if !keep.contains(index) {
+            continue;
+        }
+        if let Some(pair) =
+            database.paired_peptide_index(sage_core::database::PeptideIx(index as u32))
+        {
+            keep.insert(pair.0 as usize);
+        }
+    }
 }
 
 impl OutputTarget {
@@ -785,19 +869,32 @@ impl Runner {
             };
 
         let db_params = self.database_parameters.clone();
-        let mut prefilter_params = db_params.clone();
-        prefilter_params.generate_decoys = false;
-
+        let digests =
+            db_params.digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
+        let target_sequences = digests
+            .iter()
+            .filter(|digest| !digest.reference.decoy)
+            .map(|digest| digest.reference.sequence.as_bytes().to_vec())
+            .collect::<HashSet<_>>();
+        let requested_chunks = fasta
+            .targets
+            .len()
+            .div_ceil(db_params.prefilter_chunk_size.max(1))
+            .max(1);
+        let digest_chunk_size = digests.len().div_ceil(requested_chunks).max(1);
+        let digest_chunks = Parameters::partition_digests_by_sequence(digests, digest_chunk_size);
+        info!(
+            "using {} sequence-coherent prefilter chunks",
+            digest_chunks.len()
+        );
         let mut all_peptides = Vec::new();
-        for (chunk_id, fasta_chunk) in fasta
-            .iter_chunks(self.database_parameters.prefilter_chunk_size)
-            .enumerate()
-        {
+        for (chunk_id, digest_chunk) in digest_chunks.into_iter().enumerate() {
             let start = Instant::now();
             info!("pre-filtering fasta chunk {}", chunk_id,);
-            let mut db = prefilter_params
+            let peptides = db_params
                 .clone()
-                .build_with_custom_cleavages(fasta_chunk, custom_cleavages.as_ref());
+                .modify_digests_with_target_sequences(digest_chunk, &target_sequences);
+            let mut db = db_params.clone().build_from_peptides(peptides);
 
             info!(
                 "generated {} fragments, {} peptides in {}ms",
@@ -825,11 +922,7 @@ impl Runner {
                 score_type: self.parameters.score_type,
             };
 
-            // Allocate an array of booleans indicating whether a peptide was identified in a
-            // preliminary pass of the data
-            let keep = (0..db.peptides.len())
-                .map(|_| std::sync::atomic::AtomicBool::new(false))
-                .collect::<Vec<_>>();
+            let keep = AtomicBitSet::new(db.peptides.len());
 
             match &spectra {
                 Some(spectra) => self.peptide_filter_processed_spectra(&scorer, spectra, &keep),
@@ -844,14 +937,16 @@ impl Runner {
                 }
             };
 
+            LabelGroupIndex::new(&db.peptides).close(&keep);
+            close_prefilter_pairs(&db, &keep);
+
             // Retain only peptides where `keep[ix] = true`
             let peptides = db
                 .peptides
                 .drain(..)
                 .enumerate()
                 .filter_map(|(ix, peptide)| {
-                    let val = keep[ix].load(std::sync::atomic::Ordering::Relaxed);
-                    if val {
+                    if keep.contains(ix) {
                         Some(peptide)
                     } else {
                         None
@@ -867,19 +962,15 @@ impl Runner {
             all_peptides.extend(peptides);
         }
 
-        if db_params.generate_decoys {
-            Ok(db_params.add_reversed_decoys(all_peptides))
-        } else {
-            Parameters::reorder_peptides(&mut all_peptides);
-            Ok(all_peptides)
-        }
+        Parameters::reorder_peptides(&mut all_peptides);
+        Ok(all_peptides)
     }
 
     fn peptide_filter_processed_spectra(
         &self,
         scorer: &Scorer,
         spectra: &[ProcessedSpectrum],
-        keep: &[std::sync::atomic::AtomicBool],
+        keep: &AtomicBitSet,
     ) {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let counter = AtomicUsize::new(0);
@@ -896,11 +987,7 @@ impl Runner {
                     let rate = prev * 1000 / (duration + 1);
                     log::trace!("- searched {} spectra ({} spectra/s)", prev, rate);
                 }
-                scorer.quick_score(
-                    spectrum,
-                    self.database_parameters.prefilter_low_memory,
-                    keep,
-                )
+                scorer.exact_prefilter(spectrum, keep)
             });
 
         let duration = Instant::now().duration_since(start).as_millis() as usize;
