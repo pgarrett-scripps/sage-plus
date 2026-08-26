@@ -149,12 +149,33 @@ fn query_filters_by_mass_retention_time_and_mobility() {
         bin_size: ranges.len(),
         min_rt: 9.0,
         max_rt: 11.0,
+        mass_search_margin: 0.2,
     };
 
     assert_eq!(query.mass_lookup(500.0).count(), 1);
     assert_eq!(query.mass_mobility_lookup(500.0, 1.0).count(), 1);
+    assert_eq!(query.mass_mobility_lookup(500.0, 0.9).count(), 1);
+    assert_eq!(query.mass_mobility_lookup(500.0, 1.1).count(), 1);
+    assert_eq!(query.mass_mobility_lookup(500.0, 0.899).count(), 0);
     assert_eq!(query.mass_mobility_lookup(500.0, 1.2).count(), 0);
     assert_eq!(query.mass_lookup(700.0).count(), 0);
+}
+
+#[test]
+fn query_uses_the_configured_mass_range_instead_of_a_fixed_margin() {
+    let ranges = vec![precursor(10.0, 499.75, 500.25, (0.9, 1.1))];
+    let query = Query {
+        ranges: &ranges,
+        page_lo: 0,
+        page_hi: 1,
+        bin_size: ranges.len(),
+        min_rt: 9.0,
+        max_rt: 11.0,
+        mass_search_margin: 0.5,
+    };
+
+    assert_eq!(query.mass_lookup(500.2).count(), 1);
+    assert_eq!(query.mass_lookup(500.3).count(), 0);
 }
 
 #[test]

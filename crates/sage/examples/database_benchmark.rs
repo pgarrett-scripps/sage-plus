@@ -35,16 +35,13 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let use_bitmap = std::env::args().nth(3).as_deref() == Some("bitmap");
-    let mut parameters: Parameters = Builder::default().make_parameters();
-    parameters.use_bitmap = use_bitmap;
+    let parameters: Parameters = Builder::default().make_parameters();
     let started = Instant::now();
     let database = parameters.build_from_peptides(peptides);
     println!(
-        "peptides={} fragments={} bitmap_words={} elapsed_ms={}",
+        "peptides={} fragments={} elapsed_ms={}",
         database.peptides.len(),
         database.fragments.len(),
-        database.bitmap_index.forward_bitmaps.len() + database.bitmap_index.reverse_bitmaps.len(),
         started.elapsed().as_millis()
     );
 }

@@ -237,7 +237,6 @@ pub struct QuantificationRunStats {
 pub struct ExecutionRunStats {
     pub batch_size: usize,
     pub parallelism: usize,
-    pub bitmap_search: bool,
     pub max_memory_gb: Option<f64>,
     pub min_free_memory_gb: Option<f64>,
 }
@@ -452,7 +451,6 @@ impl Runner {
                 cancellation,
             });
         }
-        database_parameters.use_bitmap = parameters.use_bitmap;
         if let Some(settings) = database_parameters.ptm_library.clone() {
             let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
                 let contents = sage_cloudpath::util::read_text(&settings.path)
@@ -742,12 +740,8 @@ impl Runner {
             };
 
         let db_params = self.database_parameters.clone();
-        // TODO: Don't generate decoys for fast searching
-        // * if `generate_decoys` is used, we should re-generate at the end
-        //  to ensure that picked-peptide conditions are used, otherwise,
-        //  if the user supplied decoys in the fasta file, then we should retain them
-        //
-        // db_params.generate_decoys = false;
+        let mut prefilter_params = db_params.clone();
+        prefilter_params.generate_decoys = false;
 
         let mut all_peptides = Vec::new();
         for (chunk_id, fasta_chunk) in fasta
@@ -756,7 +750,7 @@ impl Runner {
         {
             let start = Instant::now();
             info!("pre-filtering fasta chunk {}", chunk_id,);
-            let mut db = db_params
+            let mut db = prefilter_params
                 .clone()
                 .build_with_custom_cleavages(fasta_chunk, custom_cleavages.as_ref());
 
@@ -784,7 +778,6 @@ impl Runner {
                 annotate_matches: false,
                 mass_shift_ppm: self.parameters.mass_shift_ppm,
                 score_type: self.parameters.score_type,
-                use_bitmap: self.parameters.use_bitmap,
             };
 
             // Allocate an array of booleans indicating whether a peptide was identified in a
@@ -829,8 +822,12 @@ impl Runner {
             all_peptides.extend(peptides);
         }
 
-        Parameters::reorder_peptides(&mut all_peptides);
-        Ok(all_peptides)
+        if db_params.generate_decoys {
+            Ok(db_params.add_reversed_decoys(all_peptides))
+        } else {
+            Parameters::reorder_peptides(&mut all_peptides);
+            Ok(all_peptides)
+        }
     }
 
     fn peptide_filter_processed_spectra(
@@ -1533,7 +1530,6 @@ impl Runner {
             annotate_matches: false,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
-            use_bitmap: self.parameters.use_bitmap,
         };
 
         //Collect all results into a single container
@@ -1936,7 +1932,6 @@ impl Runner {
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
                 parallelism: parallel,
-                bitmap_search: self.parameters.use_bitmap,
                 max_memory_gb: self.parameters.max_memory_gb,
                 min_free_memory_gb: self.parameters.min_free_memory_gb,
             },

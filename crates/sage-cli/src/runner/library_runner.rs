@@ -862,7 +862,6 @@ impl Runner {
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
                 parallelism: parallel,
-                bitmap_search: false,
                 max_memory_gb: self.parameters.max_memory_gb,
                 min_free_memory_gb: self.parameters.min_free_memory_gb,
             },

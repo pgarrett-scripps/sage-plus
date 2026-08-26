@@ -15,9 +15,9 @@ use std::path::Path;
 
 use parquet::data_type::{BoolType, ByteArray, DoubleType, FloatType, Int64Type};
 use parquet::errors::ParquetError;
+use parquet::file::metadata::KeyValue;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::file::writer::SerializedColumnWriter;
-use parquet::format::KeyValue;
 use parquet::record::{Field, Row};
 use parquet::{
     basic::ZstdLevel,

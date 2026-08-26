@@ -21,7 +21,7 @@ agent-facing capabilities.
 
 ## Sage Plus additions
 
-- Faster, lower-memory searching with compact peptide/spectrum storage and optional bitmap preliminary scoring.
+- Lower-memory searching with compact peptide and spectrum storage.
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
 - Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
 - Modification-defined SILAC, dimethyl, and custom precursor channels on required static or optional variable modifications.
