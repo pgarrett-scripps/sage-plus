@@ -16,6 +16,40 @@ const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const MEMORY_LIMIT_EXIT_CODE: i32 = 137;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Each target family constructs only the variants supported by its allocator.
+#[allow(dead_code)]
+pub(crate) enum AllocatorTrimResult {
+    Released,
+    NoRelease,
+    Unsupported,
+}
+
+/// Ask the process allocator to return unused pages to the operating system.
+///
+/// GNU libc is currently the only supported allocator. Other targets use a no-op
+/// because they do not expose an equivalent stable system API.
+pub(crate) fn trim_allocator() -> AllocatorTrimResult {
+    trim_allocator_impl()
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_allocator_impl() -> AllocatorTrimResult {
+    // SAFETY: `malloc_trim` accepts any padding value and is safe to call while
+    // other threads exist. Sage calls this with zero once its database build has
+    // completed and temporary build allocations have been dropped.
+    if unsafe { libc::malloc_trim(0) } == 0 {
+        AllocatorTrimResult::NoRelease
+    } else {
+        AllocatorTrimResult::Released
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_allocator_impl() -> AllocatorTrimResult {
+    AllocatorTrimResult::Unsupported
+}
+
 #[derive(Clone)]
 pub enum MemoryLimitBehavior {
     TerminateProcess,

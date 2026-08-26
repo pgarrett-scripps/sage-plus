@@ -1,5 +1,5 @@
 use super::input::Search;
-use super::memory::MemoryLimits;
+use super::memory::{trim_allocator, AllocatorTrimResult, MemoryLimits};
 use super::output::SageResults;
 use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
@@ -726,6 +726,23 @@ impl Runner {
                 code: "database_without_decoys".into(),
                 message,
             });
+        }
+
+        let trim_started = Instant::now();
+        let trim_result = trim_allocator();
+        let trim_elapsed = trim_started.elapsed();
+        match trim_result {
+            AllocatorTrimResult::Released => {
+                log::debug!(
+                    "released unused allocator pages after database construction in {trim_elapsed:#?}"
+                );
+            }
+            AllocatorTrimResult::NoRelease => {
+                log::trace!(
+                    "allocator had no unused pages to release after database construction in {trim_elapsed:#?}"
+                );
+            }
+            AllocatorTrimResult::Unsupported => {}
         }
 
         cancellation.check()?;

@@ -44,3 +44,6 @@ sysinfo = "0.29"
 url = "2.0"
 maud = "0.27.0"
 report-builder = "0.1.1"
+
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
