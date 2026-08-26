@@ -394,6 +394,23 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
     }
 }
 
+fn missing_decoy_warning(
+    generate_decoys: bool,
+    decoy_labels: impl IntoIterator<Item = bool>,
+) -> Option<String> {
+    if decoy_labels.into_iter().any(|decoy| decoy) {
+        return None;
+    }
+    let remedy = if generate_decoys {
+        "Check that target peptides can produce non-colliding reversed decoys or provide explicit decoys"
+    } else {
+        "Add decoys to the input database or set database.generate_decoys to true"
+    };
+    Some(format!(
+        "the peptide database contains no decoys. FDR, q-values, rescoring, protein grouping, and LFQ filtering cannot be estimated reliably. {remedy}"
+    ))
+}
+
 impl Runner {
     pub fn new(parameters: Search, parallel: usize) -> anyhow::Result<Self> {
         Self::new_with_control(
@@ -699,6 +716,17 @@ impl Runner {
         let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
+
+        if let Some(message) = missing_decoy_warning(
+            database_parameters.generate_decoys,
+            database.peptides.iter().map(|peptide| peptide.decoy),
+        ) {
+            warn!("{message}");
+            events.emit(EventKind::Warning {
+                code: "database_without_decoys".into(),
+                message,
+            });
+        }
 
         cancellation.check()?;
         events.emit(EventKind::DatabaseBuilt {

@@ -1,8 +1,19 @@
 use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
-    normalize_finite, passes_localization_filter, passes_output_filter,
+    missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
     sort_features_by_discriminant, OutputTarget, RunSummary, SpectrumAccumulator,
 };
+
+#[test]
+fn missing_decoys_produce_an_actionable_warning() {
+    let warning = missing_decoy_warning(false, [false, false]).unwrap();
+    assert!(warning.contains("generate_decoys"));
+    assert!(warning.contains("FDR"));
+    assert!(missing_decoy_warning(false, [false, true]).is_none());
+    assert!(missing_decoy_warning(true, [false, false])
+        .unwrap()
+        .contains("non-colliding"));
+}
 use rayon::prelude::*;
 use sage_cloudpath::Url;
 use sage_core::database::PeptideIx;
