@@ -160,6 +160,9 @@ pub struct RawSpectrum {
     pub mz: Vec<f32>,
     /// Intensity array
     pub intensity: Vec<f32>,
+    /// Optional fragment charge-state array, parallel to `mz`.
+    /// Zero means the charge is unknown.
+    pub fragment_charges: Option<Vec<u8>>,
     /// Mobility array
     pub mobility: Option<Vec<f32>>,
 }
@@ -280,25 +283,38 @@ fn isotope_pattern_score(observed: &[f32], theoretical: &[f32; 4]) -> f32 {
 pub fn deisotope(
     mz: &[f32],
     int: &[f32],
+    fragment_charges: Option<&[u8]>,
     max_charge: u8,
     settings: DeisotopeSettings,
     min_mz: f32,
 ) -> Vec<Deisotoped> {
     debug_assert_eq!(mz.len(), int.len());
+    let fragment_charges = fragment_charges.filter(|charges| charges.len() == mz.len());
     debug_assert!(settings.validate().is_ok());
     let max_envelope_peaks = settings.max_envelope_peaks.clamp(2, 4);
 
     let sorted = mz
         .windows(2)
         .all(|pair| pair[0].total_cmp(&pair[1]).is_le());
-    let (sorted_mz, sorted_int): (Cow<'_, [f32]>, Cow<'_, [f32]>) = if sorted {
-        (Cow::Borrowed(mz), Cow::Borrowed(int))
+    let (sorted_mz, sorted_int, sorted_fragment_charges): (
+        Cow<'_, [f32]>,
+        Cow<'_, [f32]>,
+        Option<Cow<'_, [u8]>>,
+    ) = if sorted {
+        (
+            Cow::Borrowed(mz),
+            Cow::Borrowed(int),
+            fragment_charges.map(Cow::Borrowed),
+        )
     } else {
         let mut order = (0..mz.len()).collect::<Vec<_>>();
         order.sort_unstable_by(|&left, &right| mz[left].total_cmp(&mz[right]));
         (
             Cow::Owned(order.iter().map(|&idx| mz[idx]).collect()),
             Cow::Owned(order.iter().map(|&idx| int[idx]).collect()),
+            fragment_charges.map(|charges| {
+                Cow::Owned(order.iter().map(|&idx| charges[idx]).collect::<Vec<_>>())
+            }),
         )
     };
     let mut candidates = Vec::with_capacity(sorted_mz.len() * usize::from(max_charge));
@@ -308,6 +324,12 @@ pub fn deisotope(
             continue;
         }
         for charge in 1..=max_charge {
+            if sorted_fragment_charges
+                .as_ref()
+                .is_some_and(|charges| charges[seed] != 0 && charges[seed] != charge)
+            {
+                continue;
+            }
             let neutral_mass = (sorted_mz[seed] - PROTON) * f32::from(charge);
             if neutral_mass <= 0.0 {
                 continue;
@@ -327,6 +349,11 @@ pub fn deisotope(
 
                 let best = (lo..hi)
                     .filter(|idx| !indices[..len].contains(idx))
+                    .filter(|&idx| {
+                        sorted_fragment_charges
+                            .as_ref()
+                            .is_none_or(|charges| charges[idx] == 0 || charges[idx] == charge)
+                    })
                     .filter_map(|idx| {
                         let previous_intensity = sorted_int[previous];
                         let candidate_intensity = sorted_int[idx];
@@ -386,10 +413,13 @@ pub fn deisotope(
     let mut peaks = sorted_mz
         .iter()
         .zip(sorted_int.iter())
-        .map(|(&mz, &intensity)| Deisotoped {
+        .enumerate()
+        .map(|(idx, (&mz, &intensity))| Deisotoped {
             mz,
             intensity,
-            charge: None,
+            charge: sorted_fragment_charges
+                .as_ref()
+                .and_then(|charges| (charges[idx] != 0).then_some(charges[idx])),
             envelope: None,
         })
         .collect::<Vec<_>>();
@@ -620,6 +650,7 @@ impl SpectrumProcessor {
             let peaks = deisotope(
                 &spectrum.mz,
                 &spectrum.intensity,
+                spectrum.fragment_charges.as_deref(),
                 charge,
                 self.deisotope,
                 self.min_deisotope_mz,
@@ -661,14 +692,23 @@ impl SpectrumProcessor {
                 selected_charge_is_known,
             )
         } else {
+            let fragment_charges = spectrum
+                .fragment_charges
+                .as_deref()
+                .filter(|charges| charges.len() == spectrum.mz.len());
+            let charges = fragment_charges
+                .map(|charges| charges.iter().map(|&charge| charge.max(1)).collect())
+                .unwrap_or_else(|| vec![1; spectrum.mz.len()]);
+            let charge_is_known = fragment_charges
+                .map(|charges| charges.iter().map(|&charge| charge != 0).collect())
+                .unwrap_or_else(|| vec![false; spectrum.mz.len()]);
             let masses = spectrum
                 .mz
                 .iter()
-                .map(|mz| (mz - PROTON) * 1.0)
+                .zip(&charges)
+                .map(|(mz, charge)| (mz - PROTON) * f32::from(*charge))
                 .collect::<Vec<_>>();
             let intensities = spectrum.intensity.clone();
-            let charges = vec![1; masses.len()];
-            let charge_is_known = vec![false; masses.len()];
             let mut indices = (0..masses.len()).collect::<Vec<_>>();
             retain_top_n_by_intensity(&mut indices, &masses, &intensities, self.take_top_n, false);
             select_columns(indices, &masses, &intensities, &charges, &charge_is_known)
@@ -702,10 +742,26 @@ impl SpectrumProcessor {
                         );
                     }
                     let mut masses = spectrum.mz;
-                    masses.iter_mut().for_each(|mass| *mass -= PROTON);
+                    let fragment_charges = spectrum
+                        .fragment_charges
+                        .take()
+                        .filter(|charges| charges.len() == masses.len());
+                    let (charges, charge_is_known) = match fragment_charges {
+                        Some(mut charges) => {
+                            let charge_is_known =
+                                charges.iter().map(|&charge| charge != 0).collect();
+                            charges
+                                .iter_mut()
+                                .for_each(|charge| *charge = (*charge).max(1));
+                            (charges, charge_is_known)
+                        }
+                        None => (vec![1; masses.len()], vec![false; masses.len()]),
+                    };
+                    masses
+                        .iter_mut()
+                        .zip(&charges)
+                        .for_each(|(mass, charge)| *mass = (*mass - PROTON) * f32::from(*charge));
                     let intensities = spectrum.intensity;
-                    let charges = vec![1; masses.len()];
-                    let charge_is_known = vec![false; masses.len()];
                     if masses.len() <= self.take_top_n {
                         (masses, intensities, charges, charge_is_known)
                     } else {

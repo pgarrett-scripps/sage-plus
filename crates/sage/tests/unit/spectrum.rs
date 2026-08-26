@@ -20,7 +20,7 @@ fn test_deisotope() {
         max_isotope_log2_ratio: 10.0,
         ..DeisotopeSettings::default()
     };
-    let peaks = deisotope(&mz, &int, 2, settings, 800.91);
+    let peaks = deisotope(&mz, &int, None, 2, settings, 800.91);
 
     assert_eq!(
         peaks,
@@ -106,7 +106,14 @@ fn averagine_deisotope_accepts_a_rising_envelope() {
         pattern[1] * 1000.0,
     ];
 
-    let peaks = deisotope(&mz, &intensity, charge, DeisotopeSettings::default(), 0.0);
+    let peaks = deisotope(
+        &mz,
+        &intensity,
+        None,
+        charge,
+        DeisotopeSettings::default(),
+        0.0,
+    );
     let roots = peaks
         .iter()
         .filter(|peak| peak.envelope.is_none())
@@ -128,7 +135,7 @@ fn averagine_deisotope_preserves_intensity_with_competing_candidates() {
     let mz = [500.0, 500.0004, 500.0 + NEUTRON];
     let intensity = [100.0, 90.0, 50.0];
 
-    let peaks = deisotope(&mz, &intensity, 1, settings, 0.0);
+    let peaks = deisotope(&mz, &intensity, None, 1, settings, 0.0);
     let retained_intensity = peaks
         .iter()
         .filter(|peak| peak.envelope.is_none())
@@ -144,10 +151,62 @@ fn averagine_deisotope_rejects_an_implausible_intensity_ratio() {
     let mz = [mono_mz, mono_mz + NEUTRON];
     let intensity = [1000.0, 0.01];
 
-    let peaks = deisotope(&mz, &intensity, 1, DeisotopeSettings::default(), 0.0);
+    let peaks = deisotope(&mz, &intensity, None, 1, DeisotopeSettings::default(), 0.0);
 
     assert!(peaks.iter().all(|peak| peak.charge.is_none()));
     assert!(peaks.iter().all(|peak| peak.envelope.is_none()));
+}
+
+#[test]
+fn fragment_charge_array_constrains_deisotope_candidates() {
+    let charge = 2;
+    let neutral_mass = 1600.0;
+    let mono_mz = neutral_mass / charge as f32 + PROTON;
+    let pattern = crate::isotopes::averagine_isotopes(neutral_mass);
+    let mz = [mono_mz, mono_mz + NEUTRON / charge as f32];
+    let intensity = [pattern[0] * 1000.0, pattern[1] * 1000.0];
+
+    let accepted = deisotope(
+        &mz,
+        &intensity,
+        Some(&[charge, charge]),
+        3,
+        DeisotopeSettings::default(),
+        0.0,
+    );
+    assert_eq!(accepted[0].charge, Some(charge));
+    assert_eq!(accepted[1].envelope, Some(0));
+
+    let conflicting = deisotope(
+        &mz,
+        &intensity,
+        Some(&[1, 1]),
+        3,
+        DeisotopeSettings::default(),
+        0.0,
+    );
+    assert!(conflicting.iter().all(|peak| peak.charge == Some(1)));
+    assert!(conflicting.iter().all(|peak| peak.envelope.is_none()));
+}
+
+#[test]
+fn process_ms2_uses_fragment_charge_without_isotope_collapsing() {
+    let processor = SpectrumProcessor::new(10, false, 0.0);
+    let spectrum = RawSpectrum {
+        ms_level: 2,
+        representation: Representation::Centroid,
+        mz: vec![400.0],
+        intensity: vec![25.0],
+        fragment_charges: Some(vec![2]),
+        ..RawSpectrum::default_with_file_id(7)
+    };
+
+    let processed = processor.process(spectrum);
+
+    assert_eq!(processed.charges, vec![2]);
+    assert_eq!(processed.charge_is_known, vec![true]);
+    assert!((processed.masses[0] - (400.0 - PROTON) * 2.0).abs() < 0.001);
+    assert!((processed.peak_mz(0) - 400.0).abs() < 0.001);
 }
 
 #[test]

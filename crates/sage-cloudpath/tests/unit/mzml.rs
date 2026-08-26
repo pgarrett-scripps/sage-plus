@@ -3,6 +3,47 @@ use sage_core::{mass::Tolerance, spectrum::Representation};
 use super::{MzMLError, MzMLReader};
 
 #[tokio::test]
+async fn reads_fragment_charge_binary_array() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="1">
+      <spectrum id="scan=charges">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000127"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="3">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUAAAAAAAEB/QAAAAAAAwIJA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000516"/>
+            <cvParam accession="MS:1000519"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AgAAAAAAAAADAAAA</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(2).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 1);
+    assert_eq!(spectra[0].mz, [400.0, 500.0, 600.0]);
+    assert_eq!(spectra[0].intensity, [10.0, 20.0, 30.0]);
+    assert_eq!(spectra[0].fragment_charges, Some(vec![2, 0, 3]));
+    Ok(())
+}
+
+#[tokio::test]
 async fn resolves_referenceable_param_groups_in_all_supported_scopes() -> Result<(), MzMLError> {
     let input = r#"
     <mzML>

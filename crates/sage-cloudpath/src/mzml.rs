@@ -22,12 +22,79 @@ enum BinaryKind {
     Intensity,
     Mz,
     Noise,
+    Charge,
 }
 
 #[derive(Copy, Clone, Debug)]
 enum Dtype {
     F32,
     F64,
+    I32,
+    I64,
+}
+
+fn decode_float_array(bytes: &[u8], dtype: Dtype) -> Result<Vec<f32>, MzMLError> {
+    match dtype {
+        Dtype::F32 => {
+            let mut chunks = bytes.chunks_exact(4);
+            let values = chunks
+                .by_ref()
+                .map(|chunk| f32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
+                .collect();
+            if chunks.remainder().is_empty() {
+                Ok(values)
+            } else {
+                Err(MzMLError::Malformed)
+            }
+        }
+        Dtype::F64 => {
+            let mut chunks = bytes.chunks_exact(8);
+            let values = chunks
+                .by_ref()
+                .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")) as f32)
+                .collect();
+            if chunks.remainder().is_empty() {
+                Ok(values)
+            } else {
+                Err(MzMLError::Malformed)
+            }
+        }
+        Dtype::I32 | Dtype::I64 => Err(MzMLError::InvalidFloatArrayType),
+    }
+}
+
+fn decode_charge_array(bytes: &[u8], dtype: Dtype) -> Result<Vec<u8>, MzMLError> {
+    let values = match dtype {
+        Dtype::I32 => {
+            let mut chunks = bytes.chunks_exact(4);
+            let values = chunks
+                .by_ref()
+                .map(|chunk| i32::from_le_bytes(chunk.try_into().expect("four-byte chunk")) as i64)
+                .collect::<Vec<_>>();
+            if chunks.remainder().is_empty() {
+                values
+            } else {
+                return Err(MzMLError::Malformed);
+            }
+        }
+        Dtype::I64 => {
+            let mut chunks = bytes.chunks_exact(8);
+            let values = chunks
+                .by_ref()
+                .map(|chunk| i64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
+                .collect::<Vec<_>>();
+            if chunks.remainder().is_empty() {
+                values
+            } else {
+                return Err(MzMLError::Malformed);
+            }
+        }
+        Dtype::F32 | Dtype::F64 => return Err(MzMLError::InvalidChargeArrayType),
+    };
+    values
+        .into_iter()
+        .map(|charge| u8::try_from(charge).map_err(|_| MzMLError::InvalidFragmentCharge(charge)))
+        .collect()
 }
 
 #[derive(Clone, Debug)]
@@ -79,10 +146,13 @@ const NO_COMPRESSION: &[u8] = b"MS:1000576";
 const INTENSITY_ARRAY: &[u8] = b"MS:1000515";
 const MZ_ARRAY: &[u8] = b"MS:1000514";
 const NOISE_ARRAY: &[u8] = b"MS:1002744";
+const CHARGE_ARRAY: &[u8] = b"MS:1000516";
 
 // MUST supply only one of the following
 const FLOAT_64: &[u8] = b"MS:1000523";
 const FLOAT_32: &[u8] = b"MS:1000521";
+const INT_64: &[u8] = b"MS:1000522";
+const INT_32: &[u8] = b"MS:1000519";
 
 const MS_LEVEL: &[u8] = b"MS:1000511";
 const PROFILE: &[u8] = b"MS:1000128";
@@ -188,9 +258,12 @@ impl MzMLReader {
                         NO_COMPRESSION => compression = false,
                         FLOAT_64 => binary_dtype = Dtype::F64,
                         FLOAT_32 => binary_dtype = Dtype::F32,
+                        INT_64 => binary_dtype = Dtype::I64,
+                        INT_32 => binary_dtype = Dtype::I32,
                         INTENSITY_ARRAY => binary_array = Some(BinaryKind::Intensity),
                         MZ_ARRAY => binary_array = Some(BinaryKind::Mz),
                         NOISE_ARRAY => binary_array = Some(BinaryKind::Noise),
+                        CHARGE_ARRAY => binary_array = Some(BinaryKind::Charge),
                         _ => {}
                     },
                     Some(State::Spectrum) => match param.accession.as_slice() {
@@ -343,43 +416,23 @@ impl MzMLReader {
                             }
                         };
 
-                        let array = match binary_dtype {
-                            Dtype::F32 => {
-                                let mut buf: [u8; 4] = [0; 4];
-                                bytes
-                                    .chunks(4)
-                                    .filter(|chunk| chunk.len() == 4)
-                                    .map(|chunk| {
-                                        buf.copy_from_slice(chunk);
-                                        f32::from_le_bytes(buf)
-                                    })
-                                    .collect::<Vec<f32>>()
-                            }
-                            Dtype::F64 => {
-                                let mut buf: [u8; 8] = [0; 8];
-                                bytes
-                                    .chunks(8)
-                                    .map(|chunk| {
-                                        buf.copy_from_slice(chunk);
-                                        f64::from_le_bytes(buf) as f32
-                                    })
-                                    .collect::<Vec<f32>>()
-                            }
-                        };
-                        output_buffer.clear();
-
                         match binary_array {
                             Some(BinaryKind::Intensity) => {
-                                spectrum.intensity = array;
+                                spectrum.intensity = decode_float_array(bytes, binary_dtype)?;
                             }
                             Some(BinaryKind::Mz) => {
-                                spectrum.mz = array;
+                                spectrum.mz = decode_float_array(bytes, binary_dtype)?;
                             }
                             Some(BinaryKind::Noise) => {
-                                noise_array = array;
+                                noise_array = decode_float_array(bytes, binary_dtype)?;
+                            }
+                            Some(BinaryKind::Charge) => {
+                                spectrum.fragment_charges =
+                                    Some(decode_charge_array(bytes, binary_dtype)?);
                             }
                             None => {}
                         }
+                        output_buffer.clear();
 
                         binary_array = None;
                     }
@@ -411,6 +464,18 @@ impl MzMLReader {
                                 .as_ref()
                                 .map(|&level| level == spectrum.ms_level)
                                 .unwrap_or(true);
+
+                            if spectrum
+                                .fragment_charges
+                                .as_ref()
+                                .is_some_and(|charges| charges.len() != spectrum.mz.len())
+                            {
+                                log::warn!(
+                                    "ignoring fragment charge array with length different from m/z array for spectrum {}",
+                                    spectrum.id
+                                );
+                                spectrum.fragment_charges = None;
+                            }
 
                             match (allow, self.signal_to_noise) {
                                 (true, Some(level))
@@ -453,6 +518,12 @@ pub enum MzMLError {
     Malformed,
     #[error("unsupported cvParam {0}")]
     UnsupportedCV(String),
+    #[error("m/z, intensity, and noise arrays must use floating-point values")]
+    InvalidFloatArrayType,
+    #[error("fragment charge arrays must use 32-bit or 64-bit integers")]
+    InvalidChargeArrayType,
+    #[error("fragment charge {0} is outside the supported range 0 through 255")]
+    InvalidFragmentCharge(i64),
     #[error("unknown referenceableParamGroup `{0}`")]
     UnknownReferenceableParamGroup(String),
     #[error("XML parsing error: {0}")]

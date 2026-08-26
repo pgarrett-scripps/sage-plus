@@ -679,7 +679,7 @@ Retention-time alignment and prediction are separate features. `retention_time_a
   }
   ```
 
-  `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above.
+  `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above. When mzML or mzMLb provides the fragment charge binary array `MS:1000516`, positive values constrain isotope-envelope assignment and are used directly for charge-aware fragment matching. Zero values remain unknown and use scored inference.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).

@@ -46,7 +46,7 @@ fn peptide(index: usize) -> Peptide {
     .unwrap()
 }
 
-fn raw_spectrum(peptide: &Peptide, index: usize) -> RawSpectrum {
+fn raw_spectrum(peptide: &Peptide, index: usize, use_fragment_charges: bool) -> RawSpectrum {
     let mut peaks = Vec::new();
     for (kind_offset, kind) in [Kind::B, Kind::Y].into_iter().enumerate() {
         for (ordinal, ion) in IonSeries::new(peptide, kind).enumerate() {
@@ -57,16 +57,23 @@ fn raw_spectrum(peptide: &Peptide, index: usize) -> RawSpectrum {
             };
             let mz = ion.monoisotopic_mass / charge as f32 + PROTON;
             let intensity = 1_000.0 - ordinal as f32 * 7.0;
-            peaks.push((mz, intensity));
-            peaks.push((mz + NEUTRON / charge as f32, intensity * 0.35));
+            peaks.push((mz, intensity, charge));
+            peaks.push((mz + NEUTRON / charge as f32, intensity * 0.35, charge));
         }
     }
     for noise in 0..30 {
         let mz = 175.0 + ((index * 37 + noise * 53) % 1_250) as f32;
-        peaks.push((mz, 5.0 + noise as f32));
+        peaks.push((mz, 5.0 + noise as f32, 0));
     }
     peaks.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let (mz, intensity) = peaks.into_iter().unzip();
+    let mut mz = Vec::with_capacity(peaks.len());
+    let mut intensity = Vec::with_capacity(peaks.len());
+    let mut fragment_charges = Vec::with_capacity(peaks.len());
+    for (peak_mz, peak_intensity, charge) in peaks {
+        mz.push(peak_mz);
+        intensity.push(peak_intensity);
+        fragment_charges.push(charge);
+    }
 
     RawSpectrum {
         ms_level: 2,
@@ -79,11 +86,13 @@ fn raw_spectrum(peptide: &Peptide, index: usize) -> RawSpectrum {
         }],
         mz,
         intensity,
+        fragment_charges: use_fragment_charges.then_some(fragment_charges),
         ..RawSpectrum::default()
     }
 }
 
 fn main() {
+    let use_fragment_charges = std::env::var_os("SAGE_USE_FRAGMENT_CHARGES").is_some();
     let peptides = (0..PEPTIDE_COUNT).map(peptide).collect::<Vec<_>>();
     let targets = (0..SPECTRUM_COUNT)
         .map(|index| peptides[(index * 149) % peptides.len()].clone())
@@ -102,7 +111,7 @@ fn main() {
     let raw_spectra = targets
         .iter()
         .enumerate()
-        .map(|(index, peptide)| raw_spectrum(peptide, index))
+        .map(|(index, peptide)| raw_spectrum(peptide, index, use_fragment_charges))
         .collect::<Vec<_>>();
     let spectra = raw_spectra
         .iter()
@@ -188,6 +197,7 @@ fn main() {
     }
     let elapsed = start.elapsed();
     println!("deisotope_mode=scored");
+    println!("fragment_charge_array={use_fragment_charges}");
     println!("preprocess_rounds={PREPROCESS_ROUNDS}");
     println!(
         "preprocess_ns_per_spectrum={:.1}",

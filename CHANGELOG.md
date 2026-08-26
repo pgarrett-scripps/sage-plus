@@ -18,7 +18,7 @@ entries are retained below for provenance.
 - Searches now warn when no decoys are available for false-discovery-rate estimation.
 
 ### Changed
-- Replaced MS2 deconvolution with averagine-scored isotope envelopes. Mass tolerance, charge ceiling, envelope length, isotope score, and intensity-ratio tolerance are configurable. Scored envelopes assign peaks exclusively and preserve charge confidence for charge-aware fragment matching. Boolean `deisotope` settings remain supported, with `true` selecting the scored defaults.
+- Replaced MS2 deconvolution with averagine-scored isotope envelopes. Mass tolerance, charge ceiling, envelope length, isotope score, and intensity-ratio tolerance are configurable. Scored envelopes assign peaks exclusively and preserve charge confidence for charge-aware fragment matching. Boolean `deisotope` settings remain supported, with `true` selecting the scored defaults. mzML and mzMLb fragment charge arrays now constrain envelope assignment and flow into charge-aware matching.
 - Clarified that Bioconda installs upstream Sage rather than Sage Plus.
 - Added low-noise monthly dependency checks for Cargo and GitHub Actions.
 - Removed the experimental bitmap preliminary search path and its configuration options.
