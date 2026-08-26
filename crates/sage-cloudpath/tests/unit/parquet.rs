@@ -209,7 +209,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -258,7 +258,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
     }));
     let rows = reader
         .get_row_iter(None)?

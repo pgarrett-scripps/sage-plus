@@ -711,15 +711,15 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../schemas/results.sage.v3.parquet.schema"
+        "../../../schemas/results.sage.v1.parquet.schema"
     ))
 }
 
 fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../schemas/results.sage.v4.parquet.schema")
+        include_str!("../../../schemas/results.sage.v2.parquet.schema")
     } else {
-        include_str!("../../../schemas/results.sage.v3.parquet.schema")
+        include_str!("../../../schemas/results.sage.v1.parquet.schema")
     })
 }
 
@@ -815,7 +815,7 @@ pub fn serialize_features(
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "4" } else { "3" }.into()),
+                Some(if has_labels { "2" } else { "1" }.into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
