@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use smallvec::{smallvec, SmallVec};
 
 use crate::mass::monoisotopic;
 use crate::modification::NeutralLossMode;
@@ -38,7 +39,7 @@ pub struct IonGroup {
     pub kind: Kind,
     /// Zero-based series index used by scoring and minimum-ion filtering.
     pub series_index: usize,
-    pub variants: Vec<IonVariant>,
+    pub variants: SmallVec<[IonVariant; 2]>,
 }
 
 /// Generate groups of mutually alternative fragment forms for each peptide
@@ -72,22 +73,22 @@ impl<'p> IonGroupSeries<'p> {
         }
     }
 
-    fn losses(&self, series_index: usize) -> Vec<f32> {
-        let mut totals = vec![0.0f32];
+    fn losses(&self, series_index: usize) -> SmallVec<[f32; 4]> {
+        let mut totals = smallvec![0.0f32];
         for applied in self.peptide.applied_modifications.iter().filter(|applied| {
             self.contains_site(applied.site, series_index)
                 && !applied.modification.neutral_losses.is_empty()
         }) {
-            let mut options = Vec::with_capacity(applied.modification.neutral_losses.len() + 1);
-            if applied.modification.neutral_loss_mode == NeutralLossMode::Optional {
-                options.push(0.0);
-            }
-            options.extend(applied.modification.neutral_losses.iter().copied());
-
-            let mut next = Vec::with_capacity(totals.len().saturating_mul(options.len()));
+            let option_count = applied.modification.neutral_losses.len()
+                + usize::from(applied.modification.neutral_loss_mode == NeutralLossMode::Optional);
+            let mut next: SmallVec<[f32; 4]> =
+                SmallVec::with_capacity(totals.len().saturating_mul(option_count));
             for total in &totals {
-                for option in &options {
-                    next.push(total + option);
+                if applied.modification.neutral_loss_mode == NeutralLossMode::Optional {
+                    next.push(*total);
+                }
+                for loss in applied.modification.neutral_losses.iter() {
+                    next.push(total + loss);
                 }
             }
             next.sort_unstable_by(f32::total_cmp);
@@ -117,7 +118,7 @@ impl Iterator for IonGroupSeries<'_> {
                     neutral_loss: (loss > 0.0).then_some(loss),
                 })
             })
-            .collect();
+            .collect::<SmallVec<[_; 2]>>();
 
         Some(IonGroup {
             kind: ion.kind,
