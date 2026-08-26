@@ -9,6 +9,17 @@ mod tests {
         let schema: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA).unwrap();
         assert_eq!(schema["title"], "Sage search configuration");
         assert!(schema["properties"]["quant"]["$ref"].is_string());
+        assert_eq!(
+            schema["properties"]["deisotope"]["oneOf"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            schema["$defs"]["deisotopeSettings"]["properties"]["min_score"]["default"],
+            0.45
+        );
         assert_eq!(schema["$defs"]["lfq"]["properties"]["mbr"]["default"], true);
         assert_eq!(
             schema["$defs"]["mobilityModel"]["properties"]["enabled"]["default"],

@@ -29,7 +29,13 @@
     "precursor_charge": { "$ref": "#/$defs/u8Range" },
     "override_precursor_charge": { "type": "boolean" },
     "isotope_errors": { "$ref": "#/$defs/i8Range" },
-    "deisotope": { "type": "boolean" },
+    "deisotope": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/deisotopeSettings" }
+      ],
+      "default": true
+    },
     "quant": { "$ref": "#/$defs/quant" },
     "predict_rt": { "type": "boolean", "default": true },
     "retention_time_model": { "$ref": "#/$defs/retentionModel" },
@@ -72,6 +78,24 @@
   },
   "$defs": {
     "qValue": { "type": "number", "minimum": 0, "maximum": 1 },
+    "deisotopeSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "ppm_tolerance": { "type": "number", "exclusiveMinimum": 0, "default": 10.0 },
+        "max_charge": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "maximum": 255,
+          "default": null
+        },
+        "min_envelope_peaks": { "type": "integer", "minimum": 2, "maximum": 4, "default": 2 },
+        "max_envelope_peaks": { "type": "integer", "minimum": 2, "maximum": 4, "default": 4 },
+        "min_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.45 },
+        "max_isotope_log2_ratio": { "type": "number", "minimum": 0, "default": 1.5 }
+      }
+    },
     "u8Range": {
       "type": "array",
       "prefixItems": [

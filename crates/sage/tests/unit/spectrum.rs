@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn test_deisotope() {
-    let mut mz = [
+    let mz = [
         800.9,
         800.9 + NEUTRON * 1.0,
         800.9 + NEUTRON * 2.0,
@@ -14,8 +14,13 @@ fn test_deisotope() {
         812.0,
         812.0 + NEUTRON / 2.0,
     ];
-    let mut int = [2., 1.5, 1., 4., 3., 2., 1., 1., 9.0, 4.5];
-    let mut peaks = deisotope(&mut mz, &mut int, 2, 5.0, 800.91);
+    let int = [2., 1.5, 1., 4., 3., 2., 1., 1., 9.0, 4.5];
+    let settings = DeisotopeSettings {
+        min_score: 0.0,
+        max_isotope_log2_ratio: 10.0,
+        ..DeisotopeSettings::default()
+    };
+    let peaks = deisotope(&mz, &int, 2, settings, 800.91);
 
     assert_eq!(
         peaks,
@@ -46,21 +51,21 @@ fn test_deisotope() {
             },
             Deisotoped {
                 mz: 804.4108,
-                intensity: 6.0,
+                intensity: 3.0,
                 charge: Some(1),
                 envelope: Some(3),
             },
             Deisotoped {
                 mz: 805.4106,
-                intensity: 3.0,
+                intensity: 2.0,
                 charge: Some(1),
-                envelope: Some(4),
+                envelope: Some(3),
             },
             Deisotoped {
                 mz: 806.4116,
                 intensity: 1.0,
                 charge: Some(1),
-                envelope: Some(5),
+                envelope: Some(3),
             },
             Deisotoped {
                 mz: 810.0,
@@ -77,73 +82,6 @@ fn test_deisotope() {
             Deisotoped {
                 mz: 812.0 + NEUTRON / 2.0,
                 intensity: 4.5,
-                charge: Some(2),
-                envelope: Some(8),
-            }
-        ]
-    );
-
-    path_compression(&mut peaks);
-    assert_eq!(
-        peaks,
-        vec![
-            Deisotoped {
-                mz: 800.9,
-                intensity: 2.0,
-                charge: None,
-                envelope: None,
-            },
-            Deisotoped {
-                mz: 800.9 + NEUTRON * 1.0,
-                intensity: 2.5,
-                charge: Some(1),
-                envelope: None,
-            },
-            Deisotoped {
-                mz: 800.9 + NEUTRON * 2.0,
-                intensity: 0.0,
-                charge: Some(1),
-                envelope: Some(1),
-            },
-            Deisotoped {
-                mz: 803.4080,
-                intensity: 10.0,
-                charge: Some(1),
-                envelope: None,
-            },
-            Deisotoped {
-                mz: 804.4108,
-                intensity: 0.0,
-                charge: Some(1),
-                envelope: Some(3),
-            },
-            Deisotoped {
-                mz: 805.4106,
-                intensity: 0.0,
-                charge: Some(1),
-                envelope: Some(3),
-            },
-            Deisotoped {
-                mz: 806.4116,
-                intensity: 0.0,
-                charge: Some(1),
-                envelope: Some(3),
-            },
-            Deisotoped {
-                mz: 810.0,
-                intensity: 1.0,
-                charge: None,
-                envelope: None,
-            },
-            Deisotoped {
-                mz: 812.0,
-                intensity: 13.5,
-                charge: Some(2),
-                envelope: None,
-            },
-            Deisotoped {
-                mz: 812.0 + NEUTRON / 2.0,
-                intensity: 0.0,
                 charge: Some(2),
                 envelope: Some(8),
             }
@@ -168,7 +106,7 @@ fn averagine_deisotope_accepts_a_rising_envelope() {
         pattern[1] * 1000.0,
     ];
 
-    let peaks = deisotope_averagine(&mz, &intensity, charge, DeisotopeSettings::default(), 0.0);
+    let peaks = deisotope(&mz, &intensity, charge, DeisotopeSettings::default(), 0.0);
     let roots = peaks
         .iter()
         .filter(|peak| peak.envelope.is_none())
@@ -190,7 +128,7 @@ fn averagine_deisotope_preserves_intensity_with_competing_candidates() {
     let mz = [500.0, 500.0004, 500.0 + NEUTRON];
     let intensity = [100.0, 90.0, 50.0];
 
-    let peaks = deisotope_averagine(&mz, &intensity, 1, settings, 0.0);
+    let peaks = deisotope(&mz, &intensity, 1, settings, 0.0);
     let retained_intensity = peaks
         .iter()
         .filter(|peak| peak.envelope.is_none())
@@ -206,7 +144,7 @@ fn averagine_deisotope_rejects_an_implausible_intensity_ratio() {
     let mz = [mono_mz, mono_mz + NEUTRON];
     let intensity = [1000.0, 0.01];
 
-    let peaks = deisotope_averagine(&mz, &intensity, 1, DeisotopeSettings::default(), 0.0);
+    let peaks = deisotope(&mz, &intensity, 1, DeisotopeSettings::default(), 0.0);
 
     assert!(peaks.iter().all(|peak| peak.charge.is_none()));
     assert!(peaks.iter().all(|peak| peak.envelope.is_none()));

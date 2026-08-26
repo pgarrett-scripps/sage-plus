@@ -91,22 +91,14 @@ fn main() {
     let database = Builder::default()
         .make_parameters()
         .build_from_peptides(peptides);
-    let mode = std::env::var("SAGE_DEISOTOPE_MODE").unwrap_or_else(|_| "legacy".into());
-    let processor = match mode.as_str() {
-        "averagine" => {
-            let mut settings = DeisotopeSettings::default();
-            if let Ok(value) = std::env::var("SAGE_MIN_ISOTOPE_SCORE") {
-                settings.min_score = value.parse().expect("valid SAGE_MIN_ISOTOPE_SCORE");
-            }
-            if let Ok(value) = std::env::var("SAGE_MAX_ISOTOPE_LOG2_RATIO") {
-                settings.max_isotope_log2_ratio =
-                    value.parse().expect("valid SAGE_MAX_ISOTOPE_LOG2_RATIO");
-            }
-            SpectrumProcessor::with_deisotope_settings(150, settings, 0.0)
-        }
-        "legacy" => SpectrumProcessor::new(150, true, 0.0),
-        other => panic!("unknown SAGE_DEISOTOPE_MODE {other}"),
-    };
+    let mut settings = DeisotopeSettings::default();
+    if let Ok(value) = std::env::var("SAGE_MIN_ISOTOPE_SCORE") {
+        settings.min_score = value.parse().expect("valid SAGE_MIN_ISOTOPE_SCORE");
+    }
+    if let Ok(value) = std::env::var("SAGE_MAX_ISOTOPE_LOG2_RATIO") {
+        settings.max_isotope_log2_ratio = value.parse().expect("valid SAGE_MAX_ISOTOPE_LOG2_RATIO");
+    }
+    let processor = SpectrumProcessor::with_deisotope_settings(150, settings, 0.0);
     let raw_spectra = targets
         .iter()
         .enumerate()
@@ -195,7 +187,7 @@ fn main() {
         }
     }
     let elapsed = start.elapsed();
-    println!("deisotope_mode={mode}");
+    println!("deisotope_mode=scored");
     println!("preprocess_rounds={PREPROCESS_ROUNDS}");
     println!(
         "preprocess_ns_per_spectrum={:.1}",
