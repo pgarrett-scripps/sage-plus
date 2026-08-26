@@ -56,6 +56,93 @@ struct PreScore {
     isotope_error: i8,
 }
 
+#[derive(Copy, Clone)]
+struct FragmentMatchPeak {
+    neutral_mass: f32,
+    query_index: usize,
+    charge: u8,
+    charge_is_known: bool,
+}
+
+struct FragmentMatchIndex {
+    peaks: Vec<FragmentMatchPeak>,
+}
+
+impl FragmentMatchIndex {
+    fn new(query: &ProcessedSpectrum, max_charge: u8) -> Self {
+        let capacity = query.masses.len() * usize::from(max_charge.saturating_sub(1));
+        let mut peaks = Vec::with_capacity(capacity);
+        for (query_index, &mass) in query.masses.iter().enumerate() {
+            if query.has_known_charge(query_index) {
+                let charge = query.charges[query_index];
+                if charge < max_charge {
+                    peaks.push(FragmentMatchPeak {
+                        neutral_mass: mass,
+                        query_index,
+                        charge,
+                        charge_is_known: true,
+                    });
+                }
+            } else {
+                for charge in 1..max_charge {
+                    peaks.push(FragmentMatchPeak {
+                        neutral_mass: mass * charge as f32,
+                        query_index,
+                        charge,
+                        charge_is_known: false,
+                    });
+                }
+            }
+        }
+        peaks.sort_unstable_by(|left, right| left.neutral_mass.total_cmp(&right.neutral_mass));
+        Self { peaks }
+    }
+
+    fn select_peak(
+        &self,
+        query: &ProcessedSpectrum,
+        neutral_mass: f32,
+        charge: u8,
+        tolerance: Tolerance,
+    ) -> Option<usize> {
+        let scaled_tolerance = match tolerance {
+            Tolerance::Da(lo, hi) => Tolerance::Da(lo * charge as f32, hi * charge as f32),
+            _ => tolerance,
+        };
+        let (lo, hi) = scaled_tolerance.bounds(neutral_mass);
+        let start = self
+            .peaks
+            .partition_point(|peak| peak.neutral_mass.total_cmp(&lo).is_lt())
+            .saturating_sub(1);
+        let mut best_peak = None;
+        let mut max_intensity = 0.0;
+        for peak in &self.peaks[start..] {
+            if peak.neutral_mass.total_cmp(&hi).is_gt() {
+                break;
+            }
+            if peak.charge != charge {
+                continue;
+            }
+            let compatible = if peak.charge_is_known {
+                tolerance.contains(neutral_mass, peak.neutral_mass)
+            } else {
+                scaled_tolerance.contains(neutral_mass, peak.neutral_mass)
+            };
+            if !compatible {
+                continue;
+            }
+            let intensity = query.intensities[peak.query_index];
+            let later_tie =
+                intensity == max_intensity && best_peak.is_none_or(|best| peak.query_index >= best);
+            if intensity > max_intensity || later_tie {
+                max_intensity = intensity;
+                best_peak = Some(peak.query_index);
+            }
+        }
+        best_peak
+    }
+}
+
 /// Store preliminary scores & stats for first pass search for a query spectrum
 #[derive(Clone, Default)]
 struct InitialHits {
@@ -323,6 +410,16 @@ impl<'db> Scorer<'db> {
             panic!("missing MS1 precursor for {}", query.id);
         });
         let hits = self.initial_hits(query, precursor);
+        let max_charge = hits
+            .preliminary
+            .iter()
+            .map(|pre| pre.precursor_charge)
+            .max()
+            .unwrap_or(self.min_precursor_charge);
+        let fragment_index = FragmentMatchIndex::new(
+            query,
+            max_fragment_charge(self.max_fragment_charge, max_charge),
+        );
 
         if prefilter_low_memory {
             let mut score_vector = hits
@@ -332,7 +429,8 @@ impl<'db> Scorer<'db> {
                     if pre.peptide == PeptideIx::default() {
                         return None;
                     }
-                    let (score, _, _) = self.score_candidate(query, pre, false);
+                    let (score, _, _) =
+                        self.score_candidate_with_index(query, pre, false, &fragment_index);
                     if (score.matched_b + score.matched_y) < self.min_matched_peaks {
                         return None;
                     }
@@ -391,7 +489,7 @@ impl<'db> Scorer<'db> {
     /// in sorted order.
     fn matched_peaks_with_isotope(
         &self,
-        query: &ProcessedSpectrum,
+        fragment_index: &FragmentMatchIndex,
         precursor_mass: f32,
         precursor_charge: u8,
         precursor_tol: Tolerance,
@@ -403,7 +501,6 @@ impl<'db> Scorer<'db> {
             self.fragment_tol,
         );
 
-        let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
         let potential = candidates.pre_idx_hi - candidates.pre_idx_lo + 1;
 
         PRE_SCORE_SCRATCH.with(|scratch| {
@@ -413,22 +510,19 @@ impl<'db> Scorer<'db> {
             let mut matched_peaks = 0;
             let mut scored_candidates = 0;
 
-            for peak_mass in query.masses.iter() {
-                for charge in 1..max_fragment_charge {
-                    let mass = peak_mass * charge as f32;
-                    for frag in candidates.page_search(mass) {
-                        let idx = frag.peptide_index.0 as usize - candidates.pre_idx_lo;
-                        let sc = &mut preliminary[idx];
-                        if sc.matched == 0 {
-                            scored_candidates += 1;
-                            sc.precursor_charge = precursor_charge;
-                            sc.peptide = frag.peptide_index;
-                            sc.isotope_error = isotope_error;
-                        }
-
-                        sc.matched += 1;
-                        matched_peaks += 1;
+            for peak in &fragment_index.peaks {
+                for frag in candidates.page_search(peak.neutral_mass) {
+                    let idx = frag.peptide_index.0 as usize - candidates.pre_idx_lo;
+                    let sc = &mut preliminary[idx];
+                    if sc.matched == 0 {
+                        scored_candidates += 1;
+                        sc.precursor_charge = precursor_charge;
+                        sc.peptide = frag.peptide_index;
+                        sc.isotope_error = isotope_error;
                     }
+
+                    sc.matched += 1;
+                    matched_peaks += 1;
                 }
             }
 
@@ -456,12 +550,14 @@ impl<'db> Scorer<'db> {
         precursor_charge: u8,
         precursor_tol: Tolerance,
     ) -> InitialHits {
+        let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
+        let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
         if self.min_isotope_err != self.max_isotope_err {
             let mut hits = (self.min_isotope_err..=self.max_isotope_err).fold(
                 InitialHits::default(),
                 |mut hits, isotope| {
                     hits += self.matched_peaks_with_isotope(
-                        query,
+                        &fragment_index,
                         precursor_mass,
                         precursor_charge,
                         precursor_tol,
@@ -474,7 +570,7 @@ impl<'db> Scorer<'db> {
             hits
         } else {
             self.matched_peaks_with_isotope(
-                query,
+                &fragment_index,
                 precursor_mass,
                 precursor_charge,
                 precursor_tol,
@@ -551,11 +647,23 @@ impl<'db> Scorer<'db> {
         report_psms: usize,
         features: &mut Vec<Feature>,
     ) {
+        let max_charge = hits
+            .preliminary
+            .iter()
+            .map(|pre| pre.precursor_charge)
+            .max()
+            .unwrap_or(self.min_precursor_charge);
+        let fragment_index = FragmentMatchIndex::new(
+            query,
+            max_fragment_charge(self.max_fragment_charge, max_charge),
+        );
         let mut score_vector = hits
             .preliminary
             .iter()
             .filter(|score| score.peptide != PeptideIx::default())
-            .map(|pre| self.score_candidate(query, pre, self.annotate_matches))
+            .map(|pre| {
+                self.score_candidate_with_index(query, pre, self.annotate_matches, &fragment_index)
+            })
             .filter(|s| (s.0.matched_b + s.0.matched_y) >= self.min_matched_peaks)
             .collect::<Vec<_>>();
 
@@ -701,18 +809,17 @@ impl<'db> Scorer<'db> {
             .flat_map(|group| group.variants);
 
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, psm.charge);
+        let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
 
         // Remove MS2 peaks matched by previous match
         let mut to_remove = vec![false; query.masses.len()];
         for frag in fragments {
             for charge in 1..max_fragment_charge {
-                // Experimental peaks are multipled by charge, therefore theoretical are divided
-                if let Some(peak_idx) = crate::spectrum::select_most_intense_peak(
-                    &query.masses,
-                    &query.intensities,
-                    frag.monoisotopic_mass / charge as f32,
+                if let Some(peak_idx) = fragment_index.select_peak(
+                    query,
+                    frag.monoisotopic_mass,
+                    charge,
                     self.fragment_tol,
-                    None,
                 ) {
                     to_remove[peak_idx] = true;
                 }
@@ -722,6 +829,7 @@ impl<'db> Scorer<'db> {
         let mut masses = Vec::with_capacity(query.masses.len());
         let mut intensities = Vec::with_capacity(query.intensities.len());
         let mut charges = Vec::with_capacity(query.charges.len());
+        let mut charge_is_known = Vec::with_capacity(query.charge_is_known.len());
         let mut mobilities = Vec::with_capacity(query.mobilities.len());
 
         for (idx, removed) in to_remove.iter().enumerate() {
@@ -729,6 +837,9 @@ impl<'db> Scorer<'db> {
                 masses.push(query.masses[idx]);
                 intensities.push(query.intensities[idx]);
                 charges.push(query.charges[idx]);
+                if !query.charge_is_known.is_empty() {
+                    charge_is_known.push(query.charge_is_known[idx]);
+                }
                 if !query.mobilities.is_empty() {
                     mobilities.push(query.mobilities[idx]);
                 }
@@ -738,6 +849,7 @@ impl<'db> Scorer<'db> {
         query.masses = masses;
         query.intensities = intensities;
         query.charges = charges;
+        query.charge_is_known = charge_is_known;
         query.mobilities = mobilities;
         query.total_ion_current = query.intensities.iter().sum::<f32>();
     }
@@ -776,6 +888,19 @@ impl<'db> Scorer<'db> {
         query: &ProcessedSpectrum,
         pre_score: &PreScore,
         collect_fragments: bool,
+    ) -> (Score, Option<Fragments>, Coverage) {
+        let max_fragment_charge =
+            max_fragment_charge(self.max_fragment_charge, pre_score.precursor_charge);
+        let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
+        self.score_candidate_with_index(query, pre_score, collect_fragments, &fragment_index)
+    }
+
+    fn score_candidate_with_index(
+        &self,
+        query: &ProcessedSpectrum,
+        pre_score: &PreScore,
+        collect_fragments: bool,
+        fragment_index: &FragmentMatchIndex,
     ) -> (Score, Option<Fragments>, Coverage) {
         let mut score = Score {
             peptide: pre_score.peptide,
@@ -816,30 +941,35 @@ impl<'db> Scorer<'db> {
                     .variants
                     .iter()
                     .filter_map(|variant| {
-                        let mz = variant.monoisotopic_mass / charge as f32;
-                        crate::spectrum::select_most_intense_peak(
-                            &query.masses,
-                            &query.intensities,
-                            mz,
-                            self.fragment_tol,
-                            None,
-                        )
-                        .map(|peak_idx| (variant, mz, peak_idx))
+                        fragment_index
+                            .select_peak(
+                                query,
+                                variant.monoisotopic_mass,
+                                charge,
+                                self.fragment_tol,
+                            )
+                            .map(|peak_idx| (variant, peak_idx))
                     })
-                    .max_by(|a, b| query.intensities[a.2].total_cmp(&query.intensities[b.2]));
+                    .max_by(|a, b| query.intensities[a.1].total_cmp(&query.intensities[b.1]));
 
-                if let Some((frag, mz, peak_idx)) = best {
+                if let Some((frag, peak_idx)) = best {
                     let peak_mass = query.masses[peak_idx];
                     let peak_intensity = query.intensities[peak_idx];
-                    let fragment_charge = query.charges[peak_idx].max(charge);
+                    let expected_mass = if query.has_known_charge(peak_idx) {
+                        frag.monoisotopic_mass
+                    } else {
+                        frag.monoisotopic_mass / charge as f32
+                    };
 
                     score.ppm_difference +=
-                        peak_intensity * (mz - peak_mass).abs() * 2E6 / (mz + peak_mass);
+                        peak_intensity * (expected_mass - peak_mass).abs() * 2E6
+                            / (expected_mass + peak_mass);
                     score.signed_ppm_difference +=
-                        peak_intensity * (peak_mass - mz) * 2E6 / (mz + peak_mass);
+                        peak_intensity * (peak_mass - expected_mass) * 2E6
+                            / (expected_mass + peak_mass);
 
                     let exp_mz = query.peak_mz(peak_idx);
-                    let calc_mz = frag.monoisotopic_mass / fragment_charge as f32 + PROTON;
+                    let calc_mz = frag.monoisotopic_mass / charge as f32 + PROTON;
 
                     match frag.kind {
                         Kind::A | Kind::B | Kind::C => {
@@ -865,7 +995,7 @@ impl<'db> Scorer<'db> {
                             }
                         };
                         fragments_details.kinds.push(frag.kind);
-                        fragments_details.charges.push(fragment_charge as i32);
+                        fragments_details.charges.push(charge as i32);
                         fragments_details.mz_experimental.push(exp_mz);
                         fragments_details.mz_calculated.push(calc_mz);
                         fragments_details.fragment_ordinals.push(idx);

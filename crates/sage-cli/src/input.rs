@@ -13,6 +13,7 @@ use sage_core::{
     ml::retention_model::RetentionTimeSettings,
     spectral_library::SpectralLibrarySettings,
     spectral_library_search::LibrarySearchSettings,
+    spectrum::{DeisotopeConfig, DeisotopeSettings},
     tmt::Isobaric,
 };
 use serde::{Deserialize, Serialize};
@@ -53,7 +54,7 @@ pub struct Search {
     pub precursor_charge: (u8, u8),
     pub override_precursor_charge: bool,
     pub isotope_errors: (i8, i8),
-    pub deisotope: bool,
+    pub deisotope: DeisotopeSettings,
     pub chimera: bool,
     pub wide_window: bool,
     pub min_peaks: usize,
@@ -119,7 +120,7 @@ pub struct Input {
     pub precursor_charge: Option<(u8, u8)>,
     pub override_precursor_charge: Option<bool>,
     pub isotope_errors: Option<(i8, i8)>,
-    pub deisotope: Option<bool>,
+    pub deisotope: Option<DeisotopeConfig>,
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
     pub retention_time_model: Option<RetentionTimeSettings>,
@@ -436,6 +437,11 @@ impl Input {
         if let (Some(min), Some(max)) = (self.min_peaks, self.max_peaks) {
             ensure!(min <= max, "`min_peaks` cannot exceed `max_peaks`");
         }
+        self.deisotope
+            .unwrap_or(DeisotopeConfig::Enabled(true))
+            .resolve()
+            .validate()
+            .map_err(anyhow::Error::msg)?;
         ensure!(
             self.report_psms.unwrap_or(1) > 0,
             "`report_psms` must be greater than zero"
@@ -588,7 +594,10 @@ impl Input {
             precursor_charge: self.precursor_charge.unwrap_or((2, 4)),
             override_precursor_charge: self.override_precursor_charge.unwrap_or(false),
             isotope_errors: self.isotope_errors.unwrap_or((0, 0)),
-            deisotope: self.deisotope.unwrap_or(true),
+            deisotope: self
+                .deisotope
+                .unwrap_or(DeisotopeConfig::Enabled(true))
+                .resolve(),
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
             predict_rt: self.predict_rt.unwrap_or(!library_mode),

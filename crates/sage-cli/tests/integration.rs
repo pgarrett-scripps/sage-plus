@@ -48,7 +48,7 @@ fn integration() -> anyhow::Result<()> {
 
     let psm = scorer.score(&processed);
     assert_eq!(psm.len(), 1);
-    assert_eq!(psm[0].matched_peaks, 21);
+    assert_eq!(psm[0].matched_peaks, 20);
     assert!(psm[0].localization.is_none());
 
     Ok(())
@@ -139,7 +139,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     assert_eq!(summary["schema_version"], 7);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
-    assert_eq!(summary["spectral_library"]["transitions"], 20);
+    assert_eq!(summary["spectral_library"]["transitions"], 19);
     assert_eq!(summary["spectral_library"]["strategy"], "consensus");
     assert_eq!(
         summary["spectral_library"]["formats"],

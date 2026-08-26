@@ -1131,7 +1131,7 @@ impl Runner {
             None => None,
         };
 
-        let sp = SpectrumProcessor::new(
+        let sp = SpectrumProcessor::with_deisotope_settings(
             self.parameters.max_peaks,
             self.parameters.deisotope,
             min_deisotope_mz.unwrap_or(0.0),
