@@ -2,8 +2,13 @@
 
 These files are the versioned, machine-readable Parquet message schemas for Sage's canonical analytical outputs.
 
+`config.schema.json` is the JSON Schema for Sage search configuration files. Run
+`sage --write-config-schema PATH` to copy the schema from the installed Sage binary.
+
 - `results.sage.v1.parquet.schema` describes `results.sage.parquet`.
 - `results.sage.v2.parquet.schema` adds precursor label channel and group identity.
+- `results.sage.v3.parquet.schema` adds typed protein occurrence coordinates to unlabeled results.
+- `results.sage.v4.parquet.schema` combines label identity with typed protein occurrence coordinates.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
@@ -20,6 +25,6 @@ records the schema version, selection strategy, PSM and peptide q-value cutoffs,
 support, and minimum fragment frequency. `library_entry_id` groups transitions belonging to the
 same exact peptidoform and precursor charge.
 
-Unlabeled searches continue to write version 1 schemas. A configured precursor-label search writes
-version 2 results and LFQ schemas. Spectral libraries use version 2 only when labeled entries are
-present.
+Unlabeled searches write version 3 result schemas. A configured precursor-label search writes
+version 4 results and version 2 LFQ schemas. Protein site coordinates are one-based and inclusive.
+Spectral libraries use version 2 only when labeled entries are present.

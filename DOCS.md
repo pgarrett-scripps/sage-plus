@@ -164,6 +164,15 @@ spectra, or creating the output directory:
 sage config.json --validate-only
 ```
 
+The committed [JSON Schema](schemas/config.schema.json) provides editor completion and static
+validation for configuration files. An installed binary can copy its matching schema to a file or
+standard output:
+
+```shell
+sage --write-config-schema sage-config.schema.json
+sage --write-config-schema -
+```
+
 Use `--events-jsonl <path>` to stream versioned, newline-delimited JSON events while a
 search runs. `--events-jsonl -` writes events to standard output. Human-readable logs remain
 on standard error, so standard output can be consumed directly by workflow engines and other
@@ -593,6 +602,7 @@ channel-aware when these offsets are configured.
   - **spectral_angle**: Float. Threshold for the spectral angle similarity measure, ranging from 0 to 1 (default: 0.7).
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
   - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
+  - **mbr**: Boolean. Trace identified precursors into runs without direct MS2 evidence. Set this to `false` to quantify a precursor only in runs where it was identified (default: true).
 
 Example: 
 ```json
@@ -654,6 +664,7 @@ Retention-time alignment and prediction are separate features. `retention_time_a
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).
+- **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
 - **retention_time_alignment**: Explicitly align observed retention times across experiments. `"linear"` uses Sage's existing ordinary least-squares alignment. `"nonlinear"` enables robust outlier filtering followed by a monotone piecewise-linear warp. This operates independently of `predict_rt`.
 - **min_peaks**: Integer. Only process MS2 spectra with at least N peaks (default: 15).
 - **max_peaks**: Integer. Take the top N most intense MS2 peaks to search (default: 150).
@@ -769,16 +780,17 @@ Notes:
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
-- Protein coordinates are not resolved (the FASTA is consumed during indexing), so the protein-site report uses peptide-relative positions attributed to each mapped protein.
+- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable.
 
 ## Spectrum Paths
 
-- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. Thermo RAW and Bruker TDF inputs must be local because their readers require seekable files. Files ending in ".gz" or ".gzip" are inferred to be compressed.
+- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is optional and requires building with `--features mzmlb`. Files ending in ".gz" or ".gzip" are inferred to be compressed.
   - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
   - Example:
     ```json
     "mzml_paths": [
       "local/path.mzML",
+      "local/path.mzMLb",
       "local/path.raw",
       "s3://my-mass-spec-data/PXD0000001/foo.mzML.gz"
     ]
@@ -801,6 +813,7 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
 - `proteins`: Proteins containing the peptide sequence.
+- `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
 - `filename`: File containing this PSM
 - `scannr`: Spectrum identifier from mzML file.
