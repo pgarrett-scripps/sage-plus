@@ -3,6 +3,80 @@ use sage_core::{mass::Tolerance, spectrum::Representation};
 use super::{MzMLError, MzMLReader};
 
 #[tokio::test]
+async fn resolves_referenceable_param_groups_in_all_supported_scopes() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML>
+      <referenceableParamGroupList count="5">
+        <referenceableParamGroup id="spectrum-params">
+          <cvParam accession="MS:1000511" value="2"/>
+          <cvParam accession="MS:1000127"/>
+          <cvParam accession="MS:1000285" value="100"/>
+        </referenceableParamGroup>
+        <referenceableParamGroup id="scan-params">
+          <cvParam accession="MS:1000016" value="120" unitAccession="UO:0000010"/>
+          <cvParam accession="MS:1000927" value="8.5"/>
+        </referenceableParamGroup>
+        <referenceableParamGroup id="precursor-params">
+          <cvParam accession="MS:1000827" value="500.2"/>
+          <cvParam accession="MS:1000828" value="1.0"/>
+          <cvParam accession="MS:1000829" value="1.5"/>
+        </referenceableParamGroup>
+        <referenceableParamGroup id="ion-params">
+          <cvParam accession="MS:1000744" value="500.1"/>
+          <cvParam accession="MS:1000041" value="3"/>
+          <cvParam accession="MS:1002815" value="1.2"/>
+        </referenceableParamGroup>
+        <referenceableParamGroup id="mz-array-params">
+          <cvParam accession="MS:1000514"/>
+          <cvParam accession="MS:1000523"/>
+          <cvParam accession="MS:1000576"/>
+        </referenceableParamGroup>
+      </referenceableParamGroupList>
+      <run><spectrumList count="1">
+        <spectrum id="scan=1">
+          <referenceableParamGroupRef ref="spectrum-params"/>
+          <scanList count="1"><scan>
+            <referenceableParamGroupRef ref="scan-params"/>
+          </scan></scanList>
+          <precursorList count="1"><precursor>
+            <referenceableParamGroupRef ref="precursor-params"/>
+            <selectedIonList count="1"><selectedIon>
+              <referenceableParamGroupRef ref="ion-params"/>
+            </selectedIon></selectedIonList>
+          </precursor></precursorList>
+          <binaryDataArrayList count="1"><binaryDataArray>
+            <referenceableParamGroupRef ref="mz-array-params"/>
+            <binary>AAAAAAAAWUAAAAAAAEBZQA==</binary>
+          </binaryDataArray></binaryDataArrayList>
+        </spectrum>
+      </spectrumList></run>
+    </mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(4).parse(input.as_bytes()).await?;
+    assert_eq!(spectra.len(), 1);
+    let spectrum = &spectra[0];
+    assert_eq!(spectrum.file_id, 4);
+    assert_eq!(spectrum.ms_level, 2);
+    assert_eq!(
+        spectrum.representation,
+        sage_core::spectrum::Representation::Centroid
+    );
+    assert_eq!(spectrum.scan_start_time, 2.0);
+    assert_eq!(spectrum.ion_injection_time, 8.5);
+    assert_eq!(spectrum.mz, vec![100.0, 101.0]);
+    assert_eq!(spectrum.precursors.len(), 1);
+    assert_eq!(spectrum.precursors[0].mz, 500.1);
+    assert_eq!(spectrum.precursors[0].charge, Some(3));
+    assert_eq!(spectrum.precursors[0].inverse_ion_mobility, Some(1.2));
+    assert_eq!(
+        spectrum.precursors[0].isolation_window,
+        Some(sage_core::mass::Tolerance::Da(-1.0, 1.5))
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn parse_spectrum_issue_78() -> Result<(), MzMLError> {
     let s = r#"
         <spectrum id="spectrum=2442" index="286" defaultArrayLength="102" dataProcessingRef="dp_sp_1">
