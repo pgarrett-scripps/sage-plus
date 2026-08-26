@@ -18,9 +18,17 @@ fn main() -> anyhow::Result<()> {
         .about("\u{1F52E} Sage \u{1F9D9} - Proteomics searching so fast it feels like magic!")
         .arg(
             Arg::new("parameters")
-                .required(true)
+                .required_unless_present("write-config-schema")
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .help("Path to configuration parameters (JSON file)")
+                .value_hint(ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("write-config-schema")
+                .long("write-config-schema")
+                .value_name("PATH")
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .help("Write the Sage JSON configuration schema to PATH, or '-' for stdout")
                 .value_hint(ValueHint::FilePath),
         )
         .arg(
@@ -28,7 +36,7 @@ fn main() -> anyhow::Result<()> {
                 .num_args(1..)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .help(
-                    "Paths to mzML, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the \
+                    "Paths to mzML, mzMLb, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the \
                      configuration file.",
                 )
                 .value_hint(ValueHint::FilePath),
@@ -138,6 +146,15 @@ fn main() -> anyhow::Result<()> {
              {all-args}{after-help}",
         )
         .get_matches();
+
+    if let Some(path) = matches.get_one::<String>("write-config-schema") {
+        if path == "-" {
+            print!("{}", sage_cli::config_schema::CONFIG_SCHEMA);
+        } else {
+            std::fs::write(path, sage_cli::config_schema::CONFIG_SCHEMA)?;
+        }
+        return Ok(());
+    }
 
     let stack_size_mib = matches.get_one::<u32>("stack-size").copied().unwrap_or(2);
     let stack_size_bytes = stack_size_mib as usize * 1024 * 1024;
