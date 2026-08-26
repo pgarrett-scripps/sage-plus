@@ -8,7 +8,7 @@ use log::{info, warn};
 use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
 use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
-use sage_core::database::{Builder, IndexedDatabase, Parameters};
+use sage_core::database::{IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
@@ -32,8 +32,6 @@ use report_builder::{
     plots::{plot_boxplot, plot_pp, plot_scatter, plot_score_histogram},
     Report, ReportSection,
 };
-
-mod library_runner;
 
 enum OutputTarget {
     Local(BufWriter<std::fs::File>),
@@ -235,7 +233,6 @@ pub struct Runner {
     pub database: IndexedDatabase,
     pub parameters: Search,
     database_parameters: Parameters,
-    library_search: Option<library_runner::LibrarySearchRuntime>,
     start: Instant,
     events: EventEmitter,
     cancellation: CancellationToken,
@@ -267,8 +264,6 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
-    #[serde(default)]
-    pub library_search: LibrarySearchRunStats,
     pub output_paths: Vec<String>,
 }
 
@@ -295,14 +290,6 @@ pub struct ModelRunStats {
     pub ion_mobility_model_enabled: bool,
     pub ion_mobility_model_fitted: bool,
     pub ion_mobility_features: String,
-    /// Library-reference RT alignment, separate from database RT prediction.
-    pub library_retention_time_alignment: Option<String>,
-    pub library_retention_time_files_aligned: usize,
-    /// Library-reference ion-mobility alignment, separate from sequence models.
-    pub library_ion_mobility_alignment: Option<String>,
-    pub library_ion_mobility_files_aligned: usize,
-    /// Final scoring model used for library-search PSMs.
-    pub library_rescoring: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -355,15 +342,6 @@ pub struct SpectralLibraryRunStats {
     pub psm_q_value: f32,
     pub peptide_q_value: f32,
     pub formats: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct LibrarySearchRunStats {
-    pub enabled: bool,
-    pub path: Option<String>,
-    pub target_entries: usize,
-    pub decoy_entries: usize,
-    pub transitions: usize,
 }
 
 /// A single localized modification site for one PSM, used to build the
@@ -512,46 +490,9 @@ impl Runner {
         cancellation: CancellationToken,
     ) -> anyhow::Result<Self> {
         let parameters = parameters.clone();
-        let mut database_parameters = parameters
-            .database
-            .clone()
-            .unwrap_or_else(|| Builder::default().make_parameters());
+        let mut database_parameters = parameters.database.clone();
         let start = Instant::now();
         cancellation.check()?;
-        if let Some(settings) = parameters.library_search.as_ref() {
-            events.emit(EventKind::LibrarySearchStarted {
-                path: settings.path.clone(),
-            });
-            let (database, library_search) = library_runner::load_library_search(settings)?;
-            let overlapping_sources =
-                library_search.overlapping_source_files(&parameters.mzml_paths);
-            if !overlapping_sources.is_empty() {
-                let message = format!(
-                    "library search input overlaps recorded library source file(s): {}; same-source searches are unsuitable for FDR validation",
-                    overlapping_sources.join(", ")
-                );
-                warn!("{message}");
-                events.emit(EventKind::Warning {
-                    code: "library_source_overlap".into(),
-                    message,
-                });
-            }
-            events.emit(EventKind::LibrarySearchBuilt {
-                target_entries: library_search.target_entries,
-                decoy_entries: library_search.target_entries,
-                transitions: library_search.target_transitions,
-            });
-            events.check()?;
-            return Ok(Self {
-                database,
-                parameters,
-                database_parameters,
-                library_search: Some(library_search),
-                start,
-                events,
-                cancellation,
-            });
-        }
         if let Some(settings) = database_parameters.ptm_library.clone() {
             let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
                 let contents = sage_cloudpath::util::read_text(&settings.path)
@@ -757,7 +698,6 @@ impl Runner {
                             database: IndexedDatabase::default(),
                             parameters: parameters.clone(),
                             database_parameters: database_parameters.clone(),
-                            library_search: None,
                             start,
                             events: events.clone(),
                             cancellation: cancellation.clone(),
@@ -846,7 +786,6 @@ impl Runner {
             database,
             parameters,
             database_parameters,
-            library_search: None,
             start,
             events,
             cancellation,
@@ -1640,9 +1579,6 @@ impl Runner {
         parallel: usize,
     ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
-        if self.library_search.is_some() {
-            return self.run_library_with_summary(parallel);
-        }
         self.cancellation.check()?;
         self.events.check()?;
         let scorer = Scorer {
@@ -2016,7 +1952,7 @@ impl Runner {
             }
         }
         let summary = RunSummary {
-            schema_version: 7,
+            schema_version: 8,
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -2119,7 +2055,6 @@ impl Runner {
                     })
                     .collect(),
             },
-            library_search: LibrarySearchRunStats::default(),
             output_paths,
         };
         sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;

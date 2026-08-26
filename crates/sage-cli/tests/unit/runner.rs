@@ -178,11 +178,6 @@ fn older_run_summaries_receive_compatible_defaults() {
 
     assert_eq!(summary.schema_version, 1);
     assert!(!summary.ptm_localization.enabled);
-    assert_eq!(summary.models.library_retention_time_alignment, None);
-    assert_eq!(summary.models.library_retention_time_files_aligned, 0);
-    assert_eq!(summary.models.library_ion_mobility_alignment, None);
-    assert_eq!(summary.models.library_ion_mobility_files_aligned, 0);
-    assert_eq!(summary.models.library_rescoring, None);
     assert_eq!(summary.quantification.lfq_features, 0);
 }
 

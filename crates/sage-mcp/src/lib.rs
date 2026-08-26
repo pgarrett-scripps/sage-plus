@@ -119,7 +119,6 @@ struct ConfigValidation {
     config_path: String,
     fasta_path: Option<String>,
     peptide_database_path: Option<String>,
-    library_path: Option<String>,
     spectra_paths: Vec<String>,
     note: &'static str,
 }
@@ -304,7 +303,6 @@ impl State {
             config_path: config_path.to_string_lossy().into_owned(),
             fasta_path,
             peptide_database_path,
-            library_path: input.library_search.map(|library| library.path),
             spectra_paths: input.mzml_paths.unwrap_or_default(),
             note: "Local paths are normalized and constrained to the server root; remote URLs are disabled.",
         })
@@ -349,28 +347,6 @@ impl State {
         let (config_path, input) = self.load_config(config_path)?;
         let max_memory_gb = input.max_memory_gb;
         let min_free_memory_gb = input.min_free_memory_gb;
-        if let Some(library) = input.library_search {
-            let bytes = sage_cloudpath::util::read_bytes(&library.path)?;
-            let estimated_peak_bytes = (bytes.len() as u64).saturating_mul(4);
-            let estimated_peak_gib = estimated_peak_bytes as f64 / 1024_f64.powi(3);
-            return Ok(SearchEstimate {
-                config_path: config_path.to_string_lossy().into_owned(),
-                unmodified_peptides: 0,
-                modified_peptides: 0,
-                fragments: 0,
-                unmodified_peak_bytes: 0,
-                modified_peak_bytes: estimated_peak_bytes,
-                fragment_index_peak_bytes: estimated_peak_bytes,
-                estimated_peak_bytes,
-                estimated_peak_gib,
-                max_memory_gb,
-                min_free_memory_gb,
-                exceeds_configured_max_memory: max_memory_gb
-                    .filter(|limit| *limit > 0.0)
-                    .map(|limit| estimated_peak_gib >= limit),
-                note: "Conservative library-search estimate based on the serialized library size.",
-            });
-        }
         let mut parameters = input
             .database
             .expect("validated database search")
@@ -870,11 +846,6 @@ fn load_config_under(root: &Path, config_path: &str) -> anyhow::Result<(PathBuf,
                 .to_string_lossy()
                 .into_owned();
         }
-    }
-    if let Some(library) = input.library_search.as_mut() {
-        library.path = resolve_existing_under(root, &library.path)?
-            .to_string_lossy()
-            .into_owned();
     }
     for spectra in input.mzml_paths.iter_mut().flatten() {
         *spectra = resolve_existing_under(root, spectra)?

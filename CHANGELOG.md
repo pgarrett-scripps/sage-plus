@@ -28,6 +28,9 @@ entries are retained below for provenance.
 - Updated network, compression, Parquet, Bruker, logging, and reporting dependencies to patched releases.
 - Pinned CI actions to immutable commits and added dependency review for new pull requests.
 
+### Removed
+- Removed the experimental DDA spectral-library search mode. Empirical spectral-library export in Sage Parquet and PSI mzSpecLib formats remains supported.
+
 ### Fixed
 - Database prefiltering now filters targets and paired decoys together, preserves label-channel partners, and uses deterministic score ties. Prefiltered and full searches therefore use the same competition and FDR model.
 - LFQ mass lookup now derives its coarse search margin from configured precursor ranges, avoiding missed matches at wider tolerances. Mobility boundaries remain inclusive and configuration-driven.
@@ -36,12 +39,11 @@ entries are retained below for provenance.
 ## [v0.1.0-beta.1] - 2026-08-25
 
 ### Added
-- **DDA spectral-library search:** Search Sage Parquet or PSI mzSpecLib libraries without a FASTA. Deterministic composition-preserving decoys feed standard spectrum, peptide, protein, and protein-group FDR.
 - **Library calibration and quantification:** Library search supports isotope-error windows, matched-fragment export, per-file precursor and fragment calibration, RT and mobility alignment, LFQ, and TMT.
 - **Library rescoring:** A regularized target-decoy model combines spectral angle, explained intensity, isotope, mass-error, RT, and mobility evidence. Small searches fall back safely to spectral-angle scoring and emit a structured warning.
 - **Consensus library generation:** Combine supporting PSMs with median RT, mobility, and normalized fragment intensities. Minimum PSM support and fragment frequency are configurable.
 - **Modification-defined label channels:** Structured static and variable modifications can define coherent `channel_offsets` for SILAC, dimethyl, and custom precursor labels.
-- **Channel-aware LFQ and outputs:** Identified channels seed exact-mass partner extraction and reference ratios. Version 2 results, LFQ, and spectral-library schemas preserve channel and label-group metadata through export and library search.
+- **Channel-aware LFQ and outputs:** Identified channels seed exact-mass partner extraction and reference ratios. Version 2 results, LFQ, and spectral-library schemas preserve channel and label-group metadata through export.
 - **MCP worker isolation:** Searches run in dedicated processes. Panics, signals, and memory-limit exits fail only the affected job, while cancellation escalates from a cooperative request to worker termination.
 - **Library FDR validation:** Added a held-out and entrapment validation guide, a reporting script, and warnings when query files overlap library source files.
 
