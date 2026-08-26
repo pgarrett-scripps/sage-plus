@@ -146,3 +146,14 @@ fn memory_cancellation_reason_is_distinct_from_user_cancellation() {
         .to_string()
         .contains("memory limit"));
 }
+
+#[test]
+fn allocator_trim_dispatch_matches_target_support() {
+    let result = trim_allocator();
+
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    assert_ne!(result, AllocatorTrimResult::Unsupported);
+
+    #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+    assert_eq!(result, AllocatorTrimResult::Unsupported);
+}

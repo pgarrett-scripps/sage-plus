@@ -3441,6 +3441,7 @@ dependencies = [
  "env_logger",
  "fnv",
  "itoa",
+ "libc",
  "log",
  "maud",
  "num_cpus",
