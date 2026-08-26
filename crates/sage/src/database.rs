@@ -11,7 +11,7 @@ use crate::modification::{
 };
 use crate::peptide::{
     AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, Peptide,
-    VariableRule,
+    VariableRule, INLINE_PROTEINS,
 };
 use crate::ptm_library::PtmLibrary;
 use dashmap::DashSet;
@@ -494,26 +494,30 @@ impl Parameters {
                 .saturating_sub(self.min_ion_index as u64)
                 .saturating_mul(self.ion_kinds.len() as u64);
             estimate.fragments = estimate.fragments.saturating_add(fragments);
-            peptide_bytes = peptide_bytes.saturating_add(
-                (std::mem::size_of::<Peptide>() as u64)
-                    .saturating_add(sequence_len)
-                    .saturating_add(
-                        (peptide.modifications.len() as u64)
-                            .saturating_mul(std::mem::size_of::<f32>() as u64),
-                    )
-                    .saturating_add(
-                        (peptide.proteins.len() as u64)
-                            .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
-                    )
-                    .saturating_add(
-                        (peptide.protein_sites.len() as u64).saturating_mul(std::mem::size_of::<
-                            ProteinOccurrence,
-                        >(
+            let protein_bytes = peptide
+                .proteins
+                .spilled()
+                .then(|| {
+                    (peptide.proteins.len() as u64)
+                        .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
+                        .saturating_add(ALLOCATION_OVERHEAD)
+                })
+                .unwrap_or_default();
+            peptide_bytes =
+                peptide_bytes.saturating_add(
+                    (std::mem::size_of::<Peptide>() as u64)
+                        .saturating_add(sequence_len)
+                        .saturating_add(
+                            (peptide.modifications.len() as u64)
+                                .saturating_mul(std::mem::size_of::<f32>() as u64),
                         )
-                            as u64),
-                    )
-                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4)),
-            );
+                        .saturating_add(protein_bytes)
+                        .saturating_add(
+                            (peptide.protein_sites.len() as u64)
+                                .saturating_mul(std::mem::size_of::<ProteinOccurrence>() as u64),
+                        )
+                        .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3)),
+                );
         }
 
         let fragment_bytes = estimate
@@ -574,14 +578,19 @@ impl Parameters {
                     sequence_len.saturating_mul(std::mem::size_of::<AppliedModification>() as u64),
                 )
                 .saturating_add(
-                    (digest.origins.len() as u64)
-                        .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
+                    (digest.origins.len() > INLINE_PROTEINS)
+                        .then(|| {
+                            (digest.origins.len() as u64)
+                                .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
+                                .saturating_add(ALLOCATION_OVERHEAD)
+                        })
+                        .unwrap_or_default(),
                 )
                 .saturating_add(
                     (digest.origins.len() as u64)
                         .saturating_mul(std::mem::size_of::<ProteinOccurrence>() as u64),
                 )
-                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(5));
+                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4));
             peptide_bytes =
                 peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
         }
@@ -848,7 +857,7 @@ impl Parameters {
                                 let Ok(mut peptide) = Peptide::try_from(digest) else {
                                     return Vec::new();
                                 };
-                                peptide.proteins = vec![origin.protein.clone()];
+                                peptide.proteins = smallvec::smallvec![origin.protein.clone()];
                                 let start = origin.start.unwrap_or_default();
                                 let end = start.saturating_add(peptide.sequence.len() as u32);
                                 let library_sites = library

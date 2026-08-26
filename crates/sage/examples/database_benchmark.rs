@@ -30,7 +30,7 @@ fn main() {
             modifications: Vec::new(),
             monoisotopic: 1_000.0 + idx as f32 / count as f32 * 1_000.0,
             position: Position::Internal,
-            proteins: vec![Arc::from("benchmark")],
+            proteins: vec![Arc::from("benchmark")].into(),
             ..Peptide::default()
         })
         .collect::<Vec<_>>();

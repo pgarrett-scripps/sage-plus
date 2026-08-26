@@ -12,6 +12,13 @@ use crate::{
 };
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
+use smallvec::SmallVec;
+
+pub const INLINE_PROTEINS: usize = 1;
+
+/// Most peptides map to one protein, so keep that accession inline.
+/// Shared peptides transparently spill to heap storage.
+pub type ProteinAccessions = SmallVec<[Arc<str>; INLINE_PROTEINS]>;
 
 #[derive(Clone, PartialEq, Default)]
 pub struct Peptide {
@@ -42,7 +49,7 @@ pub struct Peptide {
     /// Where is this peptide located in the protein?
     pub position: Position,
 
-    pub proteins: Vec<Arc<str>>,
+    pub proteins: ProteinAccessions,
     /// Protein-coordinate occurrences shared by all modification variants.
     pub protein_sites: Arc<[ProteinOccurrence]>,
 }
@@ -932,7 +939,7 @@ impl TryFrom<Digest> for Peptide {
             cterm: None,
             missed_cleavages: value.missed_cleavages,
             semi_enzymatic: value.semi_enzymatic,
-            proteins: vec![value.protein],
+            proteins: smallvec::smallvec![value.protein],
             protein_sites,
         })
     }

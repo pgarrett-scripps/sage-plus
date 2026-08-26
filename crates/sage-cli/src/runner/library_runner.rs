@@ -106,13 +106,13 @@ fn library_peptide(
     entry: &sage_core::spectral_library_search::DdaLibraryEntry,
 ) -> anyhow::Result<Peptide> {
     let parsed = parse_proforma(&entry.proforma).map_err(anyhow::Error::msg)?;
-    let proteins = entry
+    let proteins: sage_core::peptide::ProteinAccessions = entry
         .proteins
         .split(';')
         .map(str::trim)
         .filter(|protein| !protein.is_empty())
         .map(Arc::<str>::from)
-        .collect::<Vec<_>>();
+        .collect();
     anyhow::ensure!(
         !proteins.is_empty(),
         "library entry `{}` has no protein accessions",
