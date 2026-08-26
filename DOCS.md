@@ -342,7 +342,7 @@ For additional information about configuration options and output file formats, 
     -1,                     // Consider -1 C13 isotope
     3                       // Consider up to +3 C13 isotope (-1/0/1/2/3) 
   ],
-  "deisotope": false,       // Optional[bool] {default=false}: perform deisotoping and charge state deconvolution
+  "deisotope": true,        // Optional[bool|object] {default=true}: perform MS2 deisotoping and charge deconvolution
   "chimera": false,         // Optional[bool] {default=false}: search for chimeric/co-fragmenting PSMS
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
@@ -665,7 +665,22 @@ Note on the settings below:
 
 Retention-time alignment and prediction are separate features. `retention_time_alignment` aligns observed times even when `predict_rt` is false. Prediction uses aligned times and therefore runs linear alignment when no method is specified. LFQ also requires alignment, but does not require retention-time prediction.
 
-- **deisotope**: Boolean. Perform deisotoping and charge state deconvolution on MS2 spectra (default: false). Recommended for high-resolution MS2 scans. This setting may interfere with TMT-MS2 quantification, use at your own risk.
+- **deisotope**: Boolean or object. Perform deisotoping and charge state deconvolution on MS2 spectra (default: true). `true` and `false` retain the legacy behavior. Use an object to enable bounded averagine isotope-envelope scoring. Recommended for high-resolution MS2 scans. Sage excludes the reporter-ion region from MS2 deisotoping when TMT or iTRAQ quantification is configured.
+
+  ```json
+  "deisotope": {
+    "enabled": true,
+    "algorithm": "averagine",
+    "ppm_tolerance": 10.0,
+    "max_charge": null,
+    "min_envelope_peaks": 2,
+    "max_envelope_peaks": 4,
+    "min_score": 0.45,
+    "max_isotope_log2_ratio": 1.5
+  }
+  ```
+
+  `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).

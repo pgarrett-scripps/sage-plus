@@ -64,6 +64,83 @@ fn test_max_fragment_charge() {
 }
 
 #[test]
+fn fragment_match_index_enforces_known_charge_and_infers_unknown_charge() {
+    let query = ProcessedSpectrum {
+        masses: vec![500.0, 1_000.0],
+        intensities: vec![10.0, 20.0],
+        charges: vec![1, 2],
+        charge_is_known: vec![false, true],
+        ..ProcessedSpectrum::default()
+    };
+    let index = FragmentMatchIndex::new(&query, 3);
+
+    assert_eq!(
+        index.select_peak(&query, 1_000.0, 2, Tolerance::Da(-0.01, 0.01)),
+        Some(1)
+    );
+    assert_eq!(
+        index.select_peak(&query, 1_000.0, 1, Tolerance::Da(-0.01, 0.01)),
+        None
+    );
+
+    let two_known_charges = ProcessedSpectrum {
+        masses: vec![1_000.0, 1_000.0],
+        intensities: vec![15.0, 20.0],
+        charges: vec![1, 2],
+        charge_is_known: vec![true, true],
+        ..ProcessedSpectrum::default()
+    };
+    let index = FragmentMatchIndex::new(&two_known_charges, 3);
+    assert_eq!(
+        index.select_peak(&two_known_charges, 1_000.0, 1, Tolerance::Da(-0.01, 0.01)),
+        Some(0)
+    );
+    assert_eq!(
+        index.select_peak(&two_known_charges, 1_000.0, 2, Tolerance::Da(-0.01, 0.01)),
+        Some(1)
+    );
+
+    let unknown_only = ProcessedSpectrum {
+        masses: vec![500.0],
+        intensities: vec![10.0],
+        charges: vec![1],
+        charge_is_known: vec![false],
+        ..ProcessedSpectrum::default()
+    };
+    let index = FragmentMatchIndex::new(&unknown_only, 3);
+    assert_eq!(
+        index.select_peak(&unknown_only, 1_000.0, 2, Tolerance::Da(-0.01, 0.01)),
+        Some(0)
+    );
+
+    let da_scaled_unknown = ProcessedSpectrum {
+        masses: vec![500.0075],
+        intensities: vec![10.0],
+        charges: vec![1],
+        charge_is_known: vec![false],
+        ..ProcessedSpectrum::default()
+    };
+    let index = FragmentMatchIndex::new(&da_scaled_unknown, 3);
+    assert_eq!(
+        index.select_peak(&da_scaled_unknown, 1_000.0, 2, Tolerance::Da(-0.01, 0.01)),
+        Some(0)
+    );
+
+    let da_unscaled_known = ProcessedSpectrum {
+        masses: vec![1_000.015],
+        intensities: vec![10.0],
+        charges: vec![2],
+        charge_is_known: vec![true],
+        ..ProcessedSpectrum::default()
+    };
+    let index = FragmentMatchIndex::new(&da_unscaled_known, 3);
+    assert_eq!(
+        index.select_peak(&da_unscaled_known, 1_000.0, 2, Tolerance::Da(-0.01, 0.01)),
+        None
+    );
+}
+
+#[test]
 fn equal_nonzero_isotope_bounds_are_honored() {
     let peptide = crate::peptide::Peptide::try_from(Digest {
         sequence: "PEPTIDER".into(),

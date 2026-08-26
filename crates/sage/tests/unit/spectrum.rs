@@ -152,6 +152,67 @@ fn test_deisotope() {
 }
 
 #[test]
+fn averagine_deisotope_accepts_a_rising_envelope() {
+    let charge = 2;
+    let neutral_mass = 2500.0;
+    let mono_mz = neutral_mass / charge as f32 + PROTON;
+    let pattern = crate::isotopes::averagine_isotopes(neutral_mass);
+    let mz = [
+        mono_mz + 2.0 * NEUTRON / charge as f32,
+        mono_mz,
+        mono_mz + NEUTRON / charge as f32,
+    ];
+    let intensity = [
+        pattern[2] * 1000.0,
+        pattern[0] * 1000.0,
+        pattern[1] * 1000.0,
+    ];
+
+    let peaks = deisotope_averagine(&mz, &intensity, charge, DeisotopeSettings::default(), 0.0);
+    let roots = peaks
+        .iter()
+        .filter(|peak| peak.envelope.is_none())
+        .collect::<Vec<_>>();
+
+    assert_eq!(roots.len(), 1);
+    assert_eq!(roots[0].charge, Some(charge));
+    assert!((roots[0].mz - mono_mz).abs() < 1e-4);
+    assert!((roots[0].intensity - intensity.iter().sum::<f32>()).abs() < 1e-3);
+}
+
+#[test]
+fn averagine_deisotope_preserves_intensity_with_competing_candidates() {
+    let settings = DeisotopeSettings {
+        min_score: 0.0,
+        max_isotope_log2_ratio: 10.0,
+        ..DeisotopeSettings::default()
+    };
+    let mz = [500.0, 500.0004, 500.0 + NEUTRON];
+    let intensity = [100.0, 90.0, 50.0];
+
+    let peaks = deisotope_averagine(&mz, &intensity, 1, settings, 0.0);
+    let retained_intensity = peaks
+        .iter()
+        .filter(|peak| peak.envelope.is_none())
+        .map(|peak| peak.intensity)
+        .sum::<f32>();
+
+    assert!((retained_intensity - intensity.iter().sum::<f32>()).abs() < 1e-5);
+}
+
+#[test]
+fn averagine_deisotope_rejects_an_implausible_intensity_ratio() {
+    let mono_mz = 500.0;
+    let mz = [mono_mz, mono_mz + NEUTRON];
+    let intensity = [1000.0, 0.01];
+
+    let peaks = deisotope_averagine(&mz, &intensity, 1, DeisotopeSettings::default(), 0.0);
+
+    assert!(peaks.iter().all(|peak| peak.charge.is_none()));
+    assert!(peaks.iter().all(|peak| peak.envelope.is_none()));
+}
+
+#[test]
 fn select_most_intense_peak_uses_parallel_columns() {
     let masses = vec![99.0, 100.0, 100.01, 100.02, 101.0];
     let intensities = vec![10.0, 20.0, 50.0, 30.0, 100.0];
@@ -363,6 +424,7 @@ fn process_ms2_without_deisotoping_defaults_charges_to_one() {
     );
     assert_eq!(processed.intensities, vec![10.0, 20.0, 30.0]);
     assert_eq!(processed.charges, vec![1, 1, 1]);
+    assert_eq!(processed.charge_is_known, vec![false, false, false]);
     assert_eq!(processed.peak_mz(1), 101.0);
 }
 
@@ -401,6 +463,35 @@ fn process_ms2_with_deisotoping_tracks_reassigned_charge() {
     assert_eq!(processed.masses.len(), 1);
     assert_eq!(processed.intensities, vec![13.5]);
     assert_eq!(processed.charges, vec![2]);
+    assert_eq!(processed.charge_is_known, vec![true]);
     assert!((processed.masses[0] - (812.0 - PROTON) * 2.0).abs() < 0.001);
     assert!((processed.peak_mz(0) - 812.0).abs() < 0.001);
+}
+
+#[test]
+fn process_ms2_with_averagine_deisotoping_tracks_reassigned_charge() {
+    let processor =
+        SpectrumProcessor::with_deisotope_settings(10, DeisotopeSettings::default(), 0.0);
+    let neutral_mass = 1600.0;
+    let charge = 2;
+    let mono_mz = neutral_mass / charge as f32 + PROTON;
+    let pattern = crate::isotopes::averagine_isotopes(neutral_mass);
+    let spectrum = RawSpectrum {
+        ms_level: 2,
+        representation: Representation::Centroid,
+        precursors: vec![Precursor {
+            charge: Some(3),
+            ..Precursor::default()
+        }],
+        mz: vec![mono_mz, mono_mz + NEUTRON / charge as f32],
+        intensity: vec![pattern[0] * 1000.0, pattern[1] * 1000.0],
+        ..RawSpectrum::default_with_file_id(7)
+    };
+
+    let processed = processor.process(spectrum);
+
+    assert_eq!(processed.masses.len(), 1);
+    assert_eq!(processed.charges, vec![charge]);
+    assert_eq!(processed.charge_is_known, vec![true]);
+    assert!((processed.masses[0] - neutral_mass).abs() < 0.001);
 }
