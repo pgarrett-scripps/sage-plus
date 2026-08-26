@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sage-docs.vercel.app/config.schema.json",
+  "$id": "https://raw.githubusercontent.com/pgarrett-scripps/sage-plus/main/schemas/config.schema.json",
   "title": "Sage search configuration",
   "type": "object",
   "additionalProperties": false,

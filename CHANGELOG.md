@@ -9,6 +9,14 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Standard builds and release binaries now read local mzMLb files.
+- mzML parsing now resolves referenceable parameter groups used for shared spectrum and instrument metadata.
+- Canonical PSM Parquet output now includes typed protein occurrences with one-based inclusive start and end positions plus flanking residues.
+- LFQ can disable match-between-runs with `quant.lfq_settings.mbr`, and ion-mobility model fitting can be disabled independently with `ion_mobility_model.enabled`.
+- A committed JSON configuration schema supports editor completion, static validation, and export with `sage --write-config-schema`.
+- Searches now warn when no decoys are available for false-discovery-rate estimation.
+
 ### Changed
 - Clarified that Bioconda installs upstream Sage rather than Sage Plus.
 - Added low-noise monthly dependency checks for Cargo and GitHub Actions.

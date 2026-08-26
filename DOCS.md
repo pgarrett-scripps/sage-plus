@@ -316,6 +316,7 @@ For additional information about configuration options and output file formats, 
       "spectral_angle": 0.7,  // Optional[float] {default = 0.7}, normalized spectral angle cutoff for calling an MS1 peak
       "ppm_tolerance": 5.0,    // Optional[float] {default = 5.0}, tolerance (in p.p.m.) for DICE window around calculated precursor mass
       "rt_pct_tolerance": 0.5, // Optional[float] {default = 0.5}, symmetric match-between-runs RT tolerance as percent of total gradient length
+      "mbr": true,             // Optional[bool] {default = true}, trace precursors into runs without direct MS2 evidence
       // Optional[bool] {default = true}. Combine all charge states for quantification. Setting this to false
       // quantifies each peptide-charge precursor in `precursor_charge` range (see below) separately
       "combine_charge_states": true
@@ -345,6 +346,9 @@ For additional information about configuration options and output file formats, 
   "chimera": false,         // Optional[bool] {default=false}: search for chimeric/co-fragmenting PSMS
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
+  "ion_mobility_model": {
+    "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
+  },
   "retention_time_alignment": "nonlinear", // Optional["linear" | "nonlinear"]: explicitly enable observed-RT alignment
   "min_peaks": 15,          // Optional[int] {default=15}: only process MS2 spectra with at least N peaks
   "max_peaks": 150,         // Optional[int] {default=150}: take the top N most intense MS2 peaks to search,
@@ -618,7 +622,8 @@ Example:
       "integration": "Sum",
       "spectral_angle": 0.7,
       "ppm_tolerance": 5.0,
-      "rt_pct_tolerance": 0.5
+      "rt_pct_tolerance": 0.5,
+      "mbr": true
     }
   }
 ```
@@ -665,6 +670,12 @@ Retention-time alignment and prediction are separate features. `retention_time_a
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
+  - Example:
+    ```json
+    "ion_mobility_model": {
+      "enabled": false
+    }
+    ```
 - **retention_time_alignment**: Explicitly align observed retention times across experiments. `"linear"` uses Sage's existing ordinary least-squares alignment. `"nonlinear"` enables robust outlier filtering followed by a monotone piecewise-linear warp. This operates independently of `predict_rt`.
 - **min_peaks**: Integer. Only process MS2 spectra with at least N peaks (default: 15).
 - **max_peaks**: Integer. Take the top N most intense MS2 peaks to search (default: 150).
@@ -784,7 +795,7 @@ Notes:
 
 ## Spectrum Paths
 
-- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is optional and requires building with `--features mzmlb`. Files ending in ".gz" or ".gzip" are inferred to be compressed.
+- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is included in standard builds and release binaries. Minimal source builds created with `--no-default-features` omit it. Files ending in ".gz" or ".gzip" are inferred to be compressed.
   - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
   - Example:
     ```json

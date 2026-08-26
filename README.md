@@ -29,7 +29,7 @@ agent-facing capabilities.
 - Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
 - Configurable LFQ match-between-runs retention-time tolerance.
 - Optional LFQ match-between-runs and independent ion-mobility model controls.
-- Optional local mzMLb input through the `mzmlb` Cargo feature.
+- Local mzMLb input in standard Sage builds.
 - Typed protein occurrence coordinates in the canonical PSM Parquet output.
 - A machine-readable JSON configuration schema, available with `sage --write-config-schema`.
 - PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
@@ -55,6 +55,9 @@ cd sage-plus
 cargo build --release --workspace
 ./target/release/sage config.json
 ```
+
+mzMLb support is included in standard builds and release binaries. Minimal source builds can omit
+the HDF5-based mzMLb reader with `cargo build --release --workspace --no-default-features`.
 
 The release build produces the standard `sage` executable and the optional `sage-mcp` server.
 Run `sage --help` for CLI options.
