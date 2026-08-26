@@ -197,6 +197,7 @@ impl TdfReader {
                             id,
                             intensity,
                             total_ion_current,
+                            fragment_charges: None,
                             mobility: Some(mobility),
                         };
                         Some(spec)
@@ -252,6 +253,7 @@ impl TdfReader {
                                 .iter()
                                 .map(|&value| value as f32)
                                 .collect(),
+                            fragment_charges: None,
                             mobility: None,
                         };
                         Some(spectrum)

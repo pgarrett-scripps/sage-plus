@@ -73,6 +73,7 @@ impl ThermoRawReader {
             total_ion_current: record.total_ion_current as f32,
             mz: record.mz.into_iter().map(|mz| mz as f32).collect(),
             intensity: record.intensity,
+            fragment_charges: None,
             mobility: None,
         }
     }

@@ -11,6 +11,31 @@ pub struct MzMLbReader {
     file_id: usize,
 }
 
+fn normalize_fragment_charges(
+    charges: &[i32],
+    peak_count: usize,
+    spectrum_id: &str,
+) -> Option<Vec<u8>> {
+    if charges.len() != peak_count {
+        log::warn!(
+            "ignoring fragment charge array with length different from m/z array for spectrum {}",
+            spectrum_id
+        );
+        return None;
+    }
+    let converted = charges
+        .iter()
+        .map(|&charge| u8::try_from(charge).ok())
+        .collect::<Option<Vec<_>>>();
+    if converted.is_none() {
+        log::warn!(
+            "ignoring fragment charge array with values outside 0 through 255 for spectrum {}",
+            spectrum_id
+        );
+    }
+    converted
+}
+
 impl MzMLbReader {
     pub fn with_file_id(file_id: usize) -> Self {
         Self { file_id }
@@ -75,6 +100,10 @@ impl MzMLbReader {
                     })
                     .collect();
                 let raw: MzDataSpectrum = spectrum.into();
+                let fragment_charges =
+                    raw.arrays.charges().ok().and_then(|charges| {
+                        normalize_fragment_charges(&charges, raw.mzs().len(), &id)
+                    });
 
                 RawSpectrum {
                     file_id: self.file_id,
@@ -87,6 +116,7 @@ impl MzMLbReader {
                     total_ion_current,
                     mz: raw.mzs().iter().map(|value| *value as f32).collect(),
                     intensity: raw.intensities().to_vec(),
+                    fragment_charges,
                     mobility: None,
                 }
             })
@@ -102,9 +132,9 @@ mod tests {
         SpectrumWriter,
     };
     use mzdata::spectrum::{
-        bindata::BinaryArrayMap, Acquisition, IsolationWindow, IsolationWindowState,
-        Precursor as MzDataPrecursor, RawSpectrum as MzDataRawSpectrum, ScanEvent, SelectedIon,
-        SpectrumDescription,
+        bindata::{ArrayType, BinaryArrayMap, BinaryDataArrayType, DataArray},
+        Acquisition, IsolationWindow, IsolationWindowState, Precursor as MzDataPrecursor,
+        RawSpectrum as MzDataRawSpectrum, ScanEvent, SelectedIon, SpectrumDescription,
     };
     use mzdata::{mzpeaks::CentroidPeak, mzpeaks::MZPeakSetType};
 
@@ -122,6 +152,11 @@ mod tests {
             injection_time: 7.0,
             ..ScanEvent::default()
         });
+        let mut arrays = BinaryArrayMap::from(&peaks);
+        let mut charge_array =
+            DataArray::from_name_and_type(&ArrayType::ChargeArray, BinaryDataArrayType::Int32);
+        charge_array.extend(&[2i32, 0]).unwrap();
+        arrays.add(charge_array);
         let spectrum = MzDataRawSpectrum {
             description: SpectrumDescription {
                 id: "scan=42".into(),
@@ -146,7 +181,7 @@ mod tests {
                 }],
                 ..SpectrumDescription::default()
             },
-            arrays: BinaryArrayMap::from(&peaks),
+            arrays,
         };
         let mut writer: MzMLbWriter = MzMLbWriterBuilder::new(&path).create()?;
         writer.write(&spectrum)?;
@@ -161,6 +196,7 @@ mod tests {
         assert_eq!(spectrum.ion_injection_time, 7.0);
         assert_eq!(spectrum.mz, [100.0, 200.0]);
         assert_eq!(spectrum.intensity, [10.0, 20.0]);
+        assert_eq!(spectrum.fragment_charges, Some(vec![2, 0]));
         assert_eq!(spectrum.precursors[0].mz, 500.25);
         assert_eq!(spectrum.precursors[0].charge, Some(2));
         assert_eq!(
