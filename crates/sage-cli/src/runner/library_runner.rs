@@ -132,6 +132,7 @@ fn library_peptide(
         semi_enzymatic: false,
         position: Position::Full,
         proteins,
+        protein_sites: Arc::default(),
     })
 }
 

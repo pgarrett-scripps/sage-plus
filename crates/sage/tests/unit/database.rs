@@ -240,6 +240,8 @@ fn channel_offsets_add_to_the_modification_base_mass() {
         origins: vec![crate::enzyme::ProteinOccurrence {
             protein: digest.protein.clone(),
             start: digest.protein_start,
+            prev_aa: None,
+            next_aa: None,
         }],
     }]);
     let heavy = peptides

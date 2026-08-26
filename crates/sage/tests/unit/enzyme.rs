@@ -13,7 +13,9 @@ fn hash_digest() {
             missed_cleavages: 0,
             position: Position::Nterm,
             protein: Arc::from(String::default()),
-            protein_start: 0,
+            protein_start: Some(0),
+            prev_aa: None,
+            next_aa: None,
         },
         Digest {
             decoy: false,
@@ -22,7 +24,9 @@ fn hash_digest() {
             missed_cleavages: 0,
             position: Position::Nterm,
             protein: Arc::from(String::default()),
-            protein_start: 0,
+            protein_start: Some(0),
+            prev_aa: None,
+            next_aa: None,
         },
     ];
 
@@ -38,7 +42,9 @@ fn hash_digest() {
             missed_cleavages: 0,
             position: Position::Nterm,
             protein: Arc::from(String::default()),
-            protein_start: 0,
+            protein_start: Some(0),
+            prev_aa: None,
+            next_aa: None,
         },
         Digest {
             decoy: false,
@@ -47,7 +53,9 @@ fn hash_digest() {
             missed_cleavages: 0,
             position: Position::Internal,
             protein: Arc::from(String::default()),
-            protein_start: 0,
+            protein_start: Some(0),
+            prev_aa: None,
+            next_aa: None,
         },
     ];
 
@@ -310,7 +318,10 @@ fn no_digest() {
 #[test]
 fn preserve_repeated_sequence_coordinates() {
     let sequence = "KVEGAQNQGKKVEGAQNQGK";
-    let expected = vec![("VEGAQNQGK".to_string(), 1), ("VEGAQNQGK".to_string(), 11)];
+    let expected = vec![
+        ("VEGAQNQGK".to_string(), Some(1)),
+        ("VEGAQNQGK".to_string(), Some(11)),
+    ];
 
     let tryp = EnzymeParameters {
         min_len: 2,

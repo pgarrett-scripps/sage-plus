@@ -1,6 +1,7 @@
 use super::*;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use sage_core::database::PeptideIx;
+use sage_core::enzyme::ProteinOccurrence;
 use sage_core::ion_series::Kind;
 use sage_core::peptide::Peptide;
 use sage_core::spectral_library::{LibraryFragment, SpectralLibraryEntry, SpectralLibrarySettings};
@@ -174,6 +175,57 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
 }
 
 #[test]
+fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: Arc::from(&b"PEPTIDE"[..]),
+        proteins: vec![Arc::from("P12345"), Arc::from("P67890")],
+        protein_sites: Arc::from([
+            ProteinOccurrence {
+                protein: Arc::from("P12345"),
+                start: Some(4),
+                prev_aa: Some(b'K'),
+                next_aa: Some(b'R'),
+            },
+            ProteinOccurrence {
+                protein: Arc::from("P67890"),
+                start: Some(9),
+                prev_aa: None,
+                next_aa: None,
+            },
+        ]),
+        ..Peptide::default()
+    });
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        ..Feature::default()
+    };
+
+    let bytes = serialize_features(&[&feature], &[], &["run-a".into()], &database, 1.0)?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let metadata = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap();
+    assert!(metadata.iter().any(|entry| {
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
+    }));
+    let rows = reader
+        .get_row_iter(None)?
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    let values = rows[0]
+        .get_column_iter()
+        .map(|(name, field)| (name.as_str(), field))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(
+        values["protein_sites"].to_string(),
+        "[{protein: \"P12345\", start: 5, end: 11, prev_aa: \"K\", next_aa: \"R\"}, {protein: \"P67890\", start: 10, end: 16, prev_aa: null, next_aa: null}]"
+    );
+    Ok(())
+}
+
+#[test]
 fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<()> {
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
@@ -206,7 +258,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
     }));
     let rows = reader
         .get_row_iter(None)?

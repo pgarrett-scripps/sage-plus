@@ -1,5 +1,7 @@
 use crate::cleavage::ValidatedCustomCleavageLibrary;
-use crate::enzyme::{group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position};
+use crate::enzyme::{
+    group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position, ProteinOccurrence,
+};
 use crate::fasta::Fasta;
 use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
@@ -500,7 +502,14 @@ impl Parameters {
                         (peptide.proteins.len() as u64)
                             .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
                     )
-                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3)),
+                    .saturating_add(
+                        (peptide.protein_sites.len() as u64).saturating_mul(std::mem::size_of::<
+                            ProteinOccurrence,
+                        >(
+                        )
+                            as u64),
+                    )
+                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4)),
             );
         }
 
@@ -536,6 +545,8 @@ impl Parameters {
                         let mut reference = digest.reference.clone();
                         reference.protein = origin.protein.clone();
                         reference.protein_start = origin.start;
+                        reference.prev_aa = origin.prev_aa;
+                        reference.next_aa = origin.next_aa;
                         self.variable_variant_count(&reference)
                     })
                     .fold(0u64, u64::saturating_add)
@@ -563,7 +574,11 @@ impl Parameters {
                     (digest.origins.len() as u64)
                         .saturating_mul(std::mem::size_of::<Arc<str>>() as u64),
                 )
-                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(4));
+                .saturating_add(
+                    (digest.origins.len() as u64)
+                        .saturating_mul(std::mem::size_of::<ProteinOccurrence>() as u64),
+                )
+                .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(5));
             peptide_bytes =
                 peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
         }
@@ -584,7 +599,7 @@ impl Parameters {
             .loaded_ptm_library
             .as_deref()
             .map(|library| {
-                let start = digest.protein_start;
+                let start = digest.protein_start.unwrap_or_default();
                 let end = start.saturating_add(sequence.len() as u32);
                 library
                     .sites_for(&digest.protein)
@@ -816,11 +831,13 @@ impl Parameters {
                                 let mut digest = reference.clone();
                                 digest.protein = origin.protein.clone();
                                 digest.protein_start = origin.start;
+                                digest.prev_aa = origin.prev_aa;
+                                digest.next_aa = origin.next_aa;
                                 let Ok(mut peptide) = Peptide::try_from(digest) else {
                                     return Vec::new();
                                 };
                                 peptide.proteins = vec![origin.protein.clone()];
-                                let start = origin.start;
+                                let start = origin.start.unwrap_or_default();
                                 let end = start.saturating_add(peptide.sequence.len() as u32);
                                 let library_sites = library
                                     .sites_for(&origin.protein)
@@ -933,6 +950,13 @@ impl Parameters {
                         .flatten();
                 }
                 keep.proteins.extend(remove.proteins.iter().cloned());
+                if !remove.protein_sites.is_empty() {
+                    let mut sites = keep.protein_sites.to_vec();
+                    sites.extend(remove.protein_sites.iter().cloned());
+                    sites.sort_unstable();
+                    sites.dedup();
+                    keep.protein_sites = sites.into();
+                }
                 // When merging peptides from different Fastas,
                 // decoys in one fasta might be targets in another
                 keep.decoy &= remove.decoy;
@@ -1006,7 +1030,9 @@ impl Parameters {
                     semi_enzymatic: false,
                     sequence: seq,
                     protein,
-                    protein_start: 0,
+                    protein_start: None,
+                    prev_aa: None,
+                    next_aa: None,
                     missed_cleavages: 0,
                     position: Position::Full,
                 };

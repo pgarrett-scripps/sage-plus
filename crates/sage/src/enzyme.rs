@@ -20,7 +20,11 @@ pub struct Digest {
     /// Protein accession
     pub protein: Arc<str>,
     /// Zero-based start offset of this peptide in the source protein.
-    pub protein_start: u32,
+    pub protein_start: Option<u32>,
+    /// Amino acid immediately before the peptide in the source protein.
+    pub prev_aa: Option<u8>,
+    /// Amino acid immediately after the peptide in the source protein.
+    pub next_aa: Option<u8>,
     /// Missed cleavages
     pub missed_cleavages: u8,
     /// Is this an N-terminal peptide of the protein?
@@ -35,7 +39,14 @@ pub struct DigestGroup {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProteinOccurrence {
     pub protein: Arc<str>,
-    pub start: u32,
+    pub start: Option<u32>,
+    pub prev_aa: Option<u8>,
+    pub next_aa: Option<u8>,
+}
+
+fn normalize_origins(group: &mut DigestGroup) {
+    group.origins.sort_unstable();
+    group.origins.dedup();
 }
 
 pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
@@ -54,6 +65,8 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
     let first_origin = ProteinOccurrence {
         protein: first.protein.clone(),
         start: first.protein_start,
+        prev_aa: first.prev_aa,
+        next_aa: first.next_aa,
     };
     let mut curr_group = DigestGroup {
         reference: first,
@@ -67,13 +80,17 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             curr_group.origins.push(ProteinOccurrence {
                 protein: digest.protein,
                 start: digest.protein_start,
+                prev_aa: digest.prev_aa,
+                next_aa: digest.next_aa,
             });
         } else {
-            curr_group.origins.sort_unstable();
+            normalize_origins(&mut curr_group);
             groups.push(curr_group);
             let origin = ProteinOccurrence {
                 protein: digest.protein.clone(),
                 start: digest.protein_start,
+                prev_aa: digest.prev_aa,
+                next_aa: digest.next_aa,
             };
             curr_group = DigestGroup {
                 reference: digest,
@@ -81,6 +98,7 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             };
         }
     }
+    normalize_origins(&mut curr_group);
     groups.push(curr_group);
     groups
 }
@@ -111,6 +129,8 @@ impl Digest {
             semi_enzymatic: self.semi_enzymatic,
             protein: self.protein.clone(),
             protein_start: self.protein_start,
+            prev_aa: self.prev_aa,
+            next_aa: self.next_aa,
             sequence: sequence.into_iter().collect(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
@@ -392,12 +412,12 @@ impl EnzymeParameters {
             let start = site.site.start;
             let end = site.site.end;
 
-            let sequence = match sequence.get(start..end) {
-                Some(sequence) => sequence,
+            let peptide_sequence = match sequence.get(start..end) {
+                Some(peptide_sequence) => peptide_sequence,
                 None => continue,
             };
 
-            let len = sequence.len();
+            let len = peptide_sequence.len();
 
             let position = match (start == 0, end == n) {
                 (true, true) => Position::Full,
@@ -408,13 +428,15 @@ impl EnzymeParameters {
 
             if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert((start, end)) {
                 digests.push(Digest {
-                    sequence: sequence.into(),
+                    sequence: peptide_sequence.into(),
                     missed_cleavages: site.missed_cleavages,
                     decoy: false,
                     semi_enzymatic: site.semi_enzymatic,
                     position,
                     protein: protein.clone(),
-                    protein_start: start as u32,
+                    protein_start: Some(start as u32),
+                    prev_aa: start.checked_sub(1).map(|index| sequence.as_bytes()[index]),
+                    next_aa: sequence.as_bytes().get(end).copied(),
                 });
             }
         }
