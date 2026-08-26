@@ -2,18 +2,10 @@ use crate::mass::{Tolerance, NEUTRON, PROTON};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DeisotopeAlgorithm {
-    Legacy,
-    Averagine,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeisotopeSettings {
     pub enabled: bool,
-    pub algorithm: DeisotopeAlgorithm,
     pub ppm_tolerance: f32,
     pub max_charge: Option<u8>,
     pub min_envelope_peaks: usize,
@@ -23,10 +15,9 @@ pub struct DeisotopeSettings {
 }
 
 impl DeisotopeSettings {
-    pub fn legacy(enabled: bool) -> Self {
+    pub fn from_enabled(enabled: bool) -> Self {
         Self {
             enabled,
-            algorithm: DeisotopeAlgorithm::Legacy,
             ..Self::default()
         }
     }
@@ -61,7 +52,6 @@ impl Default for DeisotopeSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            algorithm: DeisotopeAlgorithm::Averagine,
             ppm_tolerance: 10.0,
             max_charge: None,
             min_envelope_peaks: 2,
@@ -82,7 +72,7 @@ pub enum DeisotopeConfig {
 impl DeisotopeConfig {
     pub fn resolve(self) -> DeisotopeSettings {
         match self {
-            Self::Enabled(enabled) => DeisotopeSettings::legacy(enabled),
+            Self::Enabled(enabled) => DeisotopeSettings::from_enabled(enabled),
             Self::Settings(settings) => settings,
         }
     }
@@ -255,57 +245,6 @@ pub fn select_most_intense_peak(
 //     spectra.get(idx)
 // }
 
-/// Deisotope a set of peaks by attempting to find C13 peaks under a given `ppm` tolerance
-pub fn deisotope(
-    mz: &[f32],
-    int: &[f32],
-    max_charge: u8,
-    ppm: f32,
-    min_mz: f32,
-) -> Vec<Deisotoped> {
-    let mut peaks = mz
-        .iter()
-        .zip(int.iter())
-        .map(|(mz, int)| Deisotoped {
-            mz: *mz,
-            intensity: *int,
-            envelope: None,
-            charge: None,
-        })
-        .collect::<Vec<_>>();
-
-    // Is the peak at index `i` an isotopic peak?
-    for i in (0..mz.len()).rev() {
-        // Two pointer approach, j is fast pointer
-        let mut j = i.saturating_sub(1);
-        while mz[i] - mz[j] <= NEUTRON + Tolerance::ppm_to_delta_mass(mz[i], ppm) && mz[j] >= min_mz
-        {
-            let delta = mz[i] - mz[j];
-            let tol = Tolerance::ppm_to_delta_mass(mz[i], ppm);
-            for charge in 1..=max_charge {
-                let iso = NEUTRON / charge as f32;
-                if (delta - iso).abs() <= tol && int[i] < int[j] {
-                    // Make sure this peak isn't already part of an isotopic envelope
-                    if let Some(existing) = peaks[i].charge {
-                        if existing != charge {
-                            continue;
-                        }
-                    }
-                    peaks[j].intensity += peaks[i].intensity;
-                    peaks[j].charge = Some(charge);
-                    peaks[i].charge = Some(charge);
-                    peaks[i].envelope = Some(j);
-                }
-            }
-            j = j.saturating_sub(1);
-            if j == 0 {
-                break;
-            }
-        }
-    }
-    peaks
-}
-
 #[derive(Debug)]
 struct EnvelopeCandidate {
     indices: [usize; 4],
@@ -338,7 +277,7 @@ fn isotope_pattern_score(observed: &[f32], theoretical: &[f32; 4]) -> f32 {
 /// Candidates grow upward through at most four envelope peaks. Accepted
 /// candidates claim peaks exclusively, which preserves total intensity and
 /// makes charge assignment independent of input traversal side effects.
-pub fn deisotope_averagine(
+pub fn deisotope(
     mz: &[f32],
     int: &[f32],
     max_charge: u8,
@@ -479,18 +418,6 @@ pub fn deisotope_averagine(
         }
     }
     peaks
-}
-
-/// Path compression of isotopic envelope links
-pub fn path_compression(peaks: &mut [Deisotoped]) {
-    for idx in 0..peaks.len() {
-        if let Some(parent) = peaks[idx].envelope {
-            if let Some(upper) = peaks[parent].envelope {
-                peaks[idx].envelope = Some(upper);
-            }
-            peaks[idx].intensity = 0.0;
-        }
-    }
 }
 
 fn retain_top_n_by_intensity(
@@ -647,7 +574,7 @@ impl SpectrumProcessor {
         Self {
             take_top_n,
             min_deisotope_mz,
-            deisotope: DeisotopeSettings::legacy(deisotope),
+            deisotope: DeisotopeSettings::from_enabled(deisotope),
         }
     }
 
@@ -690,22 +617,13 @@ impl SpectrumProcessor {
                 .map(|configured| charge.min(configured))
                 .unwrap_or(charge)
                 .max(1);
-            let peaks = match self.deisotope.algorithm {
-                DeisotopeAlgorithm::Legacy => deisotope(
-                    &spectrum.mz,
-                    &spectrum.intensity,
-                    charge,
-                    self.deisotope.ppm_tolerance,
-                    self.min_deisotope_mz,
-                ),
-                DeisotopeAlgorithm::Averagine => deisotope_averagine(
-                    &spectrum.mz,
-                    &spectrum.intensity,
-                    charge,
-                    self.deisotope,
-                    self.min_deisotope_mz,
-                ),
-            };
+            let peaks = deisotope(
+                &spectrum.mz,
+                &spectrum.intensity,
+                charge,
+                self.deisotope,
+                self.min_deisotope_mz,
+            );
             let mz = peaks.iter().map(|peak| peak.mz).collect::<Vec<_>>();
             let intensities = peaks.iter().map(|peak| peak.intensity).collect::<Vec<_>>();
             let charges = peaks

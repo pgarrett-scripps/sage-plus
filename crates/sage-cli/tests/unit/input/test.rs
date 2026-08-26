@@ -5,7 +5,6 @@ use sage_core::{
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::{RetentionTimeFeatureSet, RetentionTimeSettings},
     spectral_library::{SpectralLibraryFormat, SpectralLibrarySettings, SpectralLibraryStrategy},
-    spectrum::DeisotopeAlgorithm,
 };
 
 #[test]
@@ -89,7 +88,7 @@ fn spectral_library_settings_are_validated() {
 }
 
 #[test]
-fn deisotope_boolean_preserves_legacy_behavior() {
+fn deisotope_boolean_uses_scored_defaults() {
     let input: Input = serde_json::from_value(serde_json::json!({
         "database": { "fasta": "test.fasta" },
         "precursor_tol": { "ppm": [-10, 10] },
@@ -101,11 +100,11 @@ fn deisotope_boolean_preserves_legacy_behavior() {
     let settings = input.deisotope.unwrap().resolve();
 
     assert!(settings.enabled);
-    assert_eq!(settings.algorithm, DeisotopeAlgorithm::Legacy);
+    assert_eq!(settings, sage_core::spectrum::DeisotopeSettings::default());
 }
 
 #[test]
-fn deisotope_object_uses_averagine_defaults_and_overrides() {
+fn deisotope_object_uses_scored_defaults_and_overrides() {
     let input: Input = serde_json::from_value(serde_json::json!({
         "database": { "fasta": "test.fasta" },
         "precursor_tol": { "ppm": [-10, 10] },
@@ -121,7 +120,6 @@ fn deisotope_object_uses_averagine_defaults_and_overrides() {
     .unwrap();
     let settings = input.deisotope.unwrap().resolve();
 
-    assert_eq!(settings.algorithm, DeisotopeAlgorithm::Averagine);
     assert_eq!(settings.ppm_tolerance, 7.5);
     assert_eq!(settings.max_envelope_peaks, 3);
     assert_eq!(settings.min_score, 0.6);

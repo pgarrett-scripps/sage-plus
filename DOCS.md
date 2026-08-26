@@ -665,12 +665,11 @@ Note on the settings below:
 
 Retention-time alignment and prediction are separate features. `retention_time_alignment` aligns observed times even when `predict_rt` is false. Prediction uses aligned times and therefore runs linear alignment when no method is specified. LFQ also requires alignment, but does not require retention-time prediction.
 
-- **deisotope**: Boolean or object. Perform deisotoping and charge state deconvolution on MS2 spectra (default: true). `true` and `false` retain the legacy behavior. Use an object to enable bounded averagine isotope-envelope scoring. Recommended for high-resolution MS2 scans. Sage excludes the reporter-ion region from MS2 deisotoping when TMT or iTRAQ quantification is configured.
+- **deisotope**: Boolean or object. Perform scored averagine deisotoping and charge state deconvolution on MS2 spectra (default: true). Use `false` to disable deconvolution or an object to tune the bounded isotope-envelope scoring. Sage excludes the reporter-ion region from MS2 deisotoping when TMT or iTRAQ quantification is configured.
 
   ```json
   "deisotope": {
     "enabled": true,
-    "algorithm": "averagine",
     "ppm_tolerance": 10.0,
     "max_charge": null,
     "min_envelope_peaks": 2,
@@ -680,7 +679,7 @@ Retention-time alignment and prediction are separate features. `retention_time_a
   }
   ```
 
-  `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios.
+  `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).
