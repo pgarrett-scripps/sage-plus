@@ -10,8 +10,8 @@ use crate::modification::{
     StaticModEntry, VarModEntry,
 };
 use crate::peptide::{
-    AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, Peptide,
-    VariableRule, INLINE_PROTEINS,
+    AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, ModificationLookup,
+    Peptide, VariableRule, INLINE_PROTEINS,
 };
 use crate::ptm_library::PtmLibrary;
 use dashmap::DashSet;
@@ -210,6 +210,30 @@ pub struct DatabaseMemoryEstimate {
 }
 
 impl Parameters {
+    pub fn validate_compact_modifications(&self) -> Result<(), String> {
+        let max_len = self.enzyme.max_len.unwrap_or(50);
+        if max_len > u8::MAX as usize {
+            return Err(format!(
+                "database.enzyme.max_len must not exceed {} residues for compact modification encoding, but is {max_len}",
+                u8::MAX
+            ));
+        }
+
+        let variable_mods = self.variable_modifications();
+        let static_mods = self.static_modifications();
+        let channels = self.label_channels();
+        let labels = LabelModificationCache::new(
+            variable_mods
+                .iter()
+                .map(|rule| &rule.modification)
+                .chain(static_mods.values()),
+            &channels,
+        );
+        ModificationLookup::for_rules(&variable_mods, &static_mods, &channels, &labels)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub fn validate_channels(&self) -> Result<(), String> {
         let definitions = self.channel_definitions();
         let Some(first) = definitions.first() else {
@@ -507,10 +531,7 @@ impl Parameters {
                 peptide_bytes.saturating_add(
                     (std::mem::size_of::<Peptide>() as u64)
                         .saturating_add(sequence_len)
-                        .saturating_add(
-                            (peptide.modifications.len() as u64)
-                                .saturating_mul(std::mem::size_of::<f32>() as u64),
-                        )
+                        .saturating_add(peptide.modifications.heap_bytes() as u64)
                         .saturating_add(protein_bytes)
                         .saturating_add(
                             (peptide.protein_sites.len() as u64)
@@ -782,6 +803,13 @@ impl Parameters {
                 .chain(static_mods.values()),
             &label_channels,
         );
+        let modification_lookup = ModificationLookup::for_rules(
+            &mods,
+            &static_mods,
+            &label_channels,
+            &label_modifications,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let library = self.loaded_ptm_library.as_deref();
 
         let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
@@ -802,6 +830,7 @@ impl Parameters {
                             &mods,
                             library_sites,
                             &static_mods,
+                            modification_lookup.clone(),
                             self.max_variable_mods,
                             self.max_total_variable_mods,
                             self.max_combinations,
@@ -951,14 +980,13 @@ impl Parameters {
             if remove.monoisotopic == keep.monoisotopic
                 && remove.sequence == keep.sequence
                 && chemical_modifications_eq(remove, keep)
-                && (remove.applied_modifications == keep.applied_modifications
+                && (remove.modifications == keep.modifications
                     || channel_zero_provenance_eq(remove, keep))
             {
                 if remove.label_channel != keep.label_channel {
                     let has_channel_site = keep
-                        .applied_modifications
-                        .iter()
-                        .chain(remove.applied_modifications.iter())
+                        .applied_modifications()
+                        .chain(remove.applied_modifications())
                         .any(|applied| applied.kind == ModificationKind::Label);
                     keep.label_channel = has_channel_site
                         .then(|| {
@@ -1060,7 +1088,7 @@ impl Parameters {
                 match Peptide::try_from(digest) {
                     Ok(p) => Some(p),
                     Err(e) => {
-                        log::warn!("skipping invalid peptide sequence: {e:?}");
+                        log::warn!("skipping peptide: {e}");
                         None
                     }
                 }
@@ -1078,6 +1106,13 @@ impl Parameters {
                 .chain(static_mods.values()),
             &label_channels,
         );
+        let modification_lookup = ModificationLookup::for_rules(
+            &variable_mods,
+            &static_mods,
+            &label_channels,
+            &label_modifications,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         let raw = raw
             .into_iter()
             .flat_map(|peptide| {
@@ -1085,6 +1120,7 @@ impl Parameters {
                     &variable_mods,
                     &[],
                     &static_mods,
+                    modification_lookup.clone(),
                     self.max_variable_mods,
                     self.max_total_variable_mods,
                     self.max_combinations,
@@ -1344,12 +1380,11 @@ fn with_estimation_margin(bytes: u64) -> u64 {
 fn channel_zero_provenance_eq(left: &Peptide, right: &Peptide) -> bool {
     let retained = |peptide: &Peptide| {
         peptide
-            .applied_modifications
-            .iter()
+            .applied_modifications()
             .filter(|applied| {
                 !(applied.kind == ModificationKind::Label && applied.modification.mass == 0.0)
             })
-            .cloned()
+            .map(|applied| (applied.site, applied.modification.clone(), applied.kind))
             .collect::<Vec<_>>()
     };
     retained(left) == retained(right)

@@ -386,10 +386,10 @@ impl Input {
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
-            database
-                .clone()
-                .make_parameters()
-                .validate_channels()
+            let parameters = database.clone().make_parameters();
+            parameters.validate_channels().map_err(anyhow::Error::msg)?;
+            parameters
+                .validate_compact_modifications()
                 .map_err(anyhow::Error::msg)?;
         }
         if let Some(library) = &self.library_search {
@@ -513,6 +513,9 @@ impl Input {
         let database = self.database.map(Builder::make_parameters);
         if let Some(database) = &database {
             database.validate_channels().map_err(anyhow::Error::msg)?;
+            database
+                .validate_compact_modifications()
+                .map_err(anyhow::Error::msg)?;
             database
                 .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
                 .map_err(anyhow::Error::msg)?;

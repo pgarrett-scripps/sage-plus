@@ -317,13 +317,16 @@ fn physicochemical_source_embed(
     embedding[PROPERTY_START + 7] = glycine as f64 / len_f;
 
     let modification_count = peptide
-        .modifications
+        .sequence
         .iter()
-        .filter(|&&mass| mass != 0.0)
+        .enumerate()
+        .filter(|(index, _)| peptide.modification_at(*index) != 0.0)
         .count()
         + usize::from(peptide.nterm.is_some())
         + usize::from(peptide.cterm.is_some());
-    let modification_mass = peptide.modifications.iter().sum::<f32>()
+    let modification_mass = (0..peptide.sequence.len())
+        .map(|index| peptide.modification_at(index))
+        .sum::<f32>()
         + peptide.nterm.unwrap_or_default()
         + peptide.cterm.unwrap_or_default();
     embedding[MODIFICATION_START] = modification_count as f64 / len_f;
@@ -439,8 +442,9 @@ pub(crate) fn variable_mod_count(
 ) -> f64 {
     let first = peptide.sequence.first().copied();
     let last = peptide.sequence.last().copied();
-    let first_mass = peptide.modifications.first().copied();
-    let last_mass = peptide.modifications.last().copied();
+    let first_mass = nonzero_modification(peptide.modification_at(0));
+    let last_mass =
+        nonzero_modification(peptide.modification_at(peptide.sequence.len().saturating_sub(1)));
     match specificity {
         ModificationSpecificity::PeptideN(None) => {
             usize::from(mass_matches(peptide.nterm, mass)) as f64
@@ -479,11 +483,17 @@ pub(crate) fn variable_mod_count(
         ModificationSpecificity::Residue(residue) => peptide
             .sequence
             .iter()
-            .zip(&peptide.modifications)
-            .filter(|&(&aa, &observed)| aa == residue && (observed - mass).abs() <= 1e-3)
+            .enumerate()
+            .filter(|(index, aa)| {
+                **aa == residue && (peptide.modification_at(*index) - mass).abs() <= 1e-3
+            })
             .count() as f64,
         _ => 0.0,
     }
+}
+
+fn nonzero_modification(mass: f32) -> Option<f32> {
+    (mass != 0.0).then_some(mass)
 }
 
 #[derive(Clone)]

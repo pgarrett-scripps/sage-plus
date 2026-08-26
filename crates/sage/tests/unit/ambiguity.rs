@@ -84,7 +84,7 @@ fn mass_shift() {
 fn peptide(seq: &str) -> Peptide {
     Peptide {
         sequence: Arc::from(seq.as_bytes()),
-        modifications: vec![0.0; seq.len()],
+        modifications: crate::peptide::CompactModifications::default(),
         ..Default::default()
     }
 }

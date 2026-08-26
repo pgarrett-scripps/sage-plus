@@ -176,13 +176,12 @@ fn settings_reject_invalid_values_and_duplicate_formats() {
 
 #[test]
 fn mass_delta_proforma_does_not_depend_on_modification_names() {
-    let mut peptide = Peptide {
+    let peptide = Peptide {
         sequence: Arc::from(&b"ACD"[..]),
-        modifications: vec![0.0, 57.021_465, 0.0],
+        modifications: crate::peptide::CompactModifications::from_dense([0.0, 57.021_465, 0.0]),
         nterm: Some(42.010_565),
         ..Peptide::default()
     };
-    peptide.applied_modifications = Arc::new(vec![]);
     assert_eq!(
         mass_delta_proforma(&peptide),
         "[+42.010567]-AC[+57.021465]D"

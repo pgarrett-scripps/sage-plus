@@ -41,7 +41,119 @@ fn unmodified_peptides_use_compact_modification_storage() {
             peptide.modification_count(ModificationSpecificity::Residue(b'P'), 10.0) > 0
         })
         .unwrap();
-    assert_eq!(modified.modifications.len(), modified.sequence.len());
+    assert_eq!(modified.modifications.len(), 1);
+    assert!(!modified.modifications.spilled());
+}
+
+#[test]
+fn compact_modification_layout_and_inline_capacity() {
+    assert_eq!(std::mem::size_of::<EncodedModification>(), 2);
+    assert_eq!(std::mem::size_of::<CompactModifications>(), 32);
+    assert_eq!(std::mem::size_of::<Peptide>(), 144);
+
+    let inline = CompactModifications::from_sparse((0..4).map(|index| (index, index as f32 + 1.0)));
+    assert_eq!(inline.len(), 4);
+    assert!(!inline.spilled());
+
+    let spilled =
+        CompactModifications::from_sparse((0..5).map(|index| (index, index as f32 + 1.0)));
+    assert_eq!(spilled.len(), 5);
+    assert!(spilled.spilled());
+}
+
+#[test]
+fn compact_forward_cursor_sums_stacked_residue_modifications() {
+    let modifications = CompactModifications::from_applied([
+        AppliedModification {
+            site: Site::Nterm,
+            modification: Arc::new(ModificationDefinition::bare(4.0)),
+            kind: ModificationKind::Ordinary,
+        },
+        AppliedModification {
+            site: Site::Sequence(2),
+            modification: Arc::new(ModificationDefinition::bare(10.0)),
+            kind: ModificationKind::Ordinary,
+        },
+        AppliedModification {
+            site: Site::Sequence(2),
+            modification: Arc::new(ModificationDefinition::bare(2.5)),
+            kind: ModificationKind::Ordinary,
+        },
+        AppliedModification {
+            site: Site::Sequence(4),
+            modification: Arc::new(ModificationDefinition::bare(3.0)),
+            kind: ModificationKind::Ordinary,
+        },
+    ])
+    .unwrap();
+    let mut cursor = 0;
+    assert_eq!(modifications.mass_at_with_cursor(0, &mut cursor), 0.0);
+    assert_eq!(modifications.mass_at_with_cursor(1, &mut cursor), 0.0);
+    assert_eq!(modifications.mass_at_with_cursor(2, &mut cursor), 12.5);
+    assert_eq!(modifications.mass_at_with_cursor(3, &mut cursor), 0.0);
+    assert_eq!(modifications.mass_at_with_cursor(4, &mut cursor), 3.0);
+}
+
+#[test]
+fn applying_rules_merges_an_existing_compact_lookup() {
+    let peptide = Peptide {
+        sequence: Arc::from(&b"ACDE"[..]),
+        modifications: CompactModifications::from_sparse([(0, 3.0)]),
+        ..Peptide::default()
+    };
+    let modified = peptide
+        .apply(
+            &[(ModificationSpecificity::Residue(b'D'), 5.0, None)],
+            &HashMap::default(),
+            1,
+            None,
+        )
+        .into_iter()
+        .find(|peptide| peptide.modification_at(2) == 5.0)
+        .unwrap();
+    assert_eq!(modified.modification_at(0), 3.0);
+    assert_eq!(modified.modification_at(2), 5.0);
+}
+
+#[test]
+fn compact_encoding_accepts_255_residues_and_rejects_256() {
+    let peptide = Peptide::try_from(Digest {
+        sequence: "A".repeat(255),
+        ..Digest::default()
+    })
+    .unwrap();
+    let mut peptide = peptide;
+    peptide.modifications = CompactModifications::from_sparse([(254, 12.5)]);
+    assert_eq!(peptide.modification_at(254), 12.5);
+
+    assert_eq!(
+        Peptide::try_from(Digest {
+            sequence: "A".repeat(256),
+            ..Digest::default()
+        }),
+        Err(PeptideError::SequenceTooLong {
+            length: 256,
+            maximum: 255,
+        })
+    );
+}
+
+#[test]
+fn compact_lookup_rejects_more_than_255_definition_variants() {
+    let definitions = |count| {
+        (0..count).map(|index| {
+            (
+                Site::Sequence(0),
+                Arc::new(ModificationDefinition::bare(index as f32 + 0.5)),
+                ModificationKind::Ordinary,
+            )
+        })
+    };
+    assert!(ModificationLookup::from_definitions(definitions(255)).is_ok());
+    assert_eq!(
+        ModificationLookup::from_definitions(definitions(256)).unwrap_err(),
+        ModificationLookupError { definitions: 256 }
+    );
 }
 
 fn detailed_mod(
@@ -627,8 +739,8 @@ fn names_follow_exact_modification_identity_and_decoy_position() {
     assert!(rendered.contains(&"AM[Oxidation]MAK".to_string()));
     assert!(rendered.contains(&"AM[AlternateName]MAK".to_string()));
     assert_ne!(
-        peptides[1].applied_modifications,
-        peptides[3].applied_modifications
+        peptides[1].applied_modifications().collect::<Vec<_>>(),
+        peptides[3].applied_modifications().collect::<Vec<_>>()
     );
 
     let named = peptides
@@ -686,7 +798,10 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
         },
     ];
 
-    let variants = peptide.apply_rules(&rules, &library, &HashMap::new(), 1, 3, None);
+    let static_mods = HashMap::new();
+    let labels = LabelModificationCache::new(rules.iter().map(|rule| &rule.modification), &[]);
+    let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels).unwrap();
+    let variants = peptide.apply_rules(&rules, &library, &static_mods, lookup, 1, 3, None);
 
     assert!(variants.iter().any(|peptide| {
         peptide.modification_at(0) != 0.0
@@ -697,7 +812,7 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
         peptide.modification_at(0) != 0.0
             && peptide.modification_at(1) == 0.0
             && peptide.modification_at(2) == 0.0
-            && peptide.applied_modifications.len() > 1
+            && peptide.applied_modifications().len() > 1
     }));
 }
 
@@ -733,11 +848,14 @@ fn named_max_count_is_shared_across_residue_rules() {
         },
     ];
 
-    let variants = peptide.apply_rules(&rules, &library, &HashMap::new(), 0, 2, None);
+    let static_mods = HashMap::new();
+    let labels = LabelModificationCache::new(rules.iter().map(|rule| &rule.modification), &[]);
+    let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels).unwrap();
+    let variants = peptide.apply_rules(&rules, &library, &static_mods, lookup, 0, 2, None);
     assert_eq!(variants.len(), 3);
     assert!(variants
         .iter()
-        .all(|peptide| peptide.applied_modifications.len() <= 1));
+        .all(|peptide| peptide.applied_modifications().len() <= 1));
 }
 
 #[test]

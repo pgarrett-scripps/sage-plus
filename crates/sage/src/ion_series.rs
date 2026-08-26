@@ -75,7 +75,7 @@ impl<'p> IonGroupSeries<'p> {
 
     fn losses(&self, series_index: usize) -> SmallVec<[f32; 4]> {
         let mut totals = smallvec![0.0f32];
-        for applied in self.peptide.applied_modifications.iter().filter(|applied| {
+        for applied in self.peptide.applied_modifications().filter(|applied| {
             self.contains_site(applied.site, series_index)
                 && !applied.modification.neutral_losses.is_empty()
         }) {
@@ -134,6 +134,7 @@ pub struct IonSeries<'p> {
     cumulative_mass: f32,
     peptide: &'p Peptide,
     idx: usize,
+    modification_idx: usize,
 }
 
 impl<'p> IonSeries<'p> {
@@ -161,6 +162,7 @@ impl<'p> IonSeries<'p> {
             cumulative_mass,
             peptide,
             idx: 0,
+            modification_idx: 0,
         }
     }
 }
@@ -175,7 +177,10 @@ impl<'p> Iterator for IonSeries<'p> {
             return None;
         }
         let r = self.peptide.sequence[self.idx];
-        let m = self.peptide.modification_at(self.idx);
+        let m = self
+            .peptide
+            .modifications
+            .mass_at_with_cursor(self.idx, &mut self.modification_idx);
 
         self.cumulative_mass += match self.kind {
             Kind::A | Kind::B | Kind::C => monoisotopic(r) + m,
