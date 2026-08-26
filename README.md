@@ -38,8 +38,6 @@ agent-facing capabilities.
 - PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
 - Direct reading of local Thermo Fisher RAW files.
 - Empirical spectral-library export in canonical Parquet and PSI mzSpecLib formats, using either a deterministic best PSM or robust consensus spectra.
-- Standalone DDA library search with shuffled decoys, isotope-aware matching, per-file mass calibration, RT and mobility alignment, matched-fragment export, LFQ, and TMT.
-- Regularized library rescoring with spectrum, peptide, protein, and protein-group FDR reporting.
 - A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
 - A root-bounded MCP server with persistent jobs and isolated search workers for configuration, estimation, safe execution, cancellation, monitoring, analysis, and result queries.
 
@@ -75,7 +73,6 @@ upstream Sage releases.
 - [Sage MCP server](crates/sage-mcp/README.md)
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
-- [DDA spectral-library search](DDA_LIBRARY_SEARCH.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 
 ## Attribution and citation

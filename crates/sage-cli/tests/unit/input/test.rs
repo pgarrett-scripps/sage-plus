@@ -154,33 +154,9 @@ fn base_search_space(value: serde_json::Value) -> Input {
 }
 
 #[test]
-fn database_and_library_search_are_mutually_exclusive() {
+fn database_is_required() {
     let database = base_search_space(serde_json::json!({ "fasta": "test.fasta" }));
     assert!(database.validate().is_ok());
-
-    let library: Input = serde_json::from_value(serde_json::json!({
-        "library_search": { "path": "library.mzspeclib.txt" },
-        "precursor_tol": { "ppm": [-10, 10] },
-        "fragment_tol": { "ppm": [-10, 10] },
-        "isotope_errors": [-1, 2],
-        "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"]
-    }))
-    .unwrap();
-    assert!(library.validate().is_ok());
-
-    let both: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
-        "library_search": { "path": "library.sage.parquet" },
-        "precursor_tol": { "ppm": [-10, 10] },
-        "fragment_tol": { "ppm": [-10, 10] },
-        "mzml_paths": ["test.mzML"]
-    }))
-    .unwrap();
-    assert!(both
-        .validate()
-        .unwrap_err()
-        .to_string()
-        .contains("exactly one"));
 
     let neither: Input = serde_json::from_value(serde_json::json!({
         "precursor_tol": { "ppm": [-10, 10] },
@@ -192,7 +168,7 @@ fn database_and_library_search_are_mutually_exclusive() {
         .validate()
         .unwrap_err()
         .to_string()
-        .contains("exactly one"));
+        .contains("database"));
 }
 
 #[test]
@@ -228,25 +204,6 @@ fn modification_channel_offsets_are_validated_before_search() {
         .unwrap_err()
         .to_string()
         .contains("same channel names"));
-}
-
-#[test]
-fn library_search_build_does_not_create_database_parameters() {
-    let spectra = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/LQSRPAAPPAPGPGQLTLR.mzML");
-    let input: Input = serde_json::from_value(serde_json::json!({
-        "library_search": { "path": "library.sage.parquet" },
-        "precursor_tol": { "ppm": [-10, 10] },
-        "fragment_tol": { "ppm": [-10, 10] },
-        "isotope_errors": [-1, 2],
-        "mzml_paths": [spectra]
-    }))
-    .unwrap();
-    let search = input.build().unwrap();
-    assert!(search.database.is_none());
-    assert!(search.library_search.is_some());
-    assert_eq!(search.isotope_errors, (-1, 2));
-    assert!(!search.predict_rt);
 }
 
 #[test]

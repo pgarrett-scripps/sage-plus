@@ -319,14 +319,6 @@ fn spectral_library_has_versioned_long_form_rows() -> parquet::errors::Result<()
         ..SpectralLibrarySettings::default()
     };
     let bytes = serialize_spectral_library(&[entry], &settings)?;
-    let search_entries = deserialize_spectral_library(bytes.clone())?;
-    assert_eq!(search_entries.len(), 1);
-    assert_eq!(search_entries[0].library_entry_id, "PEPTIDE/2");
-    assert_eq!(search_entries[0].source_file, "sample.mzML");
-    assert_eq!(search_entries[0].source_spectrum, "scan=42");
-    assert_eq!(search_entries[0].fragments.len(), 2);
-    assert!(!search_entries[0].is_decoy);
-
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     assert_eq!(reader.metadata().file_metadata().num_rows(), 2);
     assert_eq!(
@@ -397,10 +389,17 @@ fn labeled_spectral_library_round_trips_channel_metadata() -> parquet::errors::R
         }],
     };
     let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
-    let entries = deserialize_spectral_library(bytes)?;
-    assert_eq!(entries[0].label_channel.as_deref(), Some("heavy"));
-    assert_eq!(entries[0].label_group.as_deref(), Some("PEPTIDER"));
-    assert_eq!(entries[0].label_reference.as_deref(), Some("light"));
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let rows = reader
+        .get_row_iter(None)?
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    let first = rows[0]
+        .get_column_iter()
+        .map(|(name, field)| (name.as_str(), field))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(first["label_channel"], &Field::Str("heavy".into()));
+    assert_eq!(first["label_group"], &Field::Str("PEPTIDER".into()));
+    assert_eq!(first["label_reference"], &Field::Str("light".into()));
     Ok(())
 }
 

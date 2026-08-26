@@ -4,14 +4,9 @@
   "title": "Sage search configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["precursor_tol", "fragment_tol"],
-  "oneOf": [
-    { "required": ["database"], "not": { "required": ["library_search"] } },
-    { "required": ["library_search"], "not": { "required": ["database"] } }
-  ],
+  "required": ["database", "precursor_tol", "fragment_tol"],
   "properties": {
     "database": { "$ref": "#/$defs/database" },
-    "library_search": { "type": "object", "additionalProperties": true },
     "precursor_tol": { "$ref": "#/$defs/tolerance" },
     "fragment_tol": { "$ref": "#/$defs/tolerance" },
     "report_psms": { "type": "integer", "minimum": 1, "default": 1 },

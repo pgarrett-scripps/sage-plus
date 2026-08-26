@@ -97,10 +97,8 @@ fn builds_normalized_top_fragments_and_mzspeclib() {
     assert!(text.contains("MS:1003270|proforma peptidoform ion notation=PEPTIDE/2"));
     assert!(text.contains("300.000000\t10000.000000\ty3-H2O"));
     assert!(text.contains("SAGE:1000001|label channel=heavy"));
-    let parsed = crate::spectral_library_search::deserialize_mzspeclib(&text).unwrap();
-    assert_eq!(parsed[0].label_channel.as_deref(), Some("heavy"));
-    assert_eq!(parsed[0].label_group.as_deref(), Some("PEPTIDE"));
-    assert_eq!(parsed[0].label_reference.as_deref(), Some("light"));
+    assert!(text.contains("SAGE:1000002|label group=PEPTIDE"));
+    assert!(text.contains("SAGE:1000003|label reference=light"));
 }
 
 #[test]

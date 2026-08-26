@@ -12,7 +12,6 @@ use sage_core::{
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
     spectral_library::SpectralLibrarySettings,
-    spectral_library_search::LibrarySearchSettings,
     spectrum::{DeisotopeConfig, DeisotopeSettings},
     tmt::Isobaric,
 };
@@ -44,10 +43,7 @@ impl Default for PtmLocalizationSettings {
 /// Actual search parameters - may include overrides or default values not set by user
 pub struct Search {
     pub version: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub database: Option<Parameters>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub library_search: Option<LibrarySearchSettings>,
+    pub database: Parameters,
     pub quant: QuantSettings,
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
@@ -106,7 +102,6 @@ pub struct Search {
 /// Input search parameters deserialized from JSON file
 pub struct Input {
     pub database: Option<Builder>,
-    pub library_search: Option<LibrarySearchSettings>,
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
     pub report_psms: Option<usize>,
@@ -373,10 +368,7 @@ impl Input {
 
     /// Validate logical configuration constraints without reading inputs or writing outputs.
     pub fn validate(&self) -> anyhow::Result<()> {
-        ensure!(
-            self.database.is_some() ^ self.library_search.is_some(),
-            "exactly one of `database` or `library_search` must be configured"
-        );
+        ensure!(self.database.is_some(), "`database` must be configured");
         if let Some(database) = &self.database {
             ensure!(
                 database.fasta.is_some() || database.peptides.is_some(),
@@ -391,32 +383,6 @@ impl Input {
             parameters
                 .validate_compact_modifications()
                 .map_err(anyhow::Error::msg)?;
-        }
-        if let Some(library) = &self.library_search {
-            library.validate().map_err(anyhow::Error::msg)?;
-            ensure!(
-                self.report_psms.unwrap_or(1) == 1,
-                "`report_psms` must be 1 with `library_search` for target-decoy competition"
-            );
-            ensure!(
-                !self.chimera.unwrap_or(false),
-                "`chimera` is not supported with `library_search`"
-            );
-            ensure!(
-                !self.wide_window.unwrap_or(false),
-                "`wide_window` is not supported with `library_search`"
-            );
-            ensure!(
-                !self.ptm_localization.unwrap_or_default().enabled,
-                "`ptm_localization` is not supported with `library_search`"
-            );
-            ensure!(
-                !self
-                    .spectral_library
-                    .as_ref()
-                    .is_some_and(|settings| settings.enabled),
-                "spectral-library export is not supported during `library_search`"
-            );
         }
         ensure!(
             self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
@@ -510,18 +476,17 @@ impl Input {
         self.validate()?;
         let memory_limits = self.memory_limits()?;
         let batch_size = resolve_batch_size(self.batch_size)?;
-        let database = self.database.map(Builder::make_parameters);
-        if let Some(database) = &database {
-            database.validate_channels().map_err(anyhow::Error::msg)?;
-            database
-                .validate_compact_modifications()
-                .map_err(anyhow::Error::msg)?;
-            database
-                .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
-                .map_err(anyhow::Error::msg)?;
-        }
-        let library_mode = self.library_search.is_some();
-
+        let database = self
+            .database
+            .expect("validated database configuration")
+            .make_parameters();
+        database.validate_channels().map_err(anyhow::Error::msg)?;
+        database
+            .validate_compact_modifications()
+            .map_err(anyhow::Error::msg)?;
+        database
+            .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
+            .map_err(anyhow::Error::msg)?;
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
 
@@ -581,7 +546,6 @@ impl Input {
         Ok(Search {
             version: clap::crate_version!().into(),
             database,
-            library_search: self.library_search,
             quant: self.quant.map(Into::into).unwrap_or_default(),
             mzml_paths,
             output_directory,
@@ -603,7 +567,7 @@ impl Input {
                 .resolve(),
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
-            predict_rt: self.predict_rt.unwrap_or(!library_mode),
+            predict_rt: self.predict_rt.unwrap_or(true),
             retention_time_model: self.retention_time_model.unwrap_or_default(),
             retention_time_alignment: self.retention_time_alignment,
             ion_mobility_model: self.ion_mobility_model.unwrap_or_default(),
