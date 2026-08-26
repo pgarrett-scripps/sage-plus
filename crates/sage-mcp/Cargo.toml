@@ -7,6 +7,10 @@ description = "Model Context Protocol server for Sage proteomics searches"
 license = "MIT"
 publish = false
 
+[features]
+default = ["mzmlb"]
+mzmlb = ["sage-cli/mzmlb"]
+
 [[bin]]
 name = "sage-mcp"
 path = "src/main.rs"
@@ -14,7 +18,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 rmcp = { version = "3.1.2", features = ["server", "transport-io"] }
-sage-cli = { path = "../sage-cli" }
+sage-cli = { path = "../sage-cli", default-features = false }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 sage-core = { path = "../sage" }
 schemars = "1"
