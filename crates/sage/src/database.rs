@@ -117,12 +117,16 @@ pub struct Builder {
     pub prefilter_chunk_size: Option<usize>,
     /// Pre-filter the database to minimize memory usage
     pub prefilter: Option<bool>,
-    /// Pre-filter the database with a minimal amount of memory at the cost of speed
+    /// Deprecated compatibility option. Exact prefiltering always uses compact
+    /// survivor tracking and ignores this value.
     pub prefilter_low_memory: Option<bool>,
 }
 
 impl Builder {
     pub fn make_parameters(self) -> Parameters {
+        if self.prefilter_low_memory.is_some() {
+            log::warn!("database.prefilter_low_memory is deprecated and ignored");
+        }
         let bucket_size = self.bucket_size.unwrap_or(8192).next_power_of_two();
         let max_variable_mods = self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2);
         let max_total_variable_mods = self
@@ -181,6 +185,8 @@ pub struct Parameters {
     pub custom_cleavage_sites: Option<String>,
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
+    /// Deprecated compatibility option. Exact prefiltering ignores this value.
+    #[serde(skip_serializing)]
     pub prefilter_low_memory: bool,
     #[serde(skip)]
     pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
@@ -793,6 +799,21 @@ impl Parameters {
 
     /// Expand variable modifications and generate decoys from an unmodified digest.
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
+        let target_sequences = digests
+            .iter()
+            .filter(|digest| !digest.reference.decoy)
+            .map(|digest| digest.reference.sequence.as_bytes().to_vec())
+            .collect::<HashSet<_>>();
+        self.modify_digests_with_target_sequences(digests, &target_sequences)
+    }
+
+    /// Expand a digest chunk while checking generated decoys against every
+    /// target sequence in the complete database.
+    pub fn modify_digests_with_target_sequences(
+        &self,
+        digests: Vec<DigestGroup>,
+        target_sequences: &HashSet<Vec<u8>>,
+    ) -> Vec<Peptide> {
         let mods = self.variable_modifications();
         let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
@@ -811,14 +832,6 @@ impl Parameters {
         )
         .unwrap_or_else(|error| panic!("{error}"));
         let library = self.loaded_ptm_library.as_deref();
-
-        let targets: DashSet<_, FnvBuildHasher> = DashSet::default();
-        digests
-            .par_iter()
-            .filter(|digest| !digest.reference.decoy)
-            .for_each(|digest| {
-                targets.insert(digest.reference.sequence.clone().into_bytes());
-            });
 
         log::trace!("modifying peptides");
         let mut target_decoys = digests
@@ -863,7 +876,7 @@ impl Parameters {
                             }
                         })
                         .filter(|peptide| {
-                            !peptide.decoy || !targets.contains(&(peptide.sequence[..]))
+                            !peptide.decoy || !target_sequences.contains(&(peptide.sequence[..]))
                         })
                         .collect::<Vec<_>>()
                 };
@@ -914,6 +927,39 @@ impl Parameters {
         Self::reorder_peptides_with_reference(&mut target_decoys, label_reference.as_deref());
 
         target_decoys
+    }
+
+    /// Partition digest groups without splitting equal raw sequences. This
+    /// keeps terminal variants and protein occurrences together so a modified
+    /// peptidoform is generated in exactly one prefilter chunk.
+    pub fn partition_digests_by_sequence(
+        mut digests: Vec<DigestGroup>,
+        chunk_size: usize,
+    ) -> Vec<Vec<DigestGroup>> {
+        let chunk_size = chunk_size.max(1);
+        digests.sort_unstable_by(|left, right| {
+            left.reference
+                .sequence
+                .cmp(&right.reference.sequence)
+                .then_with(|| left.reference.position.cmp(&right.reference.position))
+                .then_with(|| left.reference.decoy.cmp(&right.reference.decoy))
+        });
+
+        let mut chunks = Vec::new();
+        let mut chunk: Vec<DigestGroup> = Vec::new();
+        for digest in digests {
+            let sequence_changed = chunk
+                .last()
+                .is_some_and(|previous| previous.reference.sequence != digest.reference.sequence);
+            if sequence_changed && chunk.len() >= chunk_size {
+                chunks.push(std::mem::take(&mut chunk));
+            }
+            chunk.push(digest);
+        }
+        if !chunk.is_empty() {
+            chunks.push(chunk);
+        }
+        chunks
     }
 
     pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
@@ -1453,6 +1499,33 @@ pub struct IndexedDatabase {
 }
 
 impl IndexedDatabase {
+    /// Find the paired target or decoy for a peptide. Explicit library pairing
+    /// takes precedence. Generated FASTA decoys are located by their canonical
+    /// reversed peptidoform identity.
+    pub fn paired_peptide_index(&self, peptide_index: PeptideIx) -> Option<PeptideIx> {
+        if let Some(&paired) = self.decoy_pairing.get(peptide_index.0 as usize) {
+            if paired != PeptideIx::default() {
+                return Some(paired);
+            }
+        }
+        if !self.generate_decoys {
+            return None;
+        }
+
+        let peptide = self.peptides.get(peptide_index.0 as usize)?;
+        let paired = peptide.reverse();
+        let index = self
+            .peptides
+            .binary_search_by(|candidate| {
+                candidate
+                    .monoisotopic
+                    .total_cmp(&paired.monoisotopic)
+                    .then_with(|| candidate.initial_sort(&paired))
+            })
+            .ok()?;
+        (self.peptides[index].decoy != peptide.decoy).then_some(PeptideIx(index as u32))
+    }
+
     /// Create a new [`IndexedQuery`] for a specific [`ProcessedSpectrum`]
     ///
     /// All matches returned by the query will be within the specified tolerance

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use super::*;
 
@@ -89,6 +89,60 @@ fn filtered_decoy_generation_drops_reversals_that_collide_with_targets() {
 
     assert_eq!(peptides.len(), 2);
     assert!(peptides.iter().all(|peptide| !peptide.decoy));
+}
+
+fn digest_group(sequence: &str, position: Position) -> DigestGroup {
+    let reference = Digest {
+        sequence: sequence.into(),
+        position,
+        protein: Arc::from(sequence),
+        ..Digest::default()
+    };
+    DigestGroup {
+        origins: vec![ProteinOccurrence {
+            protein: reference.protein.clone(),
+            start: reference.protein_start,
+            prev_aa: reference.prev_aa,
+            next_aa: reference.next_aa,
+        }],
+        reference,
+    }
+}
+
+#[test]
+fn sequence_coherent_partition_never_splits_terminal_variants() {
+    let chunks = Parameters::partition_digests_by_sequence(
+        vec![
+            digest_group("PEPTIDER", Position::Internal),
+            digest_group("SEQUENCEK", Position::Full),
+            digest_group("PEPTIDER", Position::Nterm),
+        ],
+        1,
+    );
+
+    assert_eq!(chunks.len(), 2);
+    assert!(chunks.iter().any(|chunk| {
+        chunk.len() == 2
+            && chunk
+                .iter()
+                .all(|group| group.reference.sequence == "PEPTIDER")
+    }));
+}
+
+#[test]
+fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
+    let parameters = Builder::default().make_parameters();
+    let target_sequences = [b"PEPTIDER".to_vec(), b"PEDITPER".to_vec()]
+        .into_iter()
+        .collect::<HashSet<_>>();
+
+    let peptides = parameters.modify_digests_with_target_sequences(
+        vec![digest_group("PEPTIDER", Position::Full)],
+        &target_sequences,
+    );
+
+    assert_eq!(peptides.len(), 1);
+    assert!(!peptides[0].decoy);
 }
 
 #[test]

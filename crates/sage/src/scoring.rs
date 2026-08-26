@@ -6,7 +6,46 @@ use crate::spectrum::{Precursor, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::ops::AddAssign;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+
+/// A compact thread-safe set used while spectra are searched in parallel.
+pub struct AtomicBitSet {
+    words: Vec<AtomicU64>,
+    len: usize,
+}
+
+impl AtomicBitSet {
+    pub fn new(len: usize) -> Self {
+        let words = (0..len.div_ceil(u64::BITS as usize))
+            .map(|_| AtomicU64::new(0))
+            .collect();
+        Self { words, len }
+    }
+
+    #[inline]
+    pub fn insert(&self, index: usize) {
+        assert!(index < self.len);
+        let word = index / u64::BITS as usize;
+        let bit = index % u64::BITS as usize;
+        self.words[word].fetch_or(1u64 << bit, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn contains(&self, index: usize) -> bool {
+        assert!(index < self.len);
+        let word = index / u64::BITS as usize;
+        let bit = index % u64::BITS as usize;
+        self.words[word].load(Ordering::Relaxed) & (1u64 << bit) != 0
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum ScoreType {
@@ -391,11 +430,63 @@ fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) ->
 }
 
 impl<'db> Scorer<'db> {
+    /// Mark every peptide that contributes at least one preliminary fragment
+    /// match for this spectrum. Keeping all contributors preserves the normal
+    /// top-K candidate set and its candidate statistics after chunk merging.
+    pub fn exact_prefilter(&self, query: &ProcessedSpectrum, keep: &AtomicBitSet) {
+        assert_eq!(
+            query.level, 2,
+            "internal bug, trying to score a non-MS2 scan!"
+        );
+        assert_eq!(keep.len(), self.db.peptides.len());
+        let precursor = query
+            .precursors
+            .first()
+            .unwrap_or_else(|| panic!("missing MS1 precursor for {}", query.id));
+        let mz = precursor.mz - PROTON;
+
+        let mark = |precursor_mass: f32, precursor_charge: u8, tolerance: Tolerance| {
+            let fragment_index = FragmentMatchIndex::new(
+                query,
+                max_fragment_charge(self.max_fragment_charge, precursor_charge),
+            );
+            for isotope_error in self.min_isotope_err..=self.max_isotope_err {
+                let candidates = self.db.query(
+                    precursor_mass - isotope_error as f32 * NEUTRON,
+                    tolerance,
+                    self.fragment_tol,
+                );
+                for peak in &fragment_index.peaks {
+                    for fragment in candidates.page_search(peak.neutral_mass) {
+                        keep.insert(fragment.peptide_index.0 as usize);
+                    }
+                }
+            }
+        };
+
+        if self.wide_window {
+            for charge in self.min_precursor_charge..=self.max_precursor_charge {
+                let tolerance = precursor
+                    .isolation_window
+                    .unwrap_or(Tolerance::Da(-2.4, 2.4))
+                    * charge as f32;
+                mark(mz * charge as f32, charge, tolerance);
+            }
+        } else if let Some(charge) = precursor.charge.filter(|_| !self.override_precursor_charge) {
+            mark(mz * charge as f32, charge, self.precursor_tol);
+        } else {
+            for charge in self.min_precursor_charge..=self.max_precursor_charge {
+                mark(mz * charge as f32, charge, self.precursor_tol);
+            }
+        }
+    }
+
     /// Perform a quick first-pass scoring, where we consider a peptide "identified"
     /// if it meets the following criterion:
     ///  * prefilter_low_memory = true: in the top `report_psms` hits for a spectrum
     ///  * prefilter_low_memory = false: has at least `min_matched_peaks` fragment ion matches
     /// * `keep`: A vector of atomic bools is used to maintain an identification list across scans
+    #[deprecated(note = "use exact_prefilter for candidate-exact filtering")]
     pub fn quick_score(
         &self,
         query: &ProcessedSpectrum,
@@ -667,8 +758,21 @@ impl<'db> Scorer<'db> {
             .filter(|s| (s.0.matched_b + s.0.matched_y) >= self.min_matched_peaks)
             .collect::<Vec<_>>();
 
-        // Hyperscore is our primary score function for PSMs
-        score_vector.sort_by(|a, b| b.0.hyperscore.total_cmp(&a.0.hyperscore));
+        // Hyperscore is primary. Peptidoform identity, charge, and isotope make
+        // exact ties deterministic across database layouts and chunk filtering.
+        score_vector.sort_unstable_by(|a, b| {
+            b.0.hyperscore
+                .total_cmp(&a.0.hyperscore)
+                .then_with(|| {
+                    let left = &self.db[a.0.peptide];
+                    let right = &self.db[b.0.peptide];
+                    left.monoisotopic
+                        .total_cmp(&right.monoisotopic)
+                        .then_with(|| left.initial_sort(right))
+                })
+                .then_with(|| a.0.precursor_charge.cmp(&b.0.precursor_charge))
+                .then_with(|| a.0.isotope_error.cmp(&b.0.isotope_error))
+        });
 
         // Expected value for poisson distribution
         // (average # of matches peaks/peptide candidate)

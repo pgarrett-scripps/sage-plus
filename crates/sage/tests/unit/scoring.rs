@@ -31,6 +31,94 @@ fn score_ordering_uses_hyperscore() {
 }
 
 #[test]
+fn exact_prefilter_preserves_tied_isobaric_scoring() {
+    let builder = Builder {
+        generate_decoys: Some(false),
+        ..Builder::default()
+    };
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nLEKPI\nPEILK\nPELIK\n");
+    let expected = peptides
+        .iter()
+        .find(|peptide| peptide.sequence.as_ref() == b"PEILK")
+        .unwrap()
+        .clone();
+    let mut masses = [Kind::B, Kind::Y]
+        .into_iter()
+        .flat_map(|kind| IonSeries::new(&expected, kind))
+        .map(|ion| ion.monoisotopic_mass)
+        .collect::<Vec<_>>();
+    masses.sort_by(f32::total_cmp);
+    let query = ProcessedSpectrum {
+        level: 2,
+        id: "tied-isobaric".into(),
+        precursors: vec![Precursor {
+            mz: expected.monoisotopic / 2.0 + PROTON,
+            charge: Some(2),
+            ..Precursor::default()
+        }],
+        intensities: vec![1.0; masses.len()],
+        charges: vec![1; masses.len()],
+        total_ion_current: masses.len() as f32,
+        masses,
+        ..ProcessedSpectrum::default()
+    };
+
+    let full = parameters.clone().build_from_peptides(peptides);
+    let make_scorer = |database| Scorer {
+        db: database,
+        precursor_tol: Tolerance::Da(-0.01, 0.01),
+        fragment_tol: Tolerance::Da(-0.01, 0.01),
+        min_matched_peaks: 1,
+        min_isotope_err: 0,
+        max_isotope_err: 0,
+        min_precursor_charge: 2,
+        max_precursor_charge: 2,
+        override_precursor_charge: false,
+        max_fragment_charge: Some(1),
+        chimera: false,
+        report_psms: 2,
+        wide_window: false,
+        annotate_matches: false,
+        mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+        score_type: ScoreType::SageHyperScore,
+    };
+    let full_scorer = make_scorer(&full);
+    let full_features = full_scorer.score(&query);
+    assert_eq!(
+        full[full_features[0].peptide_idx].sequence.as_ref(),
+        b"PEILK"
+    );
+
+    let keep = AtomicBitSet::new(full.peptides.len());
+    full_scorer.exact_prefilter(&query, &keep);
+    let survivors = full
+        .peptides
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| keep.contains(*index))
+        .map(|(_, peptide)| peptide.clone())
+        .collect::<Vec<_>>();
+    assert!(survivors.len() < full.peptides.len());
+    let reduced = parameters.build_from_peptides(survivors);
+    let reduced_features = make_scorer(&reduced).score(&query);
+
+    assert_eq!(
+        full[full_features[0].peptide_idx].sequence,
+        reduced[reduced_features[0].peptide_idx].sequence
+    );
+    assert_eq!(full_features[0].hyperscore, reduced_features[0].hyperscore);
+    assert_eq!(
+        full_features[0].scored_candidates,
+        reduced_features[0].scored_candidates
+    );
+    assert_eq!(
+        full_features[0].matched_peaks,
+        reduced_features[0].matched_peaks
+    );
+}
+
+#[test]
 fn longest_series() {
     let mut run = Run::default();
 
