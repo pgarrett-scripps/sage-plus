@@ -9,6 +9,17 @@ message schema {
     required byte_array label_channel (utf8);
     required byte_array label_group (utf8);
     required byte_array proteins (utf8);
+    required group protein_sites (LIST) {
+        repeated group list {
+            required group element {
+                required byte_array protein (utf8);
+                required int32 start;
+                required int32 end;
+                optional byte_array prev_aa (utf8);
+                optional byte_array next_aa (utf8);
+            }
+        }
+    }
     required byte_array protein_groups (utf8);
     required int32 num_proteins;
     required int32 num_protein_groups;
