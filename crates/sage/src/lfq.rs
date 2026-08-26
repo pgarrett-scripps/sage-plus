@@ -57,6 +57,13 @@ pub struct LfqSettings {
     pub mobility_pct_tolerance: f32,
     pub combine_charge_states: bool,
     pub peptide_q_value: f32,
+    /// Trace identified precursors into files without direct MS2 evidence.
+    #[serde(default = "default_true")]
+    pub mbr: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for LfqSettings {
@@ -70,6 +77,7 @@ impl Default for LfqSettings {
             mobility_pct_tolerance: 1.0,
             combine_charge_states: true,
             peptide_q_value: 0.01,
+            mbr: true,
         }
     }
 }
@@ -140,7 +148,7 @@ pub fn build_feature_map(
             (id, feat.file_id)
         })
         .collect::<FnvHashSet<_>>();
-    let map: DashMap<PeptideIx, PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
+    let map: DashMap<(PeptideIx, usize), PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
     let label_groups = db
         .peptides
         .iter()
@@ -168,9 +176,14 @@ pub fn build_feature_map(
                 .map(Vec::as_slice)
                 .unwrap_or(std::slice::from_ref(&feat.peptide_idx));
             for peptide_idx in members {
+                let map_file_id = if settings.mbr {
+                    usize::MAX
+                } else {
+                    feat.file_id
+                };
                 // `features` is sorted by confidence, so take the first anchor
-                // for each exact channel precursor.
-                if map.contains_key(peptide_idx) {
+                // for each exact channel precursor and requested file scope.
+                if map.contains_key(&(*peptide_idx, map_file_id)) {
                     continue;
                 }
                 // let mass = if feat.isotope_error > 0.0 || feat.delta_mass >= settings.ppm_tolerance * 3.0 {
@@ -184,7 +197,7 @@ pub fn build_feature_map(
                 )
                 .bounds(feat.ims);
                 map.insert(
-                    *peptide_idx,
+                    (*peptide_idx, map_file_id),
                     PrecursorRange {
                         rt: feat.aligned_rt,
                         mass_lo: db[*peptide_idx].monoisotopic,
@@ -321,6 +334,9 @@ impl FeatureMap {
                 let query = self.rt_slice(rt, rt_tol);
 
                 let add_entry = |entry: &PrecursorRange, intensity: f32| {
+                    if !self.settings.mbr && entry.file_id != spectrum.file_id {
+                        return;
+                    }
                     let id = match self.settings.combine_charge_states {
                         true => PrecursorId::Combined(entry.peptide),
                         false => PrecursorId::Charged((entry.peptide, entry.charge)),

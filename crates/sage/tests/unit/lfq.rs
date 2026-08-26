@@ -10,6 +10,48 @@ fn default_rt_tolerance_preserves_existing_window() {
 
     settings.rt_pct_tolerance = 1.25;
     assert_eq!(settings.rt_tolerance(), 0.0125);
+    assert!(settings.mbr);
+}
+
+#[test]
+fn disabling_mbr_keeps_one_anchor_per_identified_file() {
+    let parameters: Builder = serde_json::from_value(serde_json::json!({
+        "generate_decoys": false
+    }))
+    .unwrap();
+    let parameters = parameters.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let features = [0, 1].map(|file_id| Feature {
+        peptide_idx: crate::database::PeptideIx(0),
+        peptide_q: 0.0,
+        label: 1,
+        file_id,
+        aligned_rt: 0.5,
+        charge: 2,
+        ..Feature::default()
+    });
+
+    let with_mbr = build_feature_map(LfqSettings::default(), (2, 2), &features, &db);
+    let without_mbr = build_feature_map(
+        LfqSettings {
+            mbr: false,
+            ..LfqSettings::default()
+        },
+        (2, 2),
+        &features,
+        &db,
+    );
+    assert_eq!(with_mbr.ranges.len(), 6);
+    assert_eq!(without_mbr.ranges.len(), 12);
+    assert_eq!(
+        without_mbr
+            .ranges
+            .iter()
+            .map(|range| range.file_id)
+            .collect::<std::collections::HashSet<_>>(),
+        std::collections::HashSet::from([0, 1])
+    );
 }
 
 #[test]

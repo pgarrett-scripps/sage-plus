@@ -1629,28 +1629,34 @@ impl Runner {
             });
             false
         };
-        let ion_mobility_model_fitted = if has_ion_mobility {
-            if sage_core::ml::mobility_model::predict(
-                &self.database,
-                &mut outputs.features,
-                &self.parameters.ion_mobility_model,
-            )
-            .is_some()
-            {
-                self.events.emit(EventKind::MobilityModelFitted);
-                true
-            } else {
+        let ion_mobility_model_fitted =
+            if has_ion_mobility && self.parameters.ion_mobility_model.enabled {
+                if sage_core::ml::mobility_model::predict(
+                    &self.database,
+                    &mut outputs.features,
+                    &self.parameters.ion_mobility_model,
+                )
+                .is_some()
+                {
+                    self.events.emit(EventKind::MobilityModelFitted);
+                    true
+                } else {
+                    self.events.emit(EventKind::MobilityModelSkipped {
+                        reason: "ion mobility unavailable or model fitting failed".into(),
+                    });
+                    false
+                }
+            } else if !self.parameters.ion_mobility_model.enabled {
                 self.events.emit(EventKind::MobilityModelSkipped {
-                    reason: "ion mobility unavailable or model fitting failed".into(),
+                    reason: "ion-mobility prediction disabled".into(),
                 });
                 false
-            }
-        } else {
-            self.events.emit(EventKind::MobilityModelSkipped {
-                reason: "no ion-mobility observations present".into(),
-            });
-            false
-        };
+            } else {
+                self.events.emit(EventKind::MobilityModelSkipped {
+                    reason: "no ion-mobility observations present".into(),
+                });
+                false
+            };
 
         let q_spectrum = self.spectrum_fdr(&mut outputs.features);
         self.events.emit(EventKind::LdaScoringCompleted);

@@ -167,6 +167,7 @@ pub struct LfqOptions {
     pub mobility_pct_tolerance: Option<f32>,
     pub combine_charge_states: Option<bool>,
     pub peptide_q_value: Option<f32>,
+    pub mbr: Option<bool>,
 }
 
 impl From<LfqOptions> for LfqSettings {
@@ -179,6 +180,7 @@ impl From<LfqOptions> for LfqSettings {
             ppm_tolerance: value.ppm_tolerance.unwrap_or(default.ppm_tolerance),
             rt_pct_tolerance: value.rt_pct_tolerance.unwrap_or(default.rt_pct_tolerance),
             peptide_q_value: value.peptide_q_value.unwrap_or(default.peptide_q_value),
+            mbr: value.mbr.unwrap_or(default.mbr),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
                 .unwrap_or(default.mobility_pct_tolerance),
