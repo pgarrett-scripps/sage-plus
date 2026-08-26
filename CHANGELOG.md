@@ -12,6 +12,14 @@ entries are retained below for provenance.
 ### Changed
 - Clarified that Bioconda installs upstream Sage rather than Sage Plus.
 - Added low-noise monthly dependency checks for Cargo and GitHub Actions.
+- Removed the experimental bitmap preliminary search path and its configuration options.
+- Updated network, compression, Parquet, Bruker, logging, and reporting dependencies to patched releases.
+- Pinned CI actions to immutable commits and added dependency review for new pull requests.
+
+### Fixed
+- Database prefiltering now searches targets first, then generates paired decoys only for retained targets. User-supplied decoys remain intact when automatic generation is disabled.
+- LFQ mass lookup now derives its coarse search margin from configured precursor ranges, avoiding missed matches at wider tolerances. Mobility boundaries remain inclusive and configuration-driven.
+- Updated Bruker TDF parsing for the current `timsrust` API without dropping existing processing configuration.
 
 ## [v0.1.0-beta.1] - 2026-08-25
 
@@ -44,13 +52,6 @@ entries are retained below for provenance.
 - Additive protein-specific cleavage-site TSV or Parquet input with optional FASTA sequence-context validation.
 - Optional `max_memory_gb` and `min_free_memory_gb` safeguards that preflight unmodified peptides, variable-modification expansion, and fragment indexes, then monitor the running process to stop Sage before configured limits are crossed.
 - A top-level `batch_size` configuration option; the existing `--batch-size` command-line option takes precedence.
-- **Bitmap-based preliminary search** (`use_bitmap: true`): an alternative to the bucketed binary-search preliminary scoring stage.
-  - Theoretical fragment ions (forward: A/B/C series; reverse: X/Y/Z series) are encoded as packed bitsets per peptide, stored alongside a sorted precursor-mass array for fast range lookup.
-  - Experimental spectra are encoded at query time using the fragment tolerance window; bins spanning a tolerance boundary are all set, so bin-edge fragments are never missed.
-  - Scoring is a bitwise AND + popcount, which is SIMD-friendly and extremely fast.  Only the top-N candidates from this stage proceed to full hyperscore rescoring.
-  - New `database.bitmap_size` config parameter (default `30`) controls the number of 64-bit words per peptide bitmap (e.g. 30 → 1 920 bins spanning `peptide_min_mass`…`peptide_max_mass`).
-  - New top-level `use_bitmap` boolean config parameter (default `false`) to opt in.
-  - **Requires deisotoped spectra** (`deisotope: true`); each peak must carry a resolved neutral monoisotopic mass.
 - **Pre-digested peptide file input** (`database.peptides`): supply a TSV of peptide sequences instead of (or in addition to) a FASTA file.
   - TSV must have a header row with a required `sequence` column; optional `protein` and `decoy` columns are also supported.
   - Ordinary variable and static modifications are not applied from config. Precursor label channels are applied when configured.

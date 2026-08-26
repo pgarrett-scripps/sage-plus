@@ -30,6 +30,38 @@ fn binary_search_slice_run() {
 }
 
 #[test]
+fn filtered_targets_receive_paired_decoys_after_selection() {
+    let parameters = Builder::default().make_parameters();
+    let targets = parameters
+        .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
+    let targets = targets
+        .into_iter()
+        .filter(|peptide| !peptide.decoy)
+        .collect::<Vec<_>>();
+
+    let peptides = parameters.add_reversed_decoys(targets);
+
+    assert_eq!(peptides.iter().filter(|peptide| !peptide.decoy).count(), 2);
+    assert_eq!(peptides.iter().filter(|peptide| peptide.decoy).count(), 2);
+}
+
+#[test]
+fn filtered_decoy_generation_drops_reversals_that_collide_with_targets() {
+    let builder = Builder {
+        generate_decoys: Some(false),
+        ..Builder::default()
+    };
+    let parameters = builder.make_parameters();
+    let targets = parameters
+        .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nPEDITPER\tprotein-b\n");
+
+    let peptides = parameters.add_reversed_decoys(targets);
+
+    assert_eq!(peptides.len(), 2);
+    assert!(peptides.iter().all(|peptide| !peptide.decoy));
+}
+
+#[test]
 fn structured_variable_mod_config_round_trips() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "fasta": "none",
@@ -282,7 +314,6 @@ fn digestion() {
 
     let params = Parameters {
         bucket_size: 128,
-        bitmap_size: 30,
         enzyme: EnzymeBuilder {
             missed_cleavages: Some(1),
             min_len: Some(6),
@@ -313,7 +344,6 @@ fn digestion() {
         prefilter_chunk_size: 0,
         prefilter_low_memory: true,
         loaded_ptm_library: None,
-        use_bitmap: false,
     };
 
     let peptides = params.digest(&fasta);
@@ -374,32 +404,6 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
     let estimate = parameters.estimate_memory_with_custom_cleavages(&fasta, Some(&library));
     assert!(estimate.modified_peptides as usize >= custom.len());
     assert!(estimate.modified_peptides > parameters.estimate_memory(&fasta).modified_peptides);
-}
-
-#[test]
-fn builds_only_selected_search_index() {
-    let peptide = Peptide::try_from(Digest {
-        sequence: "PEPTIDER".into(),
-        protein: Arc::from("protein"),
-        ..Digest::default()
-    })
-    .unwrap();
-
-    let parameters = Builder::default().make_parameters();
-    let fragment_database = parameters
-        .clone()
-        .build_from_peptides(vec![peptide.clone()]);
-    assert!(!fragment_database.fragments.is_empty());
-    assert!(fragment_database.bitmap_index.forward_bitmaps.is_empty());
-    assert!(fragment_database.bitmap_index.reverse_bitmaps.is_empty());
-
-    let mut parameters = parameters;
-    parameters.use_bitmap = true;
-    let bitmap_database = parameters.build_from_peptides(vec![peptide]);
-    assert!(bitmap_database.fragments.is_empty());
-    assert!(bitmap_database.min_value.is_empty());
-    assert!(!bitmap_database.bitmap_index.forward_bitmaps.is_empty());
-    assert!(!bitmap_database.bitmap_index.reverse_bitmaps.is_empty());
 }
 
 #[test]

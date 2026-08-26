@@ -318,8 +318,7 @@ impl State {
             "memory": {
                 "max_memory_gb": configured.get("max_memory_gb"),
                 "min_free_memory_gb": configured.get("min_free_memory_gb"),
-                "batch_size": configured.get("batch_size"),
-                "use_bitmap": configured.get("use_bitmap")
+                "batch_size": configured.get("batch_size")
             },
             "models": {
                 "retention_time_model": configured.get("retention_time_model"),
@@ -376,7 +375,6 @@ impl State {
             .database
             .expect("validated database search")
             .make_parameters();
-        parameters.use_bitmap = input.use_bitmap.unwrap_or(false);
         if let Some(settings) = parameters.ptm_library.as_ref() {
             let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
                 let contents = sage_cloudpath::util::read_text(&settings.path)?;
@@ -1272,7 +1270,7 @@ impl SageMcp {
             },
             "sage_plus": [
                 "memory estimation and runtime limits",
-                "file batching and optional bitmap search",
+                "configurable file batching",
                 "bounded and named variable modifications with neutral losses",
                 "mass-error and nonlinear retention-time alignment",
                 "PTM-aware retention-time and ion-mobility models",

@@ -37,7 +37,7 @@ database peptides/fragments.
 
 Library search supports the same `isotope_errors` range as database search. Current restrictions
 are validated explicitly: library search does not yet support chimera/DIA wide-window search,
-bitmap search, PTM localization, or spectral-library re-export. Library matches support matched
+PTM localization, or spectral-library re-export. Library matches support matched
 fragment export, direct library RT/mobility alignment, LFQ, and TMT quantification.
 
 Sage-generated labeled libraries preserve the precursor label channel, label-stripped peptidoform

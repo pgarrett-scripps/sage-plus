@@ -17,15 +17,19 @@ fn buffer(peaks: Vec<ImsPeak>) -> PeakBuffer {
 
 #[test]
 fn parses_precursor_metadata_without_losing_optional_values() {
-    let parsed = TdfReader::parse_precursor(timsrust::Precursor {
-        mz: 500.25,
-        rt: 12.0,
-        im: 1.15,
-        charge: Some(3),
-        intensity: Some(1234.5),
-        index: 7,
-        frame_index: 42,
-    });
+    use timsrust::core::{Charge, FrameIndex, Im, Mz, Rt, ScanIndex};
+
+    let precursor = timsrust::core::Precursor::new(
+        Mz::from(500.25),
+        Im::from(1.15),
+        Rt::from(12.0),
+        ScanIndex::try_from(5).unwrap(),
+        Some(Charge::try_from(3).unwrap()),
+        Some(1234.5),
+        7,
+        FrameIndex::try_from(42).unwrap(),
+    );
+    let parsed = TdfReader::parse_precursor(&precursor);
 
     assert_eq!(parsed.mz, 500.25);
     assert_eq!(parsed.charge, Some(3));
@@ -62,7 +66,15 @@ fn parses_real_bruker_directory() {
 
 #[test]
 fn mobility_offsets_expand_run_lengths_and_skip_empty_scans() {
-    let converter = Scan2ImConverter::from_boundaries(1.0, 2.0, 4);
+    struct LinearImConverter;
+
+    impl Converter<ScanIndex, Im> for LinearImConverter {
+        fn convert(&self, scan_index: ScanIndex) -> Im {
+            Im::from(2.0 - f64::from(scan_index) * 0.25)
+        }
+    }
+
+    let converter = LinearImConverter;
     let mobility = PeakBuffer::expand_mobility_iter(&[0, 2, 2, 5], &converter).collect::<Vec<_>>();
 
     assert_eq!(mobility, vec![2.0, 2.0, 1.5, 1.5, 1.5]);

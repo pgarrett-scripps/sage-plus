@@ -77,52 +77,48 @@ fn equal_nonzero_isotope_bounds_are_honored() {
         .map(|ion| ion.monoisotopic_mass)
         .collect::<Vec<_>>();
 
-    for use_bitmap in [false, true] {
-        let mut parameters = Builder::default().make_parameters();
-        parameters.use_bitmap = use_bitmap;
-        let database = parameters.build_from_peptides(vec![peptide.clone()]);
-        let precursor_charge = 2;
-        let precursor = Precursor {
-            mz: (peptide.monoisotopic + NEUTRON) / precursor_charge as f32 + PROTON,
-            charge: Some(precursor_charge),
-            ..Precursor::default()
-        };
-        let mut query = ProcessedSpectrum {
-            level: 2,
-            id: "isotope-test".into(),
-            precursors: vec![precursor],
-            masses: fragment_masses.clone(),
-            intensities: vec![1.0; fragment_masses.len()],
-            charges: vec![1; fragment_masses.len()],
-            total_ion_current: fragment_masses.len() as f32,
-            ..ProcessedSpectrum::default()
-        };
-        query.masses.sort_by(f32::total_cmp);
+    let parameters = Builder::default().make_parameters();
+    let database = parameters.build_from_peptides(vec![peptide.clone()]);
+    let precursor_charge = 2;
+    let precursor = Precursor {
+        mz: (peptide.monoisotopic + NEUTRON) / precursor_charge as f32 + PROTON,
+        charge: Some(precursor_charge),
+        ..Precursor::default()
+    };
+    let mut query = ProcessedSpectrum {
+        level: 2,
+        id: "isotope-test".into(),
+        precursors: vec![precursor],
+        masses: fragment_masses.clone(),
+        intensities: vec![1.0; fragment_masses.len()],
+        charges: vec![1; fragment_masses.len()],
+        total_ion_current: fragment_masses.len() as f32,
+        ..ProcessedSpectrum::default()
+    };
+    query.masses.sort_by(f32::total_cmp);
 
-        let scorer = Scorer {
-            db: &database,
-            precursor_tol: Tolerance::Da(-0.01, 0.01),
-            fragment_tol: Tolerance::Da(-0.01, 0.01),
-            min_matched_peaks: 1,
-            min_isotope_err: 1,
-            max_isotope_err: 1,
-            min_precursor_charge: 2,
-            max_precursor_charge: 2,
-            override_precursor_charge: false,
-            max_fragment_charge: Some(1),
-            chimera: false,
-            report_psms: 1,
-            wide_window: false,
-            annotate_matches: false,
-            mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
-            score_type: ScoreType::SageHyperScore,
-            use_bitmap,
-        };
+    let scorer = Scorer {
+        db: &database,
+        precursor_tol: Tolerance::Da(-0.01, 0.01),
+        fragment_tol: Tolerance::Da(-0.01, 0.01),
+        min_matched_peaks: 1,
+        min_isotope_err: 1,
+        max_isotope_err: 1,
+        min_precursor_charge: 2,
+        max_precursor_charge: 2,
+        override_precursor_charge: false,
+        max_fragment_charge: Some(1),
+        chimera: false,
+        report_psms: 1,
+        wide_window: false,
+        annotate_matches: false,
+        mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+        score_type: ScoreType::SageHyperScore,
+    };
 
-        let features = scorer.score(&query);
-        assert_eq!(features.len(), 1, "use_bitmap={use_bitmap}");
-        assert_eq!(features[0].isotope_error, NEUTRON);
-    }
+    let features = scorer.score(&query);
+    assert_eq!(features.len(), 1);
+    assert_eq!(features[0].isotope_error, NEUTRON);
 }
 
 #[test]
@@ -186,7 +182,6 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
-        use_bitmap: false,
     };
 
     let features = scorer.score(&query);
@@ -253,7 +248,6 @@ fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         annotate_matches: true,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
-        use_bitmap: false,
     };
     let query = ProcessedSpectrum {
         masses: variants
@@ -338,7 +332,6 @@ fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
-        use_bitmap: false,
     };
     let rank_one = Feature {
         peptide_idx: PeptideIx(0),

@@ -44,7 +44,6 @@ fn integration() -> anyhow::Result<()> {
         annotate_matches: false,
         mass_shift_ppm: 50.0,
         score_type: ScoreType::SageHyperScore,
-        use_bitmap: false,
     };
 
     let psm = scorer.score(&processed);

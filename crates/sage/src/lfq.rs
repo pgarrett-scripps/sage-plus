@@ -102,6 +102,7 @@ pub struct FeatureMap {
     pub min_rts: Vec<f32>,
     pub bin_size: usize,
     pub settings: LfqSettings,
+    mass_search_margin: f32,
     /// Direct MS2 evidence for each LFQ precursor in each acquisition file.
     /// LFQ intensities are always obtained through the cross-run feature-tracing
     /// workflow; this set records only whether a matching accepted PSM was
@@ -252,12 +253,18 @@ pub fn build_feature_map(
         })
         .collect::<Vec<_>>();
 
+    let mass_search_margin = ranges
+        .iter()
+        .map(|range| range.mass_hi - range.mass_lo)
+        .fold(0.0_f32, f32::max);
+
     log::trace!("building feature map");
     FeatureMap {
         ranges,
         min_rts,
         bin_size: 16 * 1024,
         settings,
+        mass_search_margin,
         ms2_confirmed,
     }
 }
@@ -269,6 +276,7 @@ struct Query<'a> {
     bin_size: usize,
     min_rt: f32,
     max_rt: f32,
+    mass_search_margin: f32,
 }
 
 impl FeatureMap {
@@ -287,6 +295,7 @@ impl FeatureMap {
             bin_size: self.bin_size,
             max_rt: rt + rt_tol,
             min_rt: rt - rt_tol,
+            mass_search_margin: self.mass_search_margin,
         }
     }
 }
@@ -740,8 +749,8 @@ impl Query<'_> {
             let (inner_left, inner_right) = binary_search_slice(
                 slice,
                 |frag, bounds| frag.mass_lo.total_cmp(bounds),
-                mass - 0.1,
-                mass + 0.1,
+                mass - self.mass_search_margin,
+                mass,
             );
 
             // Finally, filter down our slice into exact matches only
@@ -760,7 +769,6 @@ impl Query<'_> {
         mobility: f32,
     ) -> impl Iterator<Item = &PrecursorRange> {
         self.mass_lookup(mass).filter(move |precursor| {
-            // TODO: replace this magic number with a patameter.
             (precursor.mobility_hi >= mobility) && (precursor.mobility_lo <= mobility)
         })
     }

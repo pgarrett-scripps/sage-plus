@@ -1,4 +1,3 @@
-use crate::bitmap::BitmapIndex;
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position};
 use crate::fasta::Fasta;
@@ -68,10 +67,6 @@ impl From<EnzymeBuilder> for EnzymeParameters {
 pub struct Builder {
     /// This parameter allows tuning of the internal search structure
     pub bucket_size: Option<usize>,
-    /// Number of u64 words per peptide in the bitmap index (default 30 → 1920 bins).
-    /// Only used when `use_bitmap` is enabled on the scorer.
-    pub bitmap_size: Option<usize>,
-
     pub enzyme: Option<EnzymeBuilder>,
     /// Minimum peptide monoisotopic mass that will be fragmented
     pub peptide_min_mass: Option<f32>,
@@ -132,7 +127,6 @@ impl Builder {
             .max(max_variable_mods);
         Parameters {
             bucket_size,
-            bitmap_size: self.bitmap_size.unwrap_or(30),
             peptide_min_mass: self.peptide_min_mass.unwrap_or(500.0),
             peptide_max_mass: self.peptide_max_mass.unwrap_or(5000.0),
             ion_kinds: self.ion_kinds.unwrap_or(vec![Kind::B, Kind::Y]),
@@ -152,7 +146,6 @@ impl Builder {
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
             prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
-            use_bitmap: false,
             loaded_ptm_library: None,
         }
     }
@@ -165,7 +158,6 @@ impl Builder {
 #[derive(Serialize, Clone, Debug)]
 pub struct Parameters {
     pub bucket_size: usize,
-    pub bitmap_size: usize,
     pub enzyme: EnzymeBuilder,
     pub peptide_min_mass: f32,
     pub peptide_max_mass: f32,
@@ -185,10 +177,6 @@ pub struct Parameters {
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
     pub prefilter_low_memory: bool,
-    /// Select the bitmap preliminary-search index instead of the fragment index.
-    /// The CLI copies its top-level `use_bitmap` option here before construction.
-    #[serde(skip)]
-    pub use_bitmap: bool,
     #[serde(skip)]
     pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
 }
@@ -468,15 +456,10 @@ impl Parameters {
             }
         }
 
-        let fragment_bytes = if self.use_bitmap {
-            0
-        } else {
-            estimate
-                .fragments
-                .saturating_mul(std::mem::size_of::<Theoretical>() as u64)
-        };
+        let fragment_bytes = estimate
+            .fragments
+            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
         let bucket_bytes = self.estimated_bucket_bytes(estimate.fragments);
-        let bitmap_bytes = self.estimated_bitmap_peak_bytes(estimate.modified_peptides);
 
         estimate.unmodified_peak_bytes = with_estimation_margin(digest_bytes.saturating_mul(2));
         estimate.modified_peak_bytes =
@@ -484,8 +467,7 @@ impl Parameters {
         estimate.fragment_peak_bytes = with_estimation_margin(
             peptide_bytes
                 .saturating_add(fragment_bytes)
-                .saturating_add(bucket_bytes)
-                .saturating_add(bitmap_bytes),
+                .saturating_add(bucket_bytes),
         );
         estimate
     }
@@ -522,19 +504,14 @@ impl Parameters {
             );
         }
 
-        let fragment_bytes = if self.use_bitmap {
-            0
-        } else {
-            estimate
-                .fragments
-                .saturating_mul(std::mem::size_of::<Theoretical>() as u64)
-        };
+        let fragment_bytes = estimate
+            .fragments
+            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
         estimate.modified_peak_bytes = with_estimation_margin(peptide_bytes);
         estimate.fragment_peak_bytes = with_estimation_margin(
             peptide_bytes
                 .saturating_add(fragment_bytes)
-                .saturating_add(self.estimated_bucket_bytes(estimate.fragments))
-                .saturating_add(self.estimated_bitmap_peak_bytes(estimate.modified_peptides)),
+                .saturating_add(self.estimated_bucket_bytes(estimate.fragments)),
         );
         estimate
     }
@@ -595,29 +572,9 @@ impl Parameters {
     }
 
     fn estimated_bucket_bytes(&self, fragments: u64) -> u64 {
-        if self.use_bitmap {
-            return 0;
-        }
         let bucket_size = self.bucket_size.max(1) as u64;
         (fragments.saturating_add(bucket_size - 1) / bucket_size)
             .saturating_mul(std::mem::size_of::<f32>() as u64)
-    }
-
-    fn estimated_bitmap_peak_bytes(&self, peptides: u64) -> u64 {
-        if !self.use_bitmap {
-            return 0;
-        }
-        // BitmapIndex::build currently creates per-peptide temporary Vecs before
-        // flattening them into the retained arrays. Include both to bound peak RSS.
-        let bitmap_words = (self.bitmap_size as u64).saturating_mul(2);
-        let retained = bitmap_words
-            .saturating_mul(std::mem::size_of::<u64>() as u64)
-            .saturating_add(std::mem::size_of::<f32>() as u64)
-            .saturating_add(std::mem::size_of::<PeptideIx>() as u64);
-        let temporary = bitmap_words
-            .saturating_mul(std::mem::size_of::<u64>() as u64)
-            .saturating_add(std::mem::size_of::<(Vec<u64>, Vec<u64>)>() as u64);
-        peptides.saturating_mul(retained.saturating_add(temporary))
     }
 
     fn variable_variant_count(&self, digest: &Digest) -> u64 {
@@ -908,6 +865,40 @@ impl Parameters {
         Self::reorder_peptides_with_reference(target_decoys, None);
     }
 
+    /// Add reversed decoys to an already filtered target set.
+    ///
+    /// This is used by the low-memory prefilter so decoys are only generated
+    /// for targets that survive the preliminary search.
+    pub fn add_reversed_decoys(&self, targets: Vec<Peptide>) -> Vec<Peptide> {
+        let target_sequences: DashSet<Vec<u8>, FnvBuildHasher> = DashSet::default();
+        targets
+            .iter()
+            .filter(|peptide| !peptide.decoy)
+            .for_each(|peptide| {
+                target_sequences.insert(peptide.sequence.to_vec());
+            });
+
+        let mut target_decoys = targets
+            .into_par_iter()
+            .flat_map_iter(|peptide| {
+                if peptide.decoy {
+                    return vec![peptide];
+                }
+                let decoy = peptide.reverse();
+                if target_sequences.contains(&decoy.sequence[..]) {
+                    vec![peptide]
+                } else {
+                    vec![decoy, peptide]
+                }
+            })
+            .collect::<Vec<_>>();
+        Self::reorder_peptides_with_reference(
+            &mut target_decoys,
+            self.label_reference().as_deref(),
+        );
+        target_decoys
+    }
+
     fn reorder_peptides_with_reference(target_decoys: &mut Vec<Peptide>, reference: Option<&str>) {
         log::trace!("sorting and deduplicating peptides");
 
@@ -1108,44 +1099,40 @@ impl Parameters {
         // Note that multiple charge states are actually handled by
         // [`SpectrumProcessor`] or during scoring - all theoretical
         // fragments are monoisotopic/uncharged
-        let mut fragments = if self.use_bitmap {
-            Vec::new()
-        } else {
-            target_decoys
-                .par_iter()
-                .enumerate()
-                .flat_map_iter(|(idx, peptide)| {
-                    // Generate both B and Y ions, then filter down to make sure that
-                    // theoretical fragments are within the search space
-                    self.ion_kinds
-                        .iter()
-                        .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
-                        .filter(|group| {
-                            // Don't store b1, b2, y1, y2 ions for preliminary scoring
+        let mut fragments = target_decoys
+            .par_iter()
+            .enumerate()
+            .flat_map_iter(|(idx, peptide)| {
+                // Generate both B and Y ions, then filter down to make sure that
+                // theoretical fragments are within the search space
+                self.ion_kinds
+                    .iter()
+                    .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
+                    .filter(|group| {
+                        // Don't store b1, b2, y1, y2 ions for preliminary scoring
 
-                            match group.kind {
-                                Kind::A | Kind::B | Kind::C => {
-                                    (group.series_index + 1) > self.min_ion_index
-                                }
-                                Kind::X | Kind::Y | Kind::Z => {
-                                    peptide.sequence.len().saturating_sub(1) - group.series_index
-                                        > self.min_ion_index
-                                }
+                        match group.kind {
+                            Kind::A | Kind::B | Kind::C => {
+                                (group.series_index + 1) > self.min_ion_index
                             }
+                            Kind::X | Kind::Y | Kind::Z => {
+                                peptide.sequence.len().saturating_sub(1) - group.series_index
+                                    > self.min_ion_index
+                            }
+                        }
+                    })
+                    // Keep one canonical form per cleavage in the preliminary
+                    // index. Full rescoring evaluates every neutral-loss
+                    // alternative as a group; indexing all alternatives here
+                    // would bias candidate selection toward configured mods.
+                    .filter_map(move |group| {
+                        group.variants.into_iter().next().map(|ion| Theoretical {
+                            peptide_index: PeptideIx(idx as u32),
+                            fragment_mz: ion.monoisotopic_mass,
                         })
-                        // Keep one canonical form per cleavage in the preliminary
-                        // index. Full rescoring evaluates every neutral-loss
-                        // alternative as a group; indexing all alternatives here
-                        // would bias candidate selection toward configured mods.
-                        .filter_map(move |group| {
-                            group.variants.into_iter().next().map(|ion| Theoretical {
-                                peptide_index: PeptideIx(idx as u32),
-                                fragment_mz: ion.monoisotopic_mass,
-                            })
-                        })
-                })
-                .collect::<Vec<_>>()
-        };
+                    })
+            })
+            .collect::<Vec<_>>();
         log::trace!("finalizing index");
 
         // Sort all of our theoretical fragments by m/z, from low to high
@@ -1271,18 +1258,6 @@ impl Parameters {
         });
         model_mods.dedup();
 
-        let bitmap_index = if self.use_bitmap {
-            BitmapIndex::build(
-                &target_decoys,
-                &self.ion_kinds,
-                self.bitmap_size,
-                self.peptide_min_mass,
-                self.peptide_max_mass,
-            )
-        } else {
-            BitmapIndex::default()
-        };
-
         let label_reference = self.label_reference();
         let label_channels = self.label_channels();
         IndexedDatabase {
@@ -1298,7 +1273,6 @@ impl Parameters {
             label_channels,
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
-            bitmap_index,
         }
     }
 }
@@ -1383,8 +1357,6 @@ pub struct IndexedDatabase {
     pub decoy_tag: String,
     /// Optional explicit target pairing for non-reversal decoy peptides.
     pub decoy_pairing: Vec<PeptideIx>,
-    /// Bitmap-based preliminary search index (forward/reverse ion bitsets per peptide).
-    pub bitmap_index: BitmapIndex,
 }
 
 impl IndexedDatabase {

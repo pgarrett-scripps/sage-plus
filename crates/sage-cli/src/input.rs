@@ -99,8 +99,6 @@ pub struct Search {
     pub annotate_matches: bool,
 
     pub score_type: ScoreType,
-    /// Use the bitmap-based preliminary search (requires `deisotope: true`).
-    pub use_bitmap: bool,
 }
 
 #[derive(Deserialize)]
@@ -144,7 +142,6 @@ pub struct Input {
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
-    pub use_bitmap: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -407,10 +404,6 @@ impl Input {
                 "`wide_window` is not supported with `library_search`"
             );
             ensure!(
-                !self.use_bitmap.unwrap_or(false),
-                "`use_bitmap` is not supported with `library_search`"
-            );
-            ensure!(
                 !self.ptm_localization.unwrap_or_default().enabled,
                 "`ptm_localization` is not supported with `library_search`"
             );
@@ -615,7 +608,6 @@ impl Input {
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             score_type,
-            use_bitmap: self.use_bitmap.unwrap_or(false),
         })
     }
 

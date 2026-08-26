@@ -62,9 +62,6 @@ The least invasive integration is to add per-file precursor and fragment
 
 - Candidate retrieval: correct the experimental precursor and fragment masses
   before `IndexedDatabase::query` and `IndexedQuery::page_search`.
-- Bitmap retrieval: build the experimental bitmap from corrected fragment
-  masses. This path must be updated at the same time; silently leaving it
-  uncorrected would make search modes disagree.
 - Full scoring: center fragment matching on the expected observed mass, or
   search a corrected mass view. `select_most_intense_peak` already supports a
   static Da offset, but a corrected mass view gives one consistent convention.
