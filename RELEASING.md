@@ -12,7 +12,9 @@ musl binaries are compiled inside the matching architecture of the official Rust
 This is required because the bundled HDF5 configuration used by mzMLb support executes target
 probes while it builds and therefore cannot use a conventional cross compiler. Native builds set
 the supported CMake policy floor to 3.5 so bundled libraries with older declarations also configure
-under CMake 4.
+under CMake 4. The macOS builds predefine `fdopen` to itself while compiling the bundled zlib 1.2.11
+source. This avoids an obsolete classic Mac compatibility branch that Xcode 16.3 and newer expose
+through `TARGET_OS_MAC`.
 
 ## One-time repository setup
 
