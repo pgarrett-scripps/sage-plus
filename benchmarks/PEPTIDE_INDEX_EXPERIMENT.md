@@ -1,5 +1,7 @@
 # Protein-backed peptide sequence experiment
 
+Status: integrated into `main` by commit `6a686d0`.
+
 ## Scope
 
 This experiment replaces independently allocated target peptide sequences with immutable spans into shared protein storage. A peptide sequence is represented by a thin `Arc` plus `u32` start and end offsets. The value remains 16 bytes, the same size as `Arc<[u8]>`, so `Peptide` remains 144 bytes.
@@ -47,12 +49,12 @@ The baseline and span implementations produced byte-identical result Parquet fil
 
 ## Code impact
 
-Relative to the current working state, the experiment changes 14 files with 454 insertions and 46 deletions. The main cost is one 314-line sequence module that owns conversion, byte-slice access, content-based comparison, hashing, formatting, and storage-sharing tests. Production call-site changes are small and concentrated in FASTA parsing, digestion, peptide conversion, decoy generation, and prefilter target collision tracking.
+Relative to its baseline, the experiment changed 14 files with 454 insertions and 46 deletions. The main cost is one 314-line sequence module that owns conversion, byte-slice access, content-based comparison, hashing, formatting, and storage-sharing tests. Production call-site changes are small and concentrated in FASTA parsing, digestion, peptide conversion, decoy generation, and prefilter target collision tracking.
 
 The main compatibility cost is public API churn. `Fasta::targets`, `Digest::sequence`, and `Peptide::sequence` now expose wrapper types instead of `String` or `Arc<[u8]>`. The peptide wrapper dereferences to `[u8]` and provides common conversions, but downstream code that constructs these structs directly may need `.into()`.
 
-## Recommendation
+## Integration outcome
 
-Integrate the approach if memory-efficient semi-enzymatic and non-specific search is an important project direction. The end-to-end tryptic saving is modest but measurable, while the digestion and expanded-search improvements are large enough to change practical memory limits. The implementation keeps peptide identity correct, does not enlarge `Peptide`, improves runtime, and has no observed output changes.
+The approach was integrated because the end-to-end tryptic saving is measurable and the digestion and expanded-search improvements are large enough to change practical memory limits. The implementation keeps peptide identity correct, does not enlarge `Peptide`, improves runtime, and produced no observed output changes.
 
-Before merging, treat the public sequence type change as the main review item. If library API stability outweighs the measured memory gains, keep this branch as a proven design and defer integration until a breaking release. The internal design itself does not need a global protein index or database lifetime coupling, which keeps it substantially simpler than storing numeric protein IDs in every peptide.
+The public sequence type change is the main compatibility cost. `Fasta::targets`, `Digest::sequence`, and `Peptide::sequence` expose wrapper types instead of `String` or `Arc<[u8]>`. The internal design does not need a global protein index or database lifetime coupling, which keeps it substantially simpler than storing numeric protein IDs in every peptide.

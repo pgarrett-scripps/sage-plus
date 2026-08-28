@@ -1,7 +1,7 @@
 //! Retention time prediction using linear regression
 //!
 //! See Klammer et al., Anal. Chem. 2007, 79, 16, 6111–6118
-//! https://doi.org/10.1021/ac070262k
+//! <https://doi.org/10.1021/ac070262k>
 
 use super::regression::LinearRegression;
 use crate::database::IndexedDatabase;

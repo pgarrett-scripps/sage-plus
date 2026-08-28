@@ -1,5 +1,7 @@
 # Lossless fragment index experiment
 
+Status: integrated into `main` by commits `4b376b9` and `66f3b45`.
+
 ## Objective
 
 Reduce theoretical-fragment memory without changing fragment masses, peptide
@@ -33,7 +35,7 @@ also coexisted with the original raw index. The resulting allocation used
 demonstrated that compression after raw-index construction cannot solve peak
 memory.
 
-## Selected prototype
+## Integrated design
 
 The selected design constructs 6-byte packed fragments directly. It never
 creates the original 8-byte fragment vector.

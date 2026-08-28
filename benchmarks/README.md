@@ -33,6 +33,17 @@ fragments, and spectral-library export for a separate candidate feature check.
 
 The one-spectrum test fixture must not be used for benchmark timing.
 
+## Integrated memory design records
+
+Two benchmark-backed design records document the compact database representations now integrated
+into Sage Plus:
+
+- [Protein-backed peptide sequences](PEPTIDE_INDEX_EXPERIMENT.md)
+- [Lossless packed fragment index](FRAGMENT_INDEX_EXPERIMENT.md)
+
+These records describe the alternatives considered, exactness checks, code tradeoffs, and the
+benchmarks used before integration.
+
 ## Commands
 
 List the available recipes:

@@ -19,7 +19,9 @@ entries are retained below for provenance.
 
 ### Changed
 - **Breaking:** `Peptide::modifications` now uses `CompactModifications` instead of a dense `Vec<f32>`, and applied metadata is exposed through `Peptide::applied_modifications()`. Use `CompactModifications::from_dense`, `from_sparse`, or `from_applied` when constructing peptides directly.
+- **Breaking:** Target peptide sequences now use immutable spans into shared protein storage. Generated decoys and pre-digested TSV peptides retain owned storage. Sequence equality, ordering, and hashing remain content-based.
 - Peptide modifications now use two-byte position and definition IDs, modification definitions are shared across the database, and common single-protein mappings remain inline.
+- The preliminary fragment index now stores lossless six-byte records. Exact floating-point mass prefixes are shared across bounded search buckets, and `database.bucket_size` remains the maximum number of fragment records in one bucket.
 - Linux GNU libc builds return unused database-construction pages to the operating system before searching.
 - Replaced MS2 deconvolution with averagine-scored isotope envelopes. Mass tolerance, charge ceiling, envelope length, isotope score, and intensity-ratio tolerance are configurable. Scored envelopes assign peaks exclusively and preserve charge confidence for charge-aware fragment matching. Boolean `deisotope` settings remain supported, with `true` selecting the scored defaults. mzML and mzMLb fragment charge arrays now constrain envelope assignment and flow into charge-aware matching.
 - Clarified that Bioconda installs upstream Sage rather than Sage Plus.

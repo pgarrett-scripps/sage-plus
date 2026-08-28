@@ -1,8 +1,8 @@
 //! False discovery rate control using double-competition (picked-peptide &
 //! picked-protein) approaches
 //!
-//! Lin et al., https://pubmed.ncbi.nlm.nih.gov/36166314/
-//! Savitski et al., https://pubmed.ncbi.nlm.nih.gov/25987413/
+//! Lin et al., <https://pubmed.ncbi.nlm.nih.gov/36166314/>
+//! Savitski et al., <https://pubmed.ncbi.nlm.nih.gov/25987413/>
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::lfq::{PrecursorId, QuantifiedPeak};
