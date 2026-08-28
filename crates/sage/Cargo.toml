@@ -13,7 +13,7 @@ publish = false
 
 [dependencies]
 csv = "1"
-dashmap = { version = "5.4.0", features = ["rayon"] }
+dashmap = { version = "6.2.1", features = ["rayon"] }
 fnv = "1.0"
 itertools = "0.10"
 log = "0.4.0"
