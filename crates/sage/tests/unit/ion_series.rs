@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 use super::*;
 use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
 use crate::peptide::Peptide;
@@ -133,13 +135,12 @@ fn index_filtering() {
         .chain(IonSeries::new(peptide, Kind::Y).enumerate())
         .filter(|(ion_idx, ion)| {
             // Don't store b1, b2, y1, y2 ions for preliminary scoring
-            let ion_idx_filter = match ion.kind {
+            match ion.kind {
                 Kind::A | Kind::B | Kind::C => (ion_idx + 1) > 2,
                 Kind::X | Kind::Y | Kind::Z => {
                     peptide.sequence.len().saturating_sub(1) - ion_idx > 2
                 }
-            };
-            ion_idx_filter
+            }
         })
         .map(|(_, mut ion)| {
             ion.monoisotopic_mass += PROTON;

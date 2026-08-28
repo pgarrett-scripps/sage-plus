@@ -163,8 +163,10 @@ impl QueryData {
 
 pub struct DefaultParser;
 
+type DefaultParserFn = fn(&str, &mut DefaultParams) -> Result<bool, MgfError>;
+
 impl DefaultParser {
-    pub fn get_parsers(&self) -> Vec<fn(&str, &mut DefaultParams) -> Result<bool, MgfError>> {
+    pub fn get_parsers(&self) -> Vec<DefaultParserFn> {
         vec![
             Self::parse_begin,
             Self::parse_tol,
@@ -216,8 +218,10 @@ impl DefaultParser {
 }
 
 pub struct QueryParser;
+type QueryParserFn = fn(&str, &mut QueryData) -> Result<bool, MgfError>;
+
 impl QueryParser {
-    pub fn get_parsers(&self) -> Vec<fn(&str, &mut QueryData) -> Result<bool, MgfError>> {
+    pub fn get_parsers(&self) -> Vec<QueryParserFn> {
         vec![
             Self::parse_begin,
             Self::parse_mz,

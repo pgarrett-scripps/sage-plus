@@ -119,9 +119,7 @@ impl Write for CloudWriter {
 async fn read_url(url: &Url) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, Error> {
     let (store, obj_path) = parse_url(url)?;
     let result = store.get(&obj_path).await.map_err(Error::ObjectStore)?;
-    let stream = result
-        .into_stream()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+    let stream = result.into_stream().map_err(std::io::Error::other);
     let reader: BufReader<Box<dyn AsyncRead + Unpin + Send>> =
         BufReader::new(Box::new(tokio_util::io::StreamReader::new(stream)));
 

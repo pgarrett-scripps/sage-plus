@@ -1,8 +1,6 @@
 {
     "database": {
         "bucket_size": 16384,
-        "fragment_min_mz": 150.0,
-        "fragment_max_mz": 1500.0,
         "enzyme": {
             "missed_cleavages": 1,
             "cleave_at": "KR",

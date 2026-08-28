@@ -10,7 +10,9 @@ use crate::scoring::Feature;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IonMobilityFeatureSet {
     #[default]
@@ -19,20 +21,23 @@ pub enum IonMobilityFeatureSet {
     AdditivePtm,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct IonMobilitySettings {
     /// Disable ion-mobility prediction even when mobility observations are present.
     pub enabled: bool,
     /// Sequence features used by the linear regression model.
     pub features: IonMobilityFeatureSet,
     /// Number of peptide-grouped cross-validation folds.
+    #[schemars(range(min = 2, max = 10))]
     pub folds: usize,
     /// Seed used for deterministic peptide-level fold assignment.
     pub seed: u64,
     /// Ridge penalty for additive variable-PTM mobility offsets.
+    #[schemars(range(min = 0.0))]
     pub ptm_regularization: f64,
     /// Minimum number of high-confidence mobility observations required for fitting.
+    #[schemars(range(min = 1))]
     pub min_training_psms: usize,
 }
 

@@ -11,7 +11,19 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    schemars::JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum NeutralLossMode {
     #[default]
@@ -20,7 +32,9 @@ pub enum NeutralLossMode {
 }
 
 /// Controls where candidates for a variable modification are generated.
-#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SiteMode {
     /// Generate the modification at every compatible site from the config.
@@ -87,7 +101,7 @@ fn validate_details<E: de::Error>(
 
 /// A structured static modification. Numeric static modifications remain
 /// supported through [`StaticModEntry::Mass`].
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct StaticModification {
     pub mass: f32,
@@ -140,7 +154,7 @@ impl<'de> Deserialize<'de> for StaticModification {
 
 /// A variable modification with optional per-peptide occurrence limit and
 /// optional fragment neutral-loss behavior.
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct VariableModification {
     pub mass: f32,
@@ -297,7 +311,7 @@ impl Ord for ModificationDefinition {
     }
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum StaticModEntry {
     Mass(f32),
@@ -364,7 +378,7 @@ impl StaticModEntry {
 
 /// A variable modification entry may use the existing bare-mass syntax or the
 /// extensible object syntax.
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
 #[serde(untagged)]
 pub enum VarModEntry {
     Mass(f32),

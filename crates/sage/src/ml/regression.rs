@@ -41,8 +41,8 @@ impl Acc {
             let rj = row[j];
             self.b[j] += rj * y;
             let off = j * d;
-            for k in 0..d {
-                self.cov[off + k] += rj * row[k];
+            for (k, &rk) in row.iter().enumerate() {
+                self.cov[off + k] += rj * rk;
             }
         }
         self.sum_y += y;

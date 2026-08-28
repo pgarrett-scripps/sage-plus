@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 use sage_core::{
     mass::Tolerance,
     spectrum::{RawSpectrum, Representation},
@@ -22,7 +24,7 @@ fn make_ions_section_spectrum_0() -> String {
         1144.66272 6260.8315429688
         END IONS
         "#;
-    return String::from(s);
+    String::from(s)
 }
 
 fn run_asserts_for_spectrum_0(s: &RawSpectrum) {

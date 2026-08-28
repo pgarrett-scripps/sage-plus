@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::Arc;
 
 // --- Ported reference doctests: construct_ambiguity_intervals ----------
 
@@ -83,7 +82,7 @@ fn mass_shift() {
 
 fn peptide(seq: &str) -> Peptide {
     Peptide {
-        sequence: Arc::from(seq.as_bytes()),
+        sequence: seq.as_bytes().into(),
         modifications: crate::peptide::CompactModifications::default(),
         ..Default::default()
     }

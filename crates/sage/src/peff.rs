@@ -14,6 +14,8 @@ pub struct PeffMod {
     pub name: String,
 }
 
+type PeffEntries = (Vec<(Arc<str>, String)>, HashMap<Arc<str>, Vec<PeffMod>>);
+
 /// Returns true when the supplied file contents look like a PEFF file
 /// (per spec, the first non-empty line is `# PEFF <version>`).
 pub fn looks_like_peff(contents: &str) -> bool {
@@ -35,11 +37,7 @@ pub fn looks_like_peff(contents: &str) -> bool {
 /// The description-line annotations honored here are limited to
 /// `\ModResUnimod=(positions|UNIMOD:N|Name)[(...)]`. Other annotations
 /// (`\ModResPsi`, `\ModRes`, `\VariantSimple`, etc.) are intentionally ignored.
-pub fn parse(
-    contents: &str,
-    decoy_tag: &str,
-    generate_decoys: bool,
-) -> (Vec<(Arc<str>, String)>, HashMap<Arc<str>, Vec<PeffMod>>) {
+pub fn parse(contents: &str, decoy_tag: &str, generate_decoys: bool) -> PeffEntries {
     let mut targets: Vec<(Arc<str>, String)> = Vec::new();
     let mut peff_mods: HashMap<Arc<str>, Vec<PeffMod>> = HashMap::new();
 

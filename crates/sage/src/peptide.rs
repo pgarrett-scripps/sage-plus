@@ -9,6 +9,7 @@ use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteM
 use crate::{
     enzyme::{Digest, DigestGroup, Position, ProteinOccurrence},
     mass::{monoisotopic, H2O},
+    sequence::PeptideSequence,
 };
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
@@ -239,8 +240,7 @@ impl CompactModifications {
         let masses = masses.into_iter().collect::<Vec<_>>();
         let records = masses
             .iter()
-            .enumerate()
-            .map(|(_, (position, mass))| {
+            .map(|(position, mass)| {
                 (
                     Site::Sequence(*position as u32),
                     Arc::new(ModificationDefinition::bare(*mass)),
@@ -472,7 +472,7 @@ impl CompactModifications {
 #[derive(Clone, PartialEq, Default)]
 pub struct Peptide {
     pub decoy: bool,
-    pub sequence: Arc<[u8]>,
+    pub sequence: PeptideSequence,
     /// Compact modification sites with shared definition metadata.
     pub modifications: CompactModifications,
     /// Precursor-resolved labeling channel, when this peptide was generated
@@ -617,6 +617,35 @@ struct ModificationCandidate {
     site: Site,
     rule: usize,
     library_supported: bool,
+}
+
+pub(crate) struct ModificationPlan<'a> {
+    variable_mods: &'a [VariableRule],
+    static_mods: &'a HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+    lookup: Arc<ModificationLookup>,
+    max_exhaustive_mods: usize,
+    max_total_mods: usize,
+    max_combinations: Option<usize>,
+}
+
+impl<'a> ModificationPlan<'a> {
+    pub(crate) fn new(
+        variable_mods: &'a [VariableRule],
+        static_mods: &'a HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
+        lookup: Arc<ModificationLookup>,
+        max_exhaustive_mods: usize,
+        max_total_mods: usize,
+        max_combinations: Option<usize>,
+    ) -> Self {
+        Self {
+            variable_mods,
+            static_mods,
+            lookup,
+            max_exhaustive_mods,
+            max_total_mods,
+            max_combinations,
+        }
+    }
 }
 
 impl ModificationSource for f32 {
@@ -1099,15 +1128,15 @@ impl Peptide {
         );
         let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels)
             .unwrap_or_else(|error| panic!("{error}"));
-        self.apply_rules(
+        let plan = ModificationPlan::new(
             &rules,
-            &[],
             &static_mods,
             lookup,
             combinations,
             combinations,
             max_combinations,
-        )
+        );
+        self.apply_rules(&plan, &[])
     }
 
     /// Apply config-defined and library-supported variable modifications in a
@@ -1116,22 +1145,17 @@ impl Peptide {
     /// named modification's shared `max_count`.
     pub(crate) fn apply_rules(
         mut self,
-        variable_mods: &[VariableRule],
+        plan: &ModificationPlan<'_>,
         library_sites: &[LibrarySite],
-        static_mods: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-        lookup: Arc<ModificationLookup>,
-        max_exhaustive_mods: usize,
-        max_total_mods: usize,
-        max_combinations: Option<usize>,
     ) -> Vec<Peptide> {
-        self.modifications.install_lookup(lookup);
-        if variable_mods.is_empty() {
-            self.static_mods_all(static_mods);
+        self.modifications.install_lookup(plan.lookup.clone());
+        if plan.variable_mods.is_empty() {
+            self.static_mods_all(plan.static_mods);
             self.finalize_modifications();
             vec![self]
         } else {
             let mut candidates: Vec<ModificationCandidate> = Vec::new();
-            for (rule_idx, rule) in variable_mods.iter().enumerate() {
+            for (rule_idx, rule) in plan.variable_mods.iter().enumerate() {
                 let mut compatible = Vec::new();
                 self.push_resi(
                     &mut compatible,
@@ -1179,7 +1203,10 @@ impl Peptide {
             let mut mods: Vec<ModificationCandidate> = Vec::with_capacity(candidates.len());
             let mut candidate_indices: HashMap<(Site, usize), usize> = HashMap::new();
             for candidate in candidates {
-                let key = (candidate.site, variable_mods[candidate.rule].count_group);
+                let key = (
+                    candidate.site,
+                    plan.variable_mods[candidate.rule].count_group,
+                );
                 if let Some(index) = candidate_indices.get(&key).copied() {
                     mods[index].library_supported |= candidate.library_supported;
                 } else {
@@ -1188,37 +1215,24 @@ impl Peptide {
                 }
             }
 
-            let mut modified = Vec::new();
-            modified.push(self.clone());
-            let group_count = variable_mods
+            let group_count = plan
+                .variable_mods
                 .iter()
                 .map(|rule| rule.count_group)
                 .max()
                 .map_or(0, |group| group + 1);
-            let mut mod_counts = vec![0usize; group_count];
-            let mut occupied = FnvHashSet::default();
-            for n in 1..=max_total_mods.min(mods.len()) {
-                if !enumerate_modifications(
-                    &self,
-                    &mods,
-                    variable_mods,
-                    0,
-                    n,
-                    0,
-                    max_exhaustive_mods,
-                    &mut occupied,
-                    &mut Vec::with_capacity(n),
-                    &mut mod_counts,
-                    &mut modified,
-                    max_combinations,
-                ) {
+            let mut enumeration = ModificationEnumeration::new(&self, &mods, plan, group_count);
+            for n in 1..=plan.max_total_mods.min(mods.len()) {
+                enumeration.selected.reserve(n);
+                if !enumeration.enumerate(0, n, 0) {
                     break;
                 }
             }
+            let mut modified = enumeration.output;
 
             // Apply static mods to all peptides
             for peptide in modified.iter_mut() {
-                peptide.static_mods_all(static_mods);
+                peptide.static_mods_all(plan.static_mods);
                 peptide.finalize_modifications();
             }
 
@@ -1227,13 +1241,15 @@ impl Peptide {
     }
 
     pub fn reverse(&self) -> Peptide {
+        self.reverse_with_sequence(self.sequence.reversed_internal())
+    }
+
+    pub(crate) fn reverse_with_sequence(&self, sequence: PeptideSequence) -> Peptide {
         let mut pep = self.clone();
         pep.decoy = !self.decoy;
         let n = pep.sequence.len().saturating_sub(1);
         if n > 1 {
-            let mut s = Vec::from(pep.sequence.as_ref());
-            s[1..n].reverse();
-            pep.sequence = Arc::from(s.into_boxed_slice());
+            pep.sequence = sequence;
             pep.modifications.reverse_internal(n);
         }
         pep
@@ -1272,78 +1288,88 @@ fn nonzero_mass(mass: f32) -> Option<f32> {
     (mass.abs() >= 1e-5).then_some(mass)
 }
 
-fn enumerate_modifications(
-    peptide: &Peptide,
-    modifications: &[ModificationCandidate],
-    variable_mods: &[VariableRule],
-    start: usize,
-    remaining: usize,
-    exhaustive_count: usize,
-    max_exhaustive_mods: usize,
-    occupied: &mut FnvHashSet<Site>,
-    selected: &mut Vec<ModificationCandidate>,
-    mod_counts: &mut [usize],
-    output: &mut Vec<Peptide>,
-    max_combinations: Option<usize>,
-) -> bool {
-    for idx in start..modifications.len() {
-        let modification = modifications[idx];
-        if occupied.insert(modification.site) {
-            let rule = &variable_mods[modification.rule];
-            let group = rule.count_group;
-            let next_exhaustive = exhaustive_count + usize::from(!modification.library_supported);
-            if next_exhaustive > max_exhaustive_mods
-                || rule
-                    .max_count
-                    .is_some_and(|limit| mod_counts[group] >= limit)
-            {
-                occupied.remove(&modification.site);
-                continue;
-            }
+struct ModificationEnumeration<'a, 'p> {
+    peptide: &'p Peptide,
+    modifications: &'p [ModificationCandidate],
+    plan: &'p ModificationPlan<'a>,
+    occupied: FnvHashSet<Site>,
+    selected: Vec<ModificationCandidate>,
+    mod_counts: Vec<usize>,
+    output: Vec<Peptide>,
+}
 
-            mod_counts[group] += 1;
-            selected.push(modification);
-            if remaining == 1 {
-                if max_combinations.is_some_and(|cap| output.len() >= cap) {
-                    selected.pop();
-                    mod_counts[group] -= 1;
-                    occupied.remove(&modification.site);
-                    return false;
-                }
-                let mut modified = peptide.clone();
-                for selected in selected.iter().copied() {
-                    modified.apply_site(
-                        selected.site,
-                        variable_mods[selected.rule].modification.clone(),
-                    );
-                }
-                output.push(modified);
-            } else if !enumerate_modifications(
-                peptide,
-                modifications,
-                variable_mods,
-                idx + 1,
-                remaining - 1,
-                next_exhaustive,
-                max_exhaustive_mods,
-                occupied,
-                selected,
-                mod_counts,
-                output,
-                max_combinations,
-            ) {
-                selected.pop();
-                mod_counts[group] -= 1;
-                occupied.remove(&modification.site);
-                return false;
-            }
-            selected.pop();
-            mod_counts[group] -= 1;
-            occupied.remove(&modification.site);
+impl<'a, 'p> ModificationEnumeration<'a, 'p> {
+    fn new(
+        peptide: &'p Peptide,
+        modifications: &'p [ModificationCandidate],
+        plan: &'p ModificationPlan<'a>,
+        group_count: usize,
+    ) -> Self {
+        Self {
+            peptide,
+            modifications,
+            plan,
+            occupied: FnvHashSet::default(),
+            selected: Vec::new(),
+            mod_counts: vec![0; group_count],
+            output: vec![peptide.clone()],
         }
     }
 
-    true
+    fn enumerate(&mut self, start: usize, remaining: usize, exhaustive_count: usize) -> bool {
+        for idx in start..self.modifications.len() {
+            let modification = self.modifications[idx];
+            if !self.occupied.insert(modification.site) {
+                continue;
+            }
+
+            let rule = &self.plan.variable_mods[modification.rule];
+            let group = rule.count_group;
+            let next_exhaustive = exhaustive_count + usize::from(!modification.library_supported);
+            let exceeds_limit = next_exhaustive > self.plan.max_exhaustive_mods
+                || rule
+                    .max_count
+                    .is_some_and(|limit| self.mod_counts[group] >= limit);
+            if exceeds_limit {
+                self.occupied.remove(&modification.site);
+                continue;
+            }
+
+            self.mod_counts[group] += 1;
+            self.selected.push(modification);
+            let should_continue = if remaining == 1 {
+                self.push_variant()
+            } else {
+                self.enumerate(idx + 1, remaining - 1, next_exhaustive)
+            };
+            self.selected.pop();
+            self.mod_counts[group] -= 1;
+            self.occupied.remove(&modification.site);
+            if !should_continue {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn push_variant(&mut self) -> bool {
+        if self
+            .plan
+            .max_combinations
+            .is_some_and(|cap| self.output.len() >= cap)
+        {
+            return false;
+        }
+        let mut modified = self.peptide.clone();
+        for selected in self.selected.iter().copied() {
+            modified.apply_site(
+                selected.site,
+                self.plan.variable_mods[selected.rule].modification.clone(),
+            );
+        }
+        self.output.push(modified);
+        true
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -1438,12 +1464,16 @@ impl TryFrom<Digest> for Peptide {
         // This is an important invariant to enforce, that ensures safety
         // while reversing peptide sequences
         if !value.sequence.is_ascii() {
-            return Err(PeptideError::InvalidSequence(value.sequence));
+            return Err(PeptideError::InvalidSequence(
+                String::from_utf8_lossy(value.sequence.as_bytes()).into_owned(),
+            ));
         }
-        for c in value.sequence.as_bytes() {
+        for c in value.sequence.iter() {
             let mono = monoisotopic(*c);
             if mono == 0.0 {
-                return Err(PeptideError::InvalidSequence(value.sequence));
+                return Err(PeptideError::InvalidSequence(
+                    String::from_utf8_lossy(value.sequence.as_bytes()).into_owned(),
+                ));
             }
             mass += mono;
         }
@@ -1454,7 +1484,7 @@ impl TryFrom<Digest> for Peptide {
             modifications: CompactModifications::default(),
             label_channel: None,
             label_group_override: None,
-            sequence: Arc::from(value.sequence.into_bytes().into_boxed_slice()),
+            sequence: value.sequence,
             monoisotopic: mass,
             nterm: None,
             cterm: None,

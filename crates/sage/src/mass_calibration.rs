@@ -189,7 +189,7 @@ fn median(values: &[f32]) -> f32 {
     let mut values = values.to_vec();
     values.sort_unstable_by(f32::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]

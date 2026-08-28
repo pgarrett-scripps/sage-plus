@@ -756,7 +756,7 @@ impl State {
                 !args.max_q_value.is_some_and(|max| {
                     row.get(q_column)
                         .and_then(serde_json::Value::as_f64)
-                        .map_or(true, |q| q > max)
+                        .is_none_or(|q| q > max)
                 }) && !args.protein.as_deref().is_some_and(|needle| {
                     !text("proteins").is_some_and(|value| value.contains(needle))
                         && !text("protein").is_some_and(|value| value.contains(needle))

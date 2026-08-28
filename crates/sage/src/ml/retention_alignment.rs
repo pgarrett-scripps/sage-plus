@@ -28,7 +28,9 @@ const MAX_RANSAC_POINTS: usize = 2_048;
 const RANSAC_TRIALS: usize = 256;
 const MIN_X_SEPARATION: f64 = 0.05;
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AlignmentMethod {
     /// Preserve Sage's existing ordinary least-squares alignment.

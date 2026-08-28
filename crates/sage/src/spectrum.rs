@@ -2,15 +2,23 @@ use crate::mass::{Tolerance, NEUTRON, PROTON};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+type SortedSpectrum<'a> = (Cow<'a, [f32]>, Cow<'a, [f32]>, Option<Cow<'a, [u8]>>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct DeisotopeSettings {
     pub enabled: bool,
+    #[schemars(range(min = 0.0))]
     pub ppm_tolerance: f32,
+    #[schemars(range(min = 1))]
     pub max_charge: Option<u8>,
+    #[schemars(range(min = 2, max = 4))]
     pub min_envelope_peaks: usize,
+    #[schemars(range(min = 2, max = 4))]
     pub max_envelope_peaks: usize,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub min_score: f32,
+    #[schemars(range(min = 0.0))]
     pub max_isotope_log2_ratio: f32,
 }
 
@@ -62,7 +70,7 @@ impl Default for DeisotopeSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum DeisotopeConfig {
     Enabled(bool),
@@ -296,11 +304,7 @@ pub fn deisotope(
     let sorted = mz
         .windows(2)
         .all(|pair| pair[0].total_cmp(&pair[1]).is_le());
-    let (sorted_mz, sorted_int, sorted_fragment_charges): (
-        Cow<'_, [f32]>,
-        Cow<'_, [f32]>,
-        Option<Cow<'_, [u8]>>,
-    ) = if sorted {
+    let (sorted_mz, sorted_int, sorted_fragment_charges): SortedSpectrum<'_> = if sorted {
         (
             Cow::Borrowed(mz),
             Cow::Borrowed(int),

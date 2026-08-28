@@ -132,7 +132,7 @@ fn sequence_coherent_partition_never_splits_terminal_variants() {
 #[test]
 fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
     let parameters = Builder::default().make_parameters();
-    let target_sequences = [b"PEPTIDER".to_vec(), b"PEDITPER".to_vec()]
+    let target_sequences = ["PEPTIDER".into(), "PEDITPER".into()]
         .into_iter()
         .collect::<HashSet<_>>();
 
@@ -143,6 +143,33 @@ fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
 
     assert_eq!(peptides.len(), 1);
     assert!(!peptides[0].decoy);
+}
+
+#[test]
+fn modification_variants_share_target_and_decoy_sequence_storage() {
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "variable_mods": {"M": [15.9949]}
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.modify_digests(vec![digest_group("AMPEPTIDER", Position::Full)]);
+    let targets = peptides
+        .iter()
+        .filter(|peptide| !peptide.decoy)
+        .collect::<Vec<_>>();
+    let decoys = peptides
+        .iter()
+        .filter(|peptide| peptide.decoy)
+        .collect::<Vec<_>>();
+
+    assert!(targets.len() >= 2);
+    assert_eq!(targets.len(), decoys.len());
+    assert!(targets
+        .windows(2)
+        .all(|pair| pair[0].sequence.shares_storage_with(&pair[1].sequence)));
+    assert!(decoys
+        .windows(2)
+        .all(|pair| pair[0].sequence.shares_storage_with(&pair[1].sequence)));
 }
 
 #[test]
@@ -487,7 +514,6 @@ fn digestion() {
         custom_cleavage_sites: None,
         prefilter: false,
         prefilter_chunk_size: 0,
-        prefilter_low_memory: true,
         loaded_ptm_library: None,
     };
 
@@ -526,14 +552,16 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
             .unwrap()
             .validate(&fasta)
             .unwrap();
-    let mut builder = Builder::default();
-    builder.enzyme = Some(EnzymeBuilder {
-        missed_cleavages: Some(1),
-        min_len: Some(3),
-        max_len: Some(50),
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(1),
+            min_len: Some(3),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        generate_decoys: Some(false),
         ..Default::default()
-    });
-    builder.generate_decoys = Some(false);
+    };
     let parameters = builder.make_parameters();
 
     let ordinary = parameters.digest(&fasta);
@@ -553,23 +581,25 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
 
 #[test]
 fn estimates_variable_modification_expansion_before_allocation() {
-    let mut builder = Builder::default();
-    builder.enzyme = Some(EnzymeBuilder {
-        cleave_at: Some("$".into()),
-        min_len: Some(1),
-        max_len: Some(50),
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            cleave_at: Some("$".into()),
+            min_len: Some(1),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        variable_mods: Some(
+            [(
+                "S".to_string(),
+                vec![VarModEntry::Mass(79.9663), VarModEntry::Mass(80.0)],
+            )]
+            .into_iter()
+            .collect(),
+        ),
+        max_variable_mods: Some(3),
+        generate_decoys: Some(false),
         ..Default::default()
-    });
-    builder.variable_mods = Some(
-        [(
-            "S".to_string(),
-            vec![VarModEntry::Mass(79.9663), VarModEntry::Mass(80.0)],
-        )]
-        .into_iter()
-        .collect(),
-    );
-    builder.max_variable_mods = Some(3);
-    builder.generate_decoys = Some(false);
+    };
     let parameters = builder.make_parameters();
     let fasta = Fasta::parse(">protein\nSSSSSSSSSS\n".into(), "rev_", false).unwrap();
 

@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 use super::*;
 use crate::enzyme::Digest;
 use crate::mass::PROTON;
@@ -187,5 +189,5 @@ fn label_is_populated_when_registered() {
 // sage's peak convention in future edits.
 #[test]
 fn proton_constant_available() {
-    assert!(PROTON > 1.0 && PROTON < 1.01);
+    const { assert!(PROTON > 1.0 && PROTON < 1.01) }
 }

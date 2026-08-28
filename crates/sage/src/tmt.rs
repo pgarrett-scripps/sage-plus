@@ -6,7 +6,7 @@ use crate::spectrum::{self, ProcessedSpectrum};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum Isobaric {
     Tmt6,
     Tmt10,

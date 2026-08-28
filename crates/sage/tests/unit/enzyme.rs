@@ -334,7 +334,7 @@ fn preserve_repeated_sequence_coordinates() {
         expected,
         tryp.digest(sequence, Arc::default())
             .into_iter()
-            .map(|d| (d.sequence, d.protein_start))
+            .map(|d| (d.sequence.to_string(), d.protein_start))
             .collect::<Vec<_>>()
     );
 }
@@ -483,9 +483,9 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
         .into_iter()
         .map(|digest| digest.sequence)
         .collect::<HashSet<_>>();
-    assert!(sequences.contains("ACDE"));
-    assert!(sequences.contains("FGHIK"));
-    assert!(sequences.contains(sequence));
+    assert!(sequences.contains(&b"ACDE"[..]));
+    assert!(sequences.contains(&b"FGHIK"[..]));
+    assert!(sequences.contains(sequence.as_bytes()));
 
     let nonspecific = EnzymeParameters {
         min_len: 3,
@@ -497,6 +497,50 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
         nonspecific.digest(sequence, Arc::default()),
         nonspecific.digest_with_custom_cleavages(sequence, Arc::default(), &[4])
     );
+}
+
+#[test]
+fn nonspecific_digest_spans_share_one_protein_allocation() {
+    let sequence: ProteinSequence = "ACDEFGHIK".into();
+    let nonspecific = EnzymeParameters {
+        min_len: 3,
+        max_len: 3,
+        missed_cleavages: 0,
+        enzyme: None,
+    };
+    let digests =
+        nonspecific.digest_protein_with_custom_cleavages(&sequence, Arc::from("protein"), &[]);
+
+    assert_eq!(digests.len(), 7);
+    assert!(digests
+        .windows(2)
+        .all(|pair| pair[0].sequence.shares_storage_with(&pair[1].sequence)));
+    assert!(digests
+        .iter()
+        .all(|digest| digest.sequence.storage_len() == sequence.len()));
+}
+
+#[test]
+fn grouping_uses_sequence_content_instead_of_storage_identity() {
+    let no_digest = EnzymeParameters {
+        min_len: 3,
+        max_len: 50,
+        missed_cleavages: 0,
+        enzyme: Enzyme::new("$", "", true, false),
+    };
+    let first: ProteinSequence = "PEPTIDE".into();
+    let second: ProteinSequence = "PEPTIDE".into();
+    let mut digests =
+        no_digest.digest_protein_with_custom_cleavages(&first, Arc::from("first"), &[]);
+    digests.extend(no_digest.digest_protein_with_custom_cleavages(
+        &second,
+        Arc::from("second"),
+        &[],
+    ));
+
+    let groups = group_digests(digests);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].origins.len(), 2);
 }
 
 /// Helper struct for generation of random sequences of valid amino acids

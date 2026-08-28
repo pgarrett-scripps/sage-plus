@@ -17,15 +17,17 @@ use sage_core::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
-#[serde(default)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct PtmLocalizationSettings {
     /// Compute PTM site localization and write site-level reports.
     pub enabled: bool,
     /// Identification q-value cutoff for PSMs included in PTM site reports.
     #[serde(alias = "q_value")]
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub psm_q_value: f32,
     /// Arrangement-level false-localization-rate q-value cutoff.
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub localization_q_value: f32,
 }
 
@@ -98,19 +100,27 @@ pub struct Search {
     pub score_type: ScoreType,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(title = "Sage search configuration")]
 /// Input search parameters deserialized from JSON file
 pub struct Input {
+    #[schemars(required)]
     pub database: Option<Builder>,
     pub precursor_tol: Tolerance,
     pub fragment_tol: Tolerance,
+    #[schemars(range(min = 1))]
     pub report_psms: Option<usize>,
     pub output_filter: Option<OutputFilter>,
     pub chimera: Option<bool>,
     pub wide_window: Option<bool>,
+    #[schemars(range(min = 1))]
     pub min_peaks: Option<usize>,
+    #[schemars(range(min = 1))]
     pub max_peaks: Option<usize>,
+    #[schemars(range(min = 1))]
     pub max_fragment_charge: Option<u8>,
+    #[schemars(range(min = 1))]
     pub min_matched_peaks: Option<u16>,
     pub precursor_charge: Option<(u8, u8)>,
     pub override_precursor_charge: Option<bool>,
@@ -122,16 +132,22 @@ pub struct Input {
     pub retention_time_alignment: Option<AlignmentMethod>,
     pub ion_mobility_model: Option<IonMobilitySettings>,
     pub output_directory: Option<String>,
+    #[schemars(required, length(min = 1))]
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
     pub protein_grouping: Option<bool>,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub protein_grouping_peptide_fdr: Option<f32>,
+    #[schemars(range(min = 0.0))]
     pub max_memory_gb: Option<f64>,
+    #[schemars(range(min = 0.0))]
     pub min_free_memory_gb: Option<f64>,
+    #[schemars(range(min = 1))]
     pub batch_size: Option<usize>,
 
     pub ptm_localization: Option<PtmLocalizationSettings>,
     pub spectral_library: Option<SpectralLibrarySettings>,
+    #[schemars(range(min = 0.0))]
     pub mass_shift_ppm: Option<f32>,
 
     pub annotate_matches: Option<bool>,
@@ -140,10 +156,11 @@ pub struct Input {
     pub score_type: Option<ScoreType>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct OutputFilter {
     /// Maximum spectrum-level q-value written to the PSM and matched-fragment tables.
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub psm_q_value: f32,
 }
 
@@ -153,15 +170,21 @@ impl Default for OutputFilter {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct LfqOptions {
     pub peak_scoring: Option<sage_core::lfq::PeakScoringStrategy>,
     pub integration: Option<sage_core::lfq::IntegrationStrategy>,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub spectral_angle: Option<f64>,
+    #[schemars(range(min = 0.0))]
     pub ppm_tolerance: Option<f32>,
+    #[schemars(range(min = 0.0))]
     pub rt_pct_tolerance: Option<f32>,
+    #[schemars(range(min = 0.0))]
     pub mobility_pct_tolerance: Option<f32>,
     pub combine_charge_states: Option<bool>,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub peptide_q_value: Option<f32>,
     pub mbr: Option<bool>,
 }
@@ -217,7 +240,8 @@ impl From<LfqOptions> for LfqSettings {
 #[path = "../tests/unit/input/tests.rs"]
 mod tests;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TmtOptions {
     pub level: Option<u8>,
     pub sn: Option<bool>,
@@ -248,7 +272,8 @@ impl Default for TmtSettings {
     }
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct QuantOptions {
     pub tmt: Option<Isobaric>,
     #[serde(rename = "tmt_settings")]

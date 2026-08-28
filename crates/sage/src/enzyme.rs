@@ -3,6 +3,7 @@ use regex::Regex;
 use std::sync::Arc;
 
 use crate::mass::VALID_AA;
+use crate::sequence::{PeptideSequence, ProteinSequence};
 
 #[derive(Clone, PartialOrd, Ord, Debug, Default)]
 /// An enzymatic digest
@@ -16,7 +17,7 @@ pub struct Digest {
     /// Semi-enzymatic?
     pub semi_enzymatic: bool,
     /// Cleaved peptide sequence
-    pub sequence: String,
+    pub sequence: PeptideSequence,
     /// Protein accession
     pub protein: Arc<str>,
     /// Zero-based start offset of this peptide in the source protein.
@@ -120,10 +121,6 @@ impl Digest {
             return self.clone();
         }
 
-        let mut sequence = self.sequence.chars().rev().collect::<Vec<char>>();
-        let n = sequence.len().saturating_sub(1);
-        sequence.swap(0, n);
-
         Digest {
             decoy: true,
             semi_enzymatic: self.semi_enzymatic,
@@ -131,7 +128,7 @@ impl Digest {
             protein_start: self.protein_start,
             prev_aa: self.prev_aa,
             next_aa: self.next_aa,
-            sequence: sequence.into_iter().collect(),
+            sequence: self.sequence.reversed_internal(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
         }
@@ -240,7 +237,7 @@ impl Enzyme {
             if sequence
                 .as_bytes()
                 .get(right)
-                .map_or(false, |b| self.skip_suffix[(b - b'A') as usize])
+                .is_some_and(|b| self.skip_suffix[(b - b'A') as usize])
             {
                 continue;
             }
@@ -342,6 +339,19 @@ impl EnzymeParameters {
         protein: Arc<str>,
         custom_boundaries: &[usize],
     ) -> Vec<Digest> {
+        let sequence: ProteinSequence = sequence.into();
+        self.digest_protein_with_custom_cleavages(&sequence, protein, custom_boundaries)
+    }
+
+    /// Digest a sequence already owned by the FASTA database. Every emitted
+    /// peptide retains only a shared storage pointer and a start/end range.
+    pub fn digest_protein_with_custom_cleavages(
+        &self,
+        protein_sequence: &ProteinSequence,
+        protein: Arc<str>,
+        custom_boundaries: &[usize],
+    ) -> Vec<Digest> {
+        let sequence = protein_sequence.as_str();
         let n = sequence.len();
         let mut digests = Vec::new();
         let mut sites = self.cleavage_sites(sequence);
@@ -412,7 +422,7 @@ impl EnzymeParameters {
             let start = site.site.start;
             let end = site.site.end;
 
-            let peptide_sequence = match sequence.get(start..end) {
+            let peptide_sequence = match protein_sequence.peptide(start..end) {
                 Some(peptide_sequence) => peptide_sequence,
                 None => continue,
             };
@@ -428,7 +438,7 @@ impl EnzymeParameters {
 
             if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert((start, end)) {
                 digests.push(Digest {
-                    sequence: peptide_sequence.into(),
+                    sequence: peptide_sequence,
                     missed_cleavages: site.missed_cleavages,
                     decoy: false,
                     semi_enzymatic: site.semi_enzymatic,
