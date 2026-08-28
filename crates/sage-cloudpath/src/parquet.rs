@@ -2,9 +2,9 @@
 //!
 //! Modifying the file formats here requires some digging into documentation
 //! about Dremel definition and repetition levels and the Parquet file format
-//! https://akshays-blog.medium.com/wrapping-head-around-repetition-and-definition-levels-in-dremel-powering-bigquery-c1a33c9695da
-//! https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet
-//! https://github.com/apache/parquet-format/blob/master/LogicalTypes.md
+//! <https://akshays-blog.medium.com/wrapping-head-around-repetition-and-definition-levels-in-dremel-powering-bigquery-c1a33c9695da>
+//! <https://blog.twitter.com/engineering/en_us/a/2013/dremel-made-simple-with-parquet>
+//! <https://github.com/apache/parquet-format/blob/master/LogicalTypes.md>
 
 #![cfg(feature = "parquet")]
 

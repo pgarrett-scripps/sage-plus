@@ -261,7 +261,7 @@ For additional information about configuration options and output file formats, 
 // but need to be removed in a real config.json file
 {
   "database": {
-    "bucket_size": 32768,           // How many fragments are in each internal mass bucket
+    "bucket_size": 32768,           // Maximum fragments in each internal search bucket
     "enzyme": {               // Optional. Default is trypsin, using the parameters below
       "missed_cleavages": 2,  // Optional[int], Number of missed cleavages for tryptic digest
       "min_len": 5,           // Optional[int] {default=5}, Minimum AA length of peptides to search
@@ -392,7 +392,13 @@ This documentation covers the parameters in the JSON configuration file for the 
 
 ## Database
 
-- **bucket_size**: Integer. The number of fragments in each internal mass bucket (default: 8192). Tweaking this parameter can increase search performance for wide precursor or fragment searches.
+- **bucket_size**: Integer. The maximum number of theoretical-fragment records in one internal search bucket (default: 8192). Values are normalized to a power of two. A mass-prefix group containing more records is split into multiple buckets with the same prefix, while smaller groups allocate only the records they contain. Tweaking this parameter can affect search performance for wide precursor or fragment searches.
+
+The preliminary fragment index stores each fragment as a 32-bit peptide index and a 16-bit exact
+mass suffix. The shared upper bits of the original `f32` mass are stored once per mass-prefix
+group. Recombining the prefix and suffix reproduces the original floating-point bit pattern, so
+this representation does not round or quantize fragment masses. Empty mass-prefix groups are not
+stored.
 
 ### Enzyme
 

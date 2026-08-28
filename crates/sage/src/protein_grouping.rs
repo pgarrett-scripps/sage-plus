@@ -6,7 +6,7 @@
 //!
 //! Reference: Zhang, B., Chambers, M. C., & Tabb, D. L. (2007). Proteomic
 //! parsimony through bipartite graph analysis improves accuracy and transparency.
-//! J. Proteome Res., 6(9), 3549-3557. https://doi.org/10.1021/pr070230d
+//! J. Proteome Res., 6(9), 3549-3557. <https://doi.org/10.1021/pr070230d>
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::scoring::Feature;

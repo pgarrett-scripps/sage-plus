@@ -184,7 +184,7 @@ pub struct MzMLReader {
 }
 
 impl MzMLReader {
-    /// Create a new [`MzMlReader`] with a minimum MS level filter
+    /// Create a new [`MzMLReader`] with a minimum MS level filter
     ///
     /// # Example
     ///

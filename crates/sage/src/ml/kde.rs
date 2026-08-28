@@ -3,8 +3,8 @@
 //! discriminant score distribution. Linear interpolation and binning is used to
 //! dramatically speed up the PEP calculation
 //!
-//! Käll, 2008 [https://pubmed.ncbi.nlm.nih.gov/18052118/]
-//! Ma, 2012 [https://pubmed.ncbi.nlm.nih.gov/23176103/]
+//! Käll, 2008 <https://pubmed.ncbi.nlm.nih.gov/18052118/>
+//! Ma, 2012 <https://pubmed.ncbi.nlm.nih.gov/23176103/>
 
 use std::convert::identity;
 

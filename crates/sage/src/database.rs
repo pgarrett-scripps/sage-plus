@@ -1391,6 +1391,8 @@ pub struct Theoretical {
     pub fragment_mz: f32,
 }
 
+/// Lower `f32` mass bits stored in each packed fragment. The remaining upper
+/// bits are shared by every search bucket with the same mass prefix.
 const FRAGMENT_MASS_SUFFIX_BITS: u32 = 12;
 
 #[repr(C, packed)]
@@ -1705,7 +1707,8 @@ impl IndexedDatabase {
         (self.peptides[index].decoy != peptide.decoy).then_some(PeptideIx(index as u32))
     }
 
-    /// Create a new [`IndexedQuery`] for a specific [`ProcessedSpectrum`]
+    /// Create a new [`IndexedQuery`] for a specific
+    /// [`ProcessedSpectrum`](crate::spectrum::ProcessedSpectrum)
     ///
     /// All matches returned by the query will be within the specified tolerance
     /// parameters

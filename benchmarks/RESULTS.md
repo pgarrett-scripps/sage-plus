@@ -76,6 +76,28 @@ estimate. A later standalone run and the subsequent warmup plus three measured r
 That isolated failure remains unexplained and should be investigated before treating this workload
 as fully stable.
 
+## Follow-up: integrated compact database indexes
+
+Two subsequent memory changes are now part of `main`. Target peptides share immutable source
+protein storage where possible, as documented in
+[PEPTIDE_INDEX_EXPERIMENT.md](PEPTIDE_INDEX_EXPERIMENT.md). The preliminary fragment index stores
+lossless six-byte records and caps every search bucket at `database.bucket_size`, as documented in
+[FRAGMENT_INDEX_EXPERIMENT.md](FRAGMENT_INDEX_EXPERIMENT.md).
+
+The final fragment-index comparison used commit `6a686d0` as its baseline and the bounded packed
+index ending at commit `66f3b45` as its candidate.
+
+| Workload | Fragments | Baseline peak RSS | Packed peak RSS | RSS change | Baseline wall | Packed wall |
+|---|---:|---:|---:|---:|---:|---:|
+| Conventional HEK | 80,833,042 | 1,910.3 MiB | 1,501.1 MiB | -21.4% | 6.50 s | 6.59 s |
+| Variable modifications | 219,325,108 | 4,528.3 MiB | 3,345.9 MiB | -26.1% | 14.27 s | 14.27 s |
+| Open precursor search | 80,833,042 | 1,925.7 MiB | 1,498.1 MiB | -22.2% | 104.87 s | 107.97 s |
+
+Every baseline and packed-index pair produced the same fragment count, one-percent FDR counts,
+and byte-identical result Parquet hash. Semi-enzymatic, non-specific, and exact-prefilter checks
+also produced identical outputs. The full Rust workspace tests, exhaustive generated bucket-size
+checks, formatting, and Clippy with warnings denied passed before integration.
+
 ## Charge-aware preprocessing
 
 The deterministic synthetic scorer benchmark contains 25,000 peptides and repeatedly searches 160
