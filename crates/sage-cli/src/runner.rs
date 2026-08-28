@@ -784,6 +784,11 @@ impl Runner {
             database.peptides.len(),
             (start.elapsed())
         );
+        info!(
+            "fragment index allocated {} bytes ({:.3} bytes per fragment)",
+            database.fragments.allocated_bytes(),
+            database.fragments.allocated_bytes() as f64 / database.fragments.len().max(1) as f64
+        );
         Ok(Self {
             database,
             parameters,
