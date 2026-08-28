@@ -23,7 +23,7 @@ BENCHMARK_ROOT = REPO / "benchmarks"
 WORK_ROOT = BENCHMARK_ROOT / ".work"
 RESULTS_ROOT = BENCHMARK_ROOT / "results"
 GNU_TIME = Path("/usr/bin/time")
-DEFAULT_BASELINE = "a38387b"
+DEFAULT_BASELINE = "v0.1.0-beta.1"
 SUMMARY_FIELDS = (
     "runtime_secs",
     "files",

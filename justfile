@@ -1,6 +1,6 @@
 set dotenv-load := true
 
-baseline_ref := env_var_or_default("BASELINE_REF", "a38387b")
+baseline_ref := env_var_or_default("BASELINE_REF", "v0.1.0-beta.1")
 repeats := env_var_or_default("REPEATS", "3")
 warmups := env_var_or_default("WARMUPS", "1")
 threads := env_var_or_default("THREADS", "8")

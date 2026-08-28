@@ -5,8 +5,8 @@ development checks and README-sized performance summaries. It is not a scientifi
 suite.
 
 The harness compares the current working tree with a pinned baseline. By default the baseline is
-commit `a38387b`, the `origin/main` commit that preceded the current performance work. The candidate
-build includes uncommitted working-tree changes.
+the `v0.1.0-beta.1` release. The candidate build includes uncommitted working-tree changes. Set
+`BASELINE_REF` when evaluating a different release or development boundary.
 
 ## Requirements
 

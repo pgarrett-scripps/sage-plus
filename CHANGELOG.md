@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.2] - 2026-08-28
+
 ### Added
 - Standard builds and release binaries now read local mzMLb files.
 - mzML parsing now resolves referenceable parameter groups used for shared spectrum and instrument metadata.
