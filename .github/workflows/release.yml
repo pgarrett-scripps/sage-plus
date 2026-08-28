@@ -95,6 +95,8 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Compile native release binaries
         if: matrix.builder == 'native'
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: cargo build --release --workspace --locked --target ${{ matrix.target }}
       - name: Compile native musl release binaries
         if: matrix.builder == 'alpine'

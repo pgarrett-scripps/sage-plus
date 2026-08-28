@@ -10,7 +10,9 @@ The workflow publishes executable archives to GitHub Releases and a container to
 Release binaries are compiled on runners with the same CPU architecture as their targets. The
 musl binaries are compiled inside the matching architecture of the official Rust Alpine image.
 This is required because the bundled HDF5 configuration used by mzMLb support executes target
-probes while it builds and therefore cannot use a conventional cross compiler.
+probes while it builds and therefore cannot use a conventional cross compiler. Native builds set
+the supported CMake policy floor to 3.5 so bundled libraries with older declarations also configure
+under CMake 4.
 
 ## One-time repository setup
 

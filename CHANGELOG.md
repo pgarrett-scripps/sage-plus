@@ -37,7 +37,8 @@ entries are retained below for provenance.
 
 ### Fixed
 - Release archives now build HDF5 and mzMLb support natively on each CPU architecture, including
-  static musl builds inside matching official Rust Alpine containers.
+  static musl builds inside matching official Rust Alpine containers and CMake 4 compatibility for
+  bundled native libraries.
 - Database prefiltering now filters targets and paired decoys together, preserves label-channel partners, and uses deterministic score ties. Prefiltered and full searches therefore use the same competition and FDR model.
 - LFQ mass lookup now derives its coarse search margin from configured precursor ranges, avoiding missed matches at wider tolerances. Mobility boundaries remain inclusive and configuration-driven.
 - Updated Bruker TDF parsing for the current `timsrust` API without dropping existing processing configuration.
