@@ -63,9 +63,16 @@ fn binary_search_slice_run() {
 }
 
 #[test]
+fn fragment_bucket_slice_includes_every_repeated_prefix() {
+    let buckets = [99.96875, 100.0, 100.0, 100.0, 100.03125];
+    assert_eq!(fragment_bucket_slice(&buckets, 100.01, 100.02), (1, 4));
+}
+
+#[test]
 fn fragment_index_preserves_exact_ids_masses_and_ranges() {
     assert_eq!(std::mem::size_of::<PackedFragment>(), 6);
     let parameters = Builder {
+        bucket_size: Some(2),
         generate_decoys: Some(false),
         ..Builder::default()
     }
@@ -73,13 +80,16 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
     let mut peptides = parameters
         .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
     Parameters::reorder_peptides(&mut peptides);
+    let peptides = peptides
+        .into_iter()
+        .flat_map(|peptide| [peptide.clone(), peptide.clone(), peptide])
+        .collect::<Vec<_>>();
 
     let mut expected = BTreeMap::<u32, Vec<Theoretical>>::new();
-    let suffix_bits = fragment_suffix_bits(parameters.bucket_size);
     for (peptide_index, peptide) in peptides.iter().enumerate() {
         for mass in preliminary_fragment_masses(&parameters, peptide) {
             expected
-                .entry(mass.to_bits() >> suffix_bits)
+                .entry(mass.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS)
                 .or_default()
                 .push(Theoretical {
                     peptide_index: PeptideIx(peptide_index as u32),
@@ -88,12 +98,20 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
         }
     }
 
+    let bucket_size = parameters.bucket_size;
     let database = parameters.build_from_peptides(peptides);
     let expected = expected.into_values().flatten().collect::<Vec<_>>();
     let actual = (0..database.buckets().len())
         .flat_map(|bucket| database.fragments.bucket(bucket))
         .collect::<Vec<_>>();
     assert_eq!(actual, expected);
+    assert!(
+        database.buckets().windows(2).any(|pair| pair[0] == pair[1]),
+        "expected a split prefix in {:?}",
+        database.buckets()
+    );
+    assert!((0..database.buckets().len())
+        .all(|bucket| database.fragments.bucket(bucket).count() <= bucket_size));
     assert_eq!(
         database.fragments.allocated_bytes(),
         expected.len() * 6 + database.buckets().len() * 12

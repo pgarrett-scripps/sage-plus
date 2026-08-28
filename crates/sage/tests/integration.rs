@@ -39,13 +39,18 @@ fn check_all_ions_visited(target_fragment_mz: f32, bucket_size: usize) {
     let (frag_lo, frag_hi) = fragment_tol.bounds(target_fragment_mz);
 
     for chunk_idx in 0..database.buckets().len() {
+        let bucket_min = database.buckets()[chunk_idx];
+        let next_min = database.buckets()[chunk_idx + 1..]
+            .iter()
+            .copied()
+            .find(|next| next > &bucket_min);
         // Check for total ordering by PeptideIx within a chunk
         let mut last = PeptideIx(0);
         for frag in database.fragments.bucket(chunk_idx) {
             assert!(frag.peptide_index >= last);
-            assert!(frag.fragment_mz >= database.buckets()[chunk_idx]);
-            if chunk_idx + 1 < database.buckets().len() {
-                assert!(frag.fragment_mz <= database.buckets()[chunk_idx + 1]);
+            assert!(frag.fragment_mz >= bucket_min);
+            if let Some(next_min) = next_min {
+                assert!(frag.fragment_mz < next_min);
             }
 
             if frag.fragment_mz >= frag_lo && frag.fragment_mz <= frag_hi {

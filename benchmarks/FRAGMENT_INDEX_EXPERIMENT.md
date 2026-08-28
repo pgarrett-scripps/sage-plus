@@ -41,12 +41,14 @@ creates the original 8-byte fragment vector.
 Each record stores:
 
 - A 32-bit peptide index
-- The low 8 to 16 bits of the exact `f32` mass representation
+- The low 12 bits of the exact `f32` mass representation, stored in a `u16`
 
-Each mass bucket stores the shared high mass bits once. The configured bucket
-size selects the suffix width. A value of 16,384 selects a 12-bit suffix, which
-matches the benchmarked layout. No floating-point quantization occurs. Joining
-the shared prefix and stored suffix recreates the original `f32` bit pattern.
+Each mass-prefix group stores the shared high mass bits once. Groups containing
+more records than the configured `bucket_size` are split into multiple search
+buckets with the same prefix. This restores `bucket_size` as a hard record
+limit while retaining the benchmarked 12-bit suffix layout. No floating-point
+quantization occurs. Joining the shared prefix and stored suffix recreates the
+original `f32` bit pattern.
 
 Construction uses two passes over theoretical fragments. The first pass counts
 records for each mass prefix. The second pass writes into exact, disjoint output
@@ -63,8 +65,8 @@ trials.
 |---|---:|---:|---:|
 | Fragment records | 80,833,042 | 80,833,042 | Identical |
 | Fragment allocation | 646.7 MB raw | 485.1 MB total | 25.0% smaller |
-| Median peak RSS | 1,887.2 MiB | 1,506.2 MiB | 20.2% lower |
-| Median wall time | 6.49 s | 6.12 s | 5.7% faster |
+| Median peak RSS | 1,910.3 MiB | 1,501.1 MiB | 21.4% lower |
+| Median wall time | 6.50 s | 6.59 s | 1.4% slower |
 | PSMs at 1% FDR | 2,203 | 2,203 | Identical |
 | Peptides at 1% FDR | 1,409 | 1,409 | Identical |
 
@@ -72,21 +74,29 @@ All measured Parquet result hashes were
 `819f8983bb951f74be55690517434023ebcbd17f0fd1d8a2a42dfa8890f32c33`.
 
 The focused deterministic scorer benchmark also produced identical peptide,
-matched-peak, and score checksums. Its median search time was effectively
-unchanged for the bucket-level prototype. The final direct-build layout was
-substantially faster in that synthetic workload because its finer mass-prefix
-buckets rejected irrelevant fragments earlier.
+matched-peak, and score checksums.
 
-## Remaining validation
+## Additional validation
 
-Before integration, benchmark the packed index with:
+The modification-heavy search generated 219,325,108 fragments. Peak RSS fell
+from 4,528.3 MiB to 3,345.9 MiB, a 26.1 percent reduction, with identical wall
+time and output hash.
 
-- Open precursor searches
-- Semi-enzymatic and non-enzymatic databases
-- Variable modifications and larger peptide counts
-- Prefilter enabled and disabled
-- Narrow DDA and wide DIA isolation windows
-- Different configured bucket sizes
+An open precursor search reduced peak RSS by 22.2 percent. Runtime increased
+by 3.0 percent, within the benchmark harness's five-percent noise threshold,
+and the output hash remained identical. Small semi-enzymatic and non-enzymatic
+searches also produced identical hashes and fragment counts. Enabling exact
+prefiltering produced the same final output as leaving prefiltering disabled.
+
+Workspace tests include exhaustive query visitation across generated bucket
+sizes from 1 through 8,192. The standard benchmark exercises a bucket size of
+16,384. Dedicated tests force repeated mass prefixes, verify that no bucket
+exceeds the configured limit, and check queries beginning inside a repeated
+prefix run.
+
+The remaining performance workload is:
+
+- Wide DIA isolation windows
 
 The implementation also uses a small audited unsafe section to fill pre-counted
 parallel output ranges. Unit tests verify the 6-byte record size, exact mass
