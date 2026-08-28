@@ -7,6 +7,11 @@ builds the Linux AMD64 container, and only then publishes the GitHub release.
 The workflow publishes executable archives to GitHub Releases and a container to
 `ghcr.io/pgarrett-scripps/sage-plus`. It does not publish to crates.io, Bioconda, or Homebrew.
 
+Release binaries are compiled on runners with the same CPU architecture as their targets. The
+musl binaries are compiled inside the matching architecture of the official Rust Alpine image.
+This is required because the bundled HDF5 configuration used by mzMLb support executes target
+probes while it builds and therefore cannot use a conventional cross compiler.
+
 ## One-time repository setup
 
 Keep the repository's default Actions token permission read-only. The release workflow grants
@@ -50,8 +55,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0-beta.1 -m "Sage Plus v0.1.0-beta.1"
-git push origin v0.1.0-beta.1
+git tag -a v0.1.0-beta.2 -m "Sage Plus v0.1.0-beta.2"
+git push origin v0.1.0-beta.2
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark
