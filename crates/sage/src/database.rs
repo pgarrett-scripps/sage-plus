@@ -494,7 +494,7 @@ impl Parameters {
 
         let fragment_bytes = estimate
             .fragments
-            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
+            .saturating_mul(std::mem::size_of::<PackedFragment>() as u64);
         let bucket_bytes = self.estimated_bucket_bytes(estimate.fragments);
 
         estimate.unmodified_peak_bytes = with_estimation_margin(digest_bytes.saturating_mul(2));
@@ -548,7 +548,7 @@ impl Parameters {
 
         let fragment_bytes = estimate
             .fragments
-            .saturating_mul(std::mem::size_of::<Theoretical>() as u64);
+            .saturating_mul(std::mem::size_of::<PackedFragment>() as u64);
         estimate.modified_peak_bytes = with_estimation_margin(peptide_bytes);
         estimate.fragment_peak_bytes = with_estimation_margin(
             peptide_bytes
@@ -623,9 +623,10 @@ impl Parameters {
     }
 
     fn estimated_bucket_bytes(&self, fragments: u64) -> u64 {
-        let bucket_size = self.bucket_size.max(1) as u64;
-        (fragments.saturating_add(bucket_size - 1) / bucket_size)
-            .saturating_mul(std::mem::size_of::<f32>() as u64)
+        let maximum_buckets = 1u64 << (u32::BITS - fragment_suffix_bits(self.bucket_size));
+        fragments.min(maximum_buckets).saturating_mul(
+            (std::mem::size_of::<FragmentBucket>() + std::mem::size_of::<f32>()) as u64,
+        )
     }
 
     fn variable_variant_count(&self, digest: &Digest) -> u64 {
@@ -1233,94 +1234,7 @@ impl Parameters {
 
     pub fn build_from_peptides(self, target_decoys: Vec<Peptide>) -> IndexedDatabase {
         log::trace!("generating fragments");
-
-        // Finally, perform in silico digest for our target sequences
-        // Note that multiple charge states are actually handled by
-        // [`SpectrumProcessor`] or during scoring - all theoretical
-        // fragments are monoisotopic/uncharged
-        let mut fragments = target_decoys
-            .par_iter()
-            .enumerate()
-            .flat_map_iter(|(idx, peptide)| {
-                // Generate both B and Y ions, then filter down to make sure that
-                // theoretical fragments are within the search space
-                self.ion_kinds
-                    .iter()
-                    .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
-                    .filter(|group| {
-                        // Don't store b1, b2, y1, y2 ions for preliminary scoring
-
-                        match group.kind {
-                            Kind::A | Kind::B | Kind::C => {
-                                (group.series_index + 1) > self.min_ion_index
-                            }
-                            Kind::X | Kind::Y | Kind::Z => {
-                                peptide.sequence.len().saturating_sub(1) - group.series_index
-                                    > self.min_ion_index
-                            }
-                        }
-                    })
-                    // Keep one canonical form per cleavage in the preliminary
-                    // index. Full rescoring evaluates every neutral-loss
-                    // alternative as a group; indexing all alternatives here
-                    // would bias candidate selection toward configured mods.
-                    .filter_map(move |group| {
-                        group.variants.into_iter().next().map(|ion| Theoretical {
-                            peptide_index: PeptideIx(idx as u32),
-                            fragment_mz: ion.monoisotopic_mass,
-                        })
-                    })
-            })
-            .collect::<Vec<_>>();
-        log::trace!("finalizing index");
-
-        // Sort all of our theoretical fragments by m/z, from low to high
-        fragments.par_sort_unstable_by(|a, b| a.fragment_mz.total_cmp(&b.fragment_mz));
-
-        // Now, we bucket all of our theoretical fragments, and within each bucket
-        // sort by precursor m/z - and save the minimum *fragment* m/z in a separate
-        // vector so that we can perform an efficient binary search to reduce
-        // the number of in silico fragments we evaluate
-        //
-        // Imagine our theoretical fragments look like this
-        //
-        // Fragment        A      B       C       D       E       F       G       H
-        // Fragment m/z [ 1.0    1.2     1.3     2.5     2.5     2.6     3.5     4.0 ]
-        // Parent m/z   [ 500    439     291     800     142     515     517     232 ]
-        //
-        // If we apply a bucket size of 4 we will end up with the following:
-        //
-        // Fragment        C      B       A       D       E       H       F       G
-        // Fragment m/z [ 1.3    1.2     1.0     2.5     2.5     4.0     3.5     2.6 ]
-        // Parent m/z   [ 291    439     500     800     142     232     515     517 ]
-        //              |___________________________|   |____________________________|
-        //               Bucket 1: min m/z 1.0          Bucket 2: min m/z 2.5
-        //
-        // * Example query: Fragment m/z 1.3 - 1.9 & Precursor m/z: 450 - 900
-        // 1) Perform a binary search to narrow down our window to Bucket 1 only
-        //      * Bucket 2 has a min m/z outside of our query range - nothing here can match
-        //
-        // Fragment        C      B       A       D
-        // Fragment m/z [ 1.3    1.2     1.0     2.5
-        // Parent m/z   [ 291    439     500     800
-        //                            |_____________|
-        //                                    ^
-        //                                    |
-        // Window with matching precursors ___|
-
-        // and within Bucket 1, we can perform another binary search to find fragments
-        // matching our desired precursor m/z tolerance
-
-        let min_value = fragments
-            .par_chunks_mut(self.bucket_size)
-            .map(|chunk| {
-                // There should always be at least one item in the chunk!
-                //  we know the chunk is already sorted by fragment_mz too, so this is minimum value
-                let min = chunk[0].fragment_mz;
-                chunk.par_sort_unstable_by(|a, b| a.peptide_index.cmp(&b.peptide_index));
-                min
-            })
-            .collect::<Vec<_>>();
+        let (compressed_fragments, min_value) = FragmentIndex::build(&self, &target_decoys);
 
         // PTM localization works from the compact mass/specificity list below,
         // while ambiguity and site reports resolve display labels by mass.
@@ -1401,9 +1315,8 @@ impl Parameters {
         let label_channels = self.label_channels();
         IndexedDatabase {
             peptides: target_decoys,
-            fragments,
+            fragments: compressed_fragments,
             min_value,
-            bucket_size: self.bucket_size,
             ion_kinds: self.ion_kinds,
             generate_decoys: self.generate_decoys,
             potential_mods,
@@ -1476,10 +1389,257 @@ pub struct Theoretical {
     pub fragment_mz: f32,
 }
 
+fn fragment_suffix_bits(bucket_size: usize) -> u32 {
+    bucket_size.ilog2().saturating_sub(2).clamp(8, 16)
+}
+
+#[repr(C, packed)]
+#[derive(Copy, Clone)]
+struct PackedFragment {
+    peptide_index: u32,
+    mass_suffix: u16,
+}
+
+impl PackedFragment {
+    #[inline(always)]
+    fn peptide_index(self) -> u32 {
+        self.peptide_index
+    }
+
+    #[inline(always)]
+    fn decode(self, mass_prefix: u32) -> Theoretical {
+        Theoretical {
+            peptide_index: PeptideIx(self.peptide_index),
+            fragment_mz: f32::from_bits(mass_prefix | u32::from(self.mass_suffix)),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct FragmentBucket {
+    mass_prefix: u32,
+    start: u32,
+    end: u32,
+}
+
+#[derive(Default)]
+/// Lossless theoretical-fragment index using exact packed mass-prefix buckets.
+pub struct FragmentIndex {
+    buckets: Vec<FragmentBucket>,
+    fragments: Vec<PackedFragment>,
+}
+
+#[derive(Copy, Clone)]
+struct SharedFragmentWriter(*mut std::mem::MaybeUninit<PackedFragment>);
+
+// SAFETY: each parallel peptide chunk receives precomputed, non-overlapping
+// output ranges for every mass prefix. No output position has multiple writers.
+unsafe impl Send for SharedFragmentWriter {}
+// SAFETY: writes through the shared pointer are confined to the disjoint ranges
+// described above, and the allocation remains alive until all workers finish.
+unsafe impl Sync for SharedFragmentWriter {}
+
+impl SharedFragmentWriter {
+    unsafe fn write(self, index: usize, fragment: PackedFragment) {
+        // SAFETY: callers use the disjoint and in-bounds positions assigned by
+        // the counting pass.
+        unsafe {
+            self.0
+                .add(index)
+                .write(std::mem::MaybeUninit::new(fragment))
+        };
+    }
+}
+
+impl FragmentIndex {
+    fn build(parameters: &Parameters, peptides: &[Peptide]) -> (Self, Vec<f32>) {
+        let suffix_bits = fragment_suffix_bits(parameters.bucket_size);
+        let suffix_mask = (1u32 << suffix_bits) - 1;
+        let requested_chunks = rayon::current_num_threads().max(1) * 4;
+        let chunk_size = peptides.len().div_ceil(requested_chunks).max(1);
+        let ranges = (0..peptides.len())
+            .step_by(chunk_size)
+            .map(|start| start..(start + chunk_size).min(peptides.len()))
+            .collect::<Vec<_>>();
+
+        let counts = ranges
+            .par_iter()
+            .map(|range| {
+                let mut counts = HashMap::<u32, u32>::new();
+                for peptide in &peptides[range.clone()] {
+                    for mass in preliminary_fragment_masses(parameters, peptide) {
+                        let prefix = mass.to_bits() >> suffix_bits;
+                        *counts.entry(prefix).or_default() += 1;
+                    }
+                }
+                counts
+            })
+            .collect::<Vec<_>>();
+
+        let mut prefixes = counts
+            .iter()
+            .flat_map(|counts| counts.keys().copied())
+            .collect::<Vec<_>>();
+        prefixes.sort_unstable();
+        prefixes.dedup();
+
+        let mut positions = vec![HashMap::<u32, usize>::new(); ranges.len()];
+        let mut limits = vec![HashMap::<u32, usize>::new(); ranges.len()];
+        let mut buckets = Vec::with_capacity(prefixes.len());
+        let mut total = 0usize;
+        for prefix in prefixes {
+            let start = total;
+            for (chunk, counts) in counts.iter().enumerate() {
+                let count = counts.get(&prefix).copied().unwrap_or_default() as usize;
+                if count > 0 {
+                    positions[chunk].insert(prefix, total);
+                    total += count;
+                    limits[chunk].insert(prefix, total);
+                }
+            }
+            buckets.push(FragmentBucket {
+                mass_prefix: prefix << suffix_bits,
+                start: u32::try_from(start).expect("fragment index exceeds 32-bit offsets"),
+                end: u32::try_from(total).expect("fragment index exceeds 32-bit offsets"),
+            });
+        }
+
+        let mut uninitialized = Vec::<std::mem::MaybeUninit<PackedFragment>>::with_capacity(total);
+        // SAFETY: the second generation pass writes every position exactly once
+        // using the counts and disjoint offsets computed above.
+        unsafe { uninitialized.set_len(total) };
+        let writer = SharedFragmentWriter(uninitialized.as_mut_ptr());
+        ranges
+            .into_par_iter()
+            .zip(positions.into_par_iter().zip(limits.into_par_iter()))
+            .for_each(|(range, (mut positions, limits))| {
+                for (peptide_index, peptide) in peptides[range.clone()].iter().enumerate() {
+                    let peptide_index = range.start + peptide_index;
+                    for mass in preliminary_fragment_masses(parameters, peptide) {
+                        let bits = mass.to_bits();
+                        let prefix = bits >> suffix_bits;
+                        let position = positions
+                            .get_mut(&prefix)
+                            .expect("counting and generation passes disagree");
+                        assert!(
+                            *position < limits[&prefix],
+                            "fragment generation exceeded the counted output range"
+                        );
+                        // SAFETY: every chunk owns a disjoint position range for
+                        // this prefix, and generation order stays within that range.
+                        unsafe {
+                            writer.write(
+                                *position,
+                                PackedFragment {
+                                    peptide_index: u32::try_from(peptide_index)
+                                        .expect("peptide index exceeds 32 bits"),
+                                    mass_suffix: (bits & suffix_mask) as u16,
+                                },
+                            )
+                        };
+                        *position += 1;
+                    }
+                }
+                assert_eq!(
+                    positions, limits,
+                    "fragment generation did not fill every counted output position"
+                );
+            });
+
+        let pointer = uninitialized.as_mut_ptr().cast::<PackedFragment>();
+        let len = uninitialized.len();
+        let capacity = uninitialized.capacity();
+        std::mem::forget(uninitialized);
+        // SAFETY: every element was initialized once above. `MaybeUninit<T>` and
+        // `T` have identical allocation layouts.
+        let fragments = unsafe { Vec::from_raw_parts(pointer, len, capacity) };
+        let min_value = buckets
+            .iter()
+            .map(|bucket| f32::from_bits(bucket.mass_prefix))
+            .collect();
+        (Self { buckets, fragments }, min_value)
+    }
+
+    pub fn len(&self) -> usize {
+        self.fragments.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fragments.is_empty()
+    }
+
+    pub fn allocated_bytes(&self) -> usize {
+        self.buckets.capacity() * std::mem::size_of::<FragmentBucket>()
+            + self.fragments.capacity() * std::mem::size_of::<PackedFragment>()
+    }
+
+    fn bucket_search(
+        &self,
+        bucket_index: usize,
+        peptide_lo: u32,
+        peptide_hi: u32,
+    ) -> FragmentIter<'_> {
+        let bucket = self.buckets[bucket_index];
+        let fragments = &self.fragments[bucket.start as usize..bucket.end as usize];
+        let first = fragments.partition_point(|fragment| fragment.peptide_index() < peptide_lo);
+        let last = fragments.partition_point(|fragment| fragment.peptide_index() <= peptide_hi);
+        FragmentIter {
+            fragments: &fragments[first..last],
+            mass_prefix: bucket.mass_prefix,
+            next: 0,
+        }
+    }
+
+    pub fn bucket(&self, bucket: usize) -> impl Iterator<Item = Theoretical> + '_ {
+        self.bucket_search(bucket, 0, u32::MAX)
+    }
+}
+
+struct FragmentIter<'a> {
+    fragments: &'a [PackedFragment],
+    mass_prefix: u32,
+    next: usize,
+}
+
+impl Iterator for FragmentIter<'_> {
+    type Item = Theoretical;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let fragment = self.fragments.get(self.next).copied()?;
+        self.next += 1;
+        Some(fragment.decode(self.mass_prefix))
+    }
+}
+
+fn preliminary_fragment_masses<'a>(
+    parameters: &'a Parameters,
+    peptide: &'a Peptide,
+) -> impl Iterator<Item = f32> + 'a {
+    parameters
+        .ion_kinds
+        .iter()
+        .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
+        .filter(|group| match group.kind {
+            Kind::A | Kind::B | Kind::C => (group.series_index + 1) > parameters.min_ion_index,
+            Kind::X | Kind::Y | Kind::Z => {
+                peptide.sequence.len().saturating_sub(1) - group.series_index
+                    > parameters.min_ion_index
+            }
+        })
+        .filter_map(|group| {
+            group
+                .variants
+                .into_iter()
+                .next()
+                .map(|ion| ion.monoisotopic_mass)
+        })
+}
+
 #[derive(Default)]
 pub struct IndexedDatabase {
     pub peptides: Vec<Peptide>,
-    pub fragments: Vec<Theoretical>,
+    pub fragments: FragmentIndex,
     pub ion_kinds: Vec<Kind>,
     pub min_value: Vec<f32>,
     /// Variable modification candidates used by PTM localization.
@@ -1490,7 +1650,6 @@ pub struct IndexedDatabase {
     pub model_mods: Vec<(ModificationSpecificity, f32)>,
     pub label_reference: Option<Arc<str>>,
     pub label_channels: Vec<Arc<str>>,
-    pub bucket_size: usize,
     pub generate_decoys: bool,
     pub decoy_tag: String,
     /// Optional explicit target pairing for non-reversal decoy peptides.
@@ -1582,13 +1741,11 @@ pub struct IndexedQuery<'d> {
 
 impl IndexedQuery<'_> {
     /// Search for a specified `fragment_mz` within the database
-    pub fn page_search(&self, mass: f32) -> impl Iterator<Item = &Theoretical> {
+    pub fn page_search(&self, mass: f32) -> impl Iterator<Item = Theoretical> + '_ {
         let (fragment_lo, fragment_hi) = self.fragment_tol.bounds(mass);
         let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
 
-        // Locate the left and right page indices that contain matching fragments
-        // Note that we need to multiply by `bucket_size` to transform these into
-        // indices that can be used with `self.db.fragments`
+        // Locate the mass-prefix buckets that can contain matching fragments.
         let (left_idx, right_idx) = binary_search_slice(
             &self.db.min_value,
             |min, bounds| min.total_cmp(bounds),
@@ -1596,47 +1753,36 @@ impl IndexedQuery<'_> {
             fragment_hi,
         );
 
-        // It is absolutely critical that we do not cross page boundaries!
-        // If we do, we can no longer rely on total ordering of peptide_index (precursor m/z)
+        let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
+        let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
+
+        // It is absolutely critical that we do not cross page boundaries.
+        // Otherwise we can no longer rely on peptide-index ordering.
         (left_idx..right_idx).flat_map(move |page| {
-            let left_idx = page * self.db.bucket_size;
-            // Last chunk not guaranted to be modulo bucket size, make sure we don't
-            // accidentally go out of bounds!
-            let right_idx = ((page + 1) * self.db.bucket_size).min(self.db.fragments.len());
-
-            // Narrow down into our region of interest, then perform another binary
-            // search to further refine down to the slice of matching precursor mzs
-            let slice = &&self.db.fragments[left_idx..right_idx];
-
-            let (inner_left, inner_right) = binary_search_slice(
-                slice,
-                |frag, bounds| (frag.peptide_index.0 as usize).cmp(bounds),
-                self.pre_idx_lo,
-                self.pre_idx_hi,
-            );
-
-            // Finally, filter down our slice into exact matches only
-            slice[inner_left..inner_right].iter().filter(move |frag| {
-                // This looks somewhat complicated, but it's a consequence of
-                // how the `binary_search_slice` function works - it will return
-                // the set of indices that maximally cover the desired range - the exact
-                // `left` and `right` indices may be valid, or just outside of the range.
-                // Anything interior of `left` and `right` is guaranteed to be within the
-                // precursor tolerance, so we just need to check the edge cases
-                //
-                // Previously, a direct lookup to check the mass of the current fragment was
-                // performed, but the pointer indirection + float comparison can slow down
-                // open searches by as much as 2x!!
-                // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
-                (frag.peptide_index.0 > self.pre_idx_lo as u32
-                    || (frag.peptide_index.0 == self.pre_idx_lo as u32
-                        && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
-                    && (frag.peptide_index.0 < self.pre_idx_hi as u32
-                        || (frag.peptide_index.0 == self.pre_idx_hi as u32
-                            && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
-                    && frag.fragment_mz >= fragment_lo
-                    && frag.fragment_mz <= fragment_hi
-            })
+            self.db
+                .fragments
+                .bucket_search(page, peptide_lo, peptide_hi)
+                .filter(move |frag| {
+                    // This looks somewhat complicated, but it's a consequence of
+                    // how the `binary_search_slice` function works - it will return
+                    // the set of indices that maximally cover the desired range - the exact
+                    // `left` and `right` indices may be valid, or just outside of the range.
+                    // Anything interior of `left` and `right` is guaranteed to be within the
+                    // precursor tolerance, so we just need to check the edge cases
+                    //
+                    // Previously, a direct lookup to check the mass of the current fragment was
+                    // performed, but the pointer indirection + float comparison can slow down
+                    // open searches by as much as 2x!!
+                    // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
+                    (frag.peptide_index.0 > self.pre_idx_lo as u32
+                        || (frag.peptide_index.0 == self.pre_idx_lo as u32
+                            && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
+                        && (frag.peptide_index.0 < self.pre_idx_hi as u32
+                            || (frag.peptide_index.0 == self.pre_idx_hi as u32
+                                && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
+                        && frag.fragment_mz >= fragment_lo
+                        && frag.fragment_mz <= fragment_hi
+                })
         })
     }
 }

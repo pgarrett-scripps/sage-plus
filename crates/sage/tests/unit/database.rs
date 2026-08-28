@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use super::*;
 
@@ -56,6 +59,44 @@ fn binary_search_slice_run() {
     assert_eq!(
         &data[left..right],
         &[1.0, 1.5, 1.5, 1.5, 1.5, 2.0, 2.5, 3.0, 3.0]
+    );
+}
+
+#[test]
+fn fragment_index_preserves_exact_ids_masses_and_ranges() {
+    assert_eq!(std::mem::size_of::<PackedFragment>(), 6);
+    let parameters = Builder {
+        generate_decoys: Some(false),
+        ..Builder::default()
+    }
+    .make_parameters();
+    let mut peptides = parameters
+        .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
+    Parameters::reorder_peptides(&mut peptides);
+
+    let mut expected = BTreeMap::<u32, Vec<Theoretical>>::new();
+    let suffix_bits = fragment_suffix_bits(parameters.bucket_size);
+    for (peptide_index, peptide) in peptides.iter().enumerate() {
+        for mass in preliminary_fragment_masses(&parameters, peptide) {
+            expected
+                .entry(mass.to_bits() >> suffix_bits)
+                .or_default()
+                .push(Theoretical {
+                    peptide_index: PeptideIx(peptide_index as u32),
+                    fragment_mz: mass,
+                });
+        }
+    }
+
+    let database = parameters.build_from_peptides(peptides);
+    let expected = expected.into_values().flatten().collect::<Vec<_>>();
+    let actual = (0..database.buckets().len())
+        .flat_map(|bucket| database.fragments.bucket(bucket))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        database.fragments.allocated_bytes(),
+        expected.len() * 6 + database.buckets().len() * 12
     );
 }
 

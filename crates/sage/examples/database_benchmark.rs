@@ -66,9 +66,10 @@ fn main() {
     let index_started = Instant::now();
     let database = parameters.build_from_peptides(peptides);
     println!(
-        "mode={modification_mode} peptides={} modifications={modification_entries} spilled={spilled_collections} fragments={} digest_ms={digest_ms} index_ms={}",
+        "mode={modification_mode} peptides={} modifications={modification_entries} spilled={spilled_collections} fragments={} fragment_bytes={} digest_ms={digest_ms} index_ms={}",
         database.peptides.len(),
         database.fragments.len(),
+        database.fragments.allocated_bytes(),
         index_started.elapsed().as_millis()
     );
 }
