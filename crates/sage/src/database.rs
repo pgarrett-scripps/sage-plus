@@ -75,7 +75,7 @@ impl From<EnzymeBuilder> for EnzymeParameters {
 #[serde(deny_unknown_fields)]
 /// Parameters used for generating the fragment database
 pub struct Builder {
-    /// This parameter allows tuning of the internal search structure
+    /// Maximum number of theoretical fragments stored in one search bucket.
     pub bucket_size: Option<usize>,
     pub enzyme: Option<EnzymeBuilder>,
     /// Minimum peptide monoisotopic mass that will be fragmented
@@ -623,8 +623,10 @@ impl Parameters {
     }
 
     fn estimated_bucket_bytes(&self, fragments: u64) -> u64 {
-        let maximum_buckets = 1u64 << (u32::BITS - fragment_suffix_bits(self.bucket_size));
-        fragments.min(maximum_buckets).saturating_mul(
+        let maximum_prefixes = 1u64 << (u32::BITS - FRAGMENT_MASS_SUFFIX_BITS);
+        let split_buckets = fragments.div_ceil(self.bucket_size.max(1) as u64);
+        let maximum_buckets = fragments.min(maximum_prefixes.saturating_add(split_buckets));
+        maximum_buckets.saturating_mul(
             (std::mem::size_of::<FragmentBucket>() + std::mem::size_of::<f32>()) as u64,
         )
     }
@@ -1389,9 +1391,7 @@ pub struct Theoretical {
     pub fragment_mz: f32,
 }
 
-fn fragment_suffix_bits(bucket_size: usize) -> u32 {
-    bucket_size.ilog2().saturating_sub(2).clamp(8, 16)
-}
+const FRAGMENT_MASS_SUFFIX_BITS: u32 = 12;
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
@@ -1453,8 +1453,9 @@ impl SharedFragmentWriter {
 
 impl FragmentIndex {
     fn build(parameters: &Parameters, peptides: &[Peptide]) -> (Self, Vec<f32>) {
-        let suffix_bits = fragment_suffix_bits(parameters.bucket_size);
+        let suffix_bits = FRAGMENT_MASS_SUFFIX_BITS;
         let suffix_mask = (1u32 << suffix_bits) - 1;
+        let bucket_size = parameters.bucket_size.max(1);
         let requested_chunks = rayon::current_num_threads().max(1) * 4;
         let chunk_size = peptides.len().div_ceil(requested_chunks).max(1);
         let ranges = (0..peptides.len())
@@ -1483,11 +1484,26 @@ impl FragmentIndex {
         prefixes.sort_unstable();
         prefixes.dedup();
 
+        let prefix_counts = prefixes
+            .into_iter()
+            .map(|prefix| {
+                let count = counts
+                    .iter()
+                    .map(|counts| counts.get(&prefix).copied().unwrap_or_default() as usize)
+                    .sum::<usize>();
+                (prefix, count)
+            })
+            .collect::<Vec<_>>();
+        let bucket_count = prefix_counts
+            .iter()
+            .map(|(_, count)| count.div_ceil(bucket_size))
+            .sum();
+
         let mut positions = vec![HashMap::<u32, usize>::new(); ranges.len()];
         let mut limits = vec![HashMap::<u32, usize>::new(); ranges.len()];
-        let mut buckets = Vec::with_capacity(prefixes.len());
+        let mut buckets = Vec::with_capacity(bucket_count);
         let mut total = 0usize;
-        for prefix in prefixes {
+        for (prefix, prefix_count) in prefix_counts {
             let start = total;
             for (chunk, counts) in counts.iter().enumerate() {
                 let count = counts.get(&prefix).copied().unwrap_or_default() as usize;
@@ -1497,11 +1513,16 @@ impl FragmentIndex {
                     limits[chunk].insert(prefix, total);
                 }
             }
-            buckets.push(FragmentBucket {
-                mass_prefix: prefix << suffix_bits,
-                start: u32::try_from(start).expect("fragment index exceeds 32-bit offsets"),
-                end: u32::try_from(total).expect("fragment index exceeds 32-bit offsets"),
-            });
+            assert_eq!(total - start, prefix_count);
+            for bucket_start in (start..total).step_by(bucket_size) {
+                let bucket_end = (bucket_start + bucket_size).min(total);
+                buckets.push(FragmentBucket {
+                    mass_prefix: prefix << suffix_bits,
+                    start: u32::try_from(bucket_start)
+                        .expect("fragment index exceeds 32-bit offsets"),
+                    end: u32::try_from(bucket_end).expect("fragment index exceeds 32-bit offsets"),
+                });
+            }
         }
 
         let mut uninitialized = Vec::<std::mem::MaybeUninit<PackedFragment>>::with_capacity(total);
@@ -1746,12 +1767,8 @@ impl IndexedQuery<'_> {
         let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
 
         // Locate the mass-prefix buckets that can contain matching fragments.
-        let (left_idx, right_idx) = binary_search_slice(
-            &self.db.min_value,
-            |min, bounds| min.total_cmp(bounds),
-            fragment_lo,
-            fragment_hi,
-        );
+        let (left_idx, right_idx) =
+            fragment_bucket_slice(&self.db.min_value, fragment_lo, fragment_hi);
 
         let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
         let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
@@ -1785,6 +1802,15 @@ impl IndexedQuery<'_> {
                 })
         })
     }
+}
+
+fn fragment_bucket_slice(min_values: &[f32], low: f32, high: f32) -> (usize, usize) {
+    let (mut left, right) =
+        binary_search_slice(min_values, |min, bounds| min.total_cmp(bounds), low, high);
+    if let Some(&left_value) = min_values.get(left) {
+        left = min_values.partition_point(|value| value.total_cmp(&left_value).is_lt());
+    }
+    (left, right)
 }
 
 /// Return the widest `left` and `right` indices into a `slice` (sorted by the

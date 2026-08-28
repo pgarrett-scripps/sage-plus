@@ -1025,7 +1025,7 @@
       "description": "Parameters used for generating the fragment database",
       "properties": {
         "bucket_size": {
-          "description": "This parameter allows tuning of the internal search structure",
+          "description": "Maximum number of theoretical fragments stored in one search bucket.",
           "format": "uint",
           "minimum": 0,
           "type": [
