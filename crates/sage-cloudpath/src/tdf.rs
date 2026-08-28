@@ -15,7 +15,8 @@ use timsrust::{
 };
 pub struct TdfReader;
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BrukerSpectrumProcessingConfig {
     pub smoothing_window: u32,
     pub centroiding_window: u32,
@@ -34,7 +35,7 @@ impl Default for BrukerSpectrumProcessingConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
 pub enum BrukerQuadWindowExpansionStrategy {
     None,
     Even(usize),
@@ -48,7 +49,7 @@ impl Default for BrukerQuadWindowExpansionStrategy {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
 pub enum BrukerFrameWindowSplittingConfig {
     Quadrupole(BrukerQuadWindowExpansionStrategy),
     Window(BrukerQuadWindowExpansionStrategy),
@@ -60,7 +61,8 @@ impl Default for BrukerFrameWindowSplittingConfig {
     }
 }
 
-#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BrukerSpectrumConfig {
     pub spectrum_processing_params: BrukerSpectrumProcessingConfig,
     pub frame_splitting_params: BrukerFrameWindowSplittingConfig,
@@ -101,7 +103,8 @@ impl BrukerSpectrumConfig {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BrukerMS1CentoidingConfig {
     pub mz_ppm: f32,
     pub ims_pct: f32,
@@ -116,7 +119,8 @@ impl Default for BrukerMS1CentoidingConfig {
     }
 }
 
-#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct BrukerProcessingConfig {
     pub ms2: BrukerSpectrumConfig,
     pub ms1: BrukerMS1CentoidingConfig,

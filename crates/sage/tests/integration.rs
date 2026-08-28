@@ -5,7 +5,7 @@ use sage_core::database::{Builder, IndexedDatabase, PeptideIx};
 use sage_core::fasta::Fasta;
 use sage_core::mass::Tolerance;
 
-const FASTA: &'static str = r#"
+const FASTA: &str = r#"
 >sp|Q99536|VAT1_HUMAN Synaptic vesicle membrane protein VAT-1 homolog OS=Homo sapiens OX=9606 GN=VAT1 PE=1 SV=2
 MSDEREVAEAATGEDASSPPPKTEAASDPQHPAASEGAAAAAASPPLLRCLVLTGFGGYD
 KVKLQSRPAAPPAPGPGQLTLRLRACGLNFADLMARQGLYDRLPPLPVTPGMEGAGVVIA

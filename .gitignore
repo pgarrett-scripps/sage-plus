@@ -1,6 +1,11 @@
 target/
 /data/
 .release/
+/benchmarks/.work/
+/benchmarks/results/
+__pycache__/
+*.py[cod]
+/.env
 
 *.pin
 *.txt
@@ -10,6 +15,7 @@ target/
 *.json
 !tests/config_spectral_library.json
 !schemas/config.schema.json
+!benchmarks/configs/*.json
 *.ms2
 *.fasta
 *.fas

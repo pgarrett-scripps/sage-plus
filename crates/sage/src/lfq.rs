@@ -25,7 +25,9 @@ fn default_rt_pct_tolerance() -> f32 {
     0.5
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub enum PeakScoringStrategy {
     RetentionTime,
     SpectralAngle,
@@ -33,7 +35,7 @@ pub enum PeakScoringStrategy {
     Hybrid,
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum IntegrationStrategy {
     Apex,
     Sum,

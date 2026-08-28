@@ -1,12 +1,13 @@
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
 use crate::mass::VALID_AA;
+use crate::sequence::ProteinSequence;
 use rayon::prelude::*;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct Fasta {
-    pub targets: Vec<(Arc<str>, String)>,
+    pub targets: Vec<(Arc<str>, ProteinSequence)>,
     decoy_tag: String,
     // Should we ignore decoys in the fasta database
     // and generate them internally?
@@ -39,7 +40,7 @@ impl Fasta {
                     let acc = accession(last_id, header_line)?;
                     let seq = std::mem::take(&mut s);
                     if !acc.contains(&decoy_tag) || !generate_decoys {
-                        targets.push((acc, seq));
+                        targets.push((acc, seq.into()));
                     }
                 }
                 accession(id, line_number)?;
@@ -64,7 +65,7 @@ impl Fasta {
             })?;
             let acc = accession(last_id, header_line)?;
             if !acc.contains(&decoy_tag) || !generate_decoys {
-                targets.push((acc, s));
+                targets.push((acc, s.into()));
             }
         }
 
@@ -95,7 +96,7 @@ impl Fasta {
                     .map(|library| library.boundaries_for(protein))
                     .unwrap_or_default();
                 enzyme
-                    .digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
+                    .digest_protein_with_custom_cleavages(sequence, protein.clone(), boundaries)
                     .into_iter()
                     .filter_map(|mut digest| {
                         if protein.contains(&self.decoy_tag) {

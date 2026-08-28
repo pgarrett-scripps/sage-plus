@@ -11,7 +11,7 @@ use std::sync::Arc;
 fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
-        sequence: Arc::from(&b"PEPTIDE"[..]),
+        sequence: (&b"PEPTIDE"[..]).into(),
         proteins: vec![Arc::from("P12345")].into(),
         ..Peptide::default()
     });
@@ -64,7 +64,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
     let mut database = IndexedDatabase::default();
     for sequence in [b"PEPTIDE".as_slice(), b"SEQUENCE".as_slice()] {
         database.peptides.push(Peptide {
-            sequence: Arc::from(sequence),
+            sequence: sequence.into(),
             proteins: vec![Arc::from("P12345")].into(),
             ..Peptide::default()
         });
@@ -178,7 +178,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
 fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
-        sequence: Arc::from(&b"PEPTIDE"[..]),
+        sequence: (&b"PEPTIDE"[..]).into(),
         proteins: vec![Arc::from("P12345"), Arc::from("P67890")].into(),
         protein_sites: Arc::from([
             ProteinOccurrence {
@@ -446,13 +446,13 @@ fn deserialize_custom_cleavage_library() -> parquet::errors::Result<()> {
     let mut row_group = writer.next_row_group().unwrap();
     write_required_column!(
         row_group,
-        vec![ByteArray::from("P1"), ByteArray::from("P2")],
+        [ByteArray::from("P1"), ByteArray::from("P2")],
         ByteArrayType
     );
-    write_required_column!(row_group, vec![4_i64, 0_i64], Int64Type);
+    write_required_column!(row_group, [4_i64, 0_i64], Int64Type);
     write_required_column!(
         row_group,
-        vec![ByteArray::from("PEPK|TIDE"), ByteArray::from("A|CDE")],
+        [ByteArray::from("PEPK|TIDE"), ByteArray::from("A|CDE")],
         ByteArrayType
     );
     row_group.close().unwrap();

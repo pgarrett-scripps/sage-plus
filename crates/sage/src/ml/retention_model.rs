@@ -13,7 +13,9 @@ use crate::scoring::Feature;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, schemars::JsonSchema, PartialEq, Eq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionTimeFeatureSet {
     #[default]
@@ -22,16 +24,18 @@ pub enum RetentionTimeFeatureSet {
     AdditivePtm,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub struct RetentionTimeSettings {
     /// Sequence features used by the linear regression model.
     pub features: RetentionTimeFeatureSet,
     /// Number of peptide-grouped cross-validation folds.
+    #[schemars(range(min = 2, max = 10))]
     pub folds: usize,
     /// Seed used for deterministic peptide-level fold assignment.
     pub seed: u64,
     /// Ridge penalty for additive variable-PTM retention-time offsets.
+    #[schemars(range(min = 0.0))]
     pub ptm_regularization: f64,
 }
 

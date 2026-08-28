@@ -39,7 +39,7 @@ fn sequence(mut value: usize) -> String {
 
 fn peptide(index: usize) -> Peptide {
     Peptide::try_from(Digest {
-        sequence: sequence(index),
+        sequence: sequence(index).into(),
         protein: Arc::from(format!("protein-{index}")),
         ..Digest::default()
     })

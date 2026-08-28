@@ -7,7 +7,9 @@ pub const PROTON: f32 = 1.0072764;
 pub const NEUTRON: f32 = 1.00335;
 pub const NH3: f32 = 17.026548;
 
-#[derive(Copy, Clone, Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
+#[derive(
+    Copy, Clone, Serialize, Deserialize, schemars::JsonSchema, Debug, PartialEq, PartialOrd,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Tolerance {
     Ppm(f32, f32),
@@ -56,10 +58,7 @@ impl Mul<f32> for Tolerance {
     }
 }
 
-pub const VALID_AA: [u8; 22] = [
-    b'A', b'C', b'D', b'E', b'F', b'G', b'H', b'I', b'K', b'L', b'M', b'N', b'P', b'Q', b'R', b'S',
-    b'T', b'V', b'W', b'Y', b'U', b'O',
-];
+pub const VALID_AA: [u8; 22] = *b"ACDEFGHIKLMNPQRSTVWYUO";
 
 pub const MONOISOTOPIC_MASSES: [f32; 26] = [
     71.03711, 0.0, 103.00919, 115.02694, 129.04259, 147.0684, 57.02146, 137.05891, 113.08406, 0.0,

@@ -5,7 +5,18 @@ use crate::mass::monoisotopic;
 use crate::modification::NeutralLossMode;
 use crate::peptide::{Peptide, Site};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Deserialize, Serialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
     A,

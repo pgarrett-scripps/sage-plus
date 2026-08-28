@@ -33,7 +33,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
 fn database() -> IndexedDatabase {
     let mut database = IndexedDatabase::default();
     database.peptides.push(Peptide {
-        sequence: Arc::from(&b"PEPTIDE"[..]),
+        sequence: (&b"PEPTIDE"[..]).into(),
         proteins: vec![Arc::from("P12345")].into(),
         ..Peptide::default()
     });
@@ -175,7 +175,7 @@ fn settings_reject_invalid_values_and_duplicate_formats() {
 #[test]
 fn mass_delta_proforma_does_not_depend_on_modification_names() {
     let peptide = Peptide {
-        sequence: Arc::from(&b"ACD"[..]),
+        sequence: (&b"ACD"[..]).into(),
         modifications: crate::peptide::CompactModifications::from_dense([0.0, 57.021_465, 0.0]),
         nterm: Some(42.010_565),
         ..Peptide::default()

@@ -6,7 +6,7 @@ use crate::spectrum::{Precursor, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::ops::AddAssign;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// A compact thread-safe set used while spectra are searched in parallel.
 pub struct AtomicBitSet {
@@ -47,7 +47,7 @@ impl AtomicBitSet {
     }
 }
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ScoreType {
     SageHyperScore,
     OpenMSHyperScore,
@@ -471,68 +471,6 @@ impl<'db> Scorer<'db> {
         } else {
             for charge in self.min_precursor_charge..=self.max_precursor_charge {
                 mark(mz * charge as f32, charge, self.precursor_tol);
-            }
-        }
-    }
-
-    /// Perform a quick first-pass scoring, where we consider a peptide "identified"
-    /// if it meets the following criterion:
-    ///  * prefilter_low_memory = true: in the top `report_psms` hits for a spectrum
-    ///  * prefilter_low_memory = false: has at least `min_matched_peaks` fragment ion matches
-    /// * `keep`: A vector of atomic bools is used to maintain an identification list across scans
-    #[deprecated(note = "use exact_prefilter for candidate-exact filtering")]
-    pub fn quick_score(
-        &self,
-        query: &ProcessedSpectrum,
-        prefilter_low_memory: bool,
-        keep: &[AtomicBool],
-    ) {
-        assert_eq!(
-            query.level, 2,
-            "internal bug, trying to score a non-MS2 scan!"
-        );
-        let precursor = query.precursors.first().unwrap_or_else(|| {
-            panic!("missing MS1 precursor for {}", query.id);
-        });
-        let hits = self.initial_hits(query, precursor);
-        let max_charge = hits
-            .preliminary
-            .iter()
-            .map(|pre| pre.precursor_charge)
-            .max()
-            .unwrap_or(self.min_precursor_charge);
-        let fragment_index = FragmentMatchIndex::new(
-            query,
-            max_fragment_charge(self.max_fragment_charge, max_charge),
-        );
-
-        if prefilter_low_memory {
-            let mut score_vector = hits
-                .preliminary
-                .iter()
-                .filter_map(|pre| {
-                    if pre.peptide == PeptideIx::default() {
-                        return None;
-                    }
-                    let (score, _, _) =
-                        self.score_candidate_with_index(query, pre, false, &fragment_index);
-                    if (score.matched_b + score.matched_y) < self.min_matched_peaks {
-                        return None;
-                    }
-                    Some(score)
-                })
-                .collect::<Vec<_>>();
-
-            let k = self.report_psms.min(score_vector.len());
-            bounded_min_heapify(&mut score_vector, k);
-            for score in &score_vector[..k] {
-                keep[score.peptide.0 as usize].store(true, Ordering::Relaxed);
-            }
-        } else {
-            for pre in &hits.preliminary {
-                if pre.peptide != PeptideIx::default() {
-                    keep[pre.peptide.0 as usize].store(true, Ordering::Relaxed);
-                }
             }
         }
     }

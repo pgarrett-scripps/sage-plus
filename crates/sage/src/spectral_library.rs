@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SpectralLibraryFormat {
     SageParquet,
@@ -17,7 +17,9 @@ pub enum SpectralLibraryFormat {
     MzSpecLib,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SpectralLibraryStrategy {
     #[default]
@@ -61,17 +63,24 @@ fn default_formats() -> Vec<SpectralLibraryFormat> {
 }
 
 /// Settings for an empirical library built from confidently identified PSMs.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct SpectralLibrarySettings {
     pub enabled: bool,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub psm_q_value: f32,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub peptide_q_value: f32,
     pub strategy: SpectralLibraryStrategy,
+    #[schemars(range(min = 1))]
     pub min_matched_peaks: u32,
+    #[schemars(range(min = 1))]
     pub max_fragments: usize,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub min_relative_intensity: f32,
+    #[schemars(range(min = 1))]
     pub min_consensus_psms: usize,
+    #[schemars(range(min = 0.0, max = 1.0))]
     pub min_fragment_frequency: f32,
     pub include_chimeric: bool,
     pub formats: Vec<SpectralLibraryFormat>,

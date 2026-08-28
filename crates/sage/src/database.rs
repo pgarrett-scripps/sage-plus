@@ -11,9 +11,10 @@ use crate::modification::{
 };
 use crate::peptide::{
     AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, ModificationLookup,
-    Peptide, VariableRule, INLINE_PROTEINS,
+    ModificationPlan, Peptide, VariableRule, INLINE_PROTEINS,
 };
 use crate::ptm_library::PtmLibrary;
+use crate::sequence::PeptideSequence;
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
 use rayon::prelude::*;
@@ -23,13 +24,16 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EnzymeBuilder {
     /// How many missed cleavages to use
     pub missed_cleavages: Option<u8>,
     /// Minimum peptide length that will be fragmented
+    #[schemars(range(min = 1))]
     pub min_len: Option<usize>,
     /// Maximum peptide length that will be fragmented
+    #[schemars(range(min = 1))]
     pub max_len: Option<usize>,
     pub cleave_at: Option<String>,
     pub restrict: Option<String>,
@@ -67,7 +71,8 @@ impl From<EnzymeBuilder> for EnzymeParameters {
     }
 }
 
-#[derive(Deserialize, Default, Clone)]
+#[derive(Deserialize, Default, Clone, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 /// Parameters used for generating the fragment database
 pub struct Builder {
     /// This parameter allows tuning of the internal search structure
@@ -154,7 +159,6 @@ impl Builder {
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
-            prefilter_low_memory: self.prefilter_low_memory.unwrap_or(true),
             loaded_ptm_library: None,
         }
     }
@@ -185,14 +189,11 @@ pub struct Parameters {
     pub custom_cleavage_sites: Option<String>,
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
-    /// Deprecated compatibility option. Exact prefiltering ignores this value.
-    #[serde(skip_serializing)]
-    pub prefilter_low_memory: bool,
     #[serde(skip)]
     pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
 }
 
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PtmLibrarySettings {
     pub path: String,
@@ -524,15 +525,13 @@ impl Parameters {
                 .saturating_sub(self.min_ion_index as u64)
                 .saturating_mul(self.ion_kinds.len() as u64);
             estimate.fragments = estimate.fragments.saturating_add(fragments);
-            let protein_bytes = peptide
-                .proteins
-                .spilled()
-                .then(|| {
-                    (peptide.proteins.len() as u64)
-                        .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
-                        .saturating_add(ALLOCATION_OVERHEAD)
-                })
-                .unwrap_or_default();
+            let protein_bytes = if peptide.proteins.spilled() {
+                (peptide.proteins.len() as u64)
+                    .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
+                    .saturating_add(ALLOCATION_OVERHEAD)
+            } else {
+                0
+            };
             peptide_bytes =
                 peptide_bytes.saturating_add(
                     (std::mem::size_of::<Peptide>() as u64)
@@ -604,15 +603,13 @@ impl Parameters {
                 .saturating_add(
                     sequence_len.saturating_mul(std::mem::size_of::<AppliedModification>() as u64),
                 )
-                .saturating_add(
-                    (digest.origins.len() > INLINE_PROTEINS)
-                        .then(|| {
-                            (digest.origins.len() as u64)
-                                .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
-                                .saturating_add(ALLOCATION_OVERHEAD)
-                        })
-                        .unwrap_or_default(),
-                )
+                .saturating_add(if digest.origins.len() > INLINE_PROTEINS {
+                    (digest.origins.len() as u64)
+                        .saturating_mul(std::mem::size_of::<Arc<str>>() as u64)
+                        .saturating_add(ALLOCATION_OVERHEAD)
+                } else {
+                    0
+                })
                 .saturating_add(
                     (digest.origins.len() as u64)
                         .saturating_mul(std::mem::size_of::<ProteinOccurrence>() as u64),
@@ -802,7 +799,7 @@ impl Parameters {
         let target_sequences = digests
             .iter()
             .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.as_bytes().to_vec())
+            .map(|digest| digest.reference.sequence.clone())
             .collect::<HashSet<_>>();
         self.modify_digests_with_target_sequences(digests, &target_sequences)
     }
@@ -812,7 +809,7 @@ impl Parameters {
     pub fn modify_digests_with_target_sequences(
         &self,
         digests: Vec<DigestGroup>,
-        target_sequences: &HashSet<Vec<u8>>,
+        target_sequences: &HashSet<PeptideSequence>,
     ) -> Vec<Peptide> {
         let mods = self.variable_modifications();
         let static_mods = self.static_modifications();
@@ -831,6 +828,14 @@ impl Parameters {
             &label_modifications,
         )
         .unwrap_or_else(|error| panic!("{error}"));
+        let modification_plan = ModificationPlan::new(
+            &mods,
+            &static_mods,
+            modification_lookup,
+            self.max_variable_mods,
+            self.max_total_variable_mods,
+            self.max_combinations,
+        );
         let library = self.loaded_ptm_library.as_deref();
 
         log::trace!("modifying peptides");
@@ -838,16 +843,11 @@ impl Parameters {
             .into_par_iter()
             .flat_map_iter(|group| {
                 let expand = |peptide: Peptide, library_sites: &[LibrarySite]| {
+                    let decoy_sequence = self
+                        .generate_decoys
+                        .then(|| peptide.sequence.reversed_internal());
                     peptide
-                        .apply_rules(
-                            &mods,
-                            library_sites,
-                            &static_mods,
-                            modification_lookup.clone(),
-                            self.max_variable_mods,
-                            self.max_total_variable_mods,
-                            self.max_combinations,
-                        )
+                        .apply_rules(&modification_plan, library_sites)
                         .into_iter()
                         .flat_map(|peptide| {
                             if label_channels.is_empty() {
@@ -869,8 +869,9 @@ impl Parameters {
                                 && peptide.monoisotopic <= self.peptide_max_mass
                         })
                         .flat_map(|peptide| {
-                            if self.generate_decoys {
-                                vec![peptide.reverse(), peptide].into_iter()
+                            if let Some(sequence) = &decoy_sequence {
+                                vec![peptide.reverse_with_sequence(sequence.clone()), peptide]
+                                    .into_iter()
                             } else {
                                 vec![peptide].into_iter()
                             }
@@ -983,12 +984,12 @@ impl Parameters {
     /// This is used by the low-memory prefilter so decoys are only generated
     /// for targets that survive the preliminary search.
     pub fn add_reversed_decoys(&self, targets: Vec<Peptide>) -> Vec<Peptide> {
-        let target_sequences: DashSet<Vec<u8>, FnvBuildHasher> = DashSet::default();
+        let target_sequences: DashSet<PeptideSequence, FnvBuildHasher> = DashSet::default();
         targets
             .iter()
             .filter(|peptide| !peptide.decoy)
             .for_each(|peptide| {
-                target_sequences.insert(peptide.sequence.to_vec());
+                target_sequences.insert(peptide.sequence.clone());
             });
 
         let mut target_decoys = targets
@@ -1123,7 +1124,7 @@ impl Parameters {
                 let digest = Digest {
                     decoy: is_decoy,
                     semi_enzymatic: false,
-                    sequence: seq,
+                    sequence: seq.into(),
                     protein,
                     protein_start: None,
                     prev_aa: None,
@@ -1159,19 +1160,17 @@ impl Parameters {
             &label_modifications,
         )
         .unwrap_or_else(|error| panic!("{error}"));
+        let modification_plan = ModificationPlan::new(
+            &variable_mods,
+            &static_mods,
+            modification_lookup,
+            self.max_variable_mods,
+            self.max_total_variable_mods,
+            self.max_combinations,
+        );
         let raw = raw
             .into_iter()
-            .flat_map(|peptide| {
-                peptide.apply_rules(
-                    &variable_mods,
-                    &[],
-                    &static_mods,
-                    modification_lookup.clone(),
-                    self.max_variable_mods,
-                    self.max_total_variable_mods,
-                    self.max_combinations,
-                )
-            })
+            .flat_map(|peptide| peptide.apply_rules(&modification_plan, &[]))
             .flat_map(|peptide| {
                 if label_channels.is_empty() {
                     vec![peptide]
@@ -1193,9 +1192,9 @@ impl Parameters {
             .collect::<Vec<_>>();
 
         // Build target sequence set for decoy deduplication.
-        let targets: DashSet<Vec<u8>, FnvBuildHasher> = DashSet::default();
+        let targets: DashSet<PeptideSequence, FnvBuildHasher> = DashSet::default();
         raw.iter().filter(|p| !p.decoy).for_each(|p| {
-            targets.insert(p.sequence.to_vec());
+            targets.insert(p.sequence.clone());
         });
 
         // Emit targets (+ generated decoys) into the final list.
@@ -1561,31 +1560,6 @@ impl IndexedDatabase {
 
     pub fn buckets(&self) -> &[f32] {
         &self.min_value
-    }
-
-    pub fn serialize(&self) {
-        use std::io::Write;
-        let mut wtr = std::io::BufWriter::new(std::fs::File::create("fragments.bin").unwrap());
-        for fragment in &self.fragments {
-            let _ = wtr.write(&fragment.fragment_mz.to_le_bytes()).unwrap();
-            let _ = wtr.write(&fragment.peptide_index.0.to_le_bytes()).unwrap();
-        }
-        wtr.flush().unwrap();
-
-        let mut wtr = std::io::BufWriter::new(std::fs::File::create("peptides.csv").unwrap());
-        writeln!(wtr, "peptide,proteins,monoisotopic,decoy").unwrap();
-        for fragment in &self.peptides {
-            writeln!(
-                wtr,
-                "{},{},{},{}",
-                fragment,
-                fragment.proteins(&self.decoy_tag, self.generate_decoys),
-                fragment.monoisotopic,
-                fragment.decoy
-            )
-            .unwrap();
-        }
-        wtr.flush().unwrap();
     }
 }
 

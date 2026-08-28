@@ -1,276 +1,1476 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/pgarrett-scripps/sage-plus/main/schemas/config.schema.json",
-  "title": "Sage search configuration",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["database", "precursor_tol", "fragment_tol"],
-  "properties": {
-    "database": { "$ref": "#/$defs/database" },
-    "precursor_tol": { "$ref": "#/$defs/tolerance" },
-    "fragment_tol": { "$ref": "#/$defs/tolerance" },
-    "report_psms": { "type": "integer", "minimum": 1, "default": 1 },
-    "output_filter": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": { "psm_q_value": { "$ref": "#/$defs/qValue" } }
-    },
-    "chimera": { "type": "boolean", "default": false },
-    "wide_window": { "type": "boolean", "default": false },
-    "min_peaks": { "type": "integer", "minimum": 1 },
-    "max_peaks": { "type": "integer", "minimum": 1 },
-    "max_fragment_charge": { "type": "integer", "minimum": 1, "maximum": 255 },
-    "min_matched_peaks": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "precursor_charge": { "$ref": "#/$defs/u8Range" },
-    "override_precursor_charge": { "type": "boolean" },
-    "isotope_errors": { "$ref": "#/$defs/i8Range" },
-    "deisotope": {
+  "$defs": {
+    "AlignmentMethod": {
       "oneOf": [
-        { "type": "boolean" },
-        { "$ref": "#/$defs/deisotopeSettings" }
-      ],
-      "default": true
+        {
+          "const": "linear",
+          "description": "Preserve Sage's existing ordinary least-squares alignment.",
+          "type": "string"
+        },
+        {
+          "const": "nonlinear",
+          "description": "Robust outlier filtering followed by a monotone piecewise-linear warp.",
+          "type": "string"
+        }
+      ]
     },
-    "quant": { "$ref": "#/$defs/quant" },
-    "predict_rt": { "type": "boolean", "default": true },
-    "retention_time_model": { "$ref": "#/$defs/retentionModel" },
-    "retention_time_alignment": {
-      "type": "string",
-      "enum": ["linear", "nonlinear"]
+    "BrukerFrameWindowSplittingConfig": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Quadrupole": {
+              "$ref": "#/$defs/BrukerQuadWindowExpansionStrategy"
+            }
+          },
+          "required": [
+            "Quadrupole"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Window": {
+              "$ref": "#/$defs/BrukerQuadWindowExpansionStrategy"
+            }
+          },
+          "required": [
+            "Window"
+          ],
+          "type": "object"
+        }
+      ]
     },
-    "ion_mobility_model": { "$ref": "#/$defs/mobilityModel" },
-    "output_directory": { "type": "string" },
-    "mzml_paths": {
-      "type": "array",
-      "minItems": 1,
-      "items": { "type": "string" }
-    },
-    "bruker_config": { "type": "object", "additionalProperties": true },
-    "protein_grouping": { "type": "boolean", "default": true },
-    "protein_grouping_peptide_fdr": { "$ref": "#/$defs/qValue" },
-    "max_memory_gb": { "type": "number", "minimum": 0 },
-    "min_free_memory_gb": { "type": "number", "minimum": 0 },
-    "batch_size": { "type": "integer", "minimum": 1 },
-    "ptm_localization": {
-      "type": "object",
+    "BrukerMS1CentoidingConfig": {
       "additionalProperties": false,
       "properties": {
-        "enabled": { "type": "boolean", "default": false },
-        "psm_q_value": { "$ref": "#/$defs/qValue" },
-        "q_value": { "$ref": "#/$defs/qValue", "deprecated": true },
-        "localization_q_value": { "$ref": "#/$defs/qValue" }
-      }
+        "ims_pct": {
+          "format": "float",
+          "type": "number"
+        },
+        "mz_ppm": {
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "mz_ppm",
+        "ims_pct"
+      ],
+      "type": "object"
     },
-    "spectral_library": { "type": "object", "additionalProperties": true },
-    "mass_shift_ppm": { "type": "number", "minimum": 0 },
-    "annotate_matches": { "type": "boolean" },
-    "write_pin": { "type": "boolean" },
-    "write_report": { "type": "boolean" },
-    "score_type": {
-      "type": "string",
-      "enum": ["SageHyperScore", "OpenMSHyperScore"]
+    "BrukerProcessingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "ms1": {
+          "$ref": "#/$defs/BrukerMS1CentoidingConfig"
+        },
+        "ms2": {
+          "$ref": "#/$defs/BrukerSpectrumConfig"
+        }
+      },
+      "required": [
+        "ms2",
+        "ms1"
+      ],
+      "type": "object"
+    },
+    "BrukerQuadWindowExpansionStrategy": {
+      "oneOf": [
+        {
+          "enum": [
+            "None"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "Even": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "Even"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UniformMobility": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "format": "double",
+                      "type": "number"
+                    },
+                    {
+                      "format": "double",
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "required": [
+            "UniformMobility"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "UniformScan": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "format": "uint",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "required": [
+            "UniformScan"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "BrukerSpectrumConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_splitting_params": {
+          "$ref": "#/$defs/BrukerFrameWindowSplittingConfig"
+        },
+        "spectrum_processing_params": {
+          "$ref": "#/$defs/BrukerSpectrumProcessingConfig"
+        }
+      },
+      "required": [
+        "spectrum_processing_params",
+        "frame_splitting_params"
+      ],
+      "type": "object"
+    },
+    "BrukerSpectrumProcessingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "calibrate": {
+          "type": "boolean"
+        },
+        "calibration_tolerance": {
+          "format": "double",
+          "type": "number"
+        },
+        "centroiding_window": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "smoothing_window": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "smoothing_window",
+        "centroiding_window",
+        "calibration_tolerance",
+        "calibrate"
+      ],
+      "type": "object"
+    },
+    "DeisotopeConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/DeisotopeSettings"
+        }
+      ]
+    },
+    "DeisotopeSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "max_charge": {
+          "default": null,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_envelope_peaks": {
+          "default": 4,
+          "format": "uint",
+          "maximum": 4,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "max_isotope_log2_ratio": {
+          "default": 1.5,
+          "format": "float",
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "min_envelope_peaks": {
+          "default": 2,
+          "format": "uint",
+          "maximum": 4,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "min_score": {
+          "default": 0.44999998807907104,
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "ppm_tolerance": {
+          "default": 10.0,
+          "format": "float",
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "EnzymeBuilder": {
+      "additionalProperties": false,
+      "properties": {
+        "c_terminal": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "cleave_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_len": {
+          "description": "Maximum peptide length that will be fragmented",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_len": {
+          "description": "Minimum peptide length that will be fragmented",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "missed_cleavages": {
+          "description": "How many missed cleavages to use",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "restrict": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "semi_enzymatic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IntegrationStrategy": {
+      "enum": [
+        "Apex",
+        "Sum"
+      ],
+      "type": "string"
+    },
+    "IonMobilityFeatureSet": {
+      "enum": [
+        "basic",
+        "physicochemical",
+        "additive_ptm"
+      ],
+      "type": "string"
+    },
+    "IonMobilitySettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Disable ion-mobility prediction even when mobility observations are present.",
+          "type": "boolean"
+        },
+        "features": {
+          "$ref": "#/$defs/IonMobilityFeatureSet",
+          "default": "basic",
+          "description": "Sequence features used by the linear regression model."
+        },
+        "folds": {
+          "default": 3,
+          "description": "Number of peptide-grouped cross-validation folds.",
+          "format": "uint",
+          "maximum": 10,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "min_training_psms": {
+          "default": 200,
+          "description": "Minimum number of high-confidence mobility observations required for fitting.",
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "ptm_regularization": {
+          "default": 25.0,
+          "description": "Ridge penalty for additive variable-PTM mobility offsets.",
+          "format": "double",
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "seed": {
+          "default": 42,
+          "description": "Seed used for deterministic peptide-level fold assignment.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Isobaric": {
+      "oneOf": [
+        {
+          "enum": [
+            "Tmt6",
+            "Tmt10",
+            "Tmt11",
+            "Tmt16",
+            "Tmt18"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "User": {
+              "items": {
+                "format": "float",
+                "type": "number"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "User"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Kind": {
+      "enum": [
+        "a",
+        "b",
+        "c",
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "string"
+    },
+    "LfqOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "combine_charge_states": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "integration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IntegrationStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mbr": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "mobility_pct_tolerance": {
+          "format": "float",
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peak_scoring": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PeakScoringStrategy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "peptide_q_value": {
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ppm_tolerance": {
+          "format": "float",
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rt_pct_tolerance": {
+          "format": "float",
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "spectral_angle": {
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "NeutralLossMode": {
+      "enum": [
+        "optional",
+        "required"
+      ],
+      "type": "string"
+    },
+    "OutputFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "psm_q_value": {
+          "default": 0.10000000149011612,
+          "description": "Maximum spectrum-level q-value written to the PSM and matched-fragment tables.",
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "PeakScoringStrategy": {
+      "enum": [
+        "RetentionTime",
+        "SpectralAngle",
+        "Intensity",
+        "Hybrid"
+      ],
+      "type": "string"
+    },
+    "PtmLibrarySettings": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "strict": {
+          "default": true,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "PtmLocalizationSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Compute PTM site localization and write site-level reports.",
+          "type": "boolean"
+        },
+        "localization_q_value": {
+          "default": 0.009999999776482582,
+          "description": "Arrangement-level false-localization-rate q-value cutoff.",
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "psm_q_value": {
+          "default": 0.009999999776482582,
+          "description": "Identification q-value cutoff for PSMs included in PTM site reports.",
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "QuantOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "lfq": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "lfq_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LfqOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Isobaric"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tmt_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TmtOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RetentionTimeFeatureSet": {
+      "enum": [
+        "basic",
+        "physicochemical",
+        "additive_ptm"
+      ],
+      "type": "string"
+    },
+    "RetentionTimeSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "features": {
+          "$ref": "#/$defs/RetentionTimeFeatureSet",
+          "default": "basic",
+          "description": "Sequence features used by the linear regression model."
+        },
+        "folds": {
+          "default": 3,
+          "description": "Number of peptide-grouped cross-validation folds.",
+          "format": "uint",
+          "maximum": 10,
+          "minimum": 2,
+          "type": "integer"
+        },
+        "ptm_regularization": {
+          "default": 25.0,
+          "description": "Ridge penalty for additive variable-PTM retention-time offsets.",
+          "format": "double",
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "seed": {
+          "default": 42,
+          "description": "Seed used for deterministic peptide-level fold assignment.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "ScoreType": {
+      "enum": [
+        "SageHyperScore",
+        "OpenMSHyperScore"
+      ],
+      "type": "string"
+    },
+    "SiteMode": {
+      "description": "Controls where candidates for a variable modification are generated.",
+      "oneOf": [
+        {
+          "const": "exhaustive",
+          "description": "Generate the modification at every compatible site from the config.",
+          "type": "string"
+        },
+        {
+          "const": "library",
+          "description": "Generate the modification only at sites listed in the PTM library.",
+          "type": "string"
+        },
+        {
+          "const": "both",
+          "description": "Generate exhaustive candidates and allow library sites as targeted additions.",
+          "type": "string"
+        }
+      ]
+    },
+    "SpectralLibraryFormat": {
+      "enum": [
+        "sage_parquet",
+        "mzspeclib"
+      ],
+      "type": "string"
+    },
+    "SpectralLibrarySettings": {
+      "additionalProperties": false,
+      "description": "Settings for an empirical library built from confidently identified PSMs.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "formats": {
+          "default": [
+            "sage_parquet",
+            "mzspeclib"
+          ],
+          "items": {
+            "$ref": "#/$defs/SpectralLibraryFormat"
+          },
+          "type": "array"
+        },
+        "include_chimeric": {
+          "default": false,
+          "type": "boolean"
+        },
+        "max_fragments": {
+          "default": 20,
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_consensus_psms": {
+          "default": 1,
+          "format": "uint",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_fragment_frequency": {
+          "default": 0.5,
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "min_matched_peaks": {
+          "default": 6,
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_relative_intensity": {
+          "default": 0.009999999776482582,
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "peptide_q_value": {
+          "default": 0.009999999776482582,
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "psm_q_value": {
+          "default": 0.009999999776482582,
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "strategy": {
+          "$ref": "#/$defs/SpectralLibraryStrategy",
+          "default": "best_psm"
+        }
+      },
+      "type": "object"
+    },
+    "SpectralLibraryStrategy": {
+      "enum": [
+        "best_psm",
+        "consensus"
+      ],
+      "type": "string"
+    },
+    "StaticModEntry": {
+      "anyOf": [
+        {
+          "format": "float",
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/StaticModification"
+        }
+      ]
+    },
+    "StaticModification": {
+      "additionalProperties": false,
+      "description": "A structured static modification. Numeric static modifications remain\nsupported through [`StaticModEntry::Mass`].",
+      "properties": {
+        "channel_offsets": {
+          "additionalProperties": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "mass": {
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neutral_loss_mode": {
+          "$ref": "#/$defs/NeutralLossMode"
+        },
+        "neutral_losses": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mass"
+      ],
+      "type": "object"
+    },
+    "TmtOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sn": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Tolerance": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ppm": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "required": [
+            "ppm"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pct": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "required": [
+            "pct"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "da": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "format": "float",
+                  "type": "number"
+                },
+                {
+                  "format": "float",
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            }
+          },
+          "required": [
+            "da"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "VarModEntry": {
+      "anyOf": [
+        {
+          "format": "float",
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/VariableModification"
+        }
+      ],
+      "description": "A variable modification entry may use the existing bare-mass syntax or the\nextensible object syntax."
+    },
+    "VariableModification": {
+      "additionalProperties": false,
+      "description": "A variable modification with optional per-peptide occurrence limit and\noptional fragment neutral-loss behavior.",
+      "properties": {
+        "channel_offsets": {
+          "additionalProperties": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "mass": {
+          "format": "float",
+          "type": "number"
+        },
+        "max_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neutral_loss_mode": {
+          "$ref": "#/$defs/NeutralLossMode"
+        },
+        "neutral_losses": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "site_mode": {
+          "$ref": "#/$defs/SiteMode"
+        }
+      },
+      "required": [
+        "mass"
+      ],
+      "type": "object"
     }
   },
-  "$defs": {
-    "qValue": { "type": "number", "minimum": 0, "maximum": 1 },
-    "deisotopeSettings": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "ppm_tolerance": { "type": "number", "exclusiveMinimum": 0, "default": 10.0 },
-        "max_charge": {
-          "type": ["integer", "null"],
-          "minimum": 1,
-          "maximum": 255,
-          "default": null
+  "$id": "https://raw.githubusercontent.com/pgarrett-scripps/sage-plus/main/schemas/config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Input search parameters deserialized from JSON file",
+  "properties": {
+    "annotate_matches": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "batch_size": {
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "bruker_config": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BrukerProcessingConfig"
         },
-        "min_envelope_peaks": { "type": "integer", "minimum": 2, "maximum": 4, "default": 2 },
-        "max_envelope_peaks": { "type": "integer", "minimum": 2, "maximum": 4, "default": 4 },
-        "min_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.45 },
-        "max_isotope_log2_ratio": { "type": "number", "minimum": 0, "default": 1.5 }
-      }
+        {
+          "type": "null"
+        }
+      ]
     },
-    "u8Range": {
-      "type": "array",
-      "prefixItems": [
-        { "type": "integer", "minimum": 0, "maximum": 255 },
-        { "type": "integer", "minimum": 0, "maximum": 255 }
-      ],
-      "minItems": 2,
-      "maxItems": 2
-    },
-    "i8Range": {
-      "type": "array",
-      "prefixItems": [
-        { "type": "integer", "minimum": -128, "maximum": 127 },
-        { "type": "integer", "minimum": -128, "maximum": 127 }
-      ],
-      "minItems": 2,
-      "maxItems": 2
-    },
-    "tolerance": {
-      "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "additionalProperties": false,
-      "properties": {
-        "ppm": { "$ref": "#/$defs/numberRange" },
-        "da": { "$ref": "#/$defs/numberRange" },
-        "pct": { "$ref": "#/$defs/numberRange" }
-      }
-    },
-    "numberRange": {
-      "type": "array",
-      "prefixItems": [{ "type": "number" }, { "type": "number" }],
-      "minItems": 2,
-      "maxItems": 2
+    "chimera": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "database": {
-      "type": "object",
       "additionalProperties": false,
+      "description": "Parameters used for generating the fragment database",
       "properties": {
-        "bucket_size": { "type": "integer", "minimum": 1 },
-        "enzyme": { "$ref": "#/$defs/enzyme" },
-        "peptide_min_mass": { "type": "number", "minimum": 0 },
-        "peptide_max_mass": { "type": "number", "minimum": 0 },
-        "fragment_min_mz": { "type": "number", "minimum": 0, "deprecated": true },
-        "fragment_max_mz": { "type": "number", "minimum": 0, "deprecated": true },
+        "bucket_size": {
+          "description": "This parameter allows tuning of the internal search structure",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "custom_cleavage_sites": {
+          "description": "Path to a protein-specific custom cleavage-site TSV or Parquet file.\nRequired columns: `protein`, `position`; optional column: `context`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decoy_tag": {
+          "description": "Use this prefix for decoy proteins",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enzyme": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EnzymeBuilder"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fasta": {
+          "description": "Path to fasta database",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generate_decoys": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "ion_kinds": {
-          "type": "array",
-          "items": { "type": "string", "enum": ["a", "b", "c", "x", "y", "z"] }
+          "description": "Which kind of fragment ions to generate (a, b, c, x, y, z)",
+          "items": {
+            "$ref": "#/$defs/Kind"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
-        "min_ion_index": { "type": "integer", "minimum": 0 },
-        "static_mods": { "$ref": "#/$defs/modificationMap" },
-        "variable_mods": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": { "$ref": "#/$defs/modification" }
-          }
+        "max_combinations": {
+          "description": "Hard cap on the total peptide variants generated per input peptide,\nincluding its unmodified form. Values below 1 are normalized to 1.\nVariants with fewer PTMs are preferred (generated first).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
-        "max_variable_mods": { "type": "integer", "minimum": 1 },
-        "max_combinations": { "type": "integer", "minimum": 1 },
-        "max_total_variable_mods": { "type": "integer", "minimum": 1 },
-        "ptm_library": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["path"],
-          "properties": {
-            "path": { "type": "string" },
-            "strict": { "type": "boolean", "default": true }
-          }
+        "max_total_variable_mods": {
+          "description": "Maximum number of variable modifications after exhaustive and\nlibrary-supported placements are combined.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
-        "decoy_tag": { "type": "string", "default": "rev_" },
-        "decoy_prefix": { "type": "string", "deprecated": true },
-        "generate_decoys": { "type": "boolean", "default": true },
-        "fasta": { "type": "string" },
-        "peptides": { "type": "string" },
-        "custom_cleavage_sites": { "type": "string" },
-        "prefilter_chunk_size": { "type": "integer", "minimum": 0 },
+        "max_variable_mods": {
+          "description": "Limit number of variable modifications on a peptide",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_ion_index": {
+          "description": "Minimum ion index to be generated: 1 will remove b1/y1 ions\n2 will remove b1/b2/y1/y2 ions, etc",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "peptide_max_mass": {
+          "description": "Maximum peptide monoisotopic mass that will be fragmented",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peptide_min_mass": {
+          "description": "Minimum peptide monoisotopic mass that will be fragmented",
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "peptides": {
+          "description": "Path to a pre-digested peptide TSV file (additive with `fasta`).\nRequired column: `sequence`. Optional columns: `protein`, `decoy`.\nConfigured static, variable, and channel-aware modifications are applied.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "prefilter": {
-          "type": "boolean",
-          "default": false,
-          "description": "Use exact paired target-decoy database prefiltering."
+          "description": "Pre-filter the database to minimize memory usage",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "prefilter_chunk_size": {
+          "description": "Number of sequences to handle simultaneously when pre-filtering the db",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "prefilter_low_memory": {
-          "type": "boolean",
-          "default": true,
           "deprecated": true,
-          "description": "Deprecated compatibility option. Exact prefiltering ignores this value."
-        }
-      }
-    },
-    "enzyme": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "missed_cleavages": { "type": "integer", "minimum": 0, "maximum": 255 },
-        "min_len": { "type": "integer", "minimum": 1 },
-        "max_len": { "type": "integer", "minimum": 1 },
-        "cleave_at": { "type": "string" },
-        "restrict": { "type": "string" },
-        "c_terminal": { "type": "boolean" },
-        "semi_enzymatic": { "type": "boolean" }
-      }
-    },
-    "modificationMap": {
-      "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/modification" }
-    },
-    "modification": {
-      "oneOf": [
-        { "type": "number" },
-        {
-          "type": "object",
-          "required": ["mass"],
-          "additionalProperties": true,
-          "properties": {
-            "mass": { "type": "number" },
-            "name": { "type": "string" },
-            "max_count": { "type": "integer", "minimum": 1 },
-            "channel_offsets": {
-              "type": "object",
-              "additionalProperties": { "type": "number" },
-              "minProperties": 2
+          "description": "Deprecated compatibility option. Exact prefiltering always uses compact\nsurvivor tracking and ignores this value.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "ptm_library": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PtmLibrarySettings"
+            },
+            {
+              "type": "null"
             }
-          }
+          ],
+          "description": "Optional site library. Modification definitions remain in `variable_mods`."
+        },
+        "static_mods": {
+          "additionalProperties": {
+            "$ref": "#/$defs/StaticModEntry"
+          },
+          "description": "Static modifications to add to matching amino acids. Entries may use\nthe existing bare mass or a structured modification object.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "variable_mods": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/VarModEntry"
+            },
+            "type": "array"
+          },
+          "description": "Variable modifications to add to matching amino acids.\nEach entry is either a bare mass (`15.9949`) or a structured object with\nmass, limits, display name, and optional neutral-loss behavior.",
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "deisotope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeisotopeConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fragment_tol": {
+      "$ref": "#/$defs/Tolerance"
+    },
+    "ion_mobility_model": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IonMobilitySettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "isotope_errors": {
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "int8",
+          "maximum": 127,
+          "minimum": -128,
+          "type": "integer"
+        },
+        {
+          "format": "int8",
+          "maximum": 127,
+          "minimum": -128,
+          "type": "integer"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "mass_shift_ppm": {
+      "format": "float",
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "max_fragment_charge": {
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "max_memory_gb": {
+      "format": "double",
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "max_peaks": {
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min_free_memory_gb": {
+      "format": "double",
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "min_matched_peaks": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "min_peaks": {
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mzml_paths": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "output_directory": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "output_filter": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutputFilter"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "override_precursor_charge": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "precursor_charge": {
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "precursor_tol": {
+      "$ref": "#/$defs/Tolerance"
+    },
+    "predict_rt": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "protein_grouping": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "protein_grouping_peptide_fdr": {
+      "format": "float",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "ptm_localization": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PtmLocalizationSettings"
+        },
+        {
+          "type": "null"
         }
       ]
     },
     "quant": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "tmt": { "type": ["string", "null"] },
-        "tmt_settings": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "level": { "type": "integer", "minimum": 1, "maximum": 255 },
-            "sn": { "type": "boolean" }
-          }
+      "anyOf": [
+        {
+          "$ref": "#/$defs/QuantOptions"
         },
-        "lfq": { "type": "boolean", "default": false },
-        "lfq_settings": { "$ref": "#/$defs/lfq" }
-      }
+        {
+          "type": "null"
+        }
+      ]
     },
-    "lfq": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "peak_scoring": { "type": "string", "enum": ["RetentionTime", "SpectralAngle", "Intensity", "Hybrid"] },
-        "integration": { "type": "string", "enum": ["Apex", "Sum"] },
-        "spectral_angle": { "type": "number", "minimum": 0, "maximum": 1 },
-        "ppm_tolerance": { "type": "number", "exclusiveMinimum": 0 },
-        "rt_pct_tolerance": { "type": "number", "exclusiveMinimum": 0 },
-        "mobility_pct_tolerance": { "type": "number", "exclusiveMinimum": 0 },
-        "combine_charge_states": { "type": "boolean" },
-        "peptide_q_value": { "$ref": "#/$defs/qValue" },
-        "mbr": { "type": "boolean", "default": true }
-      }
+    "report_psms": {
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
-    "retentionModel": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "features": { "type": "string", "enum": ["basic", "physicochemical", "additive_ptm"] },
-        "folds": { "type": "integer", "minimum": 2, "maximum": 10 },
-        "seed": { "type": "integer", "minimum": 0 },
-        "ptm_regularization": { "type": "number", "minimum": 0 }
-      }
+    "retention_time_alignment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AlignmentMethod"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
-    "mobilityModel": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "enabled": { "type": "boolean", "default": true },
-        "features": { "type": "string", "enum": ["basic", "physicochemical", "additive_ptm"] },
-        "folds": { "type": "integer", "minimum": 2, "maximum": 10 },
-        "seed": { "type": "integer", "minimum": 0 },
-        "ptm_regularization": { "type": "number", "minimum": 0 },
-        "min_training_psms": { "type": "integer", "minimum": 1 }
-      }
+    "retention_time_model": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RetentionTimeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "score_type": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScoreType"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "spectral_library": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpectralLibrarySettings"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "wide_window": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "write_pin": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "write_report": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     }
-  }
+  },
+  "required": [
+    "database",
+    "precursor_tol",
+    "fragment_tol",
+    "mzml_paths"
+  ],
+  "title": "Sage search configuration",
+  "type": "object"
 }

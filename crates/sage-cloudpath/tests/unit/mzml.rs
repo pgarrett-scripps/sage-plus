@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 use sage_core::{mass::Tolerance, spectrum::Representation};
 
 use super::{MzMLError, MzMLReader};

@@ -97,7 +97,7 @@ fn compact_forward_cursor_sums_stacked_residue_modifications() {
 #[test]
 fn applying_rules_merges_an_existing_compact_lookup() {
     let peptide = Peptide {
-        sequence: Arc::from(&b"ACDE"[..]),
+        sequence: (&b"ACDE"[..]).into(),
         modifications: CompactModifications::from_sparse([(0, 3.0)]),
         ..Peptide::default()
     };
@@ -118,7 +118,7 @@ fn applying_rules_merges_an_existing_compact_lookup() {
 #[test]
 fn compact_encoding_accepts_255_residues_and_rejects_256() {
     let peptide = Peptide::try_from(Digest {
-        sequence: "A".repeat(255),
+        sequence: "A".repeat(255).into(),
         ..Digest::default()
     })
     .unwrap();
@@ -128,7 +128,7 @@ fn compact_encoding_accepts_255_residues_and_rejects_256() {
 
     assert_eq!(
         Peptide::try_from(Digest {
-            sequence: "A".repeat(256),
+            sequence: "A".repeat(256).into(),
             ..Digest::default()
         }),
         Err(PeptideError::SequenceTooLong {
@@ -394,8 +394,8 @@ fn test_psuedo_forward() {
         let fwd = Peptide::try_from(digest.clone()).unwrap();
         let rev = Peptide::try_from(digest.reverse()).unwrap();
 
-        assert_eq!(fwd.decoy, false);
-        assert_eq!(rev.decoy, true);
+        assert!(!fwd.decoy);
+        assert!(rev.decoy);
         assert!(
             fwd.sequence.len() < 4 || fwd.sequence != rev.sequence,
             "{} {}",
@@ -801,7 +801,8 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
     let static_mods = HashMap::new();
     let labels = LabelModificationCache::new(rules.iter().map(|rule| &rule.modification), &[]);
     let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels).unwrap();
-    let variants = peptide.apply_rules(&rules, &library, &static_mods, lookup, 1, 3, None);
+    let plan = ModificationPlan::new(&rules, &static_mods, lookup, 1, 3, None);
+    let variants = peptide.apply_rules(&plan, &library);
 
     assert!(variants.iter().any(|peptide| {
         peptide.modification_at(0) != 0.0
@@ -851,7 +852,8 @@ fn named_max_count_is_shared_across_residue_rules() {
     let static_mods = HashMap::new();
     let labels = LabelModificationCache::new(rules.iter().map(|rule| &rule.modification), &[]);
     let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels).unwrap();
-    let variants = peptide.apply_rules(&rules, &library, &static_mods, lookup, 0, 2, None);
+    let plan = ModificationPlan::new(&rules, &static_mods, lookup, 0, 2, None);
+    let variants = peptide.apply_rules(&plan, &library);
     assert_eq!(variants.len(), 3);
     assert!(variants
         .iter()

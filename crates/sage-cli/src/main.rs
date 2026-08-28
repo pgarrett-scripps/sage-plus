@@ -148,10 +148,11 @@ fn main() -> anyhow::Result<()> {
         .get_matches();
 
     if let Some(path) = matches.get_one::<String>("write-config-schema") {
+        let schema = sage_cli::config_schema::generate_config_schema();
         if path == "-" {
-            print!("{}", sage_cli::config_schema::CONFIG_SCHEMA);
+            print!("{schema}");
         } else {
-            std::fs::write(path, sage_cli::config_schema::CONFIG_SCHEMA)?;
+            std::fs::write(path, schema)?;
         }
         return Ok(());
     }

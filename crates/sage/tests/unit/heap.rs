@@ -9,7 +9,7 @@ fn check<T: Ord + Clone + Debug>(mut data: Vec<T>, k: usize) {
     let k = k.min(data.len());
     let mut cloned = data.clone();
     // Stable sort the data
-    cloned.sort_by(|a, b| b.cmp(&a));
+    cloned.sort_by(|a, b| b.cmp(a));
 
     bounded_min_heapify(&mut data, k);
 
@@ -19,7 +19,7 @@ fn check<T: Ord + Clone + Debug>(mut data: Vec<T>, k: usize) {
     // Check that heap property is maintained, or that k == length of the data
     assert!(check_heap(top_k) || k == cloned.len());
 
-    top_k.sort_by(|a, b| b.cmp(&a));
+    top_k.sort_by(|a, b| b.cmp(a));
     assert_eq!(top_k, &mut cloned[..k]);
 }
 

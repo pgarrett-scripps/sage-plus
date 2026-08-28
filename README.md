@@ -73,6 +73,7 @@ upstream Sage releases.
 - [Sage MCP server](crates/sage-mcp/README.md)
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
+- [Developer benchmark pipeline and results](benchmarks/RESULTS.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 
 ## Attribution and citation

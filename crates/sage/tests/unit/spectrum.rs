@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 use super::*;
 
 #[test]
