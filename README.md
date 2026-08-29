@@ -26,7 +26,7 @@ agent-facing capabilities.
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
 - Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
 - Modification-defined SILAC, dimethyl, and custom precursor channels on required static or optional variable modifications.
-- Channel-aware LFQ with exact-mass partner extraction, reference ratios, label-aware FDR, and spectral-library round trips.
+- Channel-aware LFQ with exact-mass partner extraction, reference ratios, and label-aware FDR.
 - Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
 - Configurable LFQ match-between-runs retention-time tolerance.
 - Optional LFQ match-between-runs and independent ion-mobility model controls.
@@ -43,6 +43,27 @@ agent-facing capabilities.
 - A root-bounded MCP server with persistent jobs and isolated search workers for configuration, estimation, safe execution, cancellation, monitoring, analysis, and result queries.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
+
+## Memory and performance
+
+Sage Plus `v0.1.0-beta.2` reduces the largest in-memory search structures without lossy mass
+rounding:
+
+- Target peptides reference immutable source-protein sequences by coordinates where possible,
+  avoiding a separate sequence allocation for every generated peptide.
+- The theoretical-fragment index uses lossless six-byte records while retaining bounded search
+  buckets.
+- Spectrum storage uses compact representations for fragment data and optional charge arrays.
+- Exact database prefiltering can trade additional preparation time for a substantially smaller
+  peptide and fragment search index.
+- Memory estimation, configurable batching, and runtime memory guards help keep searches within
+  available system memory.
+
+On the local beta.2 release benchmark, conventional search used 29.5% less peak memory than
+beta.1 and was 8.9% faster. A variable-modification search used 38.9% less peak memory and was
+18.0% faster. Exact prefiltering reduced peak memory by 59.1% with byte-identical output, at an
+81.5% wall-time cost for that workload. These measurements are machine and workload specific.
+See the [benchmark methodology and complete results](benchmarks/RESULTS.md).
 
 ## Build and run
 
