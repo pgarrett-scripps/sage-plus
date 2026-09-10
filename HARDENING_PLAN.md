@@ -140,6 +140,7 @@ available in `benchmarks/SCIENTIFIC_PROTOCOL.md` and `benchmarks/datasets.json`.
 fields deliberately keep B1 open.
 
 The September 10 dependency patch resolves the XML findings and the fresh online audit passes.
-Beta.3 publication still requires hosted platform and release-workflow validation, followed by
-maintainer merge and tagging access. Follow [the beta.3 checklist](benchmarks/BETA3_RELEASE.md).
+Local validation, fork Rust CI, all seven fork release archives, and the container build pass.
+Upstream workflow approval, review and merge, a final merged-source dry run, and tagging remain
+maintainer gates. Follow [the beta.3 checklist](benchmarks/BETA3_RELEASE.md).
 No scoring-default change or external dataset calibration claim has been made.

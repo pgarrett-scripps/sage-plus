@@ -52,7 +52,9 @@ packaging. Archives include analytical schemas, the changelog, and third-party n
    cargo build --release --workspace --locked
    ```
 
-4. Commit and push the release preparation to `main`. Wait for every required Rust check to pass.
+4. Open a release preparation pull request against `main`. If it comes from a fork, a maintainer
+   must approve the pending workflow runs in Actions. Wait for every required Rust and dependency
+   check to pass, review the evidence, and merge the preparation into `main`.
 5. Run `Release Sage Plus` manually from the Actions page. A manual run builds and retains all
    archives and validates the Docker build, but does not publish a release or container.
 6. Download the `release-dist` artifact and inspect at least the archive for the maintainer's

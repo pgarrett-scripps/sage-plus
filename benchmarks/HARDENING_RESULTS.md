@@ -2,7 +2,7 @@ Hardening release evidence
 
 Historical evidence prepared September 4, 2026. For the September 10 dependency fix, beta.3 version, and final candidate checks, see [the beta.3 release checklist](BETA3_RELEASE.md). The following records the earlier candidate as tested.
 
-At that snapshot, The core hardening implementation is ready for review. Publication remains on hold for dependency disposition and hosted platform validation. The workspace version remains `0.1.0-beta.2`. No scoring default or paper result was changed by this hardening work.
+At that snapshot, the core hardening implementation was ready for review. Publication remained on hold for dependency disposition and hosted platform validation. The workspace version was `0.1.0-beta.2`. No scoring default or paper result was changed by this hardening work.
 
 **Identity and scope**
 
