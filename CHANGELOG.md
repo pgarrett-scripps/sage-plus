@@ -9,6 +9,30 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.3] - 2026-09-10
+
+### Fixed
+- API and MCP searches honor the configured file batch size and explicit request overrides.
+- Gzip outputs finish their compression stream before returning success.
+- Concurrent event output preserves sequence and elapsed-time order. Active MCP readers defer incomplete trailing records.
+- Logical validation rejects unsupported percentage precursor tolerances and invalid numeric model settings before searching.
+- Cancellation is checked at postprocessing and completion boundaries. MCP job records are replaced atomically.
+- Mass-alignment summaries report actual per-file fits and skipped fits.
+
+### Added
+- Run-summary schema 9 records warnings, effective worker count, build feature selection, and explicitly labeled input metadata identity.
+- Verified benchmark stage manifests, complete experiment checks, and typed run comparisons.
+- Minimal-feature and benchmark tests in CI, macOS and Windows worker smoke tests, and scheduled dependency auditing.
+
+### Changed
+- Local output directories containing Sage artifacts require `--overwrite` or `"overwrite": true`. Explicit overwrite removes known Sage artifacts while preserving unrelated files. Use a separate directory for each concurrent run and a fresh prefix for remote outputs.
+- Updated patched dependencies for crossbeam-epoch, h2, anyhow, memmap2, and direct quick-xml usage. Updated timsrust to 0.6.5 and chacha20 to 0.10.2. A pinned, licensed filemanager compatibility patch uses object_store 0.14.1 to remove the remaining vulnerable XML dependency.
+- Consolidated maintenance updates for anyhow 1.0.104, clap 4.6.1, itoa 1.0.18, and schemars 1.2.2. Coverage artifact uploads now use the same pinned upload-artifact v7.0.1 as release packaging. DashMap's major upgrade remains deferred for separate validation.
+- mzML binary arrays containing XML entity references now fail explicitly. Literal base64 arrays remain supported.
+
+### Validation scope
+- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/HARDENING_RESULTS.md` and `benchmarks/BETA3_RELEASE.md` for evidence and release status.
+
 ## [v0.1.0-beta.2] - 2026-08-28
 
 ### Added

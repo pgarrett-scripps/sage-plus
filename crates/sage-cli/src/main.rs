@@ -64,6 +64,12 @@ fn main() -> anyhow::Result<()> {
                 .value_hint(ValueHint::DirPath),
         )
         .arg(
+            Arg::new("overwrite")
+                .long("overwrite")
+                .action(clap::ArgAction::SetTrue)
+                .help("Replace known Sage artifacts in an existing local output directory"),
+        )
+        .arg(
             Arg::new("batch-size")
                 .long("batch-size")
                 .value_parser(value_parser!(u16).range(1..))

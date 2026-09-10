@@ -55,6 +55,11 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
     for name in ["config.json", "Q99536.fasta", "LQSRPAAPPAPGPGQLTLR.mzML"] {
         std::fs::copy(source.join(name), tests.join(name))?;
     }
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(tests.join("config.json"))?)?;
+    config["batch_size"] = 3.into();
+    config["mzml_paths"] = serde_json::json!(vec!["tests/LQSRPAAPPAPGPGQLTLR.mzML"; 3]);
+    std::fs::write(tests.join("config.json"), serde_json::to_vec(&config)?)?;
 
     let executable = env!("CARGO_BIN_EXE_sage-mcp");
     let transport = TokioChildProcess::new(Command::new(executable).configure(|command| {
@@ -157,6 +162,15 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         )
         .await?;
     let events = events.structured_content.unwrap();
+    let progress: Vec<_> = events
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["event"] == "search_progress")
+        .map(|event| event["files_completed"].as_u64().unwrap())
+        .collect();
+    assert_eq!(progress, vec![1, 2, 3]);
+    assert_eq!(status["summary"]["execution"]["batch_size"], 1);
     assert!(events
         .as_array()
         .unwrap()
@@ -191,11 +205,11 @@ async fn runs_fixture_search_through_mcp_tools() -> anyhow::Result<()> {
         .await?;
     assert_eq!(analysis.is_error, Some(false));
     let analysis = analysis.structured_content.as_ref().unwrap();
-    assert_eq!(analysis["summary"]["schema_version"], 8);
-    assert_eq!(analysis["summary"]["inputs"]["mzml_files"], 1);
+    assert_eq!(analysis["summary"]["schema_version"], 9);
+    assert_eq!(analysis["summary"]["inputs"]["mzml_files"], 3);
     assert_eq!(
         analysis["summary"]["models"]["mass_alignment_applied"],
-        true
+        false
     );
     assert_eq!(analysis["summary"]["ptm_localization"]["enabled"], false);
     assert!(std::path::Path::new(analysis["summary_path"].as_str().unwrap()).is_file());

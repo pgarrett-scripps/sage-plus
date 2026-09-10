@@ -27,6 +27,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std"] }
 uuid = { version = "1", features = ["v4"] }
 sysinfo = "0.29"
+tempfile = "3"
 
 [dev-dependencies]
 rmcp = { version = "3.1.2", features = ["client", "transport-child-process"] }

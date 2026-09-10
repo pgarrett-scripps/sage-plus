@@ -66,3 +66,30 @@ fn parallel_collection_keeps_every_partial_result() {
     assert_eq!(combined.features.len(), 100);
     assert_eq!(file_ids, (0..100).collect::<Vec<_>>());
 }
+
+#[test]
+fn existing_artifacts_require_explicit_overwrite_and_unrelated_files_survive() {
+    let path = std::env::temp_dir().join(format!(
+        "sage-overwrite-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join("run-summary.json"), "old completion").unwrap();
+    std::fs::write(path.join("lfq.parquet"), "old optional output").unwrap();
+    std::fs::write(path.join("notes.md"), "user notes").unwrap();
+    let url = sage_cloudpath::Url::from_directory_path(&path).unwrap();
+    assert!(super::prepare_local_directory(&url, false).is_err());
+    assert!(path.join("run-summary.json").exists());
+    super::prepare_local_directory(&url, true).unwrap();
+    assert!(!path.join("run-summary.json").exists());
+    assert!(!path.join("lfq.parquet").exists());
+    assert_eq!(
+        std::fs::read_to_string(path.join("notes.md")).unwrap(),
+        "user notes"
+    );
+    std::fs::remove_dir_all(path).unwrap();
+}

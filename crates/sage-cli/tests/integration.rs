@@ -91,6 +91,50 @@ fn empty_spectra_inputs_fail_instead_of_writing_successful_summaries() -> anyhow
 }
 
 #[test]
+fn cli_batch_override_wins_over_configuration() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-batch-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["batch_size"] = 3.into();
+    config["mzml_paths"] = serde_json::json!(vec!["tests/LQSRPAAPPAPGPGQLTLR.mzML"; 3]);
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--batch-size")
+        .arg("1")
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--events-jsonl")
+        .arg(root.join("events.jsonl"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(root.join("events.jsonl"))?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?;
+    let progress: Vec<_> = events
+        .iter()
+        .filter(|event| event["event"] == "search_progress")
+        .map(|event| event["files_completed"].as_u64().unwrap())
+        .collect();
+    assert_eq!(progress, vec![1, 2, 3]);
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
@@ -136,7 +180,7 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
-    assert_eq!(summary["schema_version"], 8);
+    assert_eq!(summary["schema_version"], 9);
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 19);

@@ -28,10 +28,31 @@ Protect `main` and require these Rust workflow checks before merging:
 - `Test Rust 1.88.0`
 - `Test Rust 1.97.1`
 
-Do not require the release workflow on ordinary branches; it is intended for manual packaging
+Do not require the release workflow on ordinary branches. It is intended for manual packaging
 checks and release tags.
 
+## Account and destination check
+
+Before remote changes, inspect `gh auth status` and the Git push URL. Use an
+already-configured account with access to the existing repository. For the owner
+account in this workspace:
+
+```shell
+gh auth switch --hostname github.com --user pgarrett-scripps
+gh api user --jq .login
+git remote get-url --push origin
+```
+
+The destination must be `pgarrett-scripps/sage-plus`. Do not create a personal fork
+as a workaround for an inactive maintainer account.
+
 ## Prepare a release
+
+The beta.3 security dependency gate passes, as recorded in
+[`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
+validation and publication gates in [`benchmarks/BETA3_RELEASE.md`](benchmarks/BETA3_RELEASE.md).
+The workflow audits the complete lockfile and runs the storage patch compatibility tests before
+packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 
 1. Set `[workspace.package].version` in `Cargo.toml`. All Sage Plus crates inherit this version.
 2. Add a matching `## [vX.Y.Z]` or prerelease section to `CHANGELOG.md`, leaving a new empty
@@ -46,7 +67,9 @@ checks and release tags.
    cargo build --release --workspace --locked
    ```
 
-4. Commit and push the release preparation to `main`. Wait for every required Rust check to pass.
+4. Open a release preparation pull request against `main`. If it comes from a fork, a maintainer
+   must approve the pending workflow runs in Actions. Wait for every required Rust and dependency
+   check to pass, review the evidence, and merge the preparation into `main`.
 5. Run `Release Sage Plus` manually from the Actions page. A manual run builds and retains all
    archives and validates the Docker build, but does not publish a release or container.
 6. Download the `release-dist` artifact and inspect at least the archive for the maintainer's
@@ -59,8 +82,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0-beta.2 -m "Sage Plus v0.1.0-beta.2"
-git push origin v0.1.0-beta.2
+git tag -a v0.1.0-beta.3 -m "Sage Plus v0.1.0-beta.3"
+git push origin v0.1.0-beta.3
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark

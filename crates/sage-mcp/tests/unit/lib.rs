@@ -6,6 +6,74 @@ fn temporary_root() -> PathBuf {
     root
 }
 
+#[test]
+fn event_pagination_defers_partial_active_records_without_losing_them() {
+    let root = temporary_root();
+    let state = State::new(root.clone(), None).unwrap();
+    let record = test_job(&state, "events-in-progress", JobStatus::Running, 0);
+    let path = Path::new(&record.events_path);
+    fs::write(path, "{\"sequence\":0}\n{\"sequence\":").unwrap();
+    let first = event_records(&record)
+        .unwrap()
+        .collect::<anyhow::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(first.len(), 1);
+    OpenOptions::new()
+        .append(true)
+        .open(path)
+        .unwrap()
+        .write_all(b"1}\n")
+        .unwrap();
+    let remaining = event_records(&record)
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|event| {
+            event["sequence"].as_u64().unwrap() > first[0]["sequence"].as_u64().unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(remaining, vec![serde_json::json!({"sequence": 1})]);
+    let unicode = "{\"sequence\":2,\"message\":\"μ\"}\n".as_bytes();
+    let split = unicode.iter().position(|byte| *byte == 0xce).unwrap() + 1;
+    fs::write(path, &unicode[..split]).unwrap();
+    assert!(event_records(&record).unwrap().next().is_none());
+    OpenOptions::new()
+        .append(true)
+        .open(path)
+        .unwrap()
+        .write_all(&unicode[split..])
+        .unwrap();
+    assert_eq!(
+        event_records(&record).unwrap().next().unwrap().unwrap()["message"],
+        "μ"
+    );
+    fs::write(path, "{invalid}\n").unwrap();
+    assert!(event_records(&record).unwrap().next().unwrap().is_err());
+    fs::write(path, "{incomplete").unwrap();
+    let record = JobRecord {
+        status: JobStatus::Completed,
+        ..record
+    };
+    assert!(event_records(&record).unwrap().next().unwrap().is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn job_manifest_replacement_preserves_valid_json() {
+    let root = temporary_root();
+    let state = State::new(root.clone(), None).unwrap();
+    let mut record = test_job(&state, "atomic-record", JobStatus::Running, 0);
+    write_record(&record).unwrap();
+    record.status = JobStatus::Failed;
+    write_record(&record).unwrap();
+    let persisted: JobRecord = serde_json::from_slice(
+        &fs::read(Path::new(&record.job_directory).join("job.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(persisted.status, JobStatus::Failed);
+    assert_eq!(fs::read_dir(&record.job_directory).unwrap().count(), 3);
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn fixture_root() -> PathBuf {
     let root = temporary_root();
     let tests = root.join("tests");

@@ -145,12 +145,19 @@ struct EventWriter {
     error: Mutex<Option<String>>,
 }
 
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct RunWarning {
+    pub code: String,
+    pub message: String,
+}
+
 /// Cloneable event destination that serializes one JSON object per line.
 #[derive(Clone)]
 pub struct EventEmitter {
     writer: Option<Arc<EventWriter>>,
     sequence: Arc<AtomicU64>,
     started: Instant,
+    warnings: Arc<Mutex<Vec<RunWarning>>>,
 }
 
 impl Default for EventEmitter {
@@ -165,6 +172,7 @@ impl EventEmitter {
             writer: None,
             sequence: Arc::new(AtomicU64::new(0)),
             started: Instant::now(),
+            warnings: Arc::default(),
         }
     }
 
@@ -176,6 +184,7 @@ impl EventEmitter {
             })),
             sequence: Arc::new(AtomicU64::new(0)),
             started: Instant::now(),
+            warnings: Arc::default(),
         }
     }
 
@@ -184,21 +193,29 @@ impl EventEmitter {
     }
 
     pub fn emit(&self, kind: EventKind) {
+        if let EventKind::Warning { code, message } = &kind {
+            if let Ok(mut warnings) = self.warnings.lock() {
+                warnings.push(RunWarning {
+                    code: code.clone(),
+                    message: message.clone(),
+                });
+            }
+        }
         let destination = match &self.writer {
             Some(destination) => destination,
             None => return,
-        };
-        let envelope = EventEnvelope {
-            schema_version: 1,
-            sequence: self.sequence.fetch_add(1, Ordering::Relaxed),
-            elapsed_ms: self.started.elapsed().as_millis(),
-            kind: &kind,
         };
         let result = (|| -> anyhow::Result<()> {
             let mut writer = destination
                 .writer
                 .lock()
                 .map_err(|_| anyhow::anyhow!("event writer lock poisoned"))?;
+            let envelope = EventEnvelope {
+                schema_version: 1,
+                sequence: self.sequence.fetch_add(1, Ordering::Relaxed),
+                elapsed_ms: self.started.elapsed().as_millis(),
+                kind: &kind,
+            };
             serde_json::to_writer(&mut *writer, &envelope)?;
             writer.write_all(b"\n")?;
             writer.flush()?;
@@ -225,6 +242,13 @@ impl EventEmitter {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn warnings(&self) -> Vec<RunWarning> {
+        self.warnings
+            .lock()
+            .map(|warnings| warnings.clone())
+            .unwrap_or_default()
     }
 }
 

@@ -75,3 +75,24 @@ fn cloud_writer_completes_multipart_upload() {
     writer.write_all(&vec![b'x'; 11 * 1024 * 1024]).unwrap();
     writer.finish().unwrap();
 }
+
+#[test]
+fn gzip_writer_finishes_complete_round_trips() {
+    let directory = tempfile::tempdir().unwrap();
+    for payload in [
+        Vec::new(),
+        b"round trip payload".to_vec(),
+        (0..100_000).map(|i| (i % 251) as u8).collect(),
+    ] {
+        let path = directory.path().join("output.gz");
+        let url = Url::from_file_path(&path).unwrap();
+        write_bytes_sync(&url, payload.clone()).unwrap();
+        let actual = read_and_execute(path.to_str().unwrap(), |mut reader| async move {
+            let mut decoded = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut decoded).await?;
+            Ok(decoded)
+        })
+        .unwrap();
+        assert_eq!(actual, payload);
+    }
+}

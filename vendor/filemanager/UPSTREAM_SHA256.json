@@ -1,0 +1,18 @@
+{
+  ".cargo_vcs_info.json": "1abc2247be8c828055d2c5cca541b23e8f06137cc96926a49f5ffeae2acf5b2e",
+  "Cargo.toml": "ec1c897f8c4c161895cef2009cac9b2df4c9e32f52918bada7bc3636448fd014",
+  "Cargo.toml.orig": "8e5d880eb0e4c73e6e2b6c13d8117909387458c34f155eed058845fdd50148de",
+  "src/cache.rs": "83a2373a2ececfcffb899341aa0203ee81f54822948048f0ced1714b73083d6f",
+  "src/cloud_store/cloud/authenticate.rs": "cb9801f816947adfeb81659c725eafc60dcd10260bdf276f48b9fb04ed37ee82",
+  "src/cloud_store/cloud.rs": "9bf00c8ea7aa0bc94da26682652d398ec5368f6394ed7dfd7ee2d411d16f6721",
+  "src/cloud_store/no_cloud.rs": "442ef1f42b12a8eda33b2b321af9b43860b24b1d6ef8a3d2270ebd397e04bbdd",
+  "src/cloud_store.rs": "6919441fd4c47cec5e6edb1465b2efd7f958e155817b918fa76fe3504f1e5f24",
+  "src/formats/binary.rs": "bff2261257f2b20efecaa8a8c8d9f68909110b4f055e3d65e8895aa8fa27fded",
+  "src/formats/json.rs": "6bddf38bb65c68c6be62f5a5e95ac4779ed4662151c92d6e7c0812777f73f04e",
+  "src/formats/parquet.rs": "ca9658c9d52c55bc115425b9ec58b5c80a5b8b9eac258e6f17c1ef1c51764a38",
+  "src/formats/sql.rs": "20053ebf8b33043f65ed29973cca2893bf9c0a725f13a25714907f9f097275ba",
+  "src/formats.rs": "c54d9f3f05fc510f0a1653e22a69cfc5f963d67af5412cd712be3f459a510ee0",
+  "src/lib.rs": "fd738d5c7f2cc59ff60a85023776728da5eb49bfecd1d607c91fe4cf9cd34590",
+  "src/runtime.rs": "875f8ca600f607780f1f207441d945bc46acddc8441b6cc3a1b77158cb3a63f7",
+  "src/uri.rs": "1e8f112163677f9cece4cad6ef80bac6fcdee53bc1845a8f0d50e617f02ef31d"
+}

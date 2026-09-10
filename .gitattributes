@@ -1,0 +1,2 @@
+# Generated schemas must match the generator on every checkout platform.
+schemas/*.json text eol=lf

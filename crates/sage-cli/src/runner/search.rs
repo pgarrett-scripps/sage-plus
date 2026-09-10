@@ -22,7 +22,11 @@ impl Runner {
     /// fitting the final FDR model. Models are trained only on provisional 1%
     /// spectrum-q rank-1 targets and are then applied equally to targets and
     /// decoys. Raw output errors remain unchanged.
-    pub(super) fn align_mass_errors(&self, features: &mut [Feature]) {
+    pub(super) fn align_mass_errors(
+        &self,
+        features: &mut [Feature],
+    ) -> Vec<MassAlignmentFileStats> {
+        let mut diagnostics = Vec::with_capacity(self.parameters.mzml_paths.len());
         features.par_iter_mut().for_each(|feature| {
             feature.aligned_delta_mass = feature.delta_mass;
             feature.aligned_average_ppm = feature.average_ppm;
@@ -65,6 +69,22 @@ impl Runner {
                 .then(|| fit_mass_calibration(&precursor_points, fit_options))
                 .flatten();
             let fragment_fit = fit_mass_calibration(&fragment_points, fit_options);
+            diagnostics.push(MassAlignmentFileStats {
+                file_id,
+                calibration_psms: calibration_psms.len(),
+                precursor: precursor_fit.map(|fit| fit.model),
+                fragment: fragment_fit.map(|fit| fit.model),
+                precursor_skip_reason: precursor_fit.is_none().then(|| {
+                    if matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)) {
+                        "insufficient finite high-confidence observations".into()
+                    } else {
+                        "precursor alignment requires ppm tolerance".into()
+                    }
+                }),
+                fragment_skip_reason: fragment_fit
+                    .is_none()
+                    .then(|| "insufficient finite high-confidence observations".into()),
+            });
 
             if let Some(fit) = precursor_fit {
                 log::info!(
@@ -107,6 +127,7 @@ impl Runner {
                     }
                 });
         }
+        diagnostics
     }
 
     // Create a path for `file_name` in the specified output directory, if it exists,

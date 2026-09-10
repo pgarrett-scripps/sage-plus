@@ -265,6 +265,55 @@ pub struct RunSummary {
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
     pub output_paths: Vec<String>,
+    #[serde(default)]
+    pub warnings: Vec<crate::events::RunWarning>,
+    #[serde(default)]
+    pub provenance: RunProvenance,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RunProvenance {
+    pub software_version: String,
+    pub mzmlb_enabled: bool,
+    pub input_identity_mode: String,
+    pub inputs: Vec<InputIdentity>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InputIdentity {
+    pub path: String,
+    pub size_bytes: Option<u64>,
+    pub modified_unix_secs: Option<u64>,
+}
+
+impl InputIdentity {
+    fn from_url(url: &Url) -> Self {
+        let metadata = url
+            .to_file_path()
+            .ok()
+            .and_then(|path| std::fs::metadata(path).ok());
+        Self {
+            path: url.to_string(),
+            size_bytes: metadata
+                .as_ref()
+                .filter(|metadata| metadata.is_file())
+                .map(std::fs::Metadata::len),
+            modified_unix_secs: metadata
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|time| time.as_secs()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MassAlignmentFileStats {
+    pub file_id: usize,
+    pub calibration_psms: usize,
+    pub precursor: Option<sage_core::mass_calibration::CalibrationModel>,
+    pub fragment: Option<sage_core::mass_calibration::CalibrationModel>,
+    pub precursor_skip_reason: Option<String>,
+    pub fragment_skip_reason: Option<String>,
 }
 
 const fn run_summary_schema_version() -> u32 {
@@ -282,6 +331,8 @@ pub struct PtmLocalizationRunStats {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModelRunStats {
     pub mass_alignment_applied: bool,
+    #[serde(default)]
+    pub mass_alignment_files: Vec<MassAlignmentFileStats>,
     pub retention_time_prediction_enabled: bool,
     pub retention_time_model_fitted: bool,
     pub retention_time_features: String,
@@ -308,6 +359,8 @@ pub struct QuantificationRunStats {
 pub struct ExecutionRunStats {
     pub batch_size: usize,
     pub parallelism: usize,
+    #[serde(default)]
+    pub rayon_threads: usize,
     pub max_memory_gb: Option<f64>,
     pub min_free_memory_gb: Option<f64>,
 }

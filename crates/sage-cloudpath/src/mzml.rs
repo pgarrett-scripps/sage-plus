@@ -401,7 +401,7 @@ impl MzMLReader {
                                 continue;
                             }
                         }
-                        let raw = text.unescape()?;
+                        let raw = text.decode()?;
                         // There are occasionally empty binary data arrays, or unknown CVs
                         if raw.is_empty() || binary_array.is_none() {
                             continue;
@@ -436,6 +436,9 @@ impl MzMLReader {
 
                         binary_array = None;
                     }
+                }
+                Ok(Event::GeneralRef(_)) if matches!(state, Some(State::Binary)) => {
+                    return Err(MzMLError::BinaryEntityReference);
                 }
                 Ok(Event::End(ev)) => {
                     state = match (state, ev.name().into_inner()) {
@@ -528,6 +531,14 @@ pub enum MzMLError {
     UnknownReferenceableParamGroup(String),
     #[error("XML parsing error: {0}")]
     XMLError(#[from] quick_xml::Error),
+    #[error("XML attribute error: {0}")]
+    XMLAttributeError(#[from] quick_xml::events::attributes::AttrError),
+    #[error("XML encoding error: {0}")]
+    XMLEncodingError(#[from] quick_xml::encoding::EncodingError),
+    #[error(
+        "XML entity references in mzML binary arrays are unsupported, use literal base64 data"
+    )]
+    BinaryEntityReference,
     #[error("io error: {0}")]
     IOError(#[from] std::io::Error),
     #[error("utf8 error: {0}")]
