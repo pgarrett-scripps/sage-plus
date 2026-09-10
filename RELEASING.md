@@ -31,6 +31,21 @@ Protect `main` and require these Rust workflow checks before merging:
 Do not require the release workflow on ordinary branches. It is intended for manual packaging
 checks and release tags.
 
+## Account and destination check
+
+Before remote changes, inspect `gh auth status` and the Git push URL. Use an
+already-configured account with access to the existing repository. For the owner
+account in this workspace:
+
+```shell
+gh auth switch --hostname github.com --user pgarrett-scripps
+gh api user --jq .login
+git remote get-url --push origin
+```
+
+The destination must be `pgarrett-scripps/sage-plus`. Do not create a personal fork
+as a workaround for an inactive maintainer account.
+
 ## Prepare a release
 
 The beta.3 security dependency gate passes, as recorded in

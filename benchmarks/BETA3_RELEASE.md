@@ -83,45 +83,36 @@ at higher cutoffs in both builds.
 
 ## Hosted gates
 
-- [x] Release preparation committed and available in [PR #20](https://github.com/pgarrett-scripps/sage-plus/pull/20).
-- [x] Fork Rust CI passes on `379b73a`, including both toolchains, Clippy, coverage, and platform smoke tests.
-- [ ] Upstream PR checks pass after maintainer approval of fork workflows.
-- [x] Windows and macOS smoke tests pass on `379b73a` in the fork.
-- [x] Fork manual release workflow builds all seven archives and the AMD64 container on `5bc965f`.
-- [ ] Final upstream release dry run passes on the reviewed, merged preparation.
-- [x] All seven release-dist checksums, required files, executable modes, and schema contents verified.
-- [x] Hosted GNU and musl x86_64 Linux archives downloaded and smoke-tested.
-- [ ] Maintainer merges the reviewed preparation into `main`.
+- [x] Release preparation is in `pgarrett-scripps/sage-plus`, branch `codex/release-beta3`, with [PR #21](https://github.com/pgarrett-scripps/sage-plus/pull/21).
+- [x] Prior hosted Rust CI passed on `379b73a`, including both toolchains, Clippy, coverage, and Windows/macOS smoke tests. Logs are retained with the local evidence.
+- [x] Prior packaging validation passed on `5bc965f` for all seven archives and the AMD64 container.
+- [x] All seven downloaded archive checksums, required files, executable modes, and schema contents were verified.
+- [x] Hosted GNU and musl x86_64 Linux archives passed smoke searches.
+- [ ] Current repository PR checks pass on the reviewed preparation.
+- [ ] Current repository release dry run passes on the final preparation.
+- [ ] Reviewed preparation is merged into `main`.
 - [ ] Annotated `v0.1.0-beta.3` tag points to the verified release source.
 - [ ] Tag workflow publishes the prerelease, checksums, and versioned container.
 
-The first fork Windows run found CRLF conversion of the generated schema.
-Commit `379b73a` pins `schemas/*.json` to LF without weakening schema comparison
-or changing search code. The corrected commit has a fresh [Rust CI run](https://github.com/afk-sapien/sage-plus/actions/runs/34532870240).
-All jobs passed, including Rust 1.88 and 1.97.1 tests, strict Clippy, coverage,
-optimized builds, and Windows and macOS smoke tests. The fork push run correctly
-skips PR-only dependency review. The upstream PR review jobs require maintainer
-approval and have not run.
+The first Windows run found CRLF conversion of the generated schema. Commit
+`379b73a` pins `schemas/*.json` to LF without weakening schema comparison or
+changing search code. Hosted Windows tests passed after that fix. The prior
+packaging validation used `5bc965f`, before the checkout fix. Compiled sources
+and packaging commands are unchanged by the fix. Current repository CI and a
+fresh release dry run validate the final preparation before publication.
 
-The [fork release dry run](https://github.com/afk-sapien/sage-plus/actions/runs/34532258817)
-uses `5bc965f`, before the schema checkout fix. The compiled sources and packaging
-commands are unchanged by that fix. All seven builds, checksum assembly, and the
-AMD64 container build passed. Publication was correctly skipped for manual dispatch.
-All seven downloaded archive hashes match `SHA256SUMS`. Required documentation,
-licenses, executable modes, and parsed schema contents were verified.
-
-Both the GNU and static musl x86_64 archives were unpacked and smoke-tested. Both
-binaries report beta.3, mzMLb is enabled, and each synthetic search finds the
-expected peptide. The GNU archive SHA-256 is
+Both downloaded Linux archive variants report beta.3, enable mzMLb, and find the
+expected peptide in the synthetic smoke search. The GNU archive SHA-256 is
 `b75d7ca4b87075590e71f970421d988e53df813e5b91f33bbca97b741b63de2d`.
 The musl archive SHA-256 is
 `fc55a359306eb56fadfe3a1d4c213ab791fb809614bea70bbfe4fb48d3f6f37e`.
-The final upstream dry run must still validate the merged release preparation.
+Earlier CI logs, build identities, archives, and checksum verification records are
+retained in `benchmarks/results/beta3-20260910/`.
 
-GitHub currently authenticates as `afk-sapien` with read-only access to
-`pgarrett-scripps/sage-plus`. Publishing requires a maintainer session or a
-maintainer to complete merge, workflow dispatch, and tagging. A local archive
-does not substitute for the hosted platform and publication gates.
+Release operations use the configured `pgarrett-scripps` owner account and the
+existing `pgarrett-scripps/sage-plus` repository. Check the active account and
+remote before making GitHub changes. An inactive authorized account should be
+selected before treating a permission error as a release blocker.
 
 ## Release scope and evidence
 
