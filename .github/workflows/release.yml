@@ -129,6 +129,7 @@ jobs:
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
+          cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage" "$archive/"
           cp "target/${{ matrix.target }}/release/sage-mcp" "$archive/"
@@ -142,6 +143,7 @@ jobs:
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
+          cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$archive/"
           cp "target/${{ matrix.target }}/release/sage-mcp.exe" "$archive/"
@@ -201,7 +203,7 @@ jobs:
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
           cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
           mkdir -p .release/docker/vendor/filemanager
-          cp vendor/filemanager/LICENSE .release/docker/vendor/filemanager/
+          cp vendor/filemanager/LICENSE vendor/filemanager/LICENSE-APACHE .release/docker/vendor/filemanager/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
           cp ".release/input/$archive/sage-mcp" .release/docker/target/x86_64-unknown-linux-musl/release/
       - name: Set up Docker Buildx

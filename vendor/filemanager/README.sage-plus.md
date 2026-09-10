@@ -2,7 +2,10 @@
 
 This directory contains the published `filemanager` 0.6.5 source from
 MannLabs/timsrust commit `5e09572fa3f1aace86e6ba64244a01fd0850fbf3`, subdirectory
-`crates/filemanager`. The upstream Apache-2.0 license is retained in `LICENSE`.
+`crates/filemanager`. The crate metadata declares Apache-2.0, while the pinned
+repository root contains an MIT license. The upstream copyright and MIT text are
+retained unchanged in `LICENSE`. `LICENSE-APACHE` contains the standard Apache 2.0
+text matching the crate declaration. Both are distributed with executable artifacts.
 `UPSTREAM_SHA256.json` records the original copied files before patching.
 
 Sage Plus changes the normalized manifest to use `object_store` 0.14.1, imports

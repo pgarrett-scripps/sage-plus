@@ -36,8 +36,9 @@ claim that every affected path is unreachable.
 The root Cargo patch uses the published filemanager 0.6.5 source from timsrust
 commit `5e09572fa3f1aace86e6ba64244a01fd0850fbf3`. It updates object_store to 0.14.1,
 imports the new extension trait, converts byte ranges to the new `u64` API, and
-checks object-size conversion. The Apache-2.0 license, original file hashes,
-compatibility tests, and removal plan are retained in `vendor/filemanager`.
+checks object-size conversion. The crate declares Apache-2.0, but its pinned
+repository root has an MIT license. Both texts, the original copyright, original
+file hashes, compatibility tests, and removal plan are retained in `vendor/filemanager`.
 Archives and containers include the dependency license and third-party notice.
 
 The patch tests exercise upload, metadata, byte ranges, listing, buffered file
