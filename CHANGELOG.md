@@ -27,6 +27,7 @@ entries are retained below for provenance.
 ### Changed
 - Local output directories containing Sage artifacts require `--overwrite` or `"overwrite": true`. Explicit overwrite removes known Sage artifacts while preserving unrelated files. Use a separate directory for each concurrent run and a fresh prefix for remote outputs.
 - Updated patched dependencies for crossbeam-epoch, h2, anyhow, memmap2, and direct quick-xml usage. Updated timsrust to 0.6.5 and chacha20 to 0.10.2. A pinned, licensed filemanager compatibility patch uses object_store 0.14.1 to remove the remaining vulnerable XML dependency.
+- Consolidated maintenance updates for anyhow 1.0.104, clap 4.6.1, itoa 1.0.18, and schemars 1.2.2. Coverage artifact uploads now use the same pinned upload-artifact v7.0.1 as release packaging. DashMap's major upgrade remains deferred for separate validation.
 - mzML binary arrays containing XML entity references now fail explicitly. Literal base64 arrays remain supported.
 
 ### Validation scope

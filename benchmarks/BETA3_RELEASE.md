@@ -4,6 +4,27 @@ Prepared September 10, 2026 for `v0.1.0-beta.3` on `codex/release-beta3`.
 This is a hardening release. It does not change scoring defaults or establish
 broader scientific calibration.
 
+## Dependency consolidation
+
+The release branch now incorporates the updates proposed in PRs #7, #10, #11,
+#12, and #19: anyhow 1.0.104, clap 4.6.1 with clap_builder 4.6.0, itoa 1.0.18,
+schemars 1.2.2, and pinned upload-artifact v7.0.1. Schemars also updates
+schemars_derive to 1.2.2 and serde_derive_internals to 0.30.0, using the existing
+syn 3.0.3 lockfile entry. Unrelated Windows dependency resolution changes were
+excluded. The existing tempfile/getrandom fix is retained.
+
+PR #10's branch name mentions 4.6.6, but its actual diff specifies clap 4.6.1
+and clap_builder 4.6.0. This consolidation follows the reviewed diff.
+DashMap remains at 5.5.3. Its major upgrade in PR #8 is deferred for focused
+concurrency, performance, and scientific-output validation.
+
+The evidence below predates this consolidation and remains historical evidence
+for its explicitly identified binaries. Fresh engineering, schema, security,
+representative scientific-output, and packaging checks are required for the
+updated candidate. Their local evidence belongs in
+`benchmarks/results/beta3-deps-20260910/`. The five bot PRs should be closed as
+superseded only after their equivalent updates are merged through PR #21.
+
 ## Local gates
 
 | Gate | Status |
