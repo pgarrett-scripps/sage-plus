@@ -28,10 +28,16 @@ Protect `main` and require these Rust workflow checks before merging:
 - `Test Rust 1.88.0`
 - `Test Rust 1.97.1`
 
-Do not require the release workflow on ordinary branches; it is intended for manual packaging
+Do not require the release workflow on ordinary branches. It is intended for manual packaging
 checks and release tags.
 
 ## Prepare a release
+
+The beta.3 security dependency gate passes, as recorded in
+[`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
+validation and publication gates in [`benchmarks/BETA3_RELEASE.md`](benchmarks/BETA3_RELEASE.md).
+The workflow audits the complete lockfile and runs the storage patch compatibility tests before
+packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 
 1. Set `[workspace.package].version` in `Cargo.toml`. All Sage Plus crates inherit this version.
 2. Add a matching `## [vX.Y.Z]` or prerelease section to `CHANGELOG.md`, leaving a new empty
@@ -59,8 +65,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0-beta.2 -m "Sage Plus v0.1.0-beta.2"
-git push origin v0.1.0-beta.2
+git tag -a v0.1.0-beta.3 -m "Sage Plus v0.1.0-beta.3"
+git push origin v0.1.0-beta.3
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark

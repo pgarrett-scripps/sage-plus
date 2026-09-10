@@ -7,16 +7,17 @@ __pycache__/
 *.py[cod]
 /.env
 
+# Search outputs may be written alongside inputs.
 *.pin
-*.txt
-*.csv
-*.tsv
-*.gz
-*.json
-!tests/config_spectral_library.json
-!schemas/config.schema.json
-!benchmarks/configs/*.json
-*.ms2
-*.fasta
-*.fas
+*.sage.parquet
+*.sage.ptm-library.tsv
+*.sage.report.html
+results.json
+run-summary.json
+lfq.parquet
+spectral_library.mzspeclib.txt
+.venv/
+.vscode/
+/coverage/
+/foo/
 **/*.DS_Store

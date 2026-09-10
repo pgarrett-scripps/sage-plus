@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "status": "candidate_inventory_not_frozen",
+  "datasets": [
+    {
+      "id": "local-hek-silac",
+      "role": "engineering_and_feasibility_only",
+      "local_spectra": "data/silac-k6r6/HEK_SILAC-K6R6.mzML",
+      "local_reference": "data/silac-k6r6/human-reviewed.fasta",
+      "identity_manifest": "benchmarks/results/hardening-baseline/manifest.json",
+      "accession": null,
+      "reuse_terms": null,
+      "status": "local_files_hashed_origin_unverified"
+    },
+    {
+      "id": "PXD001468",
+      "role": "candidate_independent_dda_study",
+      "source": "https://www.ebi.ac.uk/pride/archive/projects/PXD001468",
+      "selection_basis": "HEK293 DDA dataset named in FDRBench data availability",
+      "files": [],
+      "reference_release": null,
+      "reuse_terms": null,
+      "status": "metadata_and_file_selection_pending"
+    },
+    {
+      "id": "isb18-mix7-orbitrap",
+      "role": "candidate_known_mixture_dda_study",
+      "source": "https://regis-web.systemsbiology.net/PublicDatasets/18_Mix/Mix_7/ORBITRAP/RAW_Data/",
+      "selection_basis": "ISB18 DDA collection named in FDRBench data availability",
+      "files": [],
+      "reference_release": null,
+      "reuse_terms": null,
+      "status": "metadata_and_file_selection_pending"
+    }
+  ]
+}

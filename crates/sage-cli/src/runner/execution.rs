@@ -68,7 +68,7 @@ impl Runner {
         sage_core::ml::qvalue::spectrum_q_value_by(&mut outputs.features, |feature| {
             feature.poisson
         });
-        self.align_mass_errors(&mut outputs.features);
+        let mass_alignment_files = self.align_mass_errors(&mut outputs.features);
         self.events.emit(EventKind::MassAlignmentCompleted {
             files: self.parameters.mzml_paths.len(),
         });
@@ -176,6 +176,8 @@ impl Runner {
         self.cancellation.check()?;
 
         let postprocess = self.postprocess_features(&scorer, &mut outputs.features, parallel)?;
+        self.cancellation.check()?;
+        self.events.check()?;
         if self.parameters.annotate_matches {
             self.events.emit(EventKind::FragmentAnnotationCompleted {
                 psms: postprocess.annotated_psms,
@@ -247,6 +249,8 @@ impl Runner {
         }
         let lfq_features = areas.as_ref().map(|areas| areas.len()).unwrap_or_default();
         let tmt_features = outputs.quant.len();
+        self.cancellation.check()?;
+        self.events.check()?;
 
         log::info!(
             "discovered {} target peptide-spectrum matches at 1% FDR",
@@ -402,8 +406,34 @@ impl Runner {
                 input_stats.other_files += 1;
             }
         }
+        let mut input_identities = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .map(InputIdentity::from_url)
+            .collect::<Vec<_>>();
+        for path in std::iter::once(self.database_parameters.fasta.as_str())
+            .filter(|path| !path.is_empty())
+            .chain(self.database_parameters.peptides.as_deref())
+            .chain(self.database_parameters.custom_cleavage_sites.as_deref())
+            .chain(
+                self.database_parameters
+                    .ptm_library
+                    .as_ref()
+                    .map(|settings| settings.path.as_str()),
+            )
+        {
+            input_identities.push(InputIdentity::from_url(&sage_cloudpath::to_url(path)?));
+        }
         let summary = RunSummary {
-            schema_version: 8,
+            schema_version: 9,
+            warnings: self.events.warnings(),
+            provenance: RunProvenance {
+                software_version: self.parameters.version.clone(),
+                mzmlb_enabled: cfg!(feature = "mzmlb"),
+                input_identity_mode: "path_size_mtime".into(),
+                inputs: input_identities,
+            },
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
             peptides_in_database: self.database.peptides.len(),
@@ -419,7 +449,10 @@ impl Runner {
                 localization_q_value: self.parameters.ptm_localization.localization_q_value,
             },
             models: ModelRunStats {
-                mass_alignment_applied: true,
+                mass_alignment_applied: mass_alignment_files
+                    .iter()
+                    .any(|file| file.precursor.is_some() || file.fragment.is_some()),
+                mass_alignment_files,
                 retention_time_prediction_enabled: self.parameters.predict_rt,
                 retention_time_model_fitted,
                 retention_time_features: format!(
@@ -456,6 +489,7 @@ impl Runner {
             execution: ExecutionRunStats {
                 batch_size: self.parameters.batch_size,
                 parallelism: parallel,
+                rayon_threads: rayon::current_num_threads(),
                 max_memory_gb: self.parameters.max_memory_gb,
                 min_free_memory_gb: self.parameters.min_free_memory_gb,
             },
@@ -507,6 +541,8 @@ impl Runner {
             },
             output_paths,
         };
+        self.cancellation.check()?;
+        self.events.check()?;
         sage_cloudpath::write_bytes_sync(&summary_path, serde_json::to_vec_pretty(&summary)?)?;
         self.parameters.output_paths.push(summary_path);
 

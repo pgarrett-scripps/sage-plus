@@ -130,6 +130,21 @@ Running Sage will produce several output files (located in either the current di
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
+Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
+Overwrite removes known Sage artifacts, including stale optional outputs, and preserves unrelated
+files. It does not coordinate concurrent writers. Use one directory per job and a fresh object-store
+prefix for remote searches. A failed run can leave partial analytical files without a completion summary.
+
+Run-summary schema 9 adds `warnings`, `provenance`, per-file mass-alignment outcomes, and
+`execution.rayon_threads`. The existing `execution.parallelism` field describes file batching.
+The provenance mode `path_size_mtime` records local input metadata, not content hashes or a
+cryptographically exact build identity. Benchmark manifests separately record SHA-256 hashes of
+inputs and binaries. Older summaries remain readable through defaults for the new fields.
+
+For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
+does not specify `batch_size`. It does not set the Rayon worker count. CLI and MCP batch overrides
+take precedence over the configuration.
+
 Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
 
 The versioned physical schemas and score definitions are published in [`schemas/`](schemas/). Canonical Parquet files embed `sage.schema.name` and `sage.schema.version` metadata so downstream tools can select the matching contract.

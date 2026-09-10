@@ -132,6 +132,8 @@ pub struct Input {
     pub retention_time_alignment: Option<AlignmentMethod>,
     pub ion_mobility_model: Option<IonMobilitySettings>,
     pub output_directory: Option<String>,
+    /// Replace known Sage artifacts in an existing local output directory.
+    pub overwrite: Option<bool>,
     #[schemars(required, length(min = 1))]
     pub mzml_paths: Option<Vec<String>>,
     pub bruker_config: Option<BrukerProcessingConfig>,
@@ -316,6 +318,15 @@ impl Input {
         if let Some(output_directory) = matches.get_one::<String>("output_directory") {
             input.output_directory = Some(output_directory.into());
         }
+        if matches
+            .try_get_one::<bool>("overwrite")
+            .ok()
+            .flatten()
+            .copied()
+            .unwrap_or(false)
+        {
+            input.overwrite = Some(true);
+        }
         if let Some(fasta) = matches.get_one::<String>("fasta") {
             input.database.get_or_insert_default().fasta = Some(fasta.into());
         }
@@ -393,6 +404,25 @@ impl Input {
 
     /// Validate logical configuration constraints without reading inputs or writing outputs.
     pub fn validate(&self) -> anyhow::Result<()> {
+        for (name, tolerance) in [
+            ("precursor_tol", self.precursor_tol),
+            ("fragment_tol", self.fragment_tol),
+        ] {
+            let (low, high) = match tolerance {
+                Tolerance::Ppm(low, high) | Tolerance::Da(low, high) => (low, high),
+                Tolerance::Pct(low, high) => {
+                    ensure!(
+                        name != "precursor_tol",
+                        "percentage precursor tolerances are unsupported, use ppm or da"
+                    );
+                    (low, high)
+                }
+            };
+            ensure!(
+                low.is_finite() && high.is_finite() && low <= high,
+                "`{name}` must contain finite ordered bounds [low, high]"
+            );
+        }
         ensure!(self.database.is_some(), "`database` must be configured");
         if let Some(database) = &self.database {
             ensure!(
@@ -408,6 +438,13 @@ impl Input {
             parameters
                 .validate_compact_modifications()
                 .map_err(anyhow::Error::msg)?;
+            ensure!(
+                database.ptm_library.is_none() || database.fasta.is_some(),
+                "`database.ptm_library` requires `database.fasta`"
+            );
+            parameters
+                .validate_ptm_library(&sage_core::ptm_library::PtmLibrary::default())
+                .map_err(anyhow::Error::msg)?;
         }
         ensure!(
             self.mzml_paths.as_ref().map(Vec::len).unwrap_or_default() > 0,
@@ -421,12 +458,55 @@ impl Input {
         }
         if let Some((low, high)) = self.precursor_charge {
             ensure!(
-                low <= high,
+                low > 0 && low <= high,
                 "precursor charges must be specified [low, high], received [{low}, {high}]"
             );
         }
-        if let (Some(min), Some(max)) = (self.min_peaks, self.max_peaks) {
-            ensure!(min <= max, "`min_peaks` cannot exceed `max_peaks`");
+        ensure!(
+            self.max_fragment_charge != Some(0),
+            "`max_fragment_charge` must be greater than zero"
+        );
+        ensure!(
+            self.min_peaks.unwrap_or(15) <= self.max_peaks.unwrap_or(150),
+            "`min_peaks` cannot exceed `max_peaks`, including defaults"
+        );
+        if let Some(value) = self.protein_grouping_peptide_fdr {
+            ensure!(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                "`protein_grouping_peptide_fdr` must be between zero and one"
+            );
+        }
+        if let Some(value) = self.mass_shift_ppm {
+            ensure!(
+                value.is_finite() && value >= 0.0,
+                "`mass_shift_ppm` must be finite and nonnegative"
+            );
+        }
+        for (name, folds, regularization) in self
+            .retention_time_model
+            .as_ref()
+            .map(|s| ("retention_time_model", s.folds, s.ptm_regularization))
+            .into_iter()
+            .chain(
+                self.ion_mobility_model
+                    .as_ref()
+                    .map(|s| ("ion_mobility_model", s.folds, s.ptm_regularization)),
+            )
+        {
+            ensure!(
+                (2..=10).contains(&folds),
+                "`{name}.folds` must be between 2 and 10"
+            );
+            ensure!(
+                regularization.is_finite() && regularization >= 0.0,
+                "`{name}.ptm_regularization` must be finite and nonnegative"
+            );
+        }
+        if let Some(settings) = &self.ion_mobility_model {
+            ensure!(
+                settings.min_training_psms > 0,
+                "`ion_mobility_model.min_training_psms` must be greater than zero"
+            );
         }
         self.deisotope
             .unwrap_or(DeisotopeConfig::Enabled(true))
@@ -552,6 +632,7 @@ impl Input {
             }
         };
 
+        crate::output::prepare_local_directory(&output_directory, self.overwrite.unwrap_or(false))?;
         let score_type = self.score_type.unwrap_or(ScoreType::SageHyperScore);
 
         let ptm_localization = self.ptm_localization.unwrap_or_default();

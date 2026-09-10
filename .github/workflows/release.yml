@@ -53,6 +53,12 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run tests
         run: cargo test --workspace --locked
+      - name: Test patched storage compatibility
+        run: cargo test -p filemanager --locked
+      - name: Install pinned dependency scanner
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Require a clean vulnerability audit before packaging
+        run: cargo audit --file Cargo.lock --deny unsound
 
   build:
     name: Build ${{ matrix.target }}
@@ -121,7 +127,9 @@ jobs:
         run: |
           archive="sage-plus-${{ needs.verify.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
-          cp README.md DOCS.md LICENSE "$archive/"
+          cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
+          cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
+          cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage" "$archive/"
           cp "target/${{ matrix.target }}/release/sage-mcp" "$archive/"
           tar czf "$archive.tar.gz" "$archive"
@@ -132,7 +140,9 @@ jobs:
         run: |
           archive="sage-plus-${{ needs.verify.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
-          cp README.md DOCS.md LICENSE "$archive/"
+          cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
+          cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
+          cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$archive/"
           cp "target/${{ matrix.target }}/release/sage-mcp.exe" "$archive/"
           7z a "$archive.zip" "$archive"
@@ -189,7 +199,9 @@ jobs:
           archive="sage-plus-${{ needs.verify.outputs.release_tag }}-x86_64-unknown-linux-musl"
           tar xzf ".release/input/$archive.tar.gz" -C .release/input
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
-          cp Dockerfile .release/docker/
+          cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
+          mkdir -p .release/docker/vendor/filemanager
+          cp vendor/filemanager/LICENSE .release/docker/vendor/filemanager/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
           cp ".release/input/$archive/sage-mcp" .release/docker/target/x86_64-unknown-linux-musl/release/
       - name: Set up Docker Buildx

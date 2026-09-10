@@ -6,6 +6,8 @@ use crate::telemetry::Telemetry;
 
 /// Execution controls shared by CLI, GUI, TUI, and protocol adapters.
 pub struct JobOptions {
+    /// Legacy fallback file batch size when the input has no explicit batch size.
+    /// Rayon worker count is configured independently of file batching.
     pub parallel: usize,
     pub events: EventEmitter,
     pub cancellation: CancellationToken,
@@ -52,6 +54,10 @@ impl SageRunner {
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.options.parallel > 0,
+            "fallback batch size must be greater than zero"
+        );
         self.input.validate()?;
         self.options.events.emit(EventKind::ConfigurationValidated {
             spectra_files: self
@@ -86,10 +92,13 @@ impl SageRunner {
         let memory_guard = memory::spawn_memory_guard(self.input.memory_limits()?, behavior)?;
         let result = (|| -> anyhow::Result<JobResult> {
             cancellation.check()?;
-            let search = self.input.build()?;
+            let mut input = self.input;
+            input.batch_size.get_or_insert(parallel);
+            let search = input.build()?;
+            let batch_size = search.batch_size;
             let runner =
-                Runner::new_with_control(search, parallel, events.clone(), cancellation.clone())?;
-            let (telemetry, summary) = runner.run_with_summary(parallel)?;
+                Runner::new_with_control(search, batch_size, events.clone(), cancellation.clone())?;
+            let (telemetry, summary) = runner.run_with_summary(batch_size)?;
             Ok(JobResult { telemetry, summary })
         })();
         if let Some(message) = memory_guard.failure() {

@@ -6,12 +6,17 @@ members = [
     "crates/sage-mcp",
 ]
 
+exclude = ["vendor/filemanager"]
+
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-beta.2"
+version = "0.1.0-beta.3"
 
 [profile.release]
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+[patch.crates-io]
+filemanager = { path = "vendor/filemanager" }

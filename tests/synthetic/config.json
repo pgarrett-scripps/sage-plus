@@ -1,0 +1,25 @@
+{
+  "database": {
+    "fasta": "tests/synthetic/peptide.fasta",
+    "generate_decoys": true
+  },
+  "mzml_paths": [
+    "tests/synthetic/peptide.mgf"
+  ],
+  "deisotope": false,
+  "precursor_tol": {
+    "ppm": [
+      -10,
+      10
+    ]
+  },
+  "fragment_tol": {
+    "ppm": [
+      -10,
+      10
+    ]
+  },
+  "output_filter": {
+    "psm_q_value": 1.0
+  }
+}

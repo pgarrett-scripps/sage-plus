@@ -72,3 +72,34 @@ fn writer_failures_are_reported_by_check() {
         .to_string()
         .contains("intentional test failure"));
 }
+
+#[test]
+fn concurrent_events_are_monotonic_in_written_order() {
+    let writer = SharedWriter::default();
+    let output = writer.0.clone();
+    let emitter = EventEmitter::from_writer(writer);
+    std::thread::scope(|scope| {
+        for _ in 0..16 {
+            let emitter = &emitter;
+            scope.spawn(move || {
+                for _ in 0..1000 {
+                    emitter.emit(EventKind::DatabaseStarted);
+                }
+            });
+        }
+    });
+    emitter.check().unwrap();
+    let bytes = output.lock().unwrap();
+    let text = std::str::from_utf8(&bytes).unwrap();
+    let events: Vec<serde_json::Value> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events.len(), 16_000);
+    for (sequence, event) in events.iter().enumerate() {
+        assert_eq!(event["sequence"], sequence as u64);
+    }
+    assert!(events
+        .windows(2)
+        .all(|pair| pair[0]["elapsed_ms"].as_u64() <= pair[1]["elapsed_ms"].as_u64()));
+}

@@ -8,6 +8,43 @@ use sage_core::{
 };
 
 #[test]
+fn invalid_numeric_settings_fail_logical_validation() {
+    let fixture = serde_json::json!({
+        "database": {"fasta": "missing.fasta"},
+        "mzml_paths": ["missing.mzML"],
+        "precursor_tol": {"ppm": [-10, 10]},
+        "fragment_tol": {"ppm": [-20, 20]}
+    });
+    for (key, value) in [
+        ("precursor_tol", serde_json::json!({"pct": [-1, 1]})),
+        ("fragment_tol", serde_json::json!({"ppm": [20, -20]})),
+        ("precursor_charge", serde_json::json!([0, 3])),
+        ("max_fragment_charge", serde_json::json!(0)),
+        ("min_peaks", serde_json::json!(151)),
+        ("max_peaks", serde_json::json!(14)),
+        ("protein_grouping_peptide_fdr", serde_json::json!(1.1)),
+        ("retention_time_model", serde_json::json!({"folds": 1})),
+        (
+            "ion_mobility_model",
+            serde_json::json!({"ptm_regularization": -1}),
+        ),
+    ] {
+        let mut config = fixture.clone();
+        config[key] = value;
+        let input: Input = serde_json::from_value(config).unwrap();
+        assert!(input.validate().is_err(), "accepted invalid {key}");
+    }
+    let mut input: Input = serde_json::from_value(fixture).unwrap();
+    input.precursor_tol = sage_core::mass::Tolerance::Ppm(1.0, 10.0);
+    assert!(
+        input.validate().is_ok(),
+        "valid asymmetric tolerance rejected"
+    );
+    input.precursor_tol = sage_core::mass::Tolerance::Ppm(f32::NAN, 10.0);
+    assert!(input.validate().is_err());
+}
+
+#[test]
 fn deserialize_enriched_retention_time_settings() -> Result<(), serde_json::Error> {
     let settings: RetentionTimeSettings = serde_json::from_value(serde_json::json!({
         "features": "additive_ptm",

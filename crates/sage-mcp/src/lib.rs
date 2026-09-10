@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, BufWriter},
+    io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
@@ -633,12 +633,9 @@ impl State {
 
     fn events(&self, args: JobEventsArgs) -> anyhow::Result<Vec<serde_json::Value>> {
         let record = self.job(&args.job_id)?;
-        let reader = BufReader::new(File::open(&record.events_path)?);
         let after = args.after_sequence;
         let limit = args.limit.unwrap_or(200).min(1_000);
-        reader
-            .lines()
-            .map(|line| Ok(serde_json::from_str::<serde_json::Value>(&line?)?))
+        event_records(&record)?
             .filter(|value| {
                 value
                     .as_ref()
@@ -654,8 +651,8 @@ impl State {
     fn summarize(&self, job_id: &str) -> anyhow::Result<serde_json::Value> {
         let record = self.job(job_id)?;
         let mut recent_events = VecDeque::with_capacity(20);
-        for line in BufReader::new(File::open(&record.events_path)?).lines() {
-            let value = serde_json::from_str::<serde_json::Value>(&line?)?;
+        for value in event_records(&record)? {
+            let value = value?;
             if recent_events.len() == 20 {
                 recent_events.pop_front();
             }
@@ -1070,8 +1067,32 @@ fn now() -> u64 {
 
 fn write_record(record: &JobRecord) -> anyhow::Result<()> {
     let path = Path::new(&record.job_directory).join("job.json");
-    fs::write(path, serde_json::to_vec_pretty(record)?)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(&record.job_directory)?;
+    serde_json::to_writer_pretty(&mut temporary, record)?;
+    temporary.flush()?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(path)?;
     Ok(())
+}
+
+fn event_records(
+    record: &JobRecord,
+) -> anyhow::Result<impl Iterator<Item = anyhow::Result<serde_json::Value>>> {
+    let mut reader = BufReader::new(File::open(&record.events_path)?);
+    let active = matches!(
+        record.status,
+        JobStatus::Queued | JobStatus::Running | JobStatus::Cancelling
+    );
+    let mut line = Vec::new();
+    Ok(std::iter::from_fn(move || {
+        line.clear();
+        match reader.read_until(b'\n', &mut line) {
+            Ok(0) => None,
+            Ok(_) if active && !line.ends_with(b"\n") => None,
+            Ok(_) => Some(serde_json::from_slice(&line).context("invalid complete job event")),
+            Err(error) => Some(Err(error.into())),
+        }
+    }))
 }
 
 fn update_job(

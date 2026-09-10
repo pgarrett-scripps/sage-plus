@@ -44,6 +44,14 @@ agent-facing capabilities.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
 
+## Beta.3 hardening
+
+Beta.3 fixes batching, gzip completion, event ordering, validation, and worker persistence.
+Existing local Sage outputs now require explicit `--overwrite`, and run summaries use schema 9.
+The release also adds verified benchmark provenance and resolves the audited dependency findings.
+See the [release checklist and validation scope](benchmarks/BETA3_RELEASE.md) and
+[changelog](CHANGELOG.md) for compatibility details and publication status.
+
 ## Memory and performance
 
 Sage Plus `v0.1.0-beta.2` reduces the largest in-memory search structures without lossy mass

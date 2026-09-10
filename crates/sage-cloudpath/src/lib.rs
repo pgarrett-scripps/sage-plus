@@ -136,7 +136,7 @@ pub async fn write_bytes_async(url: &Url, bytes: Vec<u8>) -> Result<(), Error> {
         let inner = Vec::with_capacity(bytes.len() / 2);
         let mut wtr = GzipEncoder::new(inner);
         wtr.write_all(&bytes).await?;
-        wtr.flush().await?;
+        wtr.shutdown().await?;
         wtr.into_inner()
     } else {
         bytes

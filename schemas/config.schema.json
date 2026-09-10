@@ -1332,6 +1332,13 @@
         "null"
       ]
     },
+    "overwrite": {
+      "description": "Replace known Sage artifacts in an existing local output directory.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "precursor_charge": {
       "maxItems": 2,
       "minItems": 2,
