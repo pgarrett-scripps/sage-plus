@@ -18,14 +18,56 @@ and clap_builder 4.6.0. This consolidation follows the reviewed diff.
 DashMap remains at 5.5.3. Its major upgrade in PR #8 is deferred for focused
 concurrency, performance, and scientific-output validation.
 
-The evidence below predates this consolidation and remains historical evidence
-for its explicitly identified binaries. Fresh engineering, schema, security,
-representative scientific-output, and packaging checks are required for the
-updated candidate. Their local evidence belongs in
-`benchmarks/results/beta3-deps-20260910/`. The five bot PRs should be closed as
-superseded only after their equivalent updates are merged through PR #21.
+The consolidated dependency source is commit
+`e405067dba6ad04b7422ef9eb3c98c3651dde938`. Fresh local evidence is retained in
+`benchmarks/results/beta3-deps-20260910/`, including the committed source archive,
+lockfile and binary hashes, commands, logs, and `validation-summary.json`.
+The search binary SHA-256 is
+`12f7574e573dc09befe3130b7a690b8044f7319a00664199f166cf987fc4a37e`.
+The MCP binary SHA-256 is
+`a572384757c967c096a739cc7bf19ceeaa96c86ada2e70564662214b9d90c845`.
+Subsequent changes to this evidence document do not change compiled sources,
+dependencies, workflows, or files shipped in release archives.
 
-## Local gates
+Fresh validation passed:
+
+- 399 default and 399 minimal-feature workspace tests, 49 storage tests, and
+  16 Python tests. The first storage test attempt could not bind its loopback
+  server inside the sandbox. An unchanged retry with networking enabled passed.
+- Strict Clippy, Rust 1.88 compatibility, formatting, version inheritance, and
+  the optimized workspace build.
+- The online audit found zero vulnerabilities, unsoundness findings, or yanked
+  dependencies. The existing instant and paste maintenance warnings remain.
+- CLI help, version, missing arguments, unknown arguments, and invalid batch-size
+  responses match the preceding beta.3 binary. Generated configuration schema
+  bytes and complete MCP tool definitions and schemas also match.
+- Four paired workloads, each with one warmup and three measured trials per
+  binary, passed without timing, memory, or identification review flags.
+  Accepted PSM counts remain 2203, 2256, 3266, and 2203 for standard, modified,
+  feature, and prefilter searches. Compared scores agree exactly. Every compared
+  PSM, LFQ, matched-fragment, and spectral-library Parquet file is byte-identical.
+- A fresh paired 20-seed entrapment experiment completed without evaluator
+  failures. All stored and accepted identities, threshold counts, and FDP
+  estimates agree. Independent reconstruction passed all 200 count checks.
+  Spectrum q-values and hyperscores agree exactly. Maximum differences are
+  8e-8 for peptide q-values and 7e-7 for discriminant scores, without acceptance
+  changes. This remains a bounded regression check, not broad calibration.
+
+The comparator for these fresh experiments is the preceding validated beta.3
+binary identified below. The earlier evidence remains tied to its original
+binaries and is retained separately.
+
+[Hosted Rust checks](https://github.com/pgarrett-scripps/sage-plus/actions/runs/34536457819)
+and [dependency security](https://github.com/pgarrett-scripps/sage-plus/actions/runs/34536457813)
+passed on the consolidated source, including Windows and macOS smoke tests and
+the coverage gate. The
+[release packaging run](https://github.com/pgarrett-scripps/sage-plus/actions/runs/34536503116)
+validates that same source. Successful platform archives, assembly, and container
+validation are required before merge. Final statuses are available through these
+run links and PR #21. The five bot PRs should be closed as superseded only after
+their equivalent updates are merged through PR #21.
+
+## Earlier local gates
 
 | Gate | Status |
 |---|---|
@@ -47,7 +89,7 @@ mzMLb, MCP worker isolation, and the new hardening regressions. The storage patc
 also exercises S3 XML and HTTP ranges through a loopback fixture. These checks do
 not certify every cloud provider's authentication or acquisition workflow.
 
-## Final binary and workload evidence
+## Earlier binary and workload evidence
 
 The tested code and packaging source is commit `5bc965f62fa68250c1b1a8b6fa74da2fd6cc40f1`.
 The Windows schema checkout fix in `379b73a` and subsequent release-evidence
@@ -79,7 +121,7 @@ committed source archive, build and input manifests, engineering logs, audit JSO
 paired workloads, entrapment outputs, and native archive with checksum and smoke
 results. The directory is intentionally excluded from Git.
 
-## Final entrapment check
+## Earlier entrapment check
 
 The final beta.3 binary and frozen pre-hardening baseline completed the same
 20-seed experiment, seeds 20260902 through 20260921. All stored identities,
@@ -104,12 +146,15 @@ at higher cutoffs in both builds.
 
 ## Hosted gates
 
+This checklist records preparation status before merge. The linked PR and
+workflow runs show subsequent completion.
+
 - [x] Release preparation is in `pgarrett-scripps/sage-plus`, branch `codex/release-beta3`, with [PR #21](https://github.com/pgarrett-scripps/sage-plus/pull/21).
 - [x] Prior hosted Rust CI passed on `379b73a`, including both toolchains, Clippy, coverage, and Windows/macOS smoke tests. Logs are retained with the local evidence.
 - [x] Prior packaging validation passed on `5bc965f` for all seven archives and the AMD64 container.
 - [x] All seven downloaded archive checksums, required files, executable modes, and schema contents were verified.
 - [x] Hosted GNU and musl x86_64 Linux archives passed smoke searches.
-- [ ] Current repository PR checks pass on the reviewed preparation.
+- [x] Current repository PR checks pass on consolidated dependency source `e405067`. Any subsequent evidence-only commit must also pass required PR checks before merge.
 - [ ] Current repository release dry run passes on the final preparation.
 - [ ] Reviewed preparation is merged into `main`.
 - [ ] Annotated `v0.1.0-beta.3` tag points to the verified release source.
