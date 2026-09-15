@@ -1,0 +1,392 @@
+{
+  "_about": "Figures and tables the manuscript includes, referenced as #fig(\"<id>\") / #tbl(\"<id>\"). Written by the scripts in analysis/scripts/; see analysis/scripts/_assets.py.",
+  "values": {
+    "fig.report-control": {
+      "path": "figures/report-control.png",
+      "kind": "figure",
+      "desc": "LFQ threshold yield and species-absent control diagnostics for both releases",
+      "hash": "sha256:8e6fe5c01fa324d9c66db498c69345ea4c320f476a98b48a0bb20aa2bdaa0da9",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:07:28Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-disagreement": {
+      "path": "figures/report-disagreement.png",
+      "kind": "figure",
+      "desc": "Decomposition of accepted PSM disagreement using raw rank-one output",
+      "hash": "sha256:9d245492b643bcf9edf5f1a17337ce0928dc12e79d7654cca93bebe7f8f4efef",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:05:50Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-identification": {
+      "path": "figures/report-identification.png",
+      "kind": "figure",
+      "desc": "Public PSM and peptidoform yields and nominal-threshold response",
+      "hash": "sha256:2cb2c10e076203bed4ec96a51e66d7d9eed54c3826edbc4a1af624860eebc811",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:02:02Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-lfq": {
+      "path": "figures/report-lfq.png",
+      "kind": "figure",
+      "desc": "Matched LFQ distributions, ratio error, preparation variability and missingness",
+      "hash": "sha256:26582ec42ae2d31a8b6102be31286a09e4f357084140dd260a6b591c9ea1e83e",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:07:27Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-ptm": {
+      "path": "figures/report-ptm.png",
+      "kind": "figure",
+      "desc": "Synthetic PTM acceptance under spectrum-only and joint peptide filters",
+      "hash": "sha256:9504f847c49a8db6b5ef9ae66ff52873efc88b9be926cb84edfb5fc50a9d89c0",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:02:03Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-scaling": {
+      "path": "figures/report-scaling.png",
+      "kind": "figure",
+      "desc": "Matched release thread scaling with warmups excluded",
+      "hash": "sha256:b66bcd6bd01067c6ba5cf2be48f52b412919fac08feaaabece4deec04759bfb5",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:05:51Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.report-workloads": {
+      "path": "figures/report-workloads.png",
+      "kind": "figure",
+      "desc": "Within-workload performance ratios with distinct replication designs",
+      "hash": "sha256:edbe039f9052e7fb835ca0809a622c0b6c0d16f4065f97934435302d49708140",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-15T08:02:02Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+      }
+    },
+    "fig.scientific-entrapment-pilot": {
+      "path": "figures/scientific-entrapment-pilot.png",
+      "kind": "figure",
+      "desc": "Threshold calibration and file-by-seed paired differences for the frozen release pair",
+      "hash": "sha256:b7d26084cc5b38b0e1ffefc8566477f5465540307a0e4d3faac2384eba296a71",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_figure.py",
+        "at": "2026-09-15T08:05:53Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_figure.py": "sha256:f660d3b8b76f988510cffc44875cdfff6ee0345178e03ed211940e2bad945893"
+      }
+    },
+    "fig.scientific-public-timing-pilot": {
+      "path": "figures/scientific-public-timing-pilot.png",
+      "kind": "figure",
+      "desc": "Frozen public release timing comparison",
+      "hash": "sha256:7d95dd55cc535a294ec28a5c2d3893909b3a57e37e503428ee42d630b71d658a",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_figure.py",
+        "at": "2026-09-15T07:10:53Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/figures/figures.json": "sha256:db7dec76584b69d110bdee7302fd9bf77442e9a3b62b6b9ca5c3d241e0e0e4fe",
+        "../benchmarks/scientific-results/20260914/figures/public-timing-pilot.png": "sha256:7d95dd55cc535a294ec28a5c2d3893909b3a57e37e503428ee42d630b71d658a",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_figure.py": "sha256:f660d3b8b76f988510cffc44875cdfff6ee0345178e03ed211940e2bad945893"
+      }
+    },
+    "tbl.development": {
+      "path": "si/development.typ",
+      "kind": "table",
+      "desc": "Released Sage Plus changes, design motivations, and expected consequences",
+      "hash": "sha256:d63aa45983e15b975bac57e597b19565eb4b157419e38594457d6d110e422dea",
+      "origin": {
+        "by": "analysis/scripts/gen_development_table.py",
+        "at": "2026-09-15T17:42:53Z"
+      },
+      "inputs": {
+        "analysis/data/development-changes.json": "sha256:e1d2bcd1838c6856639c17694f26441ba6fe625d97447dd89bb1586f572a0997",
+        "analysis/scripts/gen_development_table.py": "sha256:0885983870a35518d099aa78c002f79578b32dac63361ce778b5185ee23d763e"
+      }
+    },
+    "tbl.report-control": {
+      "path": "si/report_control.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report control",
+      "hash": "sha256:5a70e89e5bf09eceb92d68c04185733a6d019dfab133470c896dbd1151ff9506",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:05:44Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.report-lfq": {
+      "path": "si/report_lfq.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report lfq",
+      "hash": "sha256:a90a6160da33ae57d454b05078cc3acaf07205758773617a7628c1c2ddf40e31",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:10:47Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.report-lfq-shared": {
+      "path": "si/report_lfq-shared.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report lfq-shared",
+      "hash": "sha256:74d5f0a123305379ac392f12928f24233a05e2673fa3f3e9629f6d2719811179",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:05:44Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.report-ptm-diagnostic": {
+      "path": "si/report_ptm-diagnostic.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report ptm-diagnostic",
+      "hash": "sha256:c2b4c93986fa71e573b712e9cf58a083c3c8209ad630cadb4ba4a852a038675c",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:05:44Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.report-public-counts": {
+      "path": "si/report_public-counts.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report public-counts",
+      "hash": "sha256:4d147685a4b588ade4beee3fa2c802e13b0d9ed41614ee6a4c9984e8884b6407",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:05:44Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.report-scaling": {
+      "path": "si/report_scaling.typ",
+      "kind": "table",
+      "desc": "Expanded latest-release report scaling",
+      "hash": "sha256:543308226b0ed6c37afb2930bb2db534356a1407ef321a82f1c8ca44230a8da8",
+      "origin": {
+        "by": "analysis/scripts/gen_report_table.py",
+        "at": "2026-09-15T08:05:44Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+      }
+    },
+    "tbl.scientific-enlarged": {
+      "path": "si/scientific_enlarged.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison enlarged",
+      "hash": "sha256:7d3f62bd7b67ea1290d097423ed5cbdcb46352359caaea2809f0a554ab84823d",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:01Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    },
+    "tbl.scientific-entrapment": {
+      "path": "si/scientific_entrapment.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison entrapment",
+      "hash": "sha256:571dedb70046eb787a4353657465e71aa0eb482e7afa57d95195c9a8d9db580d",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:01Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    },
+    "tbl.scientific-local": {
+      "path": "si/scientific_local.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison local",
+      "hash": "sha256:ad7cf70564e1a008bf696280004a0abb740a39a7198dc6ef4fd899b2ead1ef87",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:01Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    },
+    "tbl.scientific-overlap": {
+      "path": "si/scientific_overlap.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison overlap",
+      "hash": "sha256:f7d01a69a38bfa84cc07ce7cc61cb1bbcf861a0ed0fb6a27a9f9e8ca7cd0dad8",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:01Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    },
+    "tbl.scientific-thresholds": {
+      "path": "si/scientific_thresholds.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison thresholds",
+      "hash": "sha256:78fca11c58f6bfc57d1246eaacdb5ddcb72096975299c7f89cda686e62e7055c",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:02Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    },
+    "tbl.scientific-timing": {
+      "path": "si/scientific_timing.typ",
+      "kind": "table",
+      "desc": "Frozen latest-release comparison timing",
+      "hash": "sha256:83c344eb38ba79dd55552090e2ccb86cfe73b6dcb996871212cd5573fe7389cc",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_table.py",
+        "at": "2026-09-15T07:24:01Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_table.py": "sha256:7765082c62e955b9a1666900cc4572f1774c87e95b03d93e93512c6510930bd9"
+      }
+    }
+  }
+}

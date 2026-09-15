@@ -97,6 +97,14 @@ and versioned Linux AMD64 container images are published as
 Sage Plus uses its own version sequence, beginning with `v0.1.0-beta.1`, independently of
 upstream Sage releases.
 
+## Development and benchmarks
+
+The [Sage Plus development and benchmark report](paper/README.md) documents the
+downstream changes and the behavior of the evaluated released executables.
+[Read the PDF](paper/report.pdf) for the complete results and supporting information.
+This is independent Sage Plus project documentation. It does not imply review or
+endorsement by the upstream Sage creators or maintainers.
+
 ## Documentation
 
 - [Sage Plus configuration and outputs](DOCS.md)

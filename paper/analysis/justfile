@@ -1,0 +1,70 @@
+# The analysis that produces the manuscript's numbers.
+#
+# THE CONTRACT WITH THE MANUSCRIPT IS ONE RECIPE: `assets`. It must regenerate
+# everything paper.typ and si-body.typ include, writing figures into ../figures/
+# and tables into ../si/. The paper's justfile calls `just assets` here and knows
+# nothing else about this directory.
+#
+# Everything else in here is your project's business. Sixty numbered shell steps,
+# one notebook, a Snakemake pipeline, whatever the work needs. Keep `assets` as
+# the front door and the manuscript never has to care.
+#
+# Heavy inputs and intermediates (data/, results/) are gitignored. The generated
+# assets under ../figures/ and ../si/ are NOT: they are committed, so a fresh
+# clone compiles the PDF without re-running an analysis that may take hours.
+
+# Default target
+default:
+  @just --list
+
+# Regenerate every asset the manuscript includes. This is the contract.
+assets: tables figures stats
+  @echo ""
+  @echo "assets regenerated into ../figures/ and ../si/"
+  @echo "rebuild the manuscript with: cd .. && just paper"
+
+# Tables -> ../si/*.typ, one script per table, picked up by filename pattern so a
+# new table needs no wiring here.
+tables:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  shopt -s nullglob
+  for s in scripts/gen_*_table.py; do
+    echo "-> $s"
+    uv run --quiet "$s"
+  done
+
+# Figures -> ../figures/*.png. Seed any RNG and pass metadata={"Software": None}
+# to savefig, or every regeneration churns the PNG bytes and shows up as a diff
+# that is not a real change.
+figures:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  shopt -s nullglob
+  for s in scripts/gen_*_figure.py; do
+    echo "-> $s"
+    uv run --quiet "$s"
+  done
+
+# Numbers the prose states -> ../stats.json, read back as #s("id").
+#
+# ONE script, not a glob: every generator here would write the same file, so a
+# second one would silently clobber the first. Guards declared in gen_stats.py
+# are checked as it runs, which is why this can fail the build.
+stats:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [ -f scripts/gen_stats.py ]; then
+    echo "-> scripts/gen_stats.py"
+    uv run --quiet scripts/gen_stats.py
+  fi
+
+# Remove generated assets from the manuscript. Rarely wanted: they are tracked,
+# so `git checkout` is usually the better undo.
+#
+# ../stats.json is deliberately NOT removed. It holds hand-entered values as well
+# as generated ones, and deleting it to "clean" would throw away the half no
+# script can rebuild. Re-running `just stats` rewrites the generated entries in
+# place, which is the actual undo for that file.
+clean:
+  rm -f ../figures/*.png ../si/*.typ
