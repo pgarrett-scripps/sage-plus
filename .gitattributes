@@ -1,2 +1,5 @@
 # Generated schemas must match the generator on every checkout platform.
 schemas/*.json text eol=lf
+
+# Preserve the compiled report as a binary document.
+paper/report.pdf binary

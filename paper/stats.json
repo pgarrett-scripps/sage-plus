@@ -1,0 +1,1092 @@
+{
+  "_about": "Numbers the manuscript states in prose, read as #s(\"<id>\"). Scripts own each entry's value; fmt, unit, desc and expect are the author's to edit here. Entries with origin.by = \"hand\" are entirely yours.",
+  "sources": {
+    "analysis/scripts/gen_stats.py": {
+      "analysis/scripts/gen_stats.py": "sha256:520215b03caf0d0f032194397ba6c9b80c9e35e4f1131e0fe37911d1f846ba85",
+      "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+      "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+      "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+      "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+      "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+      "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+      "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+      "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+      "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc"
+    }
+  },
+  "values": {
+    "archive.members": {
+      "value": 3981,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Individually verified archive members",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:11bec72dc466196d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD001468.plus.rss": {
+      "value": 1491.828125,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD001468 Sage Plus timing median rss",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:8a88e6cd8b0299ee",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD001468.plus.seconds": {
+      "value": 9.48,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "PXD001468 Sage Plus timing median seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:60beee36de2e85e6",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD001468.rss_reduction": {
+      "value": 30.096369443656368,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD001468 Sage Plus reduction in rss relative to Sage",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:783dcca3610cfa96",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.PXD001468.seconds_reduction": {
+      "value": 4.339051463168508,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD001468 Sage Plus reduction in seconds relative to Sage",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:f0a089154eb25e9e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.PXD001468.upstream.rss": {
+      "value": 2134.12109375,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD001468 Sage timing median rss",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:bdaf417c2c976bd5",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD001468.upstream.seconds": {
+      "value": 9.91,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "PXD001468 Sage timing median seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:8c845ceba709bc8c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD028735.plus.rss": {
+      "value": 2419.93359375,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD028735 Sage Plus timing median rss",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:defde14099b0eee9",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD028735.plus.seconds": {
+      "value": 25.03,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "PXD028735 Sage Plus timing median seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:b5128f034e8438c0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD028735.rss_reduction": {
+      "value": 21.221712437117557,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD028735 Sage Plus reduction in rss relative to Sage",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:a6e2bfd05516b60a",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.PXD028735.seconds_reduction": {
+      "value": 3.9155470249520152,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD028735 Sage Plus reduction in seconds relative to Sage",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:9d13b8d6d17babe3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.PXD028735.upstream.rss": {
+      "value": 3071.828125,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "PXD028735 Sage timing median rss",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:e3a140369c71e59f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.PXD028735.upstream.seconds": {
+      "value": 26.05,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "PXD028735 Sage timing median seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:f305a6ac94bdd8a2",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.bootstrap": {
+      "value": 10000,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Paired bootstrap resamples",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:39e5b4830d4d9c14",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.human.delta": {
+      "value": -0.018883360886340524,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Sage Plus minus Sage FDP in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:c59c6dd0b796447a",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.human.lower": {
+      "value": -0.08281152962890409,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Conditional difference interval in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:3dbbc8b8ea81071a",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.human.plus.fdp": {
+      "value": 0.9981651945661595,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "HEK Sage Plus mean paired FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:bf9ce55212330c64",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.human.upper": {
+      "value": 0.0537312231134051,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Conditional difference interval in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:f01e992a139e9e8c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.human.upstream.fdp": {
+      "value": 1.0170485554525,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "HEK Sage mean paired FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:ba800fb5f8071b4c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.hye.delta": {
+      "value": 0.027858470591649552,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Sage Plus minus Sage FDP in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:735c66455339c249",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.hye.lower": {
+      "value": -0.03876123642490969,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Conditional difference interval in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:fe147a6392767312",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.hye.plus.fdp": {
+      "value": 1.0569887067742918,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Mixture Sage Plus mean paired FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:8d37d87bd0bad101",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.hye.upper": {
+      "value": 0.06594959316691788,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "Conditional difference interval in percentage points",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:68b5fb9f1de6dd52",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.hye.upstream.fdp": {
+      "value": 1.0291302361826424,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Mixture Sage mean paired FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:c715e623c02fd461",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "pilot.overlap.max": {
+      "value": 0.9849382211783927,
+      "fmt": ".4f",
+      "unit": "",
+      "desc": "max public PSM Jaccard",
+      "expect": {
+        "min": 0,
+        "max": 1
+      },
+      "checksum": "v2:c80dfbc0e05e9194",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.overlap.min": {
+      "value": 0.9661276481179222,
+      "fmt": ".4f",
+      "unit": "",
+      "desc": "min public PSM Jaccard",
+      "expect": {
+        "min": 0,
+        "max": 1
+      },
+      "checksum": "v2:af2c47750c20ed93",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "pilot.public_pairs": {
+      "value": 6,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Completed public identification pairs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:e7f6c011776e8db7",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T07:24:10Z"
+      }
+    },
+    "report.PXD001468.target_peptidoforms.max": {
+      "value": 0.31303972366147903,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD001468 max per-file change in target_peptidoforms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:22f9150fec4eeb0f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD001468.target_peptidoforms.min": {
+      "value": 0.1714182605557557,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD001468 min per-file change in target_peptidoforms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:a3824fad3c4b0328",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD001468.target_psms.max": {
+      "value": 0.3349479542409606,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD001468 max per-file change in target_psms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:90545ac79387e0ed",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD001468.target_psms.min": {
+      "value": 0.30238349341871196,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD001468 min per-file change in target_psms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:f42e3fd113211b9f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD028735.target_peptidoforms.max": {
+      "value": 0.3167547960252426,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD028735 max per-file change in target_peptidoforms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:ed830eeb3a603c81",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD028735.target_peptidoforms.min": {
+      "value": 0.14643545279382497,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD028735 min per-file change in target_peptidoforms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:1e147025c2511c61",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD028735.target_psms.max": {
+      "value": 0.29312443217854867,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD028735 max per-file change in target_psms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:75a251a647374354",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.PXD028735.target_psms.min": {
+      "value": 0.18591347872720654,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "PXD028735 min per-file change in target_psms percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:95aefa5c79e3fc7c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.extension.completed_jobs": {
+      "value": 34,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Report extension completed_jobs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:86e5014965866131",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:07:29Z"
+      }
+    },
+    "report.extension.source_files_verified": {
+      "value": 314,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Report extension source_files_verified",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:748064be03a08df8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:07:29Z"
+      }
+    },
+    "report.hek.entrapment.rss": {
+      "value": -18.561052084422556,
+      "fmt": "+.1f",
+      "unit": "",
+      "desc": "HEK entrapment relative change in rss percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:6477780bb42f3ef3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.hek.entrapment.seconds": {
+      "value": 19.093264248704656,
+      "fmt": "+.1f",
+      "unit": "",
+      "desc": "HEK entrapment relative change in seconds percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:1cc53b907be5f104",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.control.foreign": {
+      "value": 5872,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus human-only control foreign",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:142a0115209db40e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.control.foreign_percent": {
+      "value": 66.58300057045065,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "plus percent foreign among control rows without strict MS2 evidence",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:bfe50bafac711eb9",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.control.quantified": {
+      "value": 23771,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus human-only control quantified",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:d2c1dd979bc7fbbb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.ecoli.bias": {
+      "value": 0.18856865208572837,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "plus ecoli log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:b854f1b670b2b4f2",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.human.bias": {
+      "value": -0.045151746949985944,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "plus human log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:2c2d9e8159455dee",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.positive_target_file_rows": {
+      "value": 121179,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus LFQ primary positive_target_file_rows",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:6dc9041d14f287da",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.target_precursors": {
+      "value": 24510,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus LFQ primary target_precursors",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:c259b7fb7bda7d12",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.plus.yeast.bias": {
+      "value": -0.14099914407258485,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "plus yeast log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:755e4c389507efef",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.shared.ecoli": {
+      "value": 1788,
+      "fmt": ",",
+      "unit": "",
+      "desc": "ecoli paired ratios shared across releases",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:ad7a0849a3ea6e33",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.shared.human": {
+      "value": 33792,
+      "fmt": ",",
+      "unit": "",
+      "desc": "human paired ratios shared across releases",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:f73f5f09fd62d3c3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.shared.yeast": {
+      "value": 10183,
+      "fmt": ",",
+      "unit": "",
+      "desc": "yeast paired ratios shared across releases",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:1672dd4cc2c449cb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.shared_difference.max": {
+      "value": 0.006681798514294908,
+      "fmt": ".4f",
+      "unit": "",
+      "desc": "max species median absolute inter-engine log2 ratio difference",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:eb0b0835d5bdf953",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.shared_difference.min": {
+      "value": 0.006235535535662029,
+      "fmt": ".4f",
+      "unit": "",
+      "desc": "min species median absolute inter-engine log2 ratio difference",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:ab0d193a7dc5c69c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.control.foreign": {
+      "value": 5965,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream human-only control foreign",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:41ef81d7f6b07faa",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.control.foreign_percent": {
+      "value": 65.97662771285476,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "upstream percent foreign among control rows without strict MS2 evidence",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:1082f223a60d51de",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.control.quantified": {
+      "value": 24262,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream human-only control quantified",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:5fa6388d5e223a9b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.ecoli.bias": {
+      "value": 0.18275150917242855,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "upstream ecoli log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:2afa9debaf0901c7",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.human.bias": {
+      "value": -0.04392434660101566,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "upstream human log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:966b3fb756174979",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.positive_target_file_rows": {
+      "value": 123687,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream LFQ primary positive_target_file_rows",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:da2b8eea93b9ed50",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.target_precursors": {
+      "value": 25018,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream LFQ primary target_precursors",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:0fd7962d14c4a920",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.upstream.yeast.bias": {
+      "value": -0.14186441611964762,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "upstream yeast log2 B/A bias",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:274553dd36343f60",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.yield_change.0.01": {
+      "value": -2.0305380126309003,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "Percent LFQ precursor yield change at 0.01",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:3f56ddec9a944bcf",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.lfq.yield_change.0.05": {
+      "value": 0.24179915691266984,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "Percent LFQ precursor yield change at 0.05",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:53c980e14e98ed0f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.mixture.entrapment.rss": {
+      "value": -18.63056560567895,
+      "fmt": "+.1f",
+      "unit": "",
+      "desc": "Mixture entrapment relative change in rss percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:b92927aba96cb234",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.mixture.entrapment.seconds": {
+      "value": 18.5303123086344,
+      "fmt": "+.1f",
+      "unit": "",
+      "desc": "Mixture entrapment relative change in seconds percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:9dd46d4c071e8f54",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.plus.threshold_disagreement": {
+      "value": 44.6286622757211,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Percent of engine-only accepted PSMs with the identical assignment above threshold in the other engine",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:40a72414151f6bd1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.ptm.1.upstream.joint_accepted": {
+      "value": 0,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 upstream joint_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:5feceb66ffc86f38",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.ptm.1.upstream.spectrum_accepted": {
+      "value": 3141,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 upstream spectrum_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:51c94a510b50e68f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.ptm.2.upstream.spectrum_accepted": {
+      "value": 1958,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 upstream spectrum_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:522e6198a268c62c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.scaling.plus.eight_seconds": {
+      "value": 9.82,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus eight worker median seconds in the extension",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:598b92301628d7ae",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.scaling.plus.speedup": {
+      "value": 4.057026476578412,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus wall time speedup from one to eight workers",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:9a9e1bf1ad67dbd3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.scaling.upstream.eight_seconds": {
+      "value": 10.42,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "upstream eight worker median seconds in the extension",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:fe8500cb61cd64af",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.scaling.upstream.speedup": {
+      "value": 3.7591170825335896,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "upstream wall time speedup from one to eight workers",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:328e98a70b660609",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "report.upstream.threshold_disagreement": {
+      "value": 39.487870619946094,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Percent of engine-only accepted PSMs with the identical assignment above threshold in the other engine",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:f42fe8bc9f92f550",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-15T08:05:54Z"
+      }
+    }
+  }
+}

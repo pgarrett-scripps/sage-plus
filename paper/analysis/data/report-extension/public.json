@@ -1,0 +1,620 @@
+{
+  "analysis_sources_sha256": {
+    "/home/ty/Repos/sage-plus/benchmarks/analyze_scientific.py": "d5a189cc421b18f60607906415f18dc6e5f7e7f4ea6c767767f8f00093015ea0",
+    "/home/ty/Repos/sage-plus/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
+    "/home/ty/Repos/sage-plus/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
+    "/home/ty/Repos/sage-plus/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_report.py": "6e8ed0b1d304396340d777dc09cea905d77584c5d1b0379afa1055ead824ee12"
+  },
+  "data": [
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 84,
+          "no_matching_rank_one_spectrum_charge": 1,
+          "same_assignment_above_threshold": 80
+        },
+        "upstream": {
+          "different_assignment": 73,
+          "no_matching_rank_one_spectrum_charge": 1,
+          "same_assignment_above_threshold": 40
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 13,
+            "target_peptidoforms": 7892,
+            "target_psms": 14832,
+            "target_sequences": 7892
+          },
+          "0.005": {
+            "decoy_psms": 82,
+            "target_peptidoforms": 9111,
+            "target_psms": 16626,
+            "target_sequences": 9111
+          },
+          "0.01": {
+            "decoy_psms": 168,
+            "target_peptidoforms": 9293,
+            "target_psms": 16917,
+            "target_sequences": 9293
+          },
+          "0.02": {
+            "decoy_psms": 344,
+            "target_peptidoforms": 9475,
+            "target_psms": 17290,
+            "target_sequences": 9475
+          },
+          "0.05": {
+            "decoy_psms": 897,
+            "target_peptidoforms": 9871,
+            "target_psms": 17961,
+            "target_sequences": 9871
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 14,
+            "target_peptidoforms": 7877,
+            "target_psms": 15039,
+            "target_sequences": 7877
+          },
+          "0.005": {
+            "decoy_psms": 81,
+            "target_peptidoforms": 9070,
+            "target_psms": 16577,
+            "target_sequences": 9070
+          },
+          "0.01": {
+            "decoy_psms": 167,
+            "target_peptidoforms": 9264,
+            "target_psms": 16866,
+            "target_sequences": 9264
+          },
+          "0.02": {
+            "decoy_psms": 344,
+            "target_peptidoforms": 9453,
+            "target_psms": 17250,
+            "target_sequences": 9453
+          },
+          "0.05": {
+            "decoy_psms": 896,
+            "target_peptidoforms": 9863,
+            "target_psms": 17945,
+            "target_sequences": 9863
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 114,
+        "candidate_only": 165,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.983618108155716,
+        "maximum_peptide_q_difference": 0.247708046,
+        "maximum_score_difference": 8.3753712,
+        "pair": "public-comparison/PXD001468-0",
+        "q": 0.01,
+        "shared_target_psms": 16752,
+        "status": "complete"
+      },
+      "pair": "public-comparison/PXD001468-0"
+    },
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 66,
+          "no_matching_rank_one_spectrum_charge": 3,
+          "same_assignment_above_threshold": 111
+        },
+        "upstream": {
+          "different_assignment": 56,
+          "no_matching_rank_one_spectrum_charge": 12,
+          "same_assignment_above_threshold": 47
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 16,
+            "target_peptidoforms": 9335,
+            "target_psms": 17023,
+            "target_sequences": 9335
+          },
+          "0.005": {
+            "decoy_psms": 94,
+            "target_peptidoforms": 10814,
+            "target_psms": 19027,
+            "target_sequences": 10814
+          },
+          "0.01": {
+            "decoy_psms": 193,
+            "target_peptidoforms": 11103,
+            "target_psms": 19471,
+            "target_sequences": 11103
+          },
+          "0.02": {
+            "decoy_psms": 396,
+            "target_peptidoforms": 11362,
+            "target_psms": 19892,
+            "target_sequences": 11362
+          },
+          "0.05": {
+            "decoy_psms": 1034,
+            "target_peptidoforms": 11858,
+            "target_psms": 20701,
+            "target_sequences": 11858
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 15,
+            "target_peptidoforms": 9054,
+            "target_psms": 16570,
+            "target_sequences": 9054
+          },
+          "0.005": {
+            "decoy_psms": 93,
+            "target_peptidoforms": 10796,
+            "target_psms": 18931,
+            "target_sequences": 10796
+          },
+          "0.01": {
+            "decoy_psms": 193,
+            "target_peptidoforms": 11084,
+            "target_psms": 19406,
+            "target_sequences": 11084
+          },
+          "0.02": {
+            "decoy_psms": 395,
+            "target_peptidoforms": 11335,
+            "target_psms": 19841,
+            "target_sequences": 11335
+          },
+          "0.05": {
+            "decoy_psms": 1034,
+            "target_peptidoforms": 11823,
+            "target_psms": 20705,
+            "target_sequences": 11823
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 115,
+        "candidate_only": 180,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.9849382211783927,
+        "maximum_peptide_q_difference": 0.20395954100000002,
+        "maximum_score_difference": 8.0027685,
+        "pair": "public-comparison/PXD001468-1",
+        "q": 0.01,
+        "shared_target_psms": 19291,
+        "status": "complete"
+      },
+      "pair": "public-comparison/PXD001468-1"
+    },
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 512,
+          "no_matching_rank_one_spectrum_charge": 42,
+          "same_assignment_above_threshold": 419
+        },
+        "upstream": {
+          "different_assignment": 465,
+          "no_matching_rank_one_spectrum_charge": 68,
+          "same_assignment_above_threshold": 285
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 45,
+            "target_peptidoforms": 32320,
+            "target_psms": 46372,
+            "target_sequences": 32320
+          },
+          "0.005": {
+            "decoy_psms": 264,
+            "target_peptidoforms": 37208,
+            "target_psms": 53043,
+            "target_sequences": 37208
+          },
+          "0.01": {
+            "decoy_psms": 555,
+            "target_peptidoforms": 39117,
+            "target_psms": 55612,
+            "target_sequences": 39117
+          },
+          "0.02": {
+            "decoy_psms": 1154,
+            "target_peptidoforms": 40784,
+            "target_psms": 57776,
+            "target_sequences": 40784
+          },
+          "0.05": {
+            "decoy_psms": 3033,
+            "target_peptidoforms": 42931,
+            "target_psms": 60697,
+            "target_sequences": 42931
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 45,
+            "target_peptidoforms": 32250,
+            "target_psms": 46222,
+            "target_sequences": 32250
+          },
+          "0.005": {
+            "decoy_psms": 262,
+            "target_peptidoforms": 36970,
+            "target_psms": 52779,
+            "target_sequences": 36970
+          },
+          "0.01": {
+            "decoy_psms": 553,
+            "target_peptidoforms": 39008,
+            "target_psms": 55457,
+            "target_sequences": 39008
+          },
+          "0.02": {
+            "decoy_psms": 1151,
+            "target_peptidoforms": 40709,
+            "target_psms": 57642,
+            "target_sequences": 40709
+          },
+          "0.05": {
+            "decoy_psms": 3029,
+            "target_peptidoforms": 42959,
+            "target_psms": 60601,
+            "target_sequences": 42959
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 818,
+        "candidate_only": 973,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.9682615629984052,
+        "maximum_peptide_q_difference": 0.171324547,
+        "maximum_score_difference": 9.86721427,
+        "pair": "public-comparison-v2/PXD028735-0",
+        "q": 0.01,
+        "shared_target_psms": 54639,
+        "status": "complete"
+      },
+      "pair": "public-comparison-v2/PXD028735-0"
+    },
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 504,
+          "no_matching_rank_one_spectrum_charge": 37,
+          "same_assignment_above_threshold": 413
+        },
+        "upstream": {
+          "different_assignment": 442,
+          "no_matching_rank_one_spectrum_charge": 54,
+          "same_assignment_above_threshold": 354
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 44,
+            "target_peptidoforms": 31724,
+            "target_psms": 45838,
+            "target_sequences": 31724
+          },
+          "0.005": {
+            "decoy_psms": 266,
+            "target_peptidoforms": 37021,
+            "target_psms": 53440,
+            "target_sequences": 37021
+          },
+          "0.01": {
+            "decoy_psms": 559,
+            "target_peptidoforms": 38982,
+            "target_psms": 56044,
+            "target_sequences": 38982
+          },
+          "0.02": {
+            "decoy_psms": 1164,
+            "target_peptidoforms": 40702,
+            "target_psms": 58253,
+            "target_sequences": 40702
+          },
+          "0.05": {
+            "decoy_psms": 3071,
+            "target_peptidoforms": 42953,
+            "target_psms": 61448,
+            "target_sequences": 42953
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 45,
+            "target_peptidoforms": 31632,
+            "target_psms": 46025,
+            "target_sequences": 31632
+          },
+          "0.005": {
+            "decoy_psms": 265,
+            "target_peptidoforms": 36889,
+            "target_psms": 53336,
+            "target_sequences": 36889
+          },
+          "0.01": {
+            "decoy_psms": 558,
+            "target_peptidoforms": 38925,
+            "target_psms": 55940,
+            "target_sequences": 38925
+          },
+          "0.02": {
+            "decoy_psms": 1161,
+            "target_peptidoforms": 40607,
+            "target_psms": 58129,
+            "target_sequences": 40607
+          },
+          "0.05": {
+            "decoy_psms": 3071,
+            "target_peptidoforms": 43003,
+            "target_psms": 61452,
+            "target_sequences": 43003
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 850,
+        "candidate_only": 954,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.9682919112735965,
+        "maximum_peptide_q_difference": 0.2098127178,
+        "maximum_score_difference": 7.595897000000001,
+        "pair": "public-comparison-v2/PXD028735-1",
+        "q": 0.01,
+        "shared_target_psms": 55090,
+        "status": "complete"
+      },
+      "pair": "public-comparison-v2/PXD028735-1"
+    },
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 580,
+          "no_matching_rank_one_spectrum_charge": 27,
+          "same_assignment_above_threshold": 485
+        },
+        "upstream": {
+          "different_assignment": 515,
+          "no_matching_rank_one_spectrum_charge": 43,
+          "same_assignment_above_threshold": 363
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 47,
+            "target_peptidoforms": 33189,
+            "target_psms": 48942,
+            "target_sequences": 33189
+          },
+          "0.005": {
+            "decoy_psms": 280,
+            "target_peptidoforms": 38246,
+            "target_psms": 56230,
+            "target_sequences": 38246
+          },
+          "0.01": {
+            "decoy_psms": 584,
+            "target_peptidoforms": 40117,
+            "target_psms": 58508,
+            "target_sequences": 40117
+          },
+          "0.02": {
+            "decoy_psms": 1217,
+            "target_peptidoforms": 41686,
+            "target_psms": 60908,
+            "target_sequences": 41686
+          },
+          "0.05": {
+            "decoy_psms": 3206,
+            "target_peptidoforms": 43952,
+            "target_psms": 64143,
+            "target_sequences": 43952
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 47,
+            "target_peptidoforms": 33316,
+            "target_psms": 48888,
+            "target_sequences": 33316
+          },
+          "0.005": {
+            "decoy_psms": 279,
+            "target_peptidoforms": 38241,
+            "target_psms": 56063,
+            "target_sequences": 38241
+          },
+          "0.01": {
+            "decoy_psms": 582,
+            "target_peptidoforms": 40047,
+            "target_psms": 58337,
+            "target_sequences": 40047
+          },
+          "0.02": {
+            "decoy_psms": 1212,
+            "target_peptidoforms": 41586,
+            "target_psms": 60660,
+            "target_sequences": 41586
+          },
+          "0.05": {
+            "decoy_psms": 3200,
+            "target_peptidoforms": 43944,
+            "target_psms": 64027,
+            "target_sequences": 43944
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 921,
+        "candidate_only": 1092,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.9661276481179222,
+        "maximum_peptide_q_difference": 0.20993675,
+        "maximum_score_difference": 8.87550435,
+        "pair": "public-comparison-v2/PXD028735-2",
+        "q": 0.01,
+        "shared_target_psms": 57416,
+        "status": "complete"
+      },
+      "pair": "public-comparison-v2/PXD028735-2"
+    },
+    {
+      "disagreement": {
+        "plus": {
+          "different_assignment": 556,
+          "no_matching_rank_one_spectrum_charge": 26,
+          "same_assignment_above_threshold": 457
+        },
+        "upstream": {
+          "different_assignment": 477,
+          "no_matching_rank_one_spectrum_charge": 39,
+          "same_assignment_above_threshold": 376
+        }
+      },
+      "engines": {
+        "plus": {
+          "0.001": {
+            "decoy_psms": 45,
+            "target_peptidoforms": 32179,
+            "target_psms": 46664,
+            "target_sequences": 32179
+          },
+          "0.005": {
+            "decoy_psms": 272,
+            "target_peptidoforms": 37231,
+            "target_psms": 54737,
+            "target_sequences": 37231
+          },
+          "0.01": {
+            "decoy_psms": 572,
+            "target_peptidoforms": 39271,
+            "target_psms": 57321,
+            "target_sequences": 39271
+          },
+          "0.02": {
+            "decoy_psms": 1193,
+            "target_peptidoforms": 40961,
+            "target_psms": 59710,
+            "target_sequences": 40961
+          },
+          "0.05": {
+            "decoy_psms": 3149,
+            "target_peptidoforms": 43385,
+            "target_psms": 63002,
+            "target_sequences": 43385
+          }
+        },
+        "upstream": {
+          "0.001": {
+            "decoy_psms": 45,
+            "target_peptidoforms": 32019,
+            "target_psms": 46400,
+            "target_sequences": 32019
+          },
+          "0.005": {
+            "decoy_psms": 270,
+            "target_peptidoforms": 37130,
+            "target_psms": 54277,
+            "target_sequences": 37130
+          },
+          "0.01": {
+            "decoy_psms": 570,
+            "target_peptidoforms": 39147,
+            "target_psms": 57174,
+            "target_sequences": 39147
+          },
+          "0.02": {
+            "decoy_psms": 1189,
+            "target_peptidoforms": 40920,
+            "target_psms": 59525,
+            "target_sequences": 40920
+          },
+          "0.05": {
+            "decoy_psms": 3147,
+            "target_peptidoforms": 43403,
+            "target_psms": 62968,
+            "target_sequences": 43403
+          }
+        }
+      },
+      "overlap": {
+        "all_psm_identities_equal": false,
+        "baseline_only": 892,
+        "candidate_only": 1039,
+        "engine_status": {
+          "plus": "complete",
+          "upstream": "complete"
+        },
+        "jaccard": 0.9668287152354285,
+        "maximum_peptide_q_difference": 0.18519355999999998,
+        "maximum_score_difference": 6.305975999999999,
+        "pair": "public-comparison-v2/PXD028735-3",
+        "q": 0.01,
+        "shared_target_psms": 56282,
+        "status": "complete"
+      },
+      "pair": "public-comparison-v2/PXD028735-3"
+    }
+  ],
+  "inputs_sha256": {
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-plus/identification-metrics.json": "43ddcbd401ae6bb7a3261321f2315f8b9be21e966535bef95c1bda7d594699dc",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-plus/results.sage.parquet": "11ed3b26120e92d62be043c7191b7f422626db966765f437bb7af24451fac1c3",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-upstream/identification-metrics.json": "14dacb56401d621c30e5a1a401c5fa3bfa207c8769857d3c392162318ce9fd13",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-upstream/results.sage.tsv": "6c424771a48d66aaa300a0c2e46a98b41bfea5e6205dae742e38e6232aca4280",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-plus/identification-metrics.json": "da4c83552e2454e69cbcbd6698a161adb64bae23a8bcc49a27e69aeef04788af",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-plus/results.sage.parquet": "2446a597d80ef6e43d98f565ff0254c6d7bb095f97fbc09efe6fda7072a9f7a5",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-upstream/identification-metrics.json": "6391ed467d75b19474d0dec0f25c007e66f8b289a056b0ab64a7ff575cbe0b2b",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-upstream/results.sage.tsv": "35fd455d5c301a63ba5f0c4a04a4d9107a8ac9dab5306c5bc4d6bf2ef967d379",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-plus/identification-metrics.json": "17c1c8c7cfb62f639eb7486cf0d5a175174c7651f2ff5bee8bcd5e1850774a15",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-plus/results.sage.parquet": "4a5ead84799d43b2dbdca6693e20d0c8a86081b66ca5a1560b2a269acac5a721",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-upstream/identification-metrics.json": "b31d5410ccc14b1f231a22e6b207fc0af9149951efff7066b722570cea880e51",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-upstream/results.sage.tsv": "306ce12d6b340d4d2ef84d2a432a22dbfa68de888459d66ef0e5c9e0633a8691",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-plus/identification-metrics.json": "b3e583042b730ef23dcd67b4b6c0d3db7bed7b39439ff6d9f0be69edec728adc",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-plus/results.sage.parquet": "396d9eab796cda51823c96f08b543ca45d6ced4f75aa47d71d9c91f42af9e7d8",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-upstream/identification-metrics.json": "f95e6d13d882451ad355bd656e91cccc160e6049946641b905eed5bb6a757aa0",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-upstream/results.sage.tsv": "8ab777768a9204a2d0f4f50522853deb959a3b6879726d86ce5d17e439f35fd0",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-plus/identification-metrics.json": "ce620d324d8f74765190c720ffd8d5e88828ddb29e5cce93bb518445ce578773",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-plus/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-upstream/identification-metrics.json": "0623d58601e65e0028ebd1cea6f0822b652c0c66a66208b7abb1ff90499bbf32",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-upstream/results.sage.tsv": "a9612d938aab2a82214c31e6d57262b0a39184d11e8d69fe471f5dc996fcc13f",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-plus/identification-metrics.json": "ea6c5ed351f7624fbc37455a626738873e195eced8df8052276d03510a80884b",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-plus/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-upstream/identification-metrics.json": "66671adb054713336bb6ec8144ac0edc8c2f0b9d58d6eecba9be4b455cbd6d87",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-upstream/results.sage.tsv": "7701b162c9db710623d1e90961d48cbabf6d4ca12f457f88631618bdd66c1b5e",
+    "/home/ty/Repos/sage-plus/benchmarks/scientific-results/20260914/pilot-summary.json": "c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379"
+  }
+}
