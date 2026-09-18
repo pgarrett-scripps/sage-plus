@@ -1,0 +1,19 @@
+workload,workload_label,release,commit,trial,wall_seconds,peak_rss_mib,source_report
+conventional,Conventional,Sage v0.15.0-beta.2,df9219951cc9a54c,1,5.43,1911.4102,benchmarks/results/20260901-142107-search/records.json
+conventional,Conventional,Sage v0.15.0-beta.2,df9219951cc9a54c,2,5.38,1849.4961,benchmarks/results/20260901-142107-search/records.json
+conventional,Conventional,Sage v0.15.0-beta.2,df9219951cc9a54c,3,5.35,1914.2188,benchmarks/results/20260901-142107-search/records.json
+conventional,Conventional,Sage Plus beta.2,5aeb56852fc176e9,1,6.33,1490.3477,benchmarks/results/20260901-142107-search/records.json
+conventional,Conventional,Sage Plus beta.2,5aeb56852fc176e9,2,6.45,1498.4180,benchmarks/results/20260901-142107-search/records.json
+conventional,Conventional,Sage Plus beta.2,5aeb56852fc176e9,3,6.50,1494.7891,benchmarks/results/20260901-142107-search/records.json
+common_mods,Common modifications,Sage v0.15.0-beta.2,df9219951cc9a54c,1,11.94,5629.5273,benchmarks/results/20260901-142158-search/records.json
+common_mods,Common modifications,Sage v0.15.0-beta.2,df9219951cc9a54c,2,11.78,5495.5820,benchmarks/results/20260901-142158-search/records.json
+common_mods,Common modifications,Sage v0.15.0-beta.2,df9219951cc9a54c,3,12.25,5311.4375,benchmarks/results/20260901-142158-search/records.json
+common_mods,Common modifications,Sage Plus beta.2,5aeb56852fc176e9,1,12.63,3712.8438,benchmarks/results/20260901-142158-search/records.json
+common_mods,Common modifications,Sage Plus beta.2,5aeb56852fc176e9,2,12.14,3698.4688,benchmarks/results/20260901-142158-search/records.json
+common_mods,Common modifications,Sage Plus beta.2,5aeb56852fc176e9,3,12.12,3654.7188,benchmarks/results/20260901-142158-search/records.json
+broad_ptm,Broad PTMs,Sage v0.15.0-beta.2,df9219951cc9a54c,1,27.55,12561.6992,benchmarks/results/20260901-142340-search/records.json
+broad_ptm,Broad PTMs,Sage v0.15.0-beta.2,df9219951cc9a54c,2,25.49,11728.9219,benchmarks/results/20260901-142340-search/records.json
+broad_ptm,Broad PTMs,Sage v0.15.0-beta.2,df9219951cc9a54c,3,25.74,12277.9570,benchmarks/results/20260901-142340-search/records.json
+broad_ptm,Broad PTMs,Sage Plus beta.2,5aeb56852fc176e9,1,30.04,7724.8242,benchmarks/results/20260901-142340-search/records.json
+broad_ptm,Broad PTMs,Sage Plus beta.2,5aeb56852fc176e9,2,29.07,7827.9609,benchmarks/results/20260901-142340-search/records.json
+broad_ptm,Broad PTMs,Sage Plus beta.2,5aeb56852fc176e9,3,28.77,7792.3438,benchmarks/results/20260901-142340-search/records.json

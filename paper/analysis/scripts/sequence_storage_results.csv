@@ -1,0 +1,7 @@
+stage,cleavage,baseline_rss_mib,shared_span_rss_mib,rss_reduction_percent,baseline_wall_seconds,shared_span_wall_seconds
+Unmodified digestion,Tryptic,427.8,338.7,20.8,1.17,0.89
+Unmodified digestion,Semi-enzymatic,439.4,320.2,27.1,0.78,0.51
+Unmodified digestion,Non-specific,1212.6,716.9,40.9,3.15,1.38
+Expanded targets and decoys,Tryptic,1163.4,1086.5,6.6,2.88,2.68
+Expanded targets and decoys,Semi-enzymatic,1227.0,1119.3,8.8,2.58,2.21
+Expanded targets and decoys,Non-specific,3541.6,3082.5,13.0,9.41,6.45

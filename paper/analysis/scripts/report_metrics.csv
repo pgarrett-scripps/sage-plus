@@ -1,0 +1,18 @@
+id,value,format,unit,description
+method.threads,8,integer,,Rayon benchmark threads
+method.warmups,1,integer,,Warmup trials per benchmark condition
+method.trials,3,integer,,Measured trials per benchmark condition
+method.mzml_size,219,integer, MB,HEK SILAC mzML size
+method.fasta_size,13,integer, MB,Reviewed-human FASTA size
+conventional.peptides,2803578,integer,,Conventional target and decoy peptides
+conventional.fragments,80833042,integer,,Conventional theoretical fragments
+charge.preprocess_reduction,32.4,decimal,%,Supplied-charge preprocessing-time reduction
+feature.wall,15.62,two_decimal, s,Feature-heavy candidate wall time
+feature.rss,2593.8,decimal_comma, MiB,Feature-heavy candidate peak RSS
+sequence.max_digest_rss_reduction,40.9,decimal,%,Largest observed digestion memory reduction
+sequence.max_expanded_rss_reduction,13.0,decimal,%,Largest observed expanded-peptide memory reduction
+fragment.baseline_bytes,8,integer,,Old fragment record width
+fragment.packed_bytes,6,integer,,Packed fragment record width
+fragment.allocation_reduction,25.0,decimal,%,Fragment allocation reduction
+fragment.rss_reduction,21.4,decimal,%,Packed-index HEK peak-RSS reduction
+fragment.wall_increase,1.4,decimal,%,Packed-index HEK wall-time increase
