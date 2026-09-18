@@ -547,7 +547,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-entrapment-resources-vector": {
@@ -566,7 +566,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-lfq-shared": {
@@ -584,7 +584,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-lfq-shared-vector": {
@@ -602,7 +602,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-local": {
@@ -621,7 +621,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-local-vector": {
@@ -640,7 +640,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-matched-fdp": {
@@ -658,7 +658,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-matched-fdp-vector": {
@@ -676,17 +676,17 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-ptm-diagnostic": {
       "path": "figures/supplement-ptm-diagnostic.png",
       "kind": "figure",
-      "desc": "Secondary Sage Plus synthesis consistency with the empty primary joint accepted sets",
-      "hash": "sha256:2f8b43d654947a431d746707706a4cf4c79710aa0bd7b5d0fef0ace2c4c5171e",
+      "desc": "Secondary Sage Plus synthesis consistency before the primary peptide filter",
+      "hash": "sha256:cf3505d3f5506cd37741c661f17edc636a8e106b9370809410c628796968b046",
       "origin": {
         "by": "analysis/scripts/gen_supplement_figure.py",
-        "at": "2026-09-18T18:31:22Z"
+        "at": "2026-09-18T19:19:50Z"
       },
       "inputs": {
         "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
@@ -695,17 +695,17 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-ptm-diagnostic-vector": {
       "path": "figures/vector/supplement-ptm-diagnostic.svg",
       "kind": "figure",
-      "desc": "Scalable companion: Secondary Sage Plus synthesis consistency with the empty primary joint accepted sets",
-      "hash": "sha256:ace031ea809be94976593bc02307e36011b86acd0df33e4f5afa047a1fc275b2",
+      "desc": "Scalable companion: Secondary Sage Plus synthesis consistency before the primary peptide filter",
+      "hash": "sha256:5cc20eef076c2888a8fd1d22b1e8ad5542385bb9a17fae4b2d32ba762794a40e",
       "origin": {
         "by": "analysis/scripts/gen_supplement_figure.py",
-        "at": "2026-09-18T18:31:22Z"
+        "at": "2026-09-18T19:19:50Z"
       },
       "inputs": {
         "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
@@ -714,7 +714,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-public-counts": {
@@ -732,7 +732,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-public-counts-vector": {
@@ -750,7 +750,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-threshold-yield": {
@@ -769,7 +769,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "fig.supplement-threshold-yield-vector": {
@@ -788,7 +788,7 @@
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_supplement_figure.py": "sha256:a925862cb269bd4bd6ee30f032c3cd06979adc904c26d7c9cd8cba2c22f1a144"
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
       }
     },
     "tbl.benchmarks": {

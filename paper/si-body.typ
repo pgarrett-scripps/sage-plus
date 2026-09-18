@@ -84,12 +84,9 @@ entries:
 P33369  P45766  P75901  P39901  P76000  P37003  P58095
 ```
 
-The amended `hye-irt-defined.fasta` excluded each listed entry for both engines.
-It did not replace unknown residues with invented amino acids or retain the
-known subsequences of excluded proteins. The original comparison plan and failed
-Sage Plus outputs were retained alongside the amended `public-comparison-v2`
-results. Unamended Sage results were not substituted for the matched
-amended-reference comparison.
+The amended `hye-irt-defined.fasta` excluded these entries in full for both
+engines. The original reference, comparison plan, and failed Sage Plus outputs
+were retained alongside the amended `public-comparison-v2` results.
 
 The community sample annotation named a different yeast species from the primary
 methods. The reagent identified in those methods was Promega V7461. Its
@@ -102,12 +99,10 @@ assumptions silently resolved by the amendment.
 
 = Additional paired resource measurements <sec:si-resource>
 
-@tbl:si-timing retains the exact summaries behind the public timing figure. Each
-median and observed range summarizes repeated searches of a fixed input.
+@tbl:si-timing retains the exact summaries behind the public timing figure.
 
-@fig:si-enlarged summarizes the entrapment workloads. Each engine has one search
-per selected file and construction seed. These medians combine different inputs,
-so they are descriptive workload summaries rather than repeat timing estimates.
+@fig:si-enlarged gives the absolute resource measurements for the entrapment
+workloads compared on a relative scale in @fig:workloads.
 
 #figure(
   fig("fig.supplement-entrapment-resources", width: 100%),
@@ -145,11 +140,8 @@ to finish the search.
 
 = Threshold-dependent entrapment results <sec:si-thresholds>
 
-The main text reports the engine-specific estimates at the primary threshold.
-@fig:entrapment shows their paired differences and conditional intervals.
-
-@fig:si-entrapment retains the threshold calibration curves and individual
-file-by-seed differences behind the main study summaries.
+@fig:si-entrapment extends the primary-threshold comparison in @fig:entrapment
+with calibration curves and individual file-by-seed differences.
 
 #figure(
   fig("fig.scientific-entrapment-detail", width: 100%),
@@ -162,9 +154,7 @@ file-by-seed differences behind the main study summaries.
 ) <fig:si-entrapment>
 
 @fig:si-threshold-yield shows target yield at every prespecified nominal
-threshold from the independent audit. Target counts and the FDP curves in
-@fig:si-entrapment average the same file-by-seed combinations. A higher target
-count at a nominal q-value is not a matched-error sensitivity result.
+threshold, averaging the same file-by-seed combinations as the FDP curves.
 
 #figure(
   fig("fig.supplement-threshold-yield", width: 100%),
@@ -178,16 +168,10 @@ count at a nominal q-value is not a matched-error sensitivity result.
 ) <fig:si-threshold-yield>
 
 Construction seeds were `20260914`, `20260915`, and `20260916`. The bootstrap
-used seed `20260914` and #s("pilot.bootstrap") resamples. It resampled the file
-and construction-seed dimensions while preserving engine pairing. The bounds in
-the main text use the #lit("2.5")th and #lit("97.5")th percentiles. These are
-conditional descriptive intervals over the selected files and seeds.
-
-The audit checked counts against official FDRBench output and explicitly
-considered exact score ties. Empty discovery denominators remain undefined. This
-convention prevents absent evidence from being presented as a zero-error
-success. Search failures are also retained as failures rather than converted to
-empty discovery sets.
+used seed `20260914`, with bounds at the #lit("2.5")th and #lit("97.5")th
+percentiles. The main Methods describe the paired resampling and audit
+conventions. Search failures were retained rather than converted to empty
+discovery sets.
 
 == Peptide yield at a common estimated FDP ceiling <sec:si-matched-fdp>
 
@@ -220,12 +204,9 @@ pooled counts.
     observations, so this is not held-out error control.],
 ) <fig:si-matched-fdp>
 
-This procedure matches an estimated error ceiling approximately, since discrete
-thresholds need not attain the same FDP exactly. Threshold selection and FDP
-estimation use the same entrapment observations. Their reuse can favor apparent
-yield, and the selected estimates do not constitute held-out error control.
-Accordingly, the results describe these files and construction seeds and do not
-establish greater sensitivity or equivalent true error rates.
+Discrete thresholds need not attain the same FDP exactly. Reusing the entrapment
+observations to select thresholds can favor apparent yield, so the comparison
+does not establish greater sensitivity or equivalent true error rates.
 
 = Public identification counts and worker scaling
 
@@ -244,11 +225,8 @@ peptidoforms without duplicating their absolute counts.
     used at every threshold.],
 ) <fig:si-identification>
 
-@fig:si-public-counts gives the absolute accepted counts for each public file.
-Peptidoform counts use peptide q-values and PSM counts use spectrum q-values.
-These filters are distinct. Decoy PSM counts document the retained
-confidence-filtered output, but they are not substituted for the independent
-entrapment estimator.
+@fig:si-public-counts gives the absolute accepted PSM and peptidoform counts
+behind the primary-threshold comparison, together with retained decoy PSMs.
 
 #figure(
   fig("fig.supplement-public-counts", width: 100%),
@@ -290,20 +268,11 @@ both engines.
     complement the engine-specific accepted sets in @fig:lfq-endpoints.],
 ) <fig:si-lfq-shared>
 
-The control denominator in @tbl:si-control includes positive finite accepted
-precursor-file intensities with an unambiguous species assignment. A foreign
-sequence also occurring in the human reference after isoleucine/leucine
-normalization is excluded. Retention-time standards and unmapped proteins are
-outside the species-control denominator. The numerator is a subset of the
-denominator under the same rule. The absence of direct evidence is computed from
-rank-one PSM results at the joint spectrum and peptide threshold. It does not
-use an exported confirmation flag whose meaning may differ between releases.
-
-The primary LFQ threshold applies to a precursor-level score shared across
-files. A positive intensity in a file is therefore not accompanied by an
-independently calibrated file-specific transfer probability in this analysis.
-The human-only control tests the intended absent-species condition. The main
-Discussion describes the limits of its error interpretation.
+The control counts in @tbl:si-control use the species and direct-MS2 rules
+defined in the main Methods. Retention-time standards and unmapped proteins are
+excluded from the denominator. Numerators and denominators both require positive
+finite accepted intensities, and direct evidence is drawn from rank-one PSM
+results.
 
 = Synthetic phosphorylation challenge <sec:si-ptm>
 
@@ -323,23 +292,18 @@ spectrum and peptide thresholds. The primary localization endpoint additionally
 required an accepted site with a reported localization q-value. Sage Plus
 exports site-level results, but the Sage output used here does not provide an
 identical site-confidence field. We therefore compared the shared upstream
-acceptance stages first. A failure to obtain accepted peptide identifications
-precludes an interpretable comparison of accepted site accuracy.
+acceptance stages first.
 
-Synthesis consistency was retained as a secondary Sage Plus diagnostic in the
-Supporting Information. It pools the available library truth because the mapping
-between acquisition files and individual synthetic libraries was not
-independently verified. It combines identification and localization
-discrepancies and cannot be interpreted as arrangement-level false localization
-rate. Truth-derived site-prior experiments were not used to claim predictive
-performance.
+The secondary Sage Plus synthesis-consistency diagnostic pools the available
+library truth because the mapping between acquisition files and individual
+synthetic libraries was not independently verified. It combines identification
+and localization discrepancies and cannot estimate arrangement-level false
+localization rate.
 
-The synthesis reference and truth were prepared before the original searches.
-The original all-site configurations are retained for both releases. Oracle
-site-prior runs used information from synthesis truth and are excluded from
-comparative accuracy claims. Development repairs after the released snapshot are
-also excluded. A result from a modified executable must be assigned its own
-software identity and independently re-evaluated before entering a later report.
+The synthesis reference and truth were prepared before the original searches,
+and all-site configurations are retained for both releases. Comparative accuracy
+claims exclude oracle site-prior runs using synthesis truth and development
+repairs made after the released snapshot.
 
 == Peptide acceptance
 
@@ -353,13 +317,11 @@ spectrum-level accepted counts in both releases. Each engine accepted #s(
 #s("report.ptm.1.upstream.joint_accepted") for both releases and both files.
 @fig:ptm shows this loss at the confidence-filtering stage.
 
-All retained rank-one matches in these runs had peptide q-values equal to one.
-Thus the absence of primary accepted sites did not arise solely from a Sage Plus
-localization cutoff. It was already present at the shared peptide acceptance
-stage. The diagnostic site output should therefore not be promoted to a
-validated phosphosite set by omitting the peptide filter. The restricted
-synthetic database and sparse decoy evidence also distinguish this challenge
-from a broad phosphoproteome search.
+All retained rank-one matches had peptide q-values equal to one. The shared
+peptide acceptance stage therefore precluded site-accuracy evaluation before the
+Sage Plus localization cutoff was considered. Omitting the peptide filter does
+not produce a validated phosphosite set. Sparse decoy evidence further limits
+interpretation of this restricted synthetic search.
 
 #figure(
   fig("fig.report-ptm", width: 100%),
@@ -375,21 +337,18 @@ from a broad phosphoproteome search.
 == Site diagnostic
 
 @fig:si-ptm-diagnostic records the released Sage Plus site output after spectrum
-and localization filtering, deliberately before peptide filtering. All primary
-jointly accepted site sets were empty. The diagnostic events therefore explain
-what was withheld by the primary confidence requirement. They are not an
-alternative validated result obtained by relaxing that requirement.
+and localization filtering, showing the events withheld by the primary peptide
+confidence requirement.
 
 #figure(
   fig("fig.supplement-ptm-diagnostic", width: 100%),
-  caption: [Secondary Sage Plus synthesis-consistency diagnostic. Panel A
-    partitions diagnostic site events into synthesis-consistent and inconsistent
-    events. Labels give event counts and the inconsistent fraction. These events
-    pass spectrum and localization q-values at one percent but omit the peptide
-    filter. Panel B restores the primary joint requirement, which accepts no
-    sites in either file. Consistency uses pooled unambiguous synthesis truth
-    with file-to-library mapping unaudited. It is not an arrangement-level
-    localization error estimate.],
+  caption: [Secondary Sage Plus synthesis-consistency diagnostic. Bars partition
+    site events into synthesis-consistent and inconsistent events, with counts
+    and inconsistent fractions labeled. Events pass spectrum and localization
+    q-values at one percent but omit the peptide filter. Restoring that filter
+    accepts no sites in either file. Consistency uses pooled unambiguous
+    synthesis truth with file-to-library mapping unaudited. It is not an
+    arrangement-level localization error estimate.],
 ) <fig:si-ptm-diagnostic>
 
 #pagebreak()

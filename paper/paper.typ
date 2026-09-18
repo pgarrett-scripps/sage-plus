@@ -93,11 +93,6 @@ rankings and confidence scores. We therefore compared Sage #lit(
 peptide-spectrum match (PSM) identities, independent peptide entrapment
 estimates, known mixture ratios, and a species-absent quantitative control.
 
-Matched public searches showed lower memory use and high PSM agreement, with
-runtime depending on the search space. The quantitative comparison found nearly
-identical ratios on shared features, but foreign-species signal in a human-only
-control showed a limitation in confidence for cross-run extracted intensities.
-
 = Development of Sage Plus <sec:development>
 
 == Relationship to upstream Sage and design goals
@@ -234,13 +229,10 @@ standards. The yeast identity followed the primary methods and reagent
 documentation. Reference receipts preserve the selected accessions and
 downloaded contents.
 
-An explicit amendment was required for the mixture reference. Sage Plus rejected
-entries containing undefined `X` residues. The amended reference excluded the
-affected proteins in their entirety for both engines, including their otherwise
-defined subsequences. The original searches, reference, and rejection records
-were preserved. All completed mixture comparisons reported here use this same
-amended reference. The reference amendment defines the effective mixture search
-space.
+Sage Plus rejected mixture reference entries containing undefined `X` residues.
+All completed mixture comparisons therefore used the same amended reference,
+with affected proteins removed in their entirety from both engines' search
+space. Excluded accessions and amendment records appear in @sec:si-inputs.
 
 == Search settings and identification agreement
 
@@ -355,12 +347,11 @@ extraction behavior was retained in both releases. An engine-specific
 match-between-runs toggle was not introduced into this matched comparison.
 
 Sage's wide LFQ table was converted to one precursor and file per row. Sage
-Plus's long Parquet table was normalized to the same representation. Combined
-charge states were mapped to a common empty charge key. The Sage export omits
-decoy quantification rows, so only target rows entered comparative yield and
-ratio endpoints. Protein inference was not assumed identical between engines.
-Species assignment required an unambiguous protein-species mapping. Sequences
-occurring in more than one reference proteome after isoleucine/leucine
+Plus's long Parquet table was normalized to the same representation. The Sage
+export omits decoy quantification rows, so only target rows entered comparative
+yield and ratio endpoints. Protein inference was not assumed identical between
+engines. Species assignment required an unambiguous protein-species mapping.
+Sequences occurring in more than one reference proteome after isoleucine/leucine
 normalization were excluded from mixture ratio analysis.
 
 Primary quantitative results used positive finite intensities at a precursor LFQ
@@ -371,8 +362,7 @@ we computed log-base-two B/A ratios without imputation. Expected values were
 following the mixture design @vanpuyvelde2022. Bias was the median difference
 from the expected ratio. Absolute error was the median absolute difference.
 Preparation variability was the coefficient of variation (CV) across the Alpha
-and Beta intensities within a condition. These pairs measure preparation
-variability.
+and Beta intensities within a condition.
 
 Missingness used the union of features observed in at least one of the four
 mixture files for that engine. The denominator was that feature count multiplied
@@ -388,8 +378,7 @@ foreign positive rows both in the complete accepted control set and among rows
 without direct accepted tandem spectral evidence. Direct tandem mass
 spectrometry (MS2) evidence required the same peptide in the same file at both
 spectrum and peptide q-values of at most #lit("1") percent. This common rule
-replaced release-specific confirmation flags. A precursor q-value shared across
-files was not treated as an individual recipient-file transfer q-value.
+replaced release-specific confirmation flags.
 
 = Computational performance <sec:results>
 
@@ -427,23 +416,16 @@ summaries and target PSM counts appear in @tbl:si-timing.
     appear in @tbl:si-timing.],
 ) <fig:timing>
 
-The runtime direction changed when the database was enlarged for entrapment.
-Sage Plus took longer while retaining lower median peak memory in both studies.
-@fig:si-enlarged reports these measurements separately because they span files
-and construction seeds rather than repeat trials of one fixed input. The local
-conventional and common-modification searches also favored Sage on runtime, as
-shown in @fig:si-local. Together, these observations establish a
-workload-dependent runtime tradeoff.
-
-@fig:workloads compares the repeated public and entrapment searches on a
-relative scale. Sage Plus used less memory in both designs, while the runtime
-ratio crossed the equal-performance reference. In the entrapment comparisons,
-the median time changes were #s(
+The runtime advantage reversed with entrapment-expanded references, while Sage
+Plus retained lower median peak memory (@fig:workloads). The median time changes
+were #s(
   "report.hek.entrapment.seconds",
 ) percent for HEK and #s("report.mixture.entrapment.seconds") percent for the
 mixture. Their corresponding memory changes were #s("report.hek.entrapment.rss")
-and #s("report.mixture.entrapment.rss") percent. The larger search space exposed
-a time-memory tradeoff that the conventional public timing alone would conceal.
+and #s("report.mixture.entrapment.rss") percent. These summaries span different
+files and construction seeds rather than repeated searches of one input
+(@fig:si-enlarged). The local conventional and common-modification searches also
+favored Sage on runtime (@fig:si-local), reinforcing the dependence on workload.
 
 #figure(
   fig("fig.report-workloads", width: 100%),
@@ -467,9 +449,8 @@ eight-worker median times in this extension were #s(
 @fig:scaling shows the full response and individual measured repeats.
 
 Sage Plus peak memory remained relatively flat as worker count increased,
-whereas Sage memory increased substantially. Whole-process time includes serial
-work and input/output, so speedup need not grow linearly with worker count.
-Concurrent-search throughput was not measured.
+whereas Sage memory increased substantially. Concurrent-search throughput was
+not measured.
 
 #figure(
   fig("fig.report-scaling", width: 100%),
@@ -674,9 +655,7 @@ foreign species in both engines. Sage reported #s(
   "report.lfq.upstream.control.foreign",
 ) foreign rows among #s("report.lfq.upstream.control.quantified") assessable
 quantified rows. Sage Plus reported #s("report.lfq.plus.control.foreign") among
-#s("report.lfq.plus.control.quantified"). These assignments survived exclusion
-of foreign sequences also found in the human reference after isoleucine/leucine
-normalization.
+#s("report.lfq.plus.control.quantified").
 
 Among control rows without direct jointly accepted spectral evidence, foreign
 assignments accounted for #s("report.lfq.upstream.control.foreign_percent")
@@ -696,20 +675,11 @@ numerators and denominators used for the control calculation.
     represent independent samples.],
 ) <fig:control>
 
-The absent-species control showed that a precursor-level confidence score shared
-across files does not provide adequate confidence for every extracted
-precursor-file intensity. Foreign signal persisted even among rows lacking
-direct accepted MS2 evidence. This result motivates file-specific confidence
-assessment for cross-run extracted intensities alongside mixture-ratio accuracy.
-
 == Compatibility and incomplete workloads
 
-Sage Plus rejected reference proteins containing undefined `X` residues, so the
-matched mixture comparison used a common reference with those proteins removed
-(@sec:si-inputs). Neither engine completed the broad modification stress
-workload under the selected limits. Sage Plus stopped at its modified-database
-memory guard, while Sage failed allocation under the process ceiling. These
-failures provide no completed-search performance estimate.
+Neither engine completed the broad modification stress workload under the
+selected limits, so it provides no completed-search performance estimate.
+Failure modes and resource limits are recorded in @sec:si-resource.
 
 = Discussion <sec:discussion>
 
@@ -729,19 +699,17 @@ others changed the peptide assignment. The entrapment intervals are conditional
 on the selected files and database-construction seeds, with no prespecified
 equivalence margin or power analysis. Yield at matched nominal q-values should
 therefore not be interpreted as yield at equal independently estimated error.
-
-The complete-threshold analysis also found similar peptide yields near a common
-entrapment FDP ceiling. Because thresholds were selected using the same
-entrapment observations, this post hoc comparison remains descriptive.
+The exploratory comparison near a common estimated FDP ceiling also remains
+descriptive because threshold selection reused the entrapment observations.
 
 The LFQ comparison found nearly identical ratios on shared features, yet both
 engines retained foreign-species signal in the human-only control. A precursor
-identified somewhere in a joint analysis does not by itself establish evidence
-for its intensity in each file. Confidence in cross-run extracted intensities
-needs separate validation alongside ratio accuracy and coverage. The control
-cannot detect erroneous human-to-human transfers, and contamination or reference
-errors can contribute foreign signal. Its fractions are therefore diagnostics
-rather than a general transfer-error rate.
+confidence score shared across files does not establish confidence in each
+extracted intensity. Confidence in cross-run extracted intensities needs
+separate validation alongside ratio accuracy and coverage. The control cannot
+detect erroneous human-to-human transfers, and contamination or reference errors
+can contribute foreign signal. Its fractions are therefore diagnostics rather
+than a general transfer-error rate.
 
 The evaluation covers selected files from two public studies on one workstation.
 Compute repeats and many precursor measurements do not add independent
@@ -754,16 +722,9 @@ necessary. In the restricted synthetic phosphorylation experiment, no peptide
 passed the one-percent peptide q-value threshold in either engine, so site-level
 accuracy could not be evaluated (@sec:si-ptm).
 
-Sage Plus reduced peak memory by #s("pilot.PXD028735.rss_reduction") to #s(
-  "pilot.PXD001468.rss_reduction",
-) percent in the repeated public searches while retaining high agreement with
-Sage in accepted PSMs. Independent entrapment estimates were similar between
-releases, whereas runtime depended on search-space size. Evaluation of the
-expanded LFQ and PTM functionality identified unresolved confidence and
-peptide-acceptance limitations. Together, these results show that Sage Plus
-reduces memory use while maintaining similar identification and LFQ results on
-the tested datasets, although quantitative transfer confidence and PTM
-acceptance require additional validation.
+Sage Plus reduced memory use while maintaining similar identification and LFQ
+results on the tested datasets. Runtime remains workload dependent, and
+quantitative transfer confidence and PTM acceptance require further validation.
 
 // <<< BODY END
 

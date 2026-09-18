@@ -5,7 +5,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import StrMethodFormatter
 from _assets import record
-from _figure_style import plt, COLORS, INK, MUTED, TEAL, PURPLE, engine_style, engine_legend, panel, save_figure
+from _figure_style import plt, COLORS, INK, MUTED, GRID, TEAL, PURPLE, engine_style, engine_legend, panel, save_figure
 from _scientific import PAPER, INPUTS, ENGINE, load
 from _report import report
 from _matched_fdp import load as matched_data, MATCHED_INPUTS
@@ -182,33 +182,27 @@ def shared_lfq():
 def ptm_diagnostic():
     pilot, _ = load()
     rows = [r for r in pilot['ptm'] if r['suite'] == 'ptm' and r['job'].endswith('-all')]
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.4), sharey=True, layout='constrained',
-                             gridspec_kw={'width_ratios': [2.3, 1]})
+    fig, ax = plt.subplots(figsize=(7.2, 2.8), layout='constrained')
     for i, row in enumerate(rows):
         good, bad = row['correct_site_events'], row['incorrect_site_events']
-        axes[0].barh(i, good, height=.5, color=TEAL)
-        axes[0].barh(i, bad, left=good, height=.5, color=COLORS['plus'])
-        axes[0].text(good / 2, i, f'{good:,}', va='center', ha='center', color='white', fontsize=10)
-        axes[0].annotate(f"{bad:,} ({100 * row['empirical_site_error_fraction']:.2f}%)",
+        ax.barh(i, good, height=.5, color=TEAL)
+        ax.barh(i, bad, left=good, height=.5, color=COLORS['plus'])
+        ax.text(good / 2, i, f'{good:,}', va='center', ha='center', color='white', fontsize=10)
+        ax.annotate(f"{bad:,} ({100 * row['empirical_site_error_fraction']:.2f}%)",
                          (good + bad, i), xytext=(6, 0), textcoords='offset points', va='center', fontsize=9)
         joint = row['joint_psm_peptide_localization_1pct']
-        value = joint['correct_site_events'] + joint['incorrect_site_events']
-        axes[1].scatter(value, i, color=PURPLE, marker='s', s=32, clip_on=False)
-        axes[1].annotate(str(value), (value, i), xytext=(8, 0), textcoords='offset points', va='center')
-    axes[0].set_xlim(0, 1870)
-    axes[0].set_xticks([0, 500, 1000, 1500])
-    axes[0].xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
-    axes[1].set_xlim(0, 1)
-    axes[1].set_xticks([0, 1])
-    for ax, letter, title, xlabel in zip(axes, 'AB', ('Diagnostic site events', 'Jointly accepted'),
-                                        ('Synthesis-consistent and inconsistent events', 'Site events')):
-        row_axis(ax, [f"HCD {r['job'].split('-')[1]}" for r in rows])
-        ax.set_xlabel(xlabel)
-        panel(ax, letter, title, grid='x')
+        assert joint['correct_site_events'] + joint['incorrect_site_events'] == 0
+    ax.set_xlim(0, 1600)
+    ax.set_xticks([0, 500, 1000, 1500])
+    ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+    row_axis(ax, [f"HCD {r['job'].split('-')[1]}" for r in rows])
+    ax.set_xlabel('Synthesis-consistent and inconsistent site events')
+    ax.grid(axis='x', color=GRID, linewidth=.65)
+    ax.set_axisbelow(True)
     fig.legend(handles=[Patch(facecolor=TEAL, label='Synthesis-consistent'),
                         Patch(facecolor=COLORS['plus'], label='Synthesis-inconsistent')],
                loc='outside upper center', ncol=2)
-    finish(fig, 'ptm-diagnostic', INPUTS, 'Secondary Sage Plus synthesis consistency with the empty primary joint accepted sets')
+    finish(fig, 'ptm-diagnostic', INPUTS, 'Secondary Sage Plus synthesis consistency before the primary peptide filter')
 
 
 if __name__ == '__main__':
