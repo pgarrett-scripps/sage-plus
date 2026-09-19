@@ -191,3 +191,50 @@ fn label_is_populated_when_registered() {
 fn proton_constant_available() {
     const { assert!(PROTON > 1.0 && PROTON < 1.01) }
 }
+
+#[test]
+fn tied_target_arrangements_cannot_inherit_confident_competition_q_values() {
+    let mut precursor = peptide("AASAATAA");
+    precursor.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let potential = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    let mut localization = localize(
+        &precursor,
+        &ProcessedSpectrum::default(),
+        &[Kind::B, Kind::Y],
+        &potential,
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    let modification = &mut localization.mods[0];
+    assert_eq!(modification.delta_score, 0.0);
+    assert_eq!(modification.candidate_sites, 2);
+    modification.set_competition_q_value(0.001);
+    assert_eq!(modification.localization_q_value, 1.0);
+
+    modification.delta_score = f32::NAN;
+    modification.set_competition_q_value(0.001);
+    assert_eq!(modification.localization_q_value, 1.0);
+}
+
+#[test]
+fn single_candidate_can_retain_competition_confidence() {
+    let mut precursor = peptide("AAASAAA");
+    precursor.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
+    let mut localization = localize(
+        &precursor,
+        &synthetic_spectrum(&precursor),
+        &[Kind::B, Kind::Y],
+        &[(ModificationSpecificity::Residue(b'S'), PHOSPHO)],
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    let modification = &mut localization.mods[0];
+    assert_eq!(modification.delta_score, 0.0);
+    modification.set_competition_q_value(0.001);
+    assert_eq!(modification.localization_q_value, 0.001);
+}

@@ -335,3 +335,58 @@ fn summarized_isotope_traces_reward_theoretical_abundance() {
     assert!(traces.spectral_angle[(0, center)] > 0.99);
     assert!(traces.spectral_angle[(0, 0)] <= traces.spectral_angle[(0, center)]);
 }
+
+#[test]
+fn file_evidence_exposes_a_weak_signal_despite_a_strong_shared_peak() {
+    let mut trace = traces();
+    trace.spectral_angle.row_slice_mut(1).fill(0.1);
+    for value in trace.dot_product.row_slice_mut(1) {
+        *value *= 0.01;
+    }
+    let (_, areas, evidence) = trace
+        .integrate_with_evidence(&LfqSettings::default())
+        .unwrap();
+    assert!(areas.iter().all(Option::is_some));
+    assert!(evidence[0].as_ref().unwrap().score > 0.9);
+    assert!(evidence[1].as_ref().unwrap().score < 0.01);
+}
+
+#[test]
+fn file_evidence_does_not_invent_a_score_for_a_missing_trace() {
+    let mut trace = traces();
+    trace.dot_product.row_slice_mut(1).fill(0.0);
+    let (_, areas, evidence) = trace
+        .integrate_with_evidence(&LfqSettings::default())
+        .unwrap();
+    assert!(areas[1].is_none());
+    assert!(evidence[1].is_none());
+}
+
+#[test]
+fn strict_ms2_evidence_requires_both_psm_and_peptide_acceptance() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let features = [0.001, 0.5, f32::NAN]
+        .into_iter()
+        .enumerate()
+        .map(|(file_id, spectrum_q)| Feature {
+            peptide_idx: PeptideIx(0),
+            peptide_q: 0.001,
+            spectrum_q,
+            label: 1,
+            file_id,
+            aligned_rt: 0.5,
+            charge: 2,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    let map = build_feature_map(LfqSettings::default(), (2, 2), &features, &db);
+    let id = PrecursorId::Combined(PeptideIx(0));
+    assert!(map.ms2_confirmed.contains(&(id, 1)));
+    assert!(map.ms2_confirmed_strict.contains(&(id, 0)));
+    assert!(!map.ms2_confirmed_strict.contains(&(id, 1)));
+    assert!(!map.ms2_confirmed_strict.contains(&(id, 2)));
+}

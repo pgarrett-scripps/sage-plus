@@ -118,6 +118,7 @@ pub struct FeatureMap {
     /// workflow; this set records only whether a matching accepted PSM was
     /// observed in the file itself.
     ms2_confirmed: FnvHashSet<(PrecursorId, usize)>,
+    ms2_confirmed_strict: FnvHashSet<(PrecursorId, usize)>,
 }
 
 /// A quantified LFQ precursor across all acquisition files.
@@ -129,6 +130,21 @@ pub struct QuantifiedPeak {
     pub intensities: Vec<Option<f64>>,
     /// Whether the corresponding file contains a matching accepted target PSM.
     pub ms2_confirmed: Vec<bool>,
+    /// Direct target evidence passing both the PSM and peptide thresholds.
+    pub ms2_confirmed_strict: Vec<bool>,
+    /// Diagnostics for individual file signals. These are not calibrated probabilities.
+    pub file_evidence: Vec<Option<FileEvidence>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FileEvidence {
+    /// No strict direct target evidence in this file, including for shifted decoys.
+    pub transfer_candidate: bool,
+    pub spectral_angle: f64,
+    pub trace_cosine: f64,
+    pub rt_shift_bins: i32,
+    /// Experimental ranking score, without an FDR guarantee.
+    pub score: f64,
 }
 
 pub fn build_feature_map(
@@ -150,6 +166,22 @@ pub fn build_feature_map(
             (id, feat.file_id)
         })
         .collect::<FnvHashSet<_>>();
+    let ms2_confirmed_strict = features
+        .iter()
+        .filter(|feat| {
+            feat.label == 1
+                && feat.peptide_q <= settings.peptide_q_value
+                && feat.spectrum_q <= settings.peptide_q_value
+        })
+        .map(|feat| {
+            let id = if settings.combine_charge_states {
+                PrecursorId::Combined(feat.peptide_idx)
+            } else {
+                PrecursorId::Charged((feat.peptide_idx, feat.charge))
+            };
+            (id, feat.file_id)
+        })
+        .collect();
     let map: DashMap<(PeptideIx, usize), PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
     let label_groups = db
         .peptides
@@ -281,6 +313,7 @@ pub fn build_feature_map(
         settings,
         mass_search_margin,
         ms2_confirmed,
+        ms2_confirmed_strict,
     }
 }
 
@@ -393,9 +426,19 @@ impl FeatureMap {
                 // attempt to trace the peaks, find the best peak, and integrate
                 // it across all of the files
                 let mut traces = grid.summarize_traces();
-                let (peak, intensities) = traces.integrate(&self.settings)?;
+                let (peak, intensities, mut file_evidence) =
+                    traces.integrate_with_evidence(&self.settings)?;
+                for (file_id, evidence) in file_evidence.iter_mut().enumerate() {
+                    if let Some(evidence) = evidence {
+                        evidence.transfer_candidate = self.settings.mbr
+                            && !self.ms2_confirmed_strict.contains(&(key.0, file_id));
+                    }
+                }
                 let ms2_confirmed = (0..alignments.len())
                     .map(|file_id| !key.1 && self.ms2_confirmed.contains(&(key.0, file_id)))
+                    .collect();
+                let ms2_confirmed_strict = (0..alignments.len())
+                    .map(|file_id| !key.1 && self.ms2_confirmed_strict.contains(&(key.0, file_id)))
                     .collect();
 
                 Some((
@@ -404,6 +447,8 @@ impl FeatureMap {
                         peak,
                         intensities,
                         ms2_confirmed,
+                        ms2_confirmed_strict,
+                        file_evidence,
                     },
                 ))
             })
@@ -453,10 +498,11 @@ pub struct Peak {
 
 impl Traces {
     /// Calculate and apply time warping factors
-    fn warp(&mut self) {
+    fn warp(&mut self) -> Vec<isize> {
         let time_warps = self.find_time_warps(&self.dot_product, 75);
         Self::apply_time_warps(&mut self.spectral_angle, &time_warps);
         Self::apply_time_warps(&mut self.dot_product, &time_warps);
+        time_warps
     }
 
     /// Find time warping offsets for each file that maximize the dot product
@@ -552,7 +598,16 @@ impl Traces {
     /// * Integrate all of the MS1 traces within said window, returning a vector
     ///   of length `n_files` containing the summed MS1 intensities
     pub fn integrate(&mut self, settings: &LfqSettings) -> Option<(Peak, Vec<Option<f64>>)> {
-        self.warp();
+        self.integrate_with_evidence(settings)
+            .map(|(peak, areas, _)| (peak, areas))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn integrate_with_evidence(
+        &mut self,
+        settings: &LfqSettings,
+    ) -> Option<(Peak, Vec<Option<f64>>, Vec<Option<FileEvidence>>)> {
+        let shifts = self.warp();
 
         let (scores, spectral) = self.scores(settings.peak_scoring);
         let mut best = Peak::default();
@@ -612,7 +667,36 @@ impl Traces {
             summed_int += dotp;
         }
         best.spectral_angle = weighted / summed_int;
-        Some((best, areas))
+        let reference = self.dot_product.row_slice(self.reference_file_id);
+        let reference_norm = reference.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let evidence = areas
+            .iter()
+            .enumerate()
+            .map(|(file, area)| {
+                area.map(|_| {
+                    let trace = self.dot_product.row_slice(file);
+                    let norm = trace.iter().map(|x| x * x).sum::<f64>().sqrt();
+                    let dot = trace.iter().zip(reference).map(|(x, y)| x * y).sum::<f64>();
+                    let trace_cosine = if norm > 0.0 && reference_norm > 0.0 {
+                        (dot / (norm * reference_norm)).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let spectral_angle = self.spectral_angle[(file, best.rt)].clamp(0.0, 1.0);
+                    let proximity = (1.0
+                        - shifts[file].unsigned_abs() as f64 / self.dot_product.cols as f64)
+                        .max(0.0);
+                    FileEvidence {
+                        transfer_candidate: false,
+                        spectral_angle,
+                        trace_cosine,
+                        rt_shift_bins: shifts[file] as i32,
+                        score: spectral_angle.powi(3) * trace_cosine * proximity,
+                    }
+                })
+            })
+            .collect();
+        Some((best, areas, evidence))
     }
 }
 

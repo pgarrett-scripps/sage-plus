@@ -27,6 +27,14 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
             },
             intensities: vec![Some(42.0), None],
             ms2_confirmed: vec![true, false],
+            ms2_confirmed_strict: vec![false, false],
+            file_evidence: vec![
+                Some(sage_core::lfq::FileEvidence {
+                    score: 0.75,
+                    ..Default::default()
+                }),
+                None,
+            ],
         },
     );
 
@@ -41,7 +49,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -56,6 +64,12 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     assert_eq!(values(&rows[0])["ms2_confirmed"], &Field::Bool(true));
     assert_eq!(values(&rows[1])["intensity"], &Field::Null);
     assert_eq!(values(&rows[1])["ms2_confirmed"], &Field::Bool(false));
+    assert_eq!(
+        values(&rows[0])["ms2_confirmed_strict"],
+        &Field::Bool(false)
+    );
+    assert_eq!(values(&rows[0])["file_score"], &Field::Double(0.75));
+    assert_eq!(values(&rows[1])["file_score"], &Field::Null);
     Ok(())
 }
 
@@ -81,6 +95,8 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         },
         intensities: vec![Some(42.0)],
         ms2_confirmed: vec![true],
+        ms2_confirmed_strict: vec![true],
+        file_evidence: vec![Some(Default::default())],
     };
     let second_peak = || QuantifiedPeak {
         peak: sage_core::lfq::Peak {
@@ -91,6 +107,8 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         },
         intensities: vec![Some(21.0)],
         ms2_confirmed: vec![false],
+        ms2_confirmed_strict: vec![false],
+        file_evidence: vec![Some(Default::default())],
     };
 
     let mut forward = HashMap::new();
@@ -137,6 +155,8 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
                 peak: sage_core::lfq::Peak::default(),
                 intensities: vec![Some(intensity)],
                 ms2_confirmed: vec![true],
+                ms2_confirmed_strict: vec![true],
+                file_evidence: vec![Some(Default::default())],
             },
         );
     }
@@ -149,7 +169,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
     }));
     let rows = reader
         .get_row_iter(None)?
