@@ -402,3 +402,12 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
     and peptide q-values at most one percent. No direct MS2 is a subset of the
     complete control set, not an additional independent sample.],
 ) <tbl:si-control>
+
+#figure(
+  tbl("tbl.mass-offset"),
+  caption: [Mass offset cost, index size, and accepted identifications on one
+    public HEK file. Search and wall seconds and peak resident memory are
+    medians of two measured searches; database and identification counts are
+    identical across those repeats. Offset PSMs count reported candidates of any
+    rank whose peptidoform carries an offset, including decoys.],
+) <tbl:si-mass-offset>

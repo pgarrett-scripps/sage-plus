@@ -16,6 +16,21 @@ The harness compares the current working tree with a pinned baseline. By default
 the `v0.1.0-beta.1` release. The candidate build includes uncommitted working-tree changes. Set
 `BASELINE_REF` when evaluating a different release or development boundary.
 
+## Mass offset evaluation
+
+`run_mass_offset.py` runs the mass offset matrix with recorded executable,
+configuration, input, and output identities, and `summarize_mass_offset.py`
+reduces it to the retained summary the chapter reads:
+
+```shell
+python3 benchmarks/run_mass_offset.py --root /data/sage-plus-scientific/mass-offset-20260919 \
+    --sage target/release/sage
+python3 benchmarks/summarize_mass_offset.py --root /data/sage-plus-scientific/mass-offset-20260919
+```
+
+Findings are in [MASS_OFFSET.md](MASS_OFFSET.md); retained evidence is under
+[`scientific-results/mass-offset-20260919/`](scientific-results/mass-offset-20260919/).
+
 ## Requirements
 
 - Linux with GNU `/usr/bin/time`

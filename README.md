@@ -25,6 +25,7 @@ agent-facing capabilities.
   and a lossless six-byte theoretical-fragment index.
 - Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
 - Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
+- Search-time mass offset modifications: one offset placed per peptide without expanding the fragment index, competing with ordinary candidates and localized like any other modification.
 - Modification-defined SILAC, dimethyl, and custom precursor channels on required static or optional variable modifications.
 - Channel-aware LFQ with exact-mass partner extraction, reference ratios, and label-aware FDR.
 - Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
@@ -43,6 +44,30 @@ agent-facing capabilities.
 - A root-bounded MCP server with persistent jobs and isolated search workers for configuration, estimation, safe execution, cancellation, monitoring, analysis, and result queries.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
+
+## Beta.4 mass offset search
+
+A variable modification can set `"search_mode": "mass_offset"` to be searched as a
+precursor and fragment offset instead of being expanded into the fragment index:
+
+```jsonc
+"variable_mods": {
+  "S": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+  "T": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+  "Y": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+  "M": [{"mass": 15.994915, "name": "Oxidation"}]
+}
+```
+
+Each spectrum is searched once per offset against a translated precursor window, with
+fragment lookups at both the unshifted and shifted masses, and every compatible placement
+competes as its own candidate. At most one offset is placed on a peptide and offsets are
+never combined with each other, so search cost grows linearly with the number configured
+while the index stays at its unmodified size. Placements become ordinary peptidoforms
+before FDR, quantification, localization, and site libraries, so an offset is never
+reported as precursor mass error. See [DOCS.md](DOCS.md#mass-offset-modifications) for
+behavior and limits and [the evaluation](benchmarks/MASS_OFFSET.md) for measured cost and
+agreement with database expansion.
 
 ## Beta.3 hardening
 

@@ -135,6 +135,38 @@
         "analysis/scripts/gen_fdrbench_validation_figure.py": "sha256:3b2490c085eed44fc31e77cb2095c6f8e8b37381057bb900c012796314774894"
       }
     },
+    "fig.mass-offset": {
+      "path": "figures/mass_offset.png",
+      "kind": "figure",
+      "desc": "Mass offset search cost, index size, memory, and error behavior.",
+      "hash": "sha256:261f75c75d099f2da0ef51b6332c41071acc1fc03f784e9b9371353271753d59",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_figure.py",
+        "at": "2026-09-19T23:07:45Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_mass_offset.py": "sha256:9174542054c5e5f9bb7a58a5c8ef297c505d6498652b30690023e9c87f77eae1",
+        "analysis/scripts/gen_mass_offset_figure.py": "sha256:52bc0bff778952afc828afc31e38f996145cb13405c2d2035a416d0a2d6b9f8f"
+      }
+    },
+    "fig.mass-offset-vector": {
+      "path": "figures/vector/mass_offset.svg",
+      "kind": "figure",
+      "desc": "Scalable companion to the mass offset figure.",
+      "hash": "sha256:9f570ff0d32ac48cf6590b72adfee7343d603f47dd3881e7f924b017ec00bf4a",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_figure.py",
+        "at": "2026-09-19T23:09:33Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_mass_offset.py": "sha256:9174542054c5e5f9bb7a58a5c8ef297c505d6498652b30690023e9c87f77eae1",
+        "analysis/scripts/gen_mass_offset_figure.py": "sha256:52bc0bff778952afc828afc31e38f996145cb13405c2d2035a416d0a2d6b9f8f"
+      }
+    },
     "fig.prefilter": {
       "path": "figures/exact_prefilter.png",
       "kind": "figure",
@@ -845,6 +877,21 @@
       "inputs": {
         "analysis/scripts/fdrbench_validation_results.csv": "sha256:5c3e67e07d7678331be9c26c1adb71eaea49ad13a1e48e344d1b16fa2cd7f079",
         "analysis/scripts/gen_fdrbench_validation_table.py": "sha256:535454b580db9380d8190a902abc9be93efdd7f24db46bf087502cc9c3e648ca"
+      }
+    },
+    "tbl.mass-offset": {
+      "path": "si/mass_offset_table.typ",
+      "kind": "table",
+      "desc": "Mass offset cost, index size, and accepted identifications.",
+      "hash": "sha256:c6936d986673f0eb9e4977c0b0f9bc166be9667c0d428928f271654a8f403434",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_table.py",
+        "at": "2026-09-19T23:07:26Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_mass_offset.py": "sha256:9174542054c5e5f9bb7a58a5c8ef297c505d6498652b30690023e9c87f77eae1",
+        "analysis/scripts/gen_mass_offset_table.py": "sha256:12bce8e3e0b1f3d6e6851709c11e9749fc7cccf51701550e8aeaabd31ca165ca"
       }
     },
     "tbl.matched-fdp": {

@@ -9,13 +9,30 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.4] - 2026-09-19
+
 ### Added
 - Variable modifications accept `search_mode`. `"mass_offset"` searches a modification as
   a search-time precursor and fragment offset instead of expanding it into the fragment
   index, placing at most one copy per peptide. Offset candidates compete with ordinary
   candidates in scoring, FDR, quantification, localization, and PTM site libraries, and
-  are restricted to library sites under `site_mode: "library"`. Run summaries report
+  are restricted to library sites under `site_mode: "library"`. Offsets are never combined
+  with each other, so cost grows linearly with the number configured while index size and
+  database-build memory follow the indexed modifications only. Run summaries report
   `mass_offset_definitions`, `mass_offset_psms`, and `mass_offset_peptidoforms`.
+- Label-free quantification records strict MS2 confirmation and experimental per-file
+  signal diagnostics (spectral angle, trace cosine, retention-time shift, and an
+  uncalibrated ranking score) in new `lfq.v3` and `lfq.v4` Parquet schemas.
+- `benchmarks/run_mass_offset.py` runs the mass offset evaluation matrix with recorded
+  executable, configuration, input, and output identities.
+
+### Changed
+- Peptide and protein confidence fall back to count-based target-decoy q-values when the
+  kernel density model is underdetermined or returns a non-finite posterior. Precursor
+  q-values use the same tie-preserving counter.
+- PTM localization reports no confidence for a modification whose best target arrangements
+  score equally, instead of accepting one arbitrary site. Those arrangements remain in the
+  false-localization-rate competition population.
 
 ## [v0.1.0-beta.3] - 2026-09-10
 

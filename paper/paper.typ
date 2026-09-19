@@ -184,6 +184,19 @@ reports, and target-decoy localization q-values. The restricted synthetic
 phosphorylation experiment and its acceptance criteria are described in
 @sec:si-ptm.
 
+A modification may also be searched as a mass offset instead of being expanded
+into the fragment index. Each spectrum is then searched once per configured
+offset, against a precursor window translated by the offset mass. Fragment
+lookups use both the unshifted and the shifted mass, so a candidate can be
+retrieved from fragments that do and do not carry the modification. Every
+compatible placement is scored as its own candidate, exactly as the enumerated
+peptidoforms of an expanded database would be. A placement then becomes an
+ordinary peptidoform before confidence assessment, quantification, and
+localization. One offset is placed per peptide, and offsets are never combined
+with each other, so the searched hypothesis count stays linear in the number
+configured rather than combinatorial. @sec:offsets measures the cost this trades
+against index size.
+
 = Evaluation design <sec:methods>
 
 == Software and comparison design
@@ -680,6 +693,59 @@ numerators and denominators used for the control calculation.
 Neither engine completed the broad modification stress workload under the
 selected limits, so it provides no completed-search performance estimate.
 Failure modes and resource limits are recorded in @sec:si-resource.
+
+= Mass offset search <sec:offsets>
+
+Searching a modification as a mass offset moves work from the fragment index to
+the search itself. Oxidation searched as an offset reduced the indexed peptides
+from #s("offset.peptides.indexed") to #s("offset.peptides.offset"), a reduction
+of #s("offset.peptides.reduction") percent. Median peak resident memory fell
+from #s("offset.indexed.rss") to #s("offset.offsets.1.rss") MiB, a reduction of
+#s("offset.rss.reduction") percent. The median search stage grew from
+#s("offset.indexed.search") to #s("offset.offsets.1.search") seconds, a factor
+of #s("offset.search.multiplier"). Offsets are never combined with each other,
+so adding more of them extends the searched hypothesis count linearly. Two
+offsets took #s("offset.offsets.2.search") seconds and three took
+#s("offset.offsets.3.search"), an average of #s("offset.search.per_offset")
+added seconds each, while the index stayed at its unmodified size and peak
+memory at #s("offset.offsets.3.rss") MiB (@fig:mass-offset). Accepted PSMs rose
+slightly across these configurations, from #s("offset.indexed.psms") to
+#s("offset.offsets.3.psms"), because an offset is tested against every indexed
+peptidoform. Exact values appear in @tbl:si-mass-offset.
+
+#figure(
+  fig("fig.mass-offset", width: 100%),
+  caption: [Mass offset cost and behavior on one public HEK file. A: median
+    search stage against the number of configured offsets, which are never
+    combined with each other. B and C: indexed peptides and median peak resident
+    memory, which follow the indexed modifications only. Bars are shaded by the
+    number of offsets, with the indexed baseline in gray. D: inconsistent
+    localized site events on the synthetic phosphopeptide libraries, and
+    combined entrapment false-discovery proportion at one percent peptide
+    q-value on the paired oxidation search. The two measures in D come from
+    different experiments and share only their percent scale.],
+) <fig:mass-offset>
+
+The accepted identifications were nearly identical to the expanded search.
+Across #s("offset.agreement.spectra") synthetic phosphopeptide spectra shared by
+both modes, #s("offset.agreement.same") received the same accepted peptidoform
+and #s("offset.agreement.differing") differed, that one case being an exact
+score tie between isobaric candidates. Localization against the
+synthesis-defined sites was also equivalent: #s("offset.sites.indexed.correct")
+consistent site events for the expanded search and
+#s("offset.sites.offset.correct") for the offset search, with inconsistent
+fractions of #s("offset.sites.indexed.error") and #s("offset.sites.offset.error")
+percent. These site counts include identification error and are not
+arrangement-level false-localization rates.
+
+Peptide-level entrapment error was comparable between the two modes. At a
+nominal one percent peptide q-value, the combined false-discovery proportion was
+#s("offset.entrapment.indexed.fdp") for the expanded search over
+#s("offset.entrapment.indexed.peptides") accepted paired peptides, against
+#s("offset.entrapment.offset.fdp") for the offset search over
+#s("offset.entrapment.offset.peptides"). Both are percentages of accepted
+peptides. Their difference is a few entrapment peptides at this scale, so these
+searches show no degradation rather than equivalent error rates.
 
 = Discussion <sec:discussion>
 
