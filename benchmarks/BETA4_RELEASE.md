@@ -46,5 +46,8 @@ Local evidence, recorded September 19, 2026:
 
 - [ ] Hosted required checks on the release preparation pull request.
 - [ ] A manual `Release Sage Plus` workflow run and archive inspection.
-- [ ] Dependency audit refresh for this release.
+- [x] Dependency audit refresh for this release. The hosted audit on the release
+      pull request flagged RUSTSEC-2026-0285 in `rustls` 0.23.37; the lockfile now
+      pins 0.23.45. The `instant` and `paste` unmaintained warnings carried over
+      from beta.3 remain.
 - [ ] Decide whether the Cascade upgrade lands alongside this tag.

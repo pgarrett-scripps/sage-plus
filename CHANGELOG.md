@@ -26,6 +26,10 @@ entries are retained below for provenance.
 - `benchmarks/run_mass_offset.py` runs the mass offset evaluation matrix with recorded
   executable, configuration, input, and output identities.
 
+### Security
+- Update `rustls` to 0.23.45, resolving RUSTSEC-2026-0285, where TLS 1.3 handshake
+  messages were accepted across encryption level boundaries.
+
 ### Changed
 - Peptide and protein confidence fall back to count-based target-decoy q-values when the
   kernel density model is underdetermined or returns a non-finite posterior. Precursor
