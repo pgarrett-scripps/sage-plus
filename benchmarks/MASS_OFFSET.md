@@ -143,6 +143,55 @@ modifications only, while search time grows with the offsets and their tested pl
 (roughly 2.1x search time for the first offset, 3.6x for two, on this data). Identifications
 increase slightly because offsets are applied to every indexed peptidoform.
 
+## Where offset search spends its time
+
+PXD001468, full human FASTA, phospho on S/T/Y as one offset. Search stage only, measured
+by selectively disabling parts of an instrumented build:
+
+| Configuration | Search stage |
+| --- | --- |
+| No offset (ordinary search) | 4.4 s |
+| One offset, complete | 10.7 s |
+| One offset, shifted fragment lookups disabled | 7.9 s |
+| One offset, one placement scored per candidate | 9.1 s |
+
+Of the 6.3 s an offset adds, roughly 3.2 s is the second precursor window, 2.7 s is the
+shifted fragment lookups, and 1.5 s is scoring the extra placements. Retrieval dominates,
+and both retrieval costs are inherent: an offset hypothesis is an additional indexed
+search of a translated window, with fragment lookups at two masses.
+
+Cost is linear in the number of configured offsets, which are never combined with each
+other (search stage, two runs each):
+
+| Offsets | Search stage | Index peptides | PSMs @1% |
+| --- | --- | --- | --- |
+| 0 (oxidation indexed) | 4.6 / 5.0 s | 7,633,197 | 20342 |
+| 1 (oxidation) | 10.0 / 9.4 s | 5,602,995 | 20385 |
+| 2 (+ phospho) | 17.8 / 16.3 s | 5,602,995 | 20448 |
+| 3 (+ deamidation) | 24.0 / 24.2 s | 5,602,995 | 20704 |
+
+Index size and peak memory do not change as offsets are added.
+
+`isotope_errors` multiplies the searched windows and is the largest configuration-level
+lever: narrowing `[-1, 3]` to `[0, 1]` halved the offset search stage (9.1 s to 4.5 s) at
+the cost of about 5% of identifications on this data.
+
+### Optimization attempted and rejected
+
+Precomputing, per offset, a bitmap of indexed peptides that have any compatible site, and
+skipping the rest during retrieval, produced no speedup (9.7 s against 9.4 s for
+oxidation; 10.5 s for an offset on tryptophan, where most peptides have no site at all).
+The retrieval cost is in the fragment index lookups themselves, not in the per-fragment
+accumulation the bitmap skips, and excluding those peptides also perturbs
+`scored_candidates` and the Poisson feature. The change was reverted.
+
+The remaining code-level option is decomposing placement scoring so each theoretical ion
+is matched once per cleavage rather than once per placement. That targets the 1.5 s
+component, roughly 7% of wall time here, and interacts with neutral-loss variant
+generation, so it was not pursued. A larger win would require batching fragment lookups
+across precursor windows, which is a change to Sage's core retrieval that would also
+affect ordinary searches.
+
 ## Other search paths
 
 - **Determinism**: repeating an offset search reproduces byte-identical results.
