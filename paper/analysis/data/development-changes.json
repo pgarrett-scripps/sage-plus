@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed development inventory for the evaluated release pair. Motivations and expected consequences express design intent, not measured effects.",
+  "description": "Reviewed development inventory and evaluation coverage for the evaluated release pair. Historical motivations and expected consequences retain design intent.",
   "sources": {
     "upstream": {
       "commit": "df9219951cc9a54cf4cd55d76541af24b687bd3d",
@@ -174,49 +174,56 @@
       "upstream": "mzML, MGF, and Bruker readers",
       "plus": "mzMLb, Thermo RAW, peptide and cleavage inputs",
       "motivation": "Broader data and digestion workflows",
-      "expected": "Fewer conversions, new input contracts"
+      "expected": "Fewer conversions, new input contracts",
+      "evaluation": "Native readers not evaluated."
     },
     {
       "area": "Output",
       "upstream": "TSV and optional Parquet, wide LFQ tables",
       "plus": "Typed Parquet, coordinates, long LFQ with nulls",
       "motivation": "Explicit identities and missing signals",
-      "expected": "Typed joins, revised consuming scripts"
+      "expected": "Typed joins, revised consuming scripts",
+      "evaluation": "Normalized PSM and LFQ results compared."
     },
     {
       "area": "Storage",
       "upstream": "Peptide arrays and dense modification vectors",
       "plus": "Protein spans and compact search structures",
       "motivation": "Reduce allocation and record size",
-      "expected": "Lower memory with possible access costs"
+      "expected": "Lower memory with possible access costs",
+      "evaluation": "Memory, runtime, and worker scaling."
     },
     {
       "area": "Execution",
       "upstream": "CLI searching and file batching",
       "plus": "Memory guards, API, events, isolated jobs",
       "motivation": "Bound resources and expose run state",
-      "expected": "Early rejection, inspectable failures"
+      "expected": "Early rejection, inspectable failures",
+      "evaluation": "Resource failures. Automation not evaluated."
     },
     {
       "area": "Modeling",
       "upstream": "Isotope processing and linear prediction",
-      "plus": "Scored envelopes, mass alignment, richer models",
+      "plus": "Isotope scoring, mass alignment, richer models",
       "motivation": "Represent candidate evidence more fully",
-      "expected": "Changed scores and acceptance thresholds"
+      "expected": "Changed scores and acceptance thresholds",
+      "evaluation": "PSM agreement and entrapment. No ablations."
     },
     {
       "area": "PTM",
       "upstream": "Mass-based static and variable modifications",
       "plus": "PTM names, caps, neutral losses, site reports",
       "motivation": "Explicit hypotheses and site ambiguity",
-      "expected": "Bounded variants, new confidence endpoints"
+      "expected": "Bounded variants, new confidence endpoints",
+      "evaluation": "Peptide acceptance only (supplement)."
     },
     {
       "area": "Quantification",
       "upstream": "LFQ tracing and reporter-ion quantification",
       "plus": "Label channels, tracing controls, library export",
       "motivation": "Extend quantification and result reuse",
-      "expected": "More options, distinct validation needs"
+      "expected": "More options, distinct validation needs",
+      "evaluation": "LFQ ratios, coverage, and species-absent control."
     }
   ]
 }
