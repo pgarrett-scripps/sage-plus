@@ -256,7 +256,7 @@ impl Runner {
         let q_values = sage_core::ptm::target_decoy_q_values(&evidence);
         for ((feature_idx, mod_idx), q_value) in localization_indices.into_iter().zip(q_values) {
             features[feature_idx].localization.as_mut().unwrap().mods[mod_idx]
-                .localization_q_value = q_value;
+                .set_competition_q_value(q_value);
         }
 
         log::info!(

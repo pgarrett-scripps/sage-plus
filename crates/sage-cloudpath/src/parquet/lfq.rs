@@ -2,15 +2,15 @@ use super::*;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/lfq.v1.parquet.schema"
+        "../../../../schemas/lfq.v3.parquet.schema"
     ))
 }
 
 fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/lfq.v2.parquet.schema")
+        include_str!("../../../../schemas/lfq.v4.parquet.schema")
     } else {
-        include_str!("../../../../schemas/lfq.v1.parquet.schema")
+        include_str!("../../../../schemas/lfq.v3.parquet.schema")
     })
 }
 
@@ -22,11 +22,15 @@ pub fn serialize_lfq<H: BuildHasher>(
     if let Some((_, quantified)) = areas.iter().find(|(_, quantified)| {
         quantified.intensities.len() != filenames.len()
             || quantified.ms2_confirmed.len() != filenames.len()
+            || quantified.ms2_confirmed_strict.len() != filenames.len()
+            || quantified.file_evidence.len() != filenames.len()
     }) {
         return Err(ParquetError::General(format!(
-            "LFQ row has {} intensities and {} MS2 evidence values for {} files",
+            "LFQ row has {} intensities, {} MS2 values, {} strict MS2 values and {} file evidence values for {} files",
             quantified.intensities.len(),
             quantified.ms2_confirmed.len(),
+            quantified.ms2_confirmed_strict.len(),
+            quantified.file_evidence.len(),
             filenames.len()
         )));
     }
@@ -64,8 +68,16 @@ pub fn serialize_lfq<H: BuildHasher>(
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("lfq".into())),
             KeyValue::new(
+                "sage.lfq.q_value_scope".into(),
+                Some("precursor_across_files".into()),
+            ),
+            KeyValue::new(
+                "sage.lfq.file_score_status".into(),
+                Some("experimental_uncalibrated".into()),
+            ),
+            KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "2" } else { "1" }.into()),
+                Some(if has_labels { "4" } else { "3" }.into()),
             ),
         ]))
         .build();
@@ -319,6 +331,65 @@ pub fn serialize_lfq<H: BuildHasher>(
         col.close()?;
     }
 
+    if let Some(mut col) = rg.next_column()? {
+        let values = rows
+            .iter()
+            .flat_map(|(_, peak)| peak.ms2_confirmed_strict.iter().copied())
+            .collect::<Vec<_>>();
+        col.typed::<BoolType>().write_batch(&values, None, None)?;
+        col.close()?;
+    }
+    for field in 0..3 {
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut levels = Vec::new();
+            for evidence in rows.iter().flat_map(|(_, peak)| &peak.file_evidence) {
+                if let Some(evidence) = evidence {
+                    values.push(match field {
+                        0 => evidence.score,
+                        1 => evidence.spectral_angle,
+                        _ => evidence.trace_cosine,
+                    });
+                    levels.push(1);
+                } else {
+                    levels.push(0);
+                }
+            }
+            col.typed::<DoubleType>()
+                .write_batch(&values, Some(&levels), None)?;
+            col.close()?;
+        }
+    }
+    if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::new();
+        let mut levels = Vec::new();
+        for evidence in rows.iter().flat_map(|(_, peak)| &peak.file_evidence) {
+            if let Some(evidence) = evidence {
+                values.push(evidence.rt_shift_bins);
+                levels.push(1);
+            } else {
+                levels.push(0);
+            }
+        }
+        col.typed::<Int32Type>()
+            .write_batch(&values, Some(&levels), None)?;
+        col.close()?;
+    }
+    if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::new();
+        let mut levels = Vec::new();
+        for evidence in rows.iter().flat_map(|(_, peak)| &peak.file_evidence) {
+            if let Some(evidence) = evidence {
+                values.push(evidence.transfer_candidate);
+                levels.push(1);
+            } else {
+                levels.push(0);
+            }
+        }
+        col.typed::<BoolType>()
+            .write_batch(&values, Some(&levels), None)?;
+        col.close()?;
+    }
     rg.close()?;
     writer.into_inner()
 }

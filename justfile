@@ -22,6 +22,12 @@ bench config:
 bench-local:
     python3 benchmarks/benchmark.py all --config benchmarks/configs/local-standard.json --baseline-ref "{{baseline_ref}}" --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
 
+# Compare upstream Sage and Sage Plus across three matched search workloads.
+bench-sage-comparison:
+    python3 benchmarks/benchmark.py search --config benchmarks/configs/local-standard.json --baseline-ref v0.15.0-beta.2 --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py search --config benchmarks/configs/upstream-compatible-modifications.json --baseline-ref v0.15.0-beta.2 --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py search --config benchmarks/configs/upstream-compatible-broad-ptm.json --baseline-ref v0.15.0-beta.2 --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+
 # Exercise SILAC, LFQ, and spectral-library export on the local real dataset.
 bench-local-feature:
     python3 benchmarks/benchmark.py feature --config data/silac-k6r6/config.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
@@ -29,6 +35,16 @@ bench-local-feature:
 # Compare a bounded variable-modification search on the local real dataset.
 bench-local-mods:
     python3 benchmarks/benchmark.py search --config benchmarks/configs/local-modifications.json --baseline-ref "{{baseline_ref}}" --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+
+# Compare conventional, exhaustive, and site-specific PTM searches on the local HEK workload.
+bench-ptm-library:
+    python3 benchmarks/generate_ptm_library_benchmark.py
+    python3 benchmarks/benchmark.py feature --config benchmarks/configs/local-standard.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py feature --config benchmarks/.work/ptm-library/config-exhaustive.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py feature --config benchmarks/.work/ptm-library/config-0.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py feature --config benchmarks/.work/ptm-library/config-50000.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py feature --config benchmarks/.work/ptm-library/config-200000.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
+    python3 benchmarks/benchmark.py feature --config benchmarks/.work/ptm-library/config-500000.json --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
 
 # Measure scored deisotoping with inferred and supplied fragment charges.
 bench-charge:
