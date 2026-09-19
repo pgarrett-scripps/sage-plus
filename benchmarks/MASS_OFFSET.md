@@ -107,13 +107,56 @@ Cascade needs two source changes, kept in
    for beta.3 regardless of this feature; the pinned revision `f9d29b4` still expects
    beta.2 and schema 8.
 
+## FDR calibration (entrapment)
+
+Paired 1:1 target/entrapment peptide reference
+(`benchmarks/results/fdrbench-validation/seeds/20260902/paired.fasta`, FDRBench-generated),
+searched against PXD001468 HEK293 DDA with oxidation as the tested modification and
+N-terminal acetyl indexed in both arms. Peptide-level, non-decoy, best representative per
+sequence; every identified peptide was present in the pairing file.
+
+| Mode | Nominal q | Targets | Entrapments | Combined FDP | Lower-bound FDP |
+| --- | --- | --- | --- | --- | --- |
+| database | 0.01 | 1087 | 6 | 0.0110 | 0.0055 |
+| mass offset | 0.01 | 1112 | 8 | 0.0143 | 0.0071 |
+| database | 0.05 | 1176 | 47 | 0.0769 | 0.0384 |
+| mass offset | 0.05 | 1180 | 46 | 0.0750 | 0.0375 |
+
+Offset search tracks the database search at both thresholds. The 1% difference is two
+entrapment peptides out of roughly 1100, which is within counting noise at this scale, so
+these runs show no degradation rather than establishing equivalence. The 5% behavior
+(both arms above nominal under the combined convention) is a property of this reference
+and dataset, not of offset search.
+
+## Performance at realistic scale
+
+PXD001468 HEK293 DDA, full reviewed human FASTA, one 241 MB file, 20k PSMs at 1%:
+
+| Configuration | Indexed peptides | Index build | Search | Peak RSS | PSMs @1% | Peptides @1% |
+| --- | --- | --- | --- | --- | --- | --- |
+| Oxidation indexed | 7,633,197 | 10.6 s | 4.4 s | 3.62 GB | 20342 | 11244 |
+| Oxidation as offset | 5,602,995 | 8.0 s | 9.2 s | 2.69 GB | 20385 | 11252 |
+| Oxidation + phospho as offsets | 5,602,995 | 8.9 s | 15.7 s | 2.69 GB | 20448 | 11321 |
+
+The trade is explicit: index size, build time, and memory follow the indexed
+modifications only, while search time grows with the offsets and their tested placements
+(roughly 2.1x search time for the first offset, 3.6x for two, on this data). Identifications
+increase slightly because offsets are applied to every indexed peptidoform.
+
+## Other search paths
+
+- **Determinism**: repeating an offset search reproduces byte-identical results.
+- **Chimeric search**: completes with offsets and reports rank-2 PSMs (2328 PSMs, 57
+  rank-2, against 2307 / 54 for the database arm on HEK).
+- **Wide-window search**: completes with offsets (3324 PSMs on HEK).
+
 ## Not established here
 
-- FDR calibration under offset search was not measured with entrapment. Decoy placement
-  is symmetric by construction (decoys receive offsets on the same rules, and library
-  placements are mirrored onto reversed sequences), and rank-1 decoy counts are
-  comparable between modes (806 vs 799 on HEK), but an entrapment arm in
-  `benchmarks/run_scientific.py` remains the way to establish calibration.
+- The entrapment arm above accepts about 1100 peptides, so it detects gross
+  miscalibration only. A larger entrapment reference, or several spectrum files, would be
+  needed to resolve differences of a few tenths of a percent.
+- Offsets have not been evaluated with TMT, SILAC channels (they are rejected with
+  channel-aware labels by design), or DIA beyond the wide-window smoke test above.
 - Labile modifications that leave the fragment entirely are out of scope; offsets assume
   the modification is retained, aside from configured neutral losses.
 - Combinations of offsets, or two copies of one offset, on a single peptide are not
