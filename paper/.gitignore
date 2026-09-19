@@ -58,6 +58,10 @@ __pycache__/
 analysis/data/*
 !analysis/data/matched-fdp.json
 !analysis/data/concurrency-feasibility.json
+!analysis/data/development-changes.json
+!analysis/data/report-extension/
+analysis/data/report-extension/*
+!analysis/data/report-extension/*.json
 analysis/results/
 analysis/.venv/
 

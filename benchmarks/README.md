@@ -1,5 +1,11 @@
 # Sage Plus benchmark pipeline
 
+The [development and benchmark report](../paper/README.md) brings together the
+released-software comparison, analytical diagnostics, limitations, and source
+provenance. A [readable PDF](../paper/report.pdf) is included. It is independent
+Sage Plus project documentation with explicit upstream attribution.
+
+
 This directory contains a small repeatable benchmark harness for Sage Plus. It is intended for
 development checks and README-sized performance summaries. It is not a scientific validation
 suite.
