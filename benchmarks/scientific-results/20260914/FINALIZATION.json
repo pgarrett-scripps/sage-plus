@@ -1,0 +1,17 @@
+{
+  "artifacts": {
+    "/data/sage-plus-scientific/20260914/SCIENTIFIC_REPORT.md": "97d47ce2fd0c74c29fdcaf0b5e6abaa67e83ce15eb980523221ad59e360802a9",
+    "/data/sage-plus-scientific/20260914/benchmark-tests.log": "91c0e3560e1e1cf74eed503b56547f4de576577cc2e7d2c5f32ef21a32b86d5d",
+    "/data/sage-plus-scientific/20260914/evidence-audit.json": "5a3df746da4217a1b37bf92e573bc9fb19e55a5d97480a25b03e106bb52d948c",
+    "/data/sage-plus-scientific/20260914/figures/figures.json": "db7dec76584b69d110bdee7302fd9bf77442e9a3b62b6b9ca5c3d241e0e0e4fe",
+    "/data/sage-plus-scientific/20260914/pilot-summary.json": "c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379"
+  },
+  "benchmark_tests_passed": 34,
+  "completed_search_jobs": 123,
+  "evidence_hash_checks": 3862,
+  "external_deposition": false,
+  "failed_attempts_retained": 21,
+  "figures_visually_checked": 6,
+  "scientific_scope": "All five pilot tracks executed. Strong PTM and transfer-confidence claims remain unsupported. This is not production calibration certification.",
+  "status": "pilot_complete"
+}

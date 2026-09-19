@@ -1,0 +1,42 @@
+{
+  "artifacts": {
+    "REPORT.md": "03e6abe4475baa4b3bec89e3067d240afabe8a25b3379ee87c4a4e9589e32b66",
+    "benchmark-tests.log": "9c508022c2db53e3d9d9c6ec3f023c1934148501fd6d6fa0960d8c5a9cb7b835",
+    "clippy.log": "dca82c1ecc185be0f53ed39594ce2ddcd10a48458b4b694a7a7a246b36e9f3a1",
+    "evaluation.json": "db58054d1fd2f1ed9882dc67f848cbeb4db29f9d70968e054e5e3e24470ba370",
+    "integrity.json": "60f3cf4c558779a43ebbcecde7c604853fbc5772d397bedc909fb928e681b569",
+    "pilot-integrity.json": "5a3df746da4217a1b37bf92e573bc9fb19e55a5d97480a25b03e106bb52d948c",
+    "tests-ptm-ties.log": "70b5b2a99992f3acd8dccae14af53526ba3e975d47bc565f10e38b92eb9e7d27"
+  },
+  "build_environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": "16",
+    "CARGO_PROFILE_RELEASE_DEBUG": "0",
+    "CARGO_PROFILE_RELEASE_LTO": "off"
+  },
+  "candidate_initial_sha256": "c6fe59dc2ea6ac24df0c83428fb337f7064033c9c81e6b83a583a6be51efdea7",
+  "candidate_ptm_ties_sha256": "04059bbe4df67742ab4d23f51fb990b45a654d2164cf9d7150841d5d9b4c53f7",
+  "git_head": "575a25224a05e6af783ba690ba2686d263e7c0b0",
+  "source_files": {
+    "source-final/benchmarks/SCIENTIFIC_HARDENING.md": "bbda307002902aebfe92a5612ea87a49de72d026e86877360f35156a05034a82",
+    "source-final/benchmarks/analyze_hardening.py": "2217ec45d0ba0e26c3d424d4a931f4402e688cfc23c9736fe9a3ffbf5b0e3b2b",
+    "source-final/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
+    "source-final/benchmarks/provenance.py": "242ec3b291dab253825ff9ddb9f1319981a5db639cabba14ea1ed465513a6a92",
+    "source-final/benchmarks/run_scientific.py": "e4e3ecf6dc4a1dc5ab795972c6f4b3b1c7d58cbeea067b62bdcdd0610aed3d51",
+    "source-final/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "source-final/benchmarks/tests/test_hardening.py": "d234afa19a8221377034e286274a471b882f6623663dd404606aba2d71b7d152",
+    "source-final/crates/sage-cli/src/runner/postprocess.rs": "c1c65efc9dfd9864775a5e77f4c074b92572f9b056c955ebf48642c752d60110",
+    "source-final/crates/sage-cloudpath/src/parquet/lfq.rs": "ed1f383a986e392c6d109a2539138e6aeb3a920a0148bb3ce9bfe456a97de0f6",
+    "source-final/crates/sage-cloudpath/tests/unit/parquet.rs": "f4dcc8812059d6eb48f9e0e41f19c2ed40d2ffbb1eadd3fe65e6c3e52c51d265",
+    "source-final/crates/sage/src/fdr.rs": "606e177fb22d560c2cc09cf12228d790ebbc8133d20a0b97949712edbd918b93",
+    "source-final/crates/sage/src/lfq.rs": "afbf9ece25103d4e91a9344023e9b7b380e8cd5ea2430a1a627adbd44ae8413e",
+    "source-final/crates/sage/src/ptm.rs": "2e96b32c9c1f57a0b881191e70a3985dd7ef87e69826d2a2ed5fbef6c664e00b",
+    "source-final/crates/sage/tests/unit/fdr.rs": "b7538eb69acf7e7ef590ce65d0d898c77c7e9e97281b73a2e8825e9ccf9e6520",
+    "source-final/crates/sage/tests/unit/lfq.rs": "8087c70f2909d8a117c229412ea100f64e5ff3e5d2be64c0781a71b214bf61be",
+    "source-final/crates/sage/tests/unit/ptm.rs": "742d746c6e6aacf024d315008ae8a0940e772d37e712c49a9690e549a539071e",
+    "source-final/schemas/README.md": "517b58ed2b07a37e0fe55dec72b8621305e9306f3e9bb957d5f5c32d5c045770",
+    "source-final/schemas/lfq.v3.parquet.schema": "fe27aef642790f9208a7431cba99d52e25636fd57146b855f700c6b7bb0b5ab1",
+    "source-final/schemas/lfq.v4.parquet.schema": "e1a92d9ac62166f409048f4fa646f1549197dae324de07e7d88a92233d0499d2",
+    "source-final/schemas/scores.v1.md": "88411b395e264ee4c9cf3a89cd3443bcb77266c341cb1521e6058848468666ad"
+  }
+}

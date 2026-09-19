@@ -1,0 +1,54 @@
+{
+  "generator_sha256": "bbaa04b8801b8f8ab1786099d8ef052c1218654609c2597463b53d7d1a81c47b",
+  "outputs": {
+    "entrapment-pilot.png": {
+      "caption": "Lines show means and points show individual selected file and seed results. The conservative end of the exact-score tie interval is used. These are pilot FDP estimates, not production calibration certificates.",
+      "sha256": "a724b5fa85abb453ea6516c53ae33a84d61d338f4077b28fb2c9e8e1da6db818"
+    },
+    "entrapment-pilot.svg": {
+      "caption": "Lines show means and points show individual selected file and seed results. The conservative end of the exact-score tie interval is used. These are pilot FDP estimates, not production calibration certificates.",
+      "sha256": "8cb602c9fa4abc29e9869e3dd19bcca1ab093456425d23866bb831658b575928"
+    },
+    "ptm-pilot.png": {
+      "caption": "Synthesis consistency at 1% reported PSM and localization thresholds. The restricted synthetic searches trigger heuristic rescoring and yield peptide q-values of one. Oracle coverage uses the known truth and is not a biological annotation benchmark. Empty denominators are omitted.",
+      "sha256": "1a6955b1c1e3cb2620954e9d2aa9602037b728ed6438e1a0ccb8c82923ea16ca"
+    },
+    "ptm-pilot.svg": {
+      "caption": "Synthesis consistency at 1% reported PSM and localization thresholds. The restricted synthetic searches trigger heuristic rescoring and yield peptide q-values of one. Oracle coverage uses the known truth and is not a biological annotation benchmark. Empty denominators are omitted.",
+      "sha256": "ae0e981bcbaba3e51aa273a1985bc9f4ba9a9219fe35d1d1ffa7879df229bf46"
+    },
+    "public-timing-pilot.png": {
+      "caption": "One selected file from each public study. Bars are medians and error bars span three measured technical repetitions, after one warmup per engine. Engine order alternates. Acquisition, conversion and primary search matrices finish before this timing experiment. The mixed reference excludes seven proteins with undefined residues identically for both engines.",
+      "sha256": "7d95dd55cc535a294ec28a5c2d3893909b3a57e37e503428ee42d630b71d658a"
+    },
+    "public-timing-pilot.svg": {
+      "caption": "One selected file from each public study. Bars are medians and error bars span three measured technical repetitions, after one warmup per engine. Engine order alternates. Acquisition, conversion and primary search matrices finish before this timing experiment. The mixed reference excludes seven proteins with undefined residues identically for both engines.",
+      "sha256": "77e3beaee79b57f9a7b5b2b0d909fa69fa86e38dff6269a4c7e12c976eae115a"
+    },
+    "quantification-diagnostic.png": {
+      "caption": "Post hoc diagnostic added after the empty MBR-off discovery set at the primary LFQ threshold. Positive intensities require direct MS2 evidence passing both 1% PSM and peptide thresholds. LFQ q-values are deliberately not filtered. Cross-species I/L ambiguity is excluded. These are not accepted 1% LFQ discoveries or evidence of calibrated LFQ confidence.",
+      "sha256": "da92ce609df1c16dacc36d8ce9663c9cf76e33caf3e465b0b76fe2ae4d91fdaa"
+    },
+    "quantification-diagnostic.svg": {
+      "caption": "Post hoc diagnostic added after the empty MBR-off discovery set at the primary LFQ threshold. Positive intensities require direct MS2 evidence passing both 1% PSM and peptide thresholds. LFQ q-values are deliberately not filtered. Cross-species I/L ambiguity is excluded. These are not accepted 1% LFQ discoveries or evidence of calibrated LFQ confidence.",
+      "sha256": "7987f8075c589c6f55b45ada67783faa480783ebb30c3963819a70e267d45b74"
+    },
+    "quantification-pilot.png": {
+      "caption": "Ratios use matched Alpha and Beta preparations, unambiguous species assignments and no imputation. Missingness uses the observed feature union. Pure-human absence-control counts are reported separately in the summary.",
+      "sha256": "42c810f60b2774a739759b7ffb8694b35c7f8a6c81390982291165da77daebf4"
+    },
+    "quantification-pilot.svg": {
+      "caption": "Ratios use matched Alpha and Beta preparations, unambiguous species assignments and no imputation. Missingness uses the observed feature union. Pure-human absence-control counts are reported separately in the summary.",
+      "sha256": "a2e10505857ff298e15177d54adaa8b153a414897a68e3c127858598b11b77f3"
+    },
+    "scaling-pilot.png": {
+      "caption": "Public HEK input and complete reviewed human reference. Points are medians and bars span measured timing repetitions. Warmups and failed jobs are excluded from these curves and retained in the result matrix.",
+      "sha256": "2cc27868ec3ea33e8fe00a60b38b933644eb7fe782d15b0f0d81c747032d05a1"
+    },
+    "scaling-pilot.svg": {
+      "caption": "Public HEK input and complete reviewed human reference. Points are medians and bars span measured timing repetitions. Warmups and failed jobs are excluded from these curves and retained in the result matrix.",
+      "sha256": "02259ae4f90a012aec0525768b719196938463da213d6b8f3c8699533ec0e87d"
+    }
+  },
+  "summary_sha256": "c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379"
+}
