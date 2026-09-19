@@ -6,19 +6,21 @@ use crate::fasta::Fasta;
 use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
 use crate::modification::{
-    validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity, SiteMode,
-    StaticModEntry, VarModEntry,
+    validate_mods, validate_var_mods, ModificationDefinition, ModificationSpecificity, SearchMode,
+    SiteMode, StaticModEntry, VarModEntry,
 };
 use crate::peptide::{
     AppliedModification, LabelModificationCache, LibrarySite, ModificationKind, ModificationLookup,
-    ModificationPlan, Peptide, VariableRule, INLINE_PROTEINS,
+    ModificationPlan, Peptide, Site, VariableRule, INLINE_PROTEINS,
 };
 use crate::ptm_library::PtmLibrary;
+use crate::scoring::Feature;
 use crate::sequence::PeptideSequence;
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -322,15 +324,19 @@ impl Parameters {
             .variable_mods
             .iter()
             .flat_map(|(specificity, entries)| {
-                entries.iter().enumerate().map(|(entry_order, entry)| {
-                    (
-                        *specificity,
-                        entry_order,
-                        Arc::new(entry.definition()),
-                        entry.max_count(),
-                        entry.site_mode(),
-                    )
-                })
+                entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, entry)| entry.search_mode() == SearchMode::Database)
+                    .map(|(entry_order, entry)| {
+                        (
+                            *specificity,
+                            entry_order,
+                            Arc::new(entry.definition()),
+                            entry.max_count(),
+                            entry.site_mode(),
+                        )
+                    })
             })
             .collect::<Vec<_>>();
         mods.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -360,11 +366,91 @@ impl Parameters {
             .collect()
     }
 
+    /// Group search-time mass offsets by chemical definition. Each group keeps
+    /// every configured specificity so placement and localization agree.
+    pub fn mass_offset_modifications(&self) -> Vec<MassOffset> {
+        let mut groups: Vec<MassOffset> = Vec::new();
+        let mut entries = self
+            .variable_mods
+            .iter()
+            .flat_map(|(specificity, entries)| {
+                entries
+                    .iter()
+                    .filter(|entry| entry.search_mode() == SearchMode::MassOffset)
+                    .map(move |entry| (*specificity, entry.definition(), entry.site_mode()))
+            })
+            .collect::<Vec<_>>();
+        entries.sort_unstable_by(|left, right| {
+            left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0))
+        });
+        for (specificity, definition, site_mode) in entries {
+            match groups
+                .iter_mut()
+                .find(|group| *group.definition == definition)
+            {
+                Some(group) => {
+                    if !group.specificities.contains(&specificity) {
+                        group.specificities.push(specificity);
+                    }
+                }
+                None => groups.push(MassOffset {
+                    definition: Arc::new(definition),
+                    specificities: vec![specificity],
+                    site_mode,
+                }),
+            }
+        }
+        groups
+    }
+
     pub fn validate_ptm_library(&self, library: &PtmLibrary) -> Result<(), String> {
         if self.max_total_variable_mods < self.max_variable_mods {
             return Err(
                 "database.max_total_variable_mods must be at least database.max_variable_mods"
                     .into(),
+            );
+        }
+
+        let mut offset_names: HashMap<Arc<str>, (ModificationDefinition, SiteMode)> =
+            HashMap::new();
+        let mut offset_count = 0usize;
+        for entries in self.variable_mods.values() {
+            for entry in entries
+                .iter()
+                .filter(|entry| entry.search_mode() == SearchMode::MassOffset)
+            {
+                offset_count += 1;
+                let definition = entry.definition();
+                if entry.site_mode() != SiteMode::Exhaustive && definition.name.is_none() {
+                    return Err(
+                        "mass_offset modifications using `library` or `both` require `name`".into(),
+                    );
+                }
+                if let Some(name) = definition.name.clone() {
+                    match offset_names.get(&name) {
+                        Some((existing, site_mode))
+                            if *existing != definition || *site_mode != entry.site_mode() =>
+                        {
+                            return Err(format!(
+                                "variable modification `{name}` has inconsistent definitions across specificities"
+                            ));
+                        }
+                        Some(_) => {}
+                        None => {
+                            offset_names.insert(name, (definition, entry.site_mode()));
+                        }
+                    }
+                }
+            }
+        }
+        if self.mass_offset_modifications().len() > MAX_MASS_OFFSETS {
+            return Err(format!(
+                "at most {MAX_MASS_OFFSETS} distinct mass_offset modifications are supported"
+            ));
+        }
+        if offset_count > 0 && self.label_channels().len() > 1 {
+            return Err(
+                "mass_offset modifications cannot be combined with channel-aware labels".into(),
             );
         }
 
@@ -387,6 +473,11 @@ impl Parameters {
                 );
             }
             if let Some(name) = rule.modification.name.as_deref() {
+                if offset_names.contains_key(name) {
+                    return Err(format!(
+                        "variable modification `{name}` cannot use both `database` and `mass_offset` search modes"
+                    ));
+                }
                 if let Some((definition, max_count, site_mode)) = definitions.get(name) {
                     if *definition != rule.modification.as_ref()
                         || *max_count != rule.max_count
@@ -403,6 +494,15 @@ impl Parameters {
         }
 
         for site in library.iter() {
+            if let Some((_, site_mode)) = offset_names.get(site.modification.as_ref()) {
+                if *site_mode == SiteMode::Exhaustive {
+                    return Err(format!(
+                        "PTM library modification `{}` must use site_mode `library` or `both`",
+                        site.modification
+                    ));
+                }
+                continue;
+            }
             match definitions.get(site.modification.as_ref()) {
                 None => {
                     return Err(format!(
@@ -1315,8 +1415,17 @@ impl Parameters {
 
         let label_reference = self.label_reference();
         let label_channels = self.label_channels();
+        let mass_offsets = self.mass_offset_modifications();
+        let offset_library = mass_offsets
+            .iter()
+            .any(|offset| offset.site_mode == SiteMode::Library)
+            .then(|| self.loaded_ptm_library.clone())
+            .flatten();
         IndexedDatabase {
             peptides: target_decoys,
+            offset_peptides: Vec::new(),
+            mass_offsets,
+            offset_library,
             fragments: compressed_fragments,
             min_value,
             ion_kinds: self.ion_kinds,
@@ -1372,6 +1481,46 @@ fn preferred_channel(
         (Some(channel), None) | (None, Some(channel)) => Some(Arc::from(channel)),
         (None, None) => None,
     }
+}
+
+/// Upper bound on distinct search-time offsets; candidate hypotheses encode
+/// the offset in one byte, with zero reserved for "no offset".
+pub const MAX_MASS_OFFSETS: usize = u8::MAX as usize - 1;
+
+/// A modification tested at search time instead of being expanded into the
+/// fragment index. At most one offset copy is placed on a peptide.
+#[derive(Clone, Debug)]
+pub struct MassOffset {
+    pub definition: Arc<ModificationDefinition>,
+    /// Every configured site rule for this definition.
+    pub specificities: Vec<ModificationSpecificity>,
+    pub site_mode: SiteMode,
+}
+
+impl MassOffset {
+    pub fn mass(&self) -> f32 {
+        self.definition.mass
+    }
+
+    /// Mass difference of the first generated fragment form containing the
+    /// modification. This mirrors the preliminary fragment index, which keeps
+    /// the first variant of every ion group.
+    pub fn fragment_shift(&self) -> f32 {
+        match self.definition.neutral_loss_mode {
+            crate::modification::NeutralLossMode::Required => {
+                self.definition.mass - self.definition.neutral_losses[0]
+            }
+            crate::modification::NeutralLossMode::Optional => self.definition.mass,
+        }
+    }
+}
+
+/// The offset placement selected for a candidate. `offset` indexes
+/// [`IndexedDatabase::mass_offsets`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MassOffsetAssignment {
+    pub offset: u16,
+    pub site: Site,
 }
 
 #[derive(Hash, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize)]
@@ -1661,7 +1810,15 @@ fn preliminary_fragment_masses<'a>(
 
 #[derive(Default)]
 pub struct IndexedDatabase {
+    /// Indexed peptides, sorted by monoisotopic mass.
     pub peptides: Vec<Peptide>,
+    /// Offset-placed peptidoforms reported by the search. They are addressed
+    /// by [`PeptideIx`] values following `peptides` and are not indexed.
+    pub offset_peptides: Vec<Peptide>,
+    /// Search-time mass offsets. Their masses are never part of the index.
+    pub mass_offsets: Vec<MassOffset>,
+    /// Site library restricting `library` mode offsets, when configured.
+    pub offset_library: Option<Arc<PtmLibrary>>,
     pub fragments: FragmentIndex,
     pub ion_kinds: Vec<Kind>,
     pub min_value: Vec<f32>,
@@ -1746,11 +1903,166 @@ impl IndexedDatabase {
     }
 }
 
+impl IndexedDatabase {
+    /// Candidate placements for one offset on an indexed peptide. Sites that
+    /// already carry a static or variable modification are excluded, matching
+    /// the database expansion and PTM localization rules.
+    pub fn mass_offset_sites(&self, peptide: &Peptide, offset: &MassOffset) -> Vec<Site> {
+        let mut sites = Vec::new();
+        for specificity in &offset.specificities {
+            peptide.compatible_sites(*specificity, &mut sites);
+        }
+        sites.retain(|site| match site {
+            Site::Nterm => peptide.nterm.is_none(),
+            Site::Cterm => peptide.cterm.is_none(),
+            Site::Sequence(index) => peptide.modification_at(*index as usize) == 0.0,
+        });
+        if offset.site_mode == SiteMode::Library {
+            let supported = self.library_offset_positions(peptide, offset);
+            let last = peptide.sequence.len().saturating_sub(1) as u32;
+            sites.retain(|site| {
+                let position = match site {
+                    Site::Nterm => 0,
+                    Site::Cterm => last,
+                    Site::Sequence(index) => *index,
+                };
+                supported.contains(&position)
+            });
+        }
+        sites.sort_unstable();
+        sites.dedup();
+        sites
+    }
+
+    /// Peptide-local positions supported by the site library. Decoys use the
+    /// mirrored target coordinates of their reversed sequence, so target and
+    /// decoy hypotheses receive the same number of library placements.
+    fn library_offset_positions(&self, peptide: &Peptide, offset: &MassOffset) -> Vec<u32> {
+        let (Some(library), Some(name)) = (&self.offset_library, offset.definition.name.as_deref())
+        else {
+            return Vec::new();
+        };
+        let length = peptide.sequence.len() as u32;
+        let last = length.saturating_sub(1);
+        let target_sequence = if peptide.decoy {
+            Cow::Owned(peptide.sequence.reversed_internal())
+        } else {
+            Cow::Borrowed(&peptide.sequence)
+        };
+        let mut positions = Vec::new();
+        for occurrence in peptide.protein_sites.iter() {
+            let Some(start) = occurrence.start else {
+                continue;
+            };
+            for site in library.sites_for(&occurrence.protein) {
+                if site.modification.as_ref() != name
+                    || !(start..start.saturating_add(length)).contains(&site.position)
+                {
+                    continue;
+                }
+                let position = site.position - start;
+                if target_sequence.get(position as usize) != Some(&site.residue) {
+                    continue;
+                }
+                positions.push(if peptide.decoy && (1..last).contains(&position) {
+                    last - position
+                } else {
+                    position
+                });
+            }
+        }
+        positions
+    }
+
+    /// Resolve the peptidoform scored for a feature, including an offset
+    /// placement that has not yet been materialized.
+    pub fn resolve_peptide(&self, feature: &Feature) -> Cow<'_, Peptide> {
+        match feature.mass_offset {
+            Some(assignment) if (feature.peptide_idx.0 as usize) < self.peptides.len() => {
+                Cow::Owned(
+                    self.peptides[feature.peptide_idx.0 as usize].with_mass_offset(
+                        assignment.site,
+                        &self.mass_offsets[assignment.offset as usize].definition,
+                    ),
+                )
+            }
+            _ => Cow::Borrowed(&self[feature.peptide_idx]),
+        }
+    }
+
+    /// Give every offset-placed PSM a stable peptide identity. Placements that
+    /// reproduce an indexed peptidoform reuse that peptide; other placements
+    /// are stored once in `offset_peptides`, so FDR, LFQ, and site reports see
+    /// ordinary peptides. Returns the number of materialized peptidoforms.
+    pub fn materialize_mass_offsets(&mut self, features: &mut [Feature]) -> usize {
+        let base = self.peptides.len();
+        let mut identities: HashMap<(String, bool), PeptideIx> = self
+            .offset_peptides
+            .iter()
+            .enumerate()
+            .map(|(index, peptide)| {
+                (
+                    (peptide.to_string(), peptide.decoy),
+                    PeptideIx((base + index) as u32),
+                )
+            })
+            .collect();
+        for feature in features.iter_mut() {
+            let Some(assignment) = feature.mass_offset else {
+                continue;
+            };
+            if feature.peptide_idx.0 as usize >= base {
+                continue;
+            }
+            let peptide = self.peptides[feature.peptide_idx.0 as usize].with_mass_offset(
+                assignment.site,
+                &self.mass_offsets[assignment.offset as usize].definition,
+            );
+            if let Some(indexed) = self.find_indexed(&peptide) {
+                feature.peptide_idx = indexed;
+                feature.mass_offset = None;
+                continue;
+            }
+            let key = (peptide.to_string(), peptide.decoy);
+            feature.peptide_idx = *identities.entry(key).or_insert_with(|| {
+                self.offset_peptides.push(peptide);
+                PeptideIx((base + self.offset_peptides.len() - 1) as u32)
+            });
+        }
+        self.offset_peptides.len()
+    }
+
+    fn find_indexed(&self, peptide: &Peptide) -> Option<PeptideIx> {
+        const MASS_EPSILON: f32 = 1e-3;
+        let start = self.peptides.partition_point(|candidate| {
+            candidate.monoisotopic < peptide.monoisotopic - MASS_EPSILON
+        });
+        self.peptides[start..]
+            .iter()
+            .take_while(|candidate| candidate.monoisotopic <= peptide.monoisotopic + MASS_EPSILON)
+            .position(|candidate| same_peptidoform(candidate, peptide))
+            .map(|offset| PeptideIx((start + offset) as u32))
+    }
+}
+
+/// Chemical peptidoform identity used to merge equivalent offset and indexed
+/// hypotheses.
+pub fn same_peptidoform(left: &Peptide, right: &Peptide) -> bool {
+    left.decoy == right.decoy
+        && left.sequence == right.sequence
+        && left.label_channel == right.label_channel
+        && chemical_modifications_eq(left, right)
+}
+
 impl std::ops::Index<PeptideIx> for IndexedDatabase {
     type Output = Peptide;
 
     fn index(&self, index: PeptideIx) -> &Self::Output {
-        &self.peptides[index.0 as usize]
+        let index = index.0 as usize;
+        match self.peptides.get(index) {
+            Some(peptide) => peptide,
+            None => &self.offset_peptides[index - self.peptides.len()],
+        }
     }
 }
 
@@ -1766,7 +2078,19 @@ pub struct IndexedQuery<'d> {
 impl IndexedQuery<'_> {
     /// Search for a specified `fragment_mz` within the database
     pub fn page_search(&self, mass: f32) -> impl Iterator<Item = Theoretical> + '_ {
+        self.page_search_shifted(mass, 0.0)
+    }
+
+    /// Search for indexed fragments at `mass - shift`. The tolerance window is
+    /// evaluated at the observed mass and then translated, so a shifted lookup
+    /// has the same width as matching the modified theoretical fragment.
+    pub fn page_search_shifted(
+        &self,
+        mass: f32,
+        shift: f32,
+    ) -> impl Iterator<Item = Theoretical> + '_ {
         let (fragment_lo, fragment_hi) = self.fragment_tol.bounds(mass);
+        let (fragment_lo, fragment_hi) = (fragment_lo - shift, fragment_hi - shift);
         let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
 
         // Locate the mass-prefix buckets that can contain matching fragments.

@@ -525,3 +525,399 @@ fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
         .fragment_ordinals
         .is_empty());
 }
+
+mod mass_offsets {
+    use super::*;
+    use crate::database::{MassOffsetAssignment, Parameters};
+    use crate::fasta::Fasta;
+    use crate::modification::{SearchMode, SiteMode, VarModEntry, VariableModification};
+    use crate::peptide::Site;
+    use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+
+    const PHOSPHO: f32 = 79.966_33;
+    const FASTA: &str = ">P1\nMAGSPEPTSIDEKLLSAYGNRWTTPEGSAR\n>P2\nGGSTVLAPEDKAAAAR\n";
+
+    fn phospho(search_mode: SearchMode, site_mode: SiteMode) -> Vec<VarModEntry> {
+        vec![VarModEntry::Detailed(VariableModification {
+            mass: PHOSPHO,
+            max_count: Some(1),
+            name: Some("Phospho".into()),
+            neutral_losses: Vec::new(),
+            neutral_loss_mode: NeutralLossMode::Optional,
+            site_mode,
+            search_mode,
+            channel_offsets: Default::default(),
+        })]
+    }
+
+    fn parameters(search_mode: SearchMode, site_mode: SiteMode) -> Parameters {
+        let mut variable_mods = HashMap::new();
+        for residue in ["S", "T", "Y"] {
+            variable_mods.insert(residue.to_string(), phospho(search_mode, site_mode));
+        }
+        Builder {
+            max_variable_mods: Some(1),
+            variable_mods: Some(variable_mods),
+            static_mods: Some(HashMap::from([(
+                "C".to_string(),
+                crate::modification::StaticModEntry::Mass(57.021_464),
+            )])),
+            peptide_min_mass: Some(300.0),
+            enzyme: Some(crate::database::EnzymeBuilder {
+                min_len: Some(5),
+                ..Default::default()
+            }),
+            ..Builder::default()
+        }
+        .make_parameters()
+    }
+
+    fn database(search_mode: SearchMode) -> IndexedDatabase {
+        let parameters = parameters(search_mode, SiteMode::Exhaustive);
+        let fasta = Fasta::parse(FASTA.into(), "rev_", true).unwrap();
+        parameters.clone().build(fasta)
+    }
+
+    fn spectrum(peptide: &Peptide) -> ProcessedSpectrum {
+        let mut masses = [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| IonSeries::new(peptide, kind))
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+        masses.sort_by(f32::total_cmp);
+        ProcessedSpectrum {
+            level: 2,
+            id: "offset".into(),
+            precursors: vec![Precursor {
+                mz: peptide.monoisotopic / 2.0 + PROTON,
+                charge: Some(2),
+                ..Precursor::default()
+            }],
+            intensities: vec![10.0; masses.len()],
+            charges: vec![1; masses.len()],
+            total_ion_current: 10.0 * masses.len() as f32,
+            masses,
+            ..ProcessedSpectrum::default()
+        }
+    }
+
+    fn scorer(database: &IndexedDatabase, chimera: bool) -> Scorer<'_> {
+        Scorer {
+            db: database,
+            precursor_tol: Tolerance::Ppm(-10.0, 10.0),
+            fragment_tol: Tolerance::Ppm(-10.0, 10.0),
+            min_matched_peaks: 4,
+            min_isotope_err: -1,
+            max_isotope_err: 2,
+            min_precursor_charge: 2,
+            max_precursor_charge: 3,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera,
+            report_psms: 2,
+            wide_window: false,
+            annotate_matches: false,
+            mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+            score_type: ScoreType::SageHyperScore,
+        }
+    }
+
+    /// The target peptidoform from the expanded database, phosphorylated at
+    /// the second S/T/Y candidate (PEPTS*IDEK).
+    fn expanded_target(database: &IndexedDatabase) -> Peptide {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "MAGSPEPTS[Phospho]IDEK")
+            .expect("expanded database contains the phosphopeptide")
+            .clone()
+    }
+
+    #[test]
+    fn offset_modifications_are_not_indexed() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let unmodified = parameters(SearchMode::Database, SiteMode::Exhaustive);
+        let mut plain = unmodified.clone();
+        plain.variable_mods.clear();
+        let plain = plain.build(Fasta::parse(FASTA.into(), "rev_", true).unwrap());
+
+        assert_eq!(offset.peptides.len(), plain.peptides.len());
+        assert_eq!(offset.fragments.len(), plain.fragments.len());
+        assert!(expanded.peptides.len() > offset.peptides.len());
+        assert_eq!(offset.mass_offsets.len(), 1);
+        assert_eq!(offset.mass_offsets[0].specificities.len(), 3);
+        // Localization still knows the offset site rules.
+        assert_eq!(offset.potential_mods, expanded.potential_mods);
+    }
+
+    #[test]
+    fn offset_search_matches_expanded_search() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+
+        let expanded_hits = scorer(&expanded, false).score(&query);
+        let mut offset_hits = scorer(&offset, false).score(&query);
+        assert_eq!(
+            expanded[expanded_hits[0].peptide_idx].to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+        let resolved = offset.resolve_peptide(&offset_hits[0]).into_owned();
+        assert_eq!(resolved.to_string(), "MAGSPEPTS[Phospho]IDEK");
+        assert_eq!(
+            offset_hits[0].mass_offset,
+            Some(MassOffsetAssignment {
+                offset: 0,
+                site: Site::Sequence(8),
+            })
+        );
+        assert_eq!(offset_hits[0].hyperscore, expanded_hits[0].hyperscore);
+        assert_eq!(offset_hits[0].matched_peaks, expanded_hits[0].matched_peaks);
+        assert_eq!(offset_hits[0].calcmass, expanded_hits[0].calcmass);
+        // Tied placement isomers compete exactly as in the expanded database.
+        assert_eq!(offset_hits[0].delta_next, expanded_hits[0].delta_next);
+        let decoy = expanded
+            .peptides
+            .iter()
+            .find(|peptide| peptide.decoy && peptide.modification_at(4) != 0.0)
+            .unwrap();
+        let base = offset
+            .peptides
+            .iter()
+            .find(|peptide| peptide.decoy && peptide.sequence == decoy.sequence)
+            .unwrap();
+        let placed = base.with_mass_offset(Site::Sequence(4), &offset.mass_offsets[0].definition);
+        assert_eq!(placed.monoisotopic.to_bits(), decoy.monoisotopic.to_bits());
+        // The assigned offset is not residual precursor error.
+        assert!(offset_hits[0].delta_mass.abs() < 1.0);
+        assert!((offset_hits[0].expmass - offset_hits[0].calcmass).abs() < 0.01);
+
+        // Materialized peptides behave like indexed ones for downstream steps.
+        let mut offset = offset;
+        offset.materialize_mass_offsets(&mut offset_hits);
+        let peptide = &offset[offset_hits[0].peptide_idx];
+        assert!(offset_hits[0].peptide_idx.0 as usize >= offset.peptides.len());
+        assert_eq!(peptide.to_string(), "MAGSPEPTS[Phospho]IDEK");
+        assert_eq!(peptide.proteins.as_slice(), &[Arc::<str>::from("P1")]);
+        assert_eq!(peptide.protein_sites[0].start, Some(0));
+        assert_eq!(peptide.monoisotopic, resolved.monoisotopic);
+        let materialized = offset.offset_peptides.len();
+        offset.materialize_mass_offsets(&mut offset_hits);
+        assert_eq!(offset.offset_peptides.len(), materialized);
+    }
+
+    #[test]
+    fn offset_placements_are_localized_to_the_same_site() {
+        let expanded = database(SearchMode::Database);
+        let mut offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let mut hits = scorer(&offset, false).score(&query);
+        offset.materialize_mass_offsets(&mut hits);
+
+        let localize = |database: &IndexedDatabase, feature: &Feature| {
+            crate::ptm::localize(
+                &database[feature.peptide_idx],
+                &query,
+                &database.ion_kinds,
+                &database.potential_mods,
+                Tolerance::Ppm(-10.0, 10.0),
+                Some(1),
+                feature.charge,
+            )
+        };
+        let expanded_hits = scorer(&expanded, false).score(&query);
+        let expected = localize(&expanded, &expanded_hits[0]);
+        let observed = localize(&offset, &hits[0]);
+        assert_eq!(observed, expected);
+        assert_eq!(observed.mods[0].best_sites[0].position, 8);
+        assert_eq!(observed.mods[0].label.as_deref(), Some("Phospho"));
+    }
+
+    #[test]
+    fn unshifted_peptides_still_compete_with_offsets() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "GGSTVLAPEDK")
+            .unwrap()
+            .clone();
+        let hits = scorer(&offset, false).score(&spectrum(&target));
+        assert_eq!(hits[0].mass_offset, None);
+        assert_eq!(offset[hits[0].peptide_idx].to_string(), "GGSTVLAPEDK");
+    }
+
+    #[test]
+    fn exact_prefilter_keeps_offset_base_peptides() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let keep = AtomicBitSet::new(offset.peptides.len());
+        scorer(&offset, false).exact_prefilter(&query, &keep);
+        let base = offset
+            .peptides
+            .iter()
+            .position(|peptide| peptide.to_string() == "MAGSPEPTSIDEK")
+            .unwrap();
+        assert!(keep.contains(base));
+
+        let survivors = offset
+            .peptides
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| keep.contains(*index))
+            .map(|(_, peptide)| peptide.clone())
+            .collect::<Vec<_>>();
+        assert!(survivors.len() < offset.peptides.len());
+        let reduced =
+            parameters(SearchMode::MassOffset, SiteMode::Exhaustive).build_from_peptides(survivors);
+        let full = scorer(&offset, false).score(&query);
+        let filtered = scorer(&reduced, false).score(&query);
+        assert_eq!(
+            offset.resolve_peptide(&full[0]).to_string(),
+            reduced.resolve_peptide(&filtered[0]).to_string()
+        );
+        assert_eq!(full[0].hyperscore, filtered[0].hyperscore);
+        assert_eq!(full[0].matched_peaks, filtered[0].matched_peaks);
+    }
+
+    #[test]
+    fn shifted_fragment_lookups_retrieve_offset_candidates() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let base = offset
+            .peptides
+            .iter()
+            .position(|peptide| peptide.to_string() == "MAGSPEPTSIDEK")
+            .unwrap();
+        let unshifted = [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| IonSeries::new(&offset.peptides[base], kind))
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+        // Keep only fragments that carry the modification.
+        let mut query = spectrum(&target);
+        let retained = query
+            .masses
+            .iter()
+            .map(|mass| !unshifted.iter().any(|base| (base - mass).abs() < 0.01))
+            .collect::<Vec<_>>();
+        let mut keep_flags = retained.iter();
+        query.masses.retain(|_| *keep_flags.next().unwrap());
+        query.intensities.truncate(query.masses.len());
+        query.charges.truncate(query.masses.len());
+        assert!(query.masses.len() >= 4);
+
+        let keep = AtomicBitSet::new(offset.peptides.len());
+        scorer(&offset, false).exact_prefilter(&query, &keep);
+        assert!(keep.contains(base));
+        let hits = scorer(&offset, false).score(&query);
+        assert_eq!(
+            offset.resolve_peptide(&hits[0]).to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+    }
+
+    #[test]
+    fn chimera_removes_peaks_of_the_placed_peptidoform() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let hits = scorer(&offset, true).score(&query);
+        assert_eq!(
+            offset.resolve_peptide(&hits[0]).to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+        // All peaks were explained by rank one, so nothing remains to match.
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn occupied_sites_do_not_receive_offsets() {
+        let offset = database(SearchMode::MassOffset);
+        let peptide = Peptide::try_from(Digest {
+            sequence: "SCTK".into(),
+            ..Default::default()
+        })
+        .unwrap()
+        .with_mass_offset(Site::Sequence(0), &offset.mass_offsets[0].definition);
+        let sites = offset.mass_offset_sites(&peptide, &offset.mass_offsets[0]);
+        assert_eq!(sites, vec![Site::Sequence(2)]);
+    }
+
+    #[test]
+    fn library_offsets_use_library_sites_and_mirror_them_on_decoys() {
+        let mut parameters = parameters(SearchMode::MassOffset, SiteMode::Library);
+        parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![PtmLibrarySite {
+            protein: "P1".into(),
+            position: 8,
+            residue: b'S',
+            modification: "Phospho".into(),
+        }])));
+        let database = parameters.build(Fasta::parse(FASTA.into(), "rev_", true).unwrap());
+        let offset = &database.mass_offsets[0];
+        let target = database
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "MAGSPEPTSIDEK")
+            .unwrap();
+        assert_eq!(
+            database.mass_offset_sites(target, offset),
+            vec![Site::Sequence(8)]
+        );
+        let decoy = database
+            .peptides
+            .iter()
+            .find(|peptide| peptide.decoy && peptide.sequence == target.reverse().sequence)
+            .unwrap();
+        // Internal residues are mirrored: 12 - 8 = 4.
+        assert_eq!(decoy.sequence[4], b'S');
+        assert_eq!(
+            database.mass_offset_sites(decoy, offset),
+            vec![Site::Sequence(4)]
+        );
+        let other = database
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "GGSTVLAPEDK")
+            .unwrap();
+        assert!(database.mass_offset_sites(other, offset).is_empty());
+    }
+
+    #[test]
+    fn duplicate_offset_and_indexed_peptidoforms_are_reported_once() {
+        let mut parameters = parameters(SearchMode::Database, SiteMode::Exhaustive);
+        let mut unnamed = phospho(SearchMode::MassOffset, SiteMode::Exhaustive);
+        if let VarModEntry::Detailed(modification) = &mut unnamed[0] {
+            modification.name = None;
+        }
+        parameters
+            .variable_mods
+            .insert(ModificationSpecificity::Residue(b'S'), {
+                let mut entries =
+                    parameters.variable_mods[&ModificationSpecificity::Residue(b'S')].clone();
+                if let VarModEntry::Detailed(modification) = &mut entries[0] {
+                    modification.name = None;
+                }
+                entries.extend(unnamed);
+                entries
+            });
+        let database = parameters.build(Fasta::parse(FASTA.into(), "rev_", true).unwrap());
+        assert_eq!(database.mass_offsets.len(), 1);
+        let target = database
+            .peptides
+            .iter()
+            .find(|peptide| {
+                peptide.sequence.as_ref() == b"MAGSPEPTSIDEK" && peptide.modification_at(8) != 0.0
+            })
+            .unwrap()
+            .clone();
+        let hits = scorer(&database, false).score(&spectrum(&target));
+        assert_eq!(hits[0].mass_offset, None, "indexed form wins exact ties");
+        assert!(hits.len() < 2 || hits[1].hyperscore < hits[0].hyperscore);
+    }
+}

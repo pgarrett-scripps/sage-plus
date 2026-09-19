@@ -20,19 +20,8 @@ impl Runner {
         Ok(results.into_iter().collect())
     }
 
-    pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
-        self.run_with_summary(parallel)
-            .map(|(telemetry, _summary)| telemetry)
-    }
-
-    pub fn run_with_summary(
-        mut self,
-        parallel: usize,
-    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
-        anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
-        self.cancellation.check()?;
-        self.events.check()?;
-        let scorer = Scorer {
+    fn scorer(&self) -> Scorer<'_> {
+        Scorer {
             db: &self.database,
             precursor_tol: self.parameters.precursor_tol,
             fragment_tol: self.parameters.fragment_tol,
@@ -49,12 +38,43 @@ impl Runner {
             annotate_matches: false,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
-        };
+        }
+    }
 
-        //Collect all results into a single container
-        let mut outputs = self.batch_files(&scorer, parallel)?;
+    pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
+        self.run_with_summary(parallel)
+            .map(|(telemetry, _summary)| telemetry)
+    }
+
+    pub fn run_with_summary(
+        mut self,
+        parallel: usize,
+    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
+        anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
         self.cancellation.check()?;
         self.events.check()?;
+        //Collect all results into a single container
+        let mut outputs = self.batch_files(&self.scorer(), parallel)?;
+        self.cancellation.check()?;
+        self.events.check()?;
+
+        // Offset placements become ordinary peptide identities before any
+        // FDR, quantification, localization, or output step reads them.
+        let offset_psms = outputs
+            .features
+            .iter()
+            .filter(|feature| feature.mass_offset.is_some())
+            .count();
+        let offset_peptidoforms = self
+            .database
+            .materialize_mass_offsets(&mut outputs.features);
+        if !self.database.mass_offsets.is_empty() {
+            info!(
+                "mass offsets: {} candidate PSMs placed, {} distinct offset peptidoforms",
+                offset_psms, offset_peptidoforms
+            );
+        }
+        let scorer = self.scorer();
 
         // Establish provisional q-values from the search-only Poisson feature,
         // then use confident PSMs for mass-error alignment and property-model
@@ -510,6 +530,9 @@ impl Runner {
                     .loaded_ptm_library
                     .as_deref()
                     .map_or(0, |library| library.len()),
+                mass_offset_definitions: self.database.mass_offsets.len(),
+                mass_offset_psms: offset_psms,
+                mass_offset_peptidoforms: offset_peptidoforms,
                 label_channels: self.database.label_channels.len(),
                 labeled_peptides: self
                     .database

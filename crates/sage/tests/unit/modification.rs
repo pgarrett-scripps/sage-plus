@@ -30,6 +30,7 @@ fn var_mod_entry_bare_mass() {
 #[test]
 fn var_mod_entry_detailed_with_limit() {
     let entry = VarModEntry::Detailed(VariableModification {
+        search_mode: SearchMode::Database,
         mass: 15.9949,
         max_count: Some(1),
         name: None,
@@ -181,6 +182,7 @@ fn validate_var_mods_mixed() {
         vec![
             VarModEntry::Mass(15.9949),
             VarModEntry::Detailed(VariableModification {
+                search_mode: SearchMode::Database,
                 mass: 15.9949,
                 max_count: Some(1),
                 name: None,
@@ -194,6 +196,7 @@ fn validate_var_mods_mixed() {
     raw.insert(
         "C".to_string(),
         vec![VarModEntry::Detailed(VariableModification {
+            search_mode: SearchMode::Database,
             mass: 57.0215,
             max_count: Some(2),
             name: None,
@@ -227,4 +230,33 @@ fn validate_var_mods_invalid_residue_skipped() {
     // Z is invalid — only M should survive
     assert_eq!(result.len(), 1);
     assert!(result.contains_key(&ModificationSpecificity::Residue(b'M')));
+}
+
+#[test]
+fn search_mode_defaults_to_database_and_accepts_mass_offset() {
+    let entry: VarModEntry =
+        serde_json::from_str(r#"{"mass": 79.966331, "name": "Phospho"}"#).unwrap();
+    assert_eq!(entry.search_mode(), SearchMode::Database);
+    let entry: VarModEntry = serde_json::from_str(
+        r#"{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}"#,
+    )
+    .unwrap();
+    assert_eq!(entry.search_mode(), SearchMode::MassOffset);
+    assert_eq!(VarModEntry::Mass(15.99).search_mode(), SearchMode::Database);
+    let serialized = serde_json::to_value(&entry).unwrap();
+    assert_eq!(serialized["search_mode"], "mass_offset");
+}
+
+#[test]
+fn mass_offset_rejects_labels_and_zero_mass() {
+    for invalid in [
+        r#"{"mass": 0.0, "search_mode": "mass_offset"}"#,
+        r#"{"mass": 4.0, "search_mode": "mass_offset", "channel_offsets": {"L": 0.0, "H": 4.0}}"#,
+        r#"{"mass": 4.0, "search_mode": "unknown"}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<VarModEntry>(invalid).is_err(),
+            "{invalid}"
+        );
+    }
 }

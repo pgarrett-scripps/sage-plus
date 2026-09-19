@@ -487,6 +487,7 @@ before database construction and reports a configuration error when either is ex
 - **neutral_losses**: Optional list of positive neutral-loss masses. During full scoring, retained and loss forms from the same cleavage and charge are alternatives and contribute at most one match. When multiple applicable modified sites occur in one fragment, their allowed loss choices are combined and duplicate total losses are removed.
 - **neutral_loss_mode**: Either `"optional"` (default) or `"required"`. Optional mode generates the retained fragment plus configured losses. Required mode suppresses the retained form for fragments containing the modification and requires at least one configured neutral loss. Preliminary indexing retains one canonical form per cleavage to avoid favoring modifications with more configured fragment alternatives.
 - **site_mode**: Either `"exhaustive"` (default), `"library"`, or `"both"`. Library-backed modes require `name` and `max_count`. Entries with the same name across residue specificities are one logical modification and must have identical mass, limit, name, and neutral-loss settings.
+- **search_mode**: Either `"database"` (default) or `"mass_offset"`. See [Mass offset modifications](#mass-offset-modifications).
   - Example: Apply a variable modification of 15.9949 to methionine, 49.2022 to the C-terminus of the peptide, 42.0 to the N-terminus of the protein, and 111.0 to the C-terminus of the protein.
     ```jsonc
     "database": {
@@ -506,6 +507,58 @@ before database construction and reports a configuration error when either is ex
       }
     }
     ```
+
+#### Mass offset modifications
+
+A variable modification with `"search_mode": "mass_offset"` is not expanded into the
+fragment index. Instead every spectrum is searched once per configured offset: the
+precursor window is translated by the offset mass, and fragment lookups are performed
+both unshifted and shifted, so peptides are retrieved on evidence from fragments that do
+and do not carry the modification. Offset and ordinary candidates are then scored,
+ranked, and target-decoy competed together.
+
+```jsonc
+"database": {
+  "variable_mods": {
+    "S": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+    "T": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+    "Y": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
+    "M": [{"mass": 15.994915, "name": "Oxidation"}]  // still indexed
+  }
+}
+```
+
+Offset and indexed modifications combine: the example above searches oxidized and
+unmodified peptides from the index, each with and without a phospho offset.
+
+Behavior and limits:
+
+- **At most one offset copy is placed on a peptide**, independent of `max_count`,
+  `max_variable_mods`, `max_total_variable_mods`, and `max_combinations`, which continue
+  to govern indexed modifications only. Two copies of the same offset, or two different
+  offsets on one peptide, are not searched.
+- **Every compatible placement competes as its own candidate**, exactly as the expanded
+  peptidoforms of a database search would, so score differences and `delta_next` keep
+  their usual meaning. Site confidence still comes from PTM localization.
+- **Candidate sites** follow the configured specificities and exclude residues and
+  termini that already carry a static or variable modification.
+- **Sites are restricted by the PTM library** when `site_mode` is `"library"`, which
+  requires `name`. Decoy placements use the mirrored coordinates of the reversed
+  sequence, so targets and decoys receive equal numbers of library placements.
+- **The assigned offset is not reported as precursor mass error.** `calcmass`,
+  `delta_mass`, mass calibration, and rescoring all see the placed peptidoform.
+- **Reported identities are ordinary peptidoforms.** A placed peptide renders,
+  quantifies, and localizes exactly like the equivalent indexed peptide, and a placement
+  matching an indexed peptidoform reuses that peptide's identity.
+- Offsets are rejected with channel-aware labels (`channel_offsets`) and require a
+  non-zero mass. At most 254 distinct offsets may be configured.
+- Fragments retaining the modification are shifted by its mass, or by mass minus the
+  first configured neutral loss when `neutral_loss_mode` is `"required"`. Modifications
+  that are entirely lost during fragmentation are better modeled with `neutral_losses`.
+
+Index size and database-build memory scale with the indexed modifications only, while
+search work grows with the number of offsets and tested placements. Prefiltering applies
+the same offset-aware retrieval, so `prefilter` may be combined with offsets.
 
 #### Modification channels
 

@@ -9,6 +9,14 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Variable modifications accept `search_mode`. `"mass_offset"` searches a modification as
+  a search-time precursor and fragment offset instead of expanding it into the fragment
+  index, placing at most one copy per peptide. Offset candidates compete with ordinary
+  candidates in scoring, FDR, quantification, localization, and PTM site libraries, and
+  are restricted to library sites under `site_mode: "library"`. Run summaries report
+  `mass_offset_definitions`, `mass_offset_psms`, and `mass_offset_peptidoforms`.
+
 ## [v0.1.0-beta.3] - 2026-09-10
 
 ### Fixed
