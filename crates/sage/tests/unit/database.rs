@@ -867,3 +867,193 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
     .unwrap_err()
     .contains("site_mode"));
 }
+
+fn positional_parameters(keys: &[&str], mode: &str, static_mod: bool) -> Parameters {
+    let mut modifications = serde_json::Map::new();
+    for key in keys {
+        let definition = if static_mod {
+            serde_json::json!({"mass": 42.0106, "name": "Acetyl"})
+        } else {
+            serde_json::json!([{"mass": 42.0106, "name": "Acetyl", "max_count": 1, "search_mode": mode}])
+        };
+        modifications.insert((*key).into(), definition);
+    }
+    serde_json::from_value::<Builder>(serde_json::json!({
+        if static_mod { "static_mods" } else { "variable_mods" }: modifications,
+        "generate_decoys": false, "peptide_min_mass": 0, "peptide_max_mass": 100000,
+        "max_variable_mods": 3,
+        "enzyme": {"min_len": 1, "max_len": 50, "missed_cleavages": 0}
+    }))
+    .unwrap()
+    .make_parameters()
+}
+
+fn positional_digest(sequence: &str, position: Position) -> Digest {
+    Digest {
+        sequence: sequence.into(),
+        position,
+        protein: "H3".into(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn internal_placement_static_variable_and_model_counts() {
+    for sequence in ["K", "KK", "KKK", "KAKAK"] {
+        let internal = sequence
+            .bytes()
+            .enumerate()
+            .filter(|(i, residue)| *residue == b'K' && *i > 0 && *i < sequence.len() - 1)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>();
+        for static_mod in [false, true] {
+            let parameters = positional_parameters(&["~K"], "database", static_mod);
+            let digest = positional_digest(sequence, Position::Internal);
+            let estimate = parameters.variable_variant_count(&digest);
+            let variants = parameters.modify_digests(group_digests(vec![digest]));
+            assert_eq!(
+                variants.len(),
+                if static_mod { 1 } else { 1 + internal.len() }
+            );
+            assert!(estimate >= variants.len() as u64);
+            for peptide in &variants {
+                assert_eq!(peptide.modification_at(0), 0.0);
+                assert_eq!(peptide.modification_at(sequence.len() - 1), 0.0);
+                let count = peptide.applied_modifications().len();
+                assert_eq!(
+                    peptide.modification_count(ModificationSpecificity::Internal(b'K'), 42.0106),
+                    count
+                );
+                assert_eq!(
+                    crate::ml::retention_model::variable_mod_count(
+                        peptide,
+                        ModificationSpecificity::Internal(b'K'),
+                        42.0106
+                    ),
+                    count as f64
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn h3k9_combined_keys_share_limit_and_protein_terminal_exception() {
+    let parameters = positional_parameters(&["^K", "~K", "]K"], "database", false);
+    let variants = parameters.modify_digests(group_digests(vec![positional_digest(
+        "KSTGGKAPR",
+        Position::Internal,
+    )]));
+    assert_eq!(variants.len(), 3);
+    assert!(variants.iter().any(|p| p.modification_at(0) != 0.0));
+    assert!(variants.iter().any(|p| p.modification_at(5) != 0.0));
+    assert!(variants
+        .iter()
+        .all(|p| p.applied_modifications().len() <= 1));
+    for (position, count) in [
+        (Position::Internal, 2),
+        (Position::Cterm, 3),
+        (Position::Full, 3),
+    ] {
+        let variants =
+            parameters.modify_digests(group_digests(vec![positional_digest("KAK", position)]));
+        assert_eq!(variants.len(), count);
+    }
+    let overlap = positional_parameters(&["^K", "$K", "]K"], "database", false);
+    let variants =
+        overlap.modify_digests(group_digests(vec![positional_digest("K", Position::Full)]));
+    assert_eq!(variants.len(), 2);
+}
+
+#[test]
+fn positional_mass_offset_sites_match_indexed_variants() {
+    for keys in [&["~K"][..], &["^K", "~K", "]K"][..]] {
+        for position in [Position::Internal, Position::Cterm, Position::Full] {
+            for sequence in ["K", "KK", "KAKAK", "KSTGGKAPR"] {
+                let digest = positional_digest(sequence, position);
+                let indexed = positional_parameters(keys, "database", false);
+                let expected = indexed.modify_digests(group_digests(vec![digest.clone()]));
+                let offset = positional_parameters(keys, "mass_offset", false);
+                let peptides = offset.modify_digests(group_digests(vec![digest]));
+                let database = offset.build_from_peptides(peptides);
+                let base = &database.peptides[0];
+                let rule = &database.mass_offsets[0];
+                let mut actual = vec![base.clone()];
+                actual.extend(
+                    database
+                        .mass_offset_sites(base, rule)
+                        .into_iter()
+                        .map(|site| base.with_mass_offset(site, &rule.definition)),
+                );
+                let strings = |peptides: &[Peptide]| {
+                    peptides
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<std::collections::BTreeSet<_>>()
+                };
+                assert_eq!(
+                    strings(&actual),
+                    strings(&expected),
+                    "{sequence}, {position:?}, {keys:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn internal_library_sites_respect_position_in_both_search_modes() {
+    use crate::ptm_library::PtmLibrarySite;
+    for mode in ["database", "mass_offset"] {
+        let mut parameters = positional_parameters(&["~K"], mode, false);
+        if let VarModEntry::Detailed(entry) = &mut parameters
+            .variable_mods
+            .get_mut(&ModificationSpecificity::Internal(b'K'))
+            .unwrap()[0]
+        {
+            entry.site_mode = SiteMode::Library;
+        }
+        parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(
+            [0, 2, 4]
+                .map(|position| PtmLibrarySite {
+                    protein: "H3".into(),
+                    position,
+                    residue: b'K',
+                    modification: "Acetyl".into(),
+                })
+                .to_vec(),
+        )));
+        let mut digest = positional_digest("KAKAK", Position::Full);
+        digest.protein_start = Some(0);
+        let peptides = parameters.modify_digests(group_digests(vec![digest]));
+        if mode == "database" {
+            assert_eq!(peptides.len(), 2);
+            assert!(peptides
+                .iter()
+                .all(|p| p.modification_at(0) == 0.0 && p.modification_at(4) == 0.0));
+        } else {
+            let database = parameters.build_from_peptides(peptides);
+            assert_eq!(
+                database.mass_offset_sites(&database.peptides[0], &database.mass_offsets[0]),
+                vec![Site::Sequence(2)]
+            );
+        }
+    }
+}
+
+#[test]
+fn internal_label_channels_keep_terminal_residues_unmodified() {
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "static_mods":{"~K":{"mass":0.0,"name":"Label","channel_offsets":{"light":0.0,"heavy":8.0}}},
+        "generate_decoys":false,"peptide_min_mass":0
+    })).unwrap().make_parameters();
+    let variants = parameters.modify_digests(group_digests(vec![positional_digest(
+        "KAKAK",
+        Position::Full,
+    )]));
+    assert_eq!(variants.len(), 2);
+    assert!(variants
+        .iter()
+        .all(|p| p.modification_at(0) == 0.0 && p.modification_at(4) == 0.0));
+    assert!(variants.iter().any(|p| p.modification_at(2) == 8.0));
+}

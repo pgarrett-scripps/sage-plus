@@ -91,10 +91,14 @@ pub struct Builder {
     pub min_ion_index: Option<usize>,
     /// Static modifications to add to matching amino acids. Entries may use
     /// the existing bare mass or a structured modification object.
+    #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
+    #[schemars(with = "Option<HashMap<String, StaticModEntry>>")]
     pub static_mods: Option<HashMap<String, StaticModEntry>>,
     /// Variable modifications to add to matching amino acids.
     /// Each entry is either a bare mass (`15.9949`) or a structured object with
     /// mass, limits, display name, and optional neutral-loss behavior.
+    #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
+    #[schemars(with = "Option<HashMap<String, Vec<VarModEntry>>>")]
     pub variable_mods: Option<HashMap<String, Vec<VarModEntry>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
@@ -130,6 +134,19 @@ pub struct Builder {
 }
 
 impl Builder {
+    pub fn validate_modification_keys(&self) -> Result<(), String> {
+        for key in self
+            .static_mods
+            .iter()
+            .flat_map(|mods| mods.keys())
+            .chain(self.variable_mods.iter().flat_map(|mods| mods.keys()))
+        {
+            key.parse::<ModificationSpecificity>()
+                .map_err(|_| format!("invalid modification key `{key}`"))?;
+        }
+        Ok(())
+    }
+
     pub fn make_parameters(self) -> Parameters {
         if self.prefilter_low_memory.is_some() {
             log::warn!("database.prefilter_low_memory is deprecated and ignored");
@@ -813,6 +830,15 @@ impl Parameters {
                         }
                     }
                 }
+                (ModificationSpecificity::Internal(residue), _) => {
+                    for (index, candidate) in sequence.iter().enumerate() {
+                        if *candidate == residue
+                            && ModificationSpecificity::is_internal(index, sequence.len())
+                        {
+                            add_site(index);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -1338,9 +1364,8 @@ impl Parameters {
         log::trace!("generating fragments");
         let (compressed_fragments, min_value) = FragmentIndex::build(&self, &target_decoys);
 
-        // PTM localization works from the compact mass/specificity list below,
-        // while ambiguity and site reports resolve display labels by mass.
-        // Preserve names from Sage Plus's structured modification definitions.
+        // Preserve names for mass-only consumers. Localization also retains
+        // full definitions so equal-mass modifications remain distinct.
         for entries in self.variable_mods.values() {
             for entry in entries {
                 let definition = entry.definition();
@@ -1368,6 +1393,26 @@ impl Parameters {
                 }
             }
         }
+
+        let mut localization_mods = self
+            .variable_mods
+            .iter()
+            .flat_map(|(specificity, entries)| {
+                entries.iter().flat_map(move |entry| {
+                    let definition = entry.definition();
+                    let mut definitions = vec![(*specificity, Arc::new(definition.clone()))];
+                    definitions.extend(definition.channel_offsets.values().map(|offset| {
+                        (
+                            *specificity,
+                            Arc::new(definition.with_mass(definition.mass + offset)),
+                        )
+                    }));
+                    definitions
+                })
+            })
+            .collect::<Vec<_>>();
+        localization_mods.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        localization_mods.dedup();
 
         let mut potential_mods = self
             .variable_mods
@@ -1431,6 +1476,7 @@ impl Parameters {
             ion_kinds: self.ion_kinds,
             generate_decoys: self.generate_decoys,
             potential_mods,
+            localization_mods,
             model_mods,
             label_reference,
             label_channels,
@@ -1824,6 +1870,8 @@ pub struct IndexedDatabase {
     pub min_value: Vec<f32>,
     /// Variable modification candidates used by PTM localization.
     pub potential_mods: Vec<(ModificationSpecificity, f32)>,
+    /// Full definitions keep equal-mass modifications distinct during localization.
+    pub localization_mods: Vec<(ModificationSpecificity, Arc<ModificationDefinition>)>,
     /// Variable and precursor-label modifications used by property models.
     /// Label modifications are intentionally excluded from `potential_mods`
     /// because they are not PTM-localization candidates.

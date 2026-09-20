@@ -18,6 +18,12 @@ pub fn generate_config_schema() -> String {
         .expect("deprecated compatibility field is present")
         .insert("deprecated".into(), true.into());
 
+    for field in ["static_mods", "variable_mods"] {
+        value["properties"]["database"]["properties"][field]["propertyNames"] = serde_json::json!({
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
+        });
+    }
+
     let mut json =
         serde_json::to_string_pretty(&value).expect("configuration schema serializes as JSON");
     json.push('\n');

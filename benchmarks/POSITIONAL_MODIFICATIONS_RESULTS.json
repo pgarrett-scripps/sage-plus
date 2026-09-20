@@ -1,0 +1,86 @@
+{
+  "results": [
+    {
+      "candidate_sites": 2,
+      "case": "H3K9_first",
+      "indexed_peptides": 3,
+      "matched_peaks": 16,
+      "mode": "database",
+      "passed": true,
+      "peptide": "K[Acetyl]STGGKAPR",
+      "site": 1
+    },
+    {
+      "candidate_sites": 2,
+      "case": "H3K9_first",
+      "indexed_peptides": 1,
+      "matched_peaks": 16,
+      "mode": "mass_offset",
+      "passed": true,
+      "peptide": "K[Acetyl]STGGKAPR",
+      "site": 1
+    },
+    {
+      "candidate_sites": 1,
+      "case": "H3_internal",
+      "indexed_peptides": 2,
+      "matched_peaks": 16,
+      "mode": "database",
+      "passed": true,
+      "peptide": "KSTGGK[Acetyl]APR",
+      "site": 6
+    },
+    {
+      "candidate_sites": 1,
+      "case": "H3_internal",
+      "indexed_peptides": 1,
+      "matched_peaks": 16,
+      "mode": "mass_offset",
+      "passed": true,
+      "peptide": "KSTGGK[Acetyl]APR",
+      "site": 6
+    },
+    {
+      "candidate_sites": 2,
+      "case": "protein_C",
+      "indexed_peptides": 3,
+      "matched_peaks": 16,
+      "mode": "database",
+      "passed": true,
+      "peptide": "ASQKSTGGK[Acetyl]",
+      "site": 9
+    },
+    {
+      "candidate_sites": 2,
+      "case": "protein_C",
+      "indexed_peptides": 1,
+      "matched_peaks": 16,
+      "mode": "mass_offset",
+      "passed": true,
+      "peptide": "ASQKSTGGK[Acetyl]",
+      "site": 9
+    },
+    {
+      "candidate_sites": 2,
+      "case": "peptide_last",
+      "indexed_peptides": 3,
+      "matched_peaks": 16,
+      "mode": "database",
+      "passed": true,
+      "peptide": "ASQKSTGGK[Acetyl]",
+      "site": 9
+    },
+    {
+      "candidate_sites": 2,
+      "case": "peptide_last",
+      "indexed_peptides": 1,
+      "matched_peaks": 16,
+      "mode": "mass_offset",
+      "passed": true,
+      "peptide": "ASQKSTGGK[Acetyl]",
+      "site": 9
+    }
+  ],
+  "scope": "synthetic regression, not empirical calibration",
+  "version": "0.1.0-beta.5"
+}

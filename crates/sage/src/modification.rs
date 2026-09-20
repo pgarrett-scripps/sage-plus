@@ -563,6 +563,15 @@ pub enum ModificationSpecificity {
     ProteinN(Option<u8>),
     ProteinC(Option<u8>),
     Residue(u8),
+    /// Residue that is neither the first nor the last residue of the peptide
+    Internal(u8),
+}
+
+impl ModificationSpecificity {
+    /// Is `index` an internal position of a peptide with `len` residues?
+    pub fn is_internal(index: usize, len: usize) -> bool {
+        index > 0 && index < len.saturating_sub(1)
+    }
 }
 
 impl Display for ModificationSpecificity {
@@ -585,6 +594,10 @@ impl Display for ModificationSpecificity {
                 *r
             }
             ModificationSpecificity::Residue(r) => Some(*r),
+            ModificationSpecificity::Internal(r) => {
+                f.write_char('~')?;
+                Some(*r)
+            }
         };
 
         if let Some(r) = r {
@@ -615,93 +628,82 @@ impl FromStr for ModificationSpecificity {
     type Err = InvalidModification;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() > 2 {
+        let bytes = s.as_bytes();
+        if bytes.is_empty() {
+            return Err(InvalidModification::Empty);
+        }
+        if bytes.len() > 2 {
             return Err(InvalidModification::TooLong(s.into()));
         }
-        if let Some(rest) = s.strip_prefix('^') {
-            return Ok(ModificationSpecificity::PeptideN(
-                rest.chars().next().map(|ch| ch as u8),
-            ));
-        }
-        if let Some(rest) = s.strip_prefix('$') {
-            return Ok(ModificationSpecificity::PeptideC(
-                rest.chars().next().map(|ch| ch as u8),
-            ));
-        }
-        if let Some(rest) = s.strip_prefix('[') {
-            return Ok(ModificationSpecificity::ProteinN(
-                rest.chars().next().map(|ch| ch as u8),
-            ));
-        }
-        if let Some(rest) = s.strip_prefix(']') {
-            return Ok(ModificationSpecificity::ProteinC(
-                rest.chars().next().map(|ch| ch as u8),
-            ));
-        }
-        match s.chars().next() {
-            Some(c) => {
-                if VALID_AA.contains(&(c as u8)) {
-                    Ok(ModificationSpecificity::Residue(c as u8))
-                } else {
-                    Err(InvalidModification::InvalidResidue(c))
-                }
+        let (prefix, residue) = match bytes {
+            [b'^' | b'$' | b'[' | b']'] => (bytes[0], None),
+            [residue] if VALID_AA.contains(residue) => {
+                return Ok(Self::Residue(*residue));
             }
-            None => Err(InvalidModification::Empty),
+            [prefix @ (b'^' | b'$' | b'[' | b']' | b'~'), residue]
+                if VALID_AA.contains(residue) =>
+            {
+                (*prefix, Some(*residue))
+            }
+            _ => {
+                return Err(InvalidModification::InvalidResidue(
+                    s.chars().last().unwrap(),
+                ))
+            }
+        };
+        Ok(match prefix {
+            b'^' => Self::PeptideN(residue),
+            b'$' => Self::PeptideC(residue),
+            b'[' => Self::ProteinN(residue),
+            b']' => Self::ProteinC(residue),
+            b'~' => Self::Internal(residue.unwrap()),
+            _ => unreachable!(),
+        })
+    }
+}
+
+/// Deserialize modification maps without dropping malformed site rules.
+pub fn deserialize_mod_map<'de, D, T>(
+    deserializer: D,
+) -> Result<Option<HashMap<String, T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let input = Option::<HashMap<String, T>>::deserialize(deserializer)?;
+    if let Some(entries) = &input {
+        for key in entries.keys() {
+            key.parse::<ModificationSpecificity>().map_err(|_| {
+                de::Error::custom(format!("invalid modification key `{key}`. Use a residue, ^, $, [, ], or a residue prefixed by ^, $, [, ], ~"))
+            })?;
         }
     }
+    Ok(input)
 }
 
 pub fn validate_mods(
     input: Option<HashMap<String, StaticModEntry>>,
 ) -> HashMap<ModificationSpecificity, StaticModEntry> {
-    let mut output = HashMap::new();
-    if let Some(input) = input {
-        for (s, mass) in input {
-            match ModificationSpecificity::from_str(&s) {
-                Ok(m) => {
-                    output.insert(m, mass);
-                }
-                Err(InvalidModification::Empty) => {
-                    log::error!("Invalid modification string: empty")
-                }
-                Err(InvalidModification::InvalidResidue(c)) => {
-                    log::error!("Invalid modification string: unrecognized residue ({})", c)
-                }
-                Err(InvalidModification::TooLong(s)) => {
-                    log::error!("Invalid modification string: {} is too long", s)
-                }
-            }
-        }
-    }
-    output
+    parse_mod_map(input)
 }
 
 pub fn validate_var_mods(
     input: Option<HashMap<String, Vec<VarModEntry>>>,
 ) -> HashMap<ModificationSpecificity, Vec<VarModEntry>> {
-    let mut output = HashMap::new();
-    if let Some(input) = input {
-        for (s, entries) in input {
-            match ModificationSpecificity::from_str(&s) {
-                Ok(m) => {
-                    output.insert(m, entries);
-                }
-                Err(InvalidModification::Empty) => {
-                    log::error!("Skipping invalid modification string: empty")
-                }
-                Err(InvalidModification::InvalidResidue(c)) => {
-                    log::error!(
-                        "Skipping invalid modification string: unrecognized residue ({})",
-                        c
-                    )
-                }
-                Err(InvalidModification::TooLong(s)) => {
-                    log::error!("Skipping invalid modification string: {} is too long", s)
-                }
-            }
-        }
-    }
-    output
+    parse_mod_map(input)
+}
+
+fn parse_mod_map<T>(input: Option<HashMap<String, T>>) -> HashMap<ModificationSpecificity, T> {
+    input
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, value)| {
+            let specificity = key
+                .parse()
+                .unwrap_or_else(|_| panic!("invalid modification key `{key}`"));
+            (specificity, value)
+        })
+        .collect()
 }
 
 #[cfg(test)]

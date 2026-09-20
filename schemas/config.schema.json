@@ -1196,7 +1196,11 @@
           "additionalProperties": {
             "$ref": "#/$defs/StaticModEntry"
           },
+          "default": null,
           "description": "Static modifications to add to matching amino acids. Entries may use\nthe existing bare mass or a structured modification object.",
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
+          },
           "type": [
             "object",
             "null"
@@ -1209,7 +1213,11 @@
             },
             "type": "array"
           },
+          "default": null,
           "description": "Variable modifications to add to matching amino acids.\nEach entry is either a bare mass (`15.9949`) or a structured object with\nmass, limits, display name, and optional neutral-loss behavior.",
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
+          },
           "type": [
             "object",
             "null"

@@ -492,6 +492,16 @@ pub(crate) fn variable_mod_count(
                 **aa == residue && (peptide.modification_at(*index) - mass).abs() <= 1e-3
             })
             .count() as f64,
+        ModificationSpecificity::Internal(residue) => peptide
+            .sequence
+            .iter()
+            .enumerate()
+            .filter(|(index, aa)| {
+                ModificationSpecificity::is_internal(*index, peptide.sequence.len())
+                    && **aa == residue
+                    && (peptide.modification_at(*index) - mass).abs() <= 1e-3
+            })
+            .count() as f64,
         _ => 0.0,
     }
 }

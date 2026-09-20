@@ -1,0 +1,10 @@
+{
+  "database": {
+    "variable_mods": {
+      "^K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
+      "~K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
+      "]K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}]
+    },
+    "max_variable_mods": 1
+  }
+}

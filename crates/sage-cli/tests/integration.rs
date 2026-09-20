@@ -194,3 +194,39 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     std::fs::remove_file(config_path)?;
     Ok(())
 }
+
+#[test]
+fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
+    let root = std::env::temp_dir().join(format!("sage-preview-{}", std::process::id()));
+    std::fs::create_dir_all(&root)?;
+    let config = root.join("config.json");
+    std::fs::write(
+        &config,
+        r#"{"database":{"variable_mods":{"~K":[42.0106]}}}"#,
+    )?;
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg(&config)
+        .args(["--preview-modifications", "KAKAK"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        result["rules"][0]["eligible_sites"],
+        serde_json::json!([{"position":3}])
+    );
+    assert_eq!(result["variants"].as_array().unwrap().len(), 2);
+    assert!(!root.join("run-summary.json").exists());
+    std::fs::write(&config, r#"{"database":{"static_mods":{"KK":42}}}"#)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg(&config)
+        .args(["--preview-modifications", "KAKAK"])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid modification key `KK`"));
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

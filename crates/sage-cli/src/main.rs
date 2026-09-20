@@ -139,6 +139,17 @@ fn main() -> anyhow::Result<()> {
                 .help("Stream versioned JSONL job events to PATH (use '-' for stdout)")
                 .value_hint(ValueHint::FilePath),
         )
+        .arg(Arg::new("preview-modifications").long("preview-modifications")
+            .value_name("PEPTIDE").conflicts_with_all(["validate-only", "write-config-schema"])
+            .help("Print eligible modification sites and bounded peptide variants as JSON"))
+        .arg(Arg::new("peptide-position").long("peptide-position")
+            .requires("preview-modifications").default_value("internal")
+            .value_parser(["internal", "nterm", "cterm", "full"])
+            .help("Protein boundary context for the preview peptide"))
+        .arg(Arg::new("preview-limit").long("preview-limit")
+            .requires("preview-modifications").default_value("100")
+            .value_parser(value_parser!(u32).range(1..=10000))
+            .help("Maximum variants returned by the modification preview"))
         .arg(
             Arg::new("validate-only")
                 .long("validate-only")
@@ -160,6 +171,18 @@ fn main() -> anyhow::Result<()> {
         } else {
             std::fs::write(path, schema)?;
         }
+        return Ok(());
+    }
+
+    if let Some(sequence) = matches.get_one::<String>("preview-modifications") {
+        let path = matches
+            .get_one::<String>("parameters")
+            .expect("config path is required");
+        let config = std::fs::read_to_string(path)?;
+        let position = matches.get_one::<String>("peptide-position").unwrap();
+        let limit = *matches.get_one::<u32>("preview-limit").unwrap() as usize;
+        let preview = sage_cli::modification_preview::preview(&config, sequence, position, limit)?;
+        println!("{}", serde_json::to_string_pretty(&preview)?);
         return Ok(());
     }
 
