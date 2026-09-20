@@ -848,6 +848,10 @@ impl Peptide {
                     (ModificationSpecificity::Residue(residue), Site::Sequence(index), _) => {
                         self.sequence.get(index as usize) == Some(&residue)
                     }
+                    (ModificationSpecificity::Internal(residue), Site::Sequence(index), _) => {
+                        ModificationSpecificity::is_internal(index as usize, self.sequence.len())
+                            && self.sequence.get(index as usize) == Some(&residue)
+                    }
                     _ => false,
                 })
                 .count();
@@ -879,6 +883,16 @@ impl Peptide {
                 .enumerate()
                 .filter(|(index, residue)| {
                     resi == **residue && mass == self.modification_at(*index)
+                })
+                .count(),
+            ModificationSpecificity::Internal(resi) => self
+                .sequence
+                .iter()
+                .enumerate()
+                .filter(|(index, residue)| {
+                    ModificationSpecificity::is_internal(*index, self.sequence.len())
+                        && resi == **residue
+                        && mass == self.modification_at(*index)
                 })
                 .count(),
         }
@@ -1066,6 +1080,21 @@ impl Peptide {
                         }),
                 );
             }
+            (ModificationSpecificity::Internal(resi), _) => {
+                let len = self.sequence.len();
+                acc.extend(
+                    self.sequence
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, residue)| {
+                            if resi == *residue && ModificationSpecificity::is_internal(idx, len) {
+                                Some((Site::Sequence(idx as u32), mass, mod_idx))
+                            } else {
+                                None
+                            }
+                        }),
+                );
+            }
             _ => {}
         }
     }
@@ -1128,6 +1157,18 @@ impl Peptide {
                 (ModificationSpecificity::Residue(residue), _) => {
                     for (position, observed) in self.sequence.iter().copied().enumerate() {
                         if observed == residue && !occupied[position] {
+                            occupied[position] = true;
+                            sites.push(Site::Sequence(position as u32));
+                        }
+                    }
+                }
+                (ModificationSpecificity::Internal(residue), _) => {
+                    let len = self.sequence.len();
+                    for (position, observed) in self.sequence.iter().copied().enumerate() {
+                        if observed == residue
+                            && ModificationSpecificity::is_internal(position, len)
+                            && !occupied[position]
+                        {
                             occupied[position] = true;
                             sites.push(Site::Sequence(position as u32));
                         }

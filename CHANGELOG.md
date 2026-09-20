@@ -9,6 +9,30 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.5] - 2026-09-20
+
+### Added
+- Internal residue specificity such as `~K` for static, indexed variable, and
+  search-time mass-offset modifications. Combine positional keys for the same
+  named modification while preserving shared occurrence limits.
+- `--preview-modifications PEPTIDE` prints eligible sites, limits, and bounded
+  generated variants as JSON. Protein-boundary context and output limits are
+  configurable, without loading spectra or writing search outputs.
+- A synthetic positional-modification benchmark covers H3K9 at the first peptide
+  residue, internal lysines, peptide-terminal and protein-terminal placements,
+  and agreement between indexed and mass-offset search.
+
+### Fixed
+- Localization retains residue-position restrictions and full modification
+  definitions, so equal-mass named modifications are not pooled and other
+  modifications remain fixed during relocation.
+- Modification placement, memory estimation, and retention and mobility feature
+  counting consistently recognize internal residues.
+
+### Changed
+- Malformed modification keys now fail configuration loading instead of being
+  logged and omitted. Runtime and JSON schema validation enforce the same syntax.
+
 ## [v0.1.0-beta.4] - 2026-09-19
 
 ### Added

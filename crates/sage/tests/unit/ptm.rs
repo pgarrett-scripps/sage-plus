@@ -238,3 +238,79 @@ fn single_candidate_can_retain_competition_confidence() {
     modification.set_competition_q_value(0.001);
     assert_eq!(modification.localization_q_value, 0.001);
 }
+
+#[test]
+fn positional_localization_preserves_first_internal_and_protein_rules() {
+    let mut truth = peptide("KAKAKAAK");
+    truth.modifications = CompactModifications::from_sparse([(2, 42.0)]);
+    let internal = [(ModificationSpecificity::Internal(b'K'), 42.0)];
+    let group = modification_groups(&internal).remove(0);
+    assert_eq!(group.candidates(&truth), vec![2, 4]);
+    let loc = localize(
+        &truth,
+        &synthetic_spectrum(&truth),
+        &[Kind::B, Kind::Y],
+        &internal,
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    assert_eq!(
+        loc.mods[0]
+            .all_sites
+            .iter()
+            .map(|site| site.position)
+            .collect::<Vec<_>>(),
+        vec![2, 4]
+    );
+    let combined = [
+        internal[0],
+        (ModificationSpecificity::PeptideN(Some(b'K')), 42.0),
+        (ModificationSpecificity::ProteinC(Some(b'K')), 42.0),
+    ];
+    let group = modification_groups(&combined).remove(0);
+    assert_eq!(group.candidates(&truth), vec![0, 2, 4]);
+    truth.position = crate::enzyme::Position::Cterm;
+    assert_eq!(group.candidates(&truth), vec![0, 2, 4, 7]);
+    let terminal = [(ModificationSpecificity::PeptideN(None), 42.0)];
+    assert!(modification_groups(&terminal).is_empty());
+}
+
+#[test]
+fn equal_mass_named_modifications_keep_identity_and_occupied_sites() {
+    let definition = |name: &str| {
+        Arc::new(ModificationDefinition {
+            name: Some(name.into()),
+            ..ModificationDefinition::bare(42.0)
+        })
+    };
+    let first = definition("FirstOnly");
+    let internal = definition("InternalOnly");
+    let truth = peptide("KAKAKAK")
+        .with_mass_offset(Site::Sequence(0), &first)
+        .with_mass_offset(Site::Sequence(2), &internal);
+    let rules = [
+        (ModificationSpecificity::PeptideN(Some(b'K')), first),
+        (ModificationSpecificity::Internal(b'K'), internal),
+    ];
+    let groups = modification_groups(&rules);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].candidates(&truth), vec![0]);
+    assert_eq!(groups[1].candidates(&truth), vec![2, 4]);
+    let loc = localize(
+        &truth,
+        &synthetic_spectrum(&truth),
+        &[Kind::B, Kind::Y],
+        &rules,
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    assert_eq!(loc.mods.len(), 2);
+    assert_eq!(loc.mods[0].label.as_deref(), Some("FirstOnly"));
+    assert_eq!(loc.mods[1].label.as_deref(), Some("InternalOnly"));
+    assert!(loc.mods.iter().all(|entry| entry.site_count == 1));
+    let other = definition("FixedOther");
+    let truth = truth.with_mass_offset(Site::Sequence(4), &other);
+    assert_eq!(groups[1].candidates(&truth), vec![2]);
+}

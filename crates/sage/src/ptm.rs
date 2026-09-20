@@ -24,9 +24,11 @@ use serde::Serialize;
 
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
-use crate::modification::ModificationSpecificity;
+use crate::modification::{ModificationDefinition, ModificationSpecificity};
 use crate::peptide::Peptide;
+use crate::peptide::Site;
 use crate::spectrum::{select_most_intense_peak, ProcessedSpectrum};
+use std::sync::Arc;
 
 /// Two modifications are considered the same delta mass if their masses agree
 /// to within this tolerance (modification deltas are stored as `f32`).
@@ -118,32 +120,30 @@ fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) ->
 
 /// Localize every variable modification carried by `peptide` against `spectrum`.
 ///
-/// * `potential_mods` is the search's `(specificity, mass)` list (available as
-///   [`crate::database::IndexedDatabase::potential_mods`]); it is used to map a
-///   delta mass back onto its candidate residues.
+/// * `potential_mods` accepts full definitions from
+///   [`crate::database::IndexedDatabase::localization_mods`] to retain identity.
+///   Legacy `(specificity, mass)` rules are also accepted with mass-based identity.
 /// * `ion_kinds` should be the same set of fragment ion kinds used for scoring.
-pub fn localize(
+pub fn localize<R: LocalizationRule>(
     peptide: &Peptide,
     spectrum: &ProcessedSpectrum,
     ion_kinds: &[Kind],
-    potential_mods: &[(ModificationSpecificity, f32)],
+    potential_mods: &[R],
     fragment_tol: Tolerance,
     user_max_fragment_charge: Option<u8>,
     precursor_charge: u8,
 ) -> Localization {
     let max_charge = max_fragment_charge(user_max_fragment_charge, precursor_charge);
 
-    // Map each variable delta mass -> set of residues that may carry it. Only
-    // residue-specificity mods are localizable (terminal mods have a single
-    // possible position and are not relocated).
+    // Group allowed residue sites by modification identity. Terminal groups
+    // remain fixed and are excluded from localization.
     let mut mods = Vec::new();
-    for (mass, residues) in residue_specificities(potential_mods) {
+    for group in modification_groups(potential_mods) {
         if let Some(loc) = localize_mass(
             peptide,
             spectrum,
             ion_kinds,
-            mass,
-            &residues,
+            &group,
             fragment_tol,
             max_charge,
         ) {
@@ -155,38 +155,142 @@ pub fn localize(
 
 /// Return whether a peptide carries at least one residue-specific variable
 /// modification that the localizer can move between candidate sites.
-pub fn has_localizable_modification(
+pub fn has_localizable_modification<R: LocalizationRule>(
     peptide: &Peptide,
-    potential_mods: &[(ModificationSpecificity, f32)],
+    potential_mods: &[R],
 ) -> bool {
-    residue_specificities(potential_mods)
-        .iter()
-        .any(|(mass, residues)| {
-            peptide.sequence.iter().enumerate().any(|(index, residue)| {
-                residues.contains(residue)
-                    && (peptide.modification_at(index) - mass).abs() < MASS_EPS
-            })
-        })
+    modification_groups(potential_mods).iter().any(|group| {
+        group
+            .candidates(peptide)
+            .iter()
+            .any(|&index| group.is_placed(peptide, index))
+    })
 }
 
-/// Collapse the `(specificity, mass)` list into `(mass, residues)` groups,
-/// unioning e.g. `Residue(S)`, `Residue(T)`, `Residue(Y)` that share the
-/// phospho delta mass.
-fn residue_specificities(potential_mods: &[(ModificationSpecificity, f32)]) -> Vec<(f32, Vec<u8>)> {
-    let mut groups: Vec<(f32, Vec<u8>)> = Vec::new();
-    for (spec, mass) in potential_mods {
-        let residue = match spec {
-            ModificationSpecificity::Residue(r) => *r,
-            // Terminal-specificity mods are not relocated.
-            _ => continue,
-        };
-        match groups.iter_mut().find(|(m, _)| (m - mass).abs() < MASS_EPS) {
-            Some((_, residues)) => {
-                if !residues.contains(&residue) {
-                    residues.push(residue);
+/// Full definitions preserve identity. Mass-only rules remain supported for callers
+/// that do not retain modification metadata.
+pub trait LocalizationRule {
+    fn specificity(&self) -> ModificationSpecificity;
+    fn mass(&self) -> f32;
+    fn definition(&self) -> Option<Arc<ModificationDefinition>>;
+}
+
+impl LocalizationRule for (ModificationSpecificity, f32) {
+    fn specificity(&self) -> ModificationSpecificity {
+        self.0
+    }
+    fn mass(&self) -> f32 {
+        self.1
+    }
+    fn definition(&self) -> Option<Arc<ModificationDefinition>> {
+        None
+    }
+}
+
+impl LocalizationRule for (ModificationSpecificity, Arc<ModificationDefinition>) {
+    fn specificity(&self) -> ModificationSpecificity {
+        self.0
+    }
+    fn mass(&self) -> f32 {
+        self.1.mass
+    }
+    fn definition(&self) -> Option<Arc<ModificationDefinition>> {
+        Some(self.1.clone())
+    }
+}
+
+struct ModificationGroup {
+    mass: f32,
+    definition: Option<Arc<ModificationDefinition>>,
+    specificities: Vec<ModificationSpecificity>,
+}
+
+impl ModificationGroup {
+    fn is_placed(&self, peptide: &Peptide, index: usize) -> bool {
+        if (peptide.modification_at(index) - self.mass).abs() >= MASS_EPS {
+            return false;
+        }
+        self.definition.as_ref().is_none_or(|definition| {
+            peptide.applied_modifications().any(|applied| {
+                applied.site == Site::Sequence(index as u32)
+                    && applied.modification == definition.as_ref()
+            })
+        })
+    }
+
+    fn candidates(&self, peptide: &Peptide) -> Vec<usize> {
+        let mut sites = Vec::new();
+        for specificity in &self.specificities {
+            peptide.compatible_sites(*specificity, &mut sites);
+        }
+        let mut candidates = sites
+            .into_iter()
+            .filter_map(|site| {
+                if let Site::Sequence(index) = site {
+                    let index = index as usize;
+                    let occupied = peptide
+                        .applied_modifications()
+                        .any(|applied| applied.site == site);
+                    if !occupied || self.is_placed(peptide, index) {
+                        return Some(index);
+                    }
                 }
+                None
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        candidates.dedup();
+        candidates
+    }
+
+    fn residues(&self) -> Vec<u8> {
+        self.specificities
+            .iter()
+            .filter_map(|specificity| match specificity {
+                ModificationSpecificity::Residue(r)
+                | ModificationSpecificity::Internal(r)
+                | ModificationSpecificity::PeptideN(Some(r))
+                | ModificationSpecificity::PeptideC(Some(r))
+                | ModificationSpecificity::ProteinN(Some(r))
+                | ModificationSpecificity::ProteinC(Some(r)) => Some(*r),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn label(&self) -> Option<String> {
+        self.definition
+            .as_ref()
+            .and_then(|definition| definition.name.as_deref().map(str::to_owned))
+            .or_else(|| crate::unimod::label_for(self.mass))
+    }
+}
+
+fn modification_groups<R: LocalizationRule>(potential_mods: &[R]) -> Vec<ModificationGroup> {
+    let mut groups: Vec<ModificationGroup> = Vec::new();
+    for rule in potential_mods {
+        if matches!(
+            rule.specificity(),
+            ModificationSpecificity::PeptideN(None)
+                | ModificationSpecificity::PeptideC(None)
+                | ModificationSpecificity::ProteinN(None)
+                | ModificationSpecificity::ProteinC(None)
+        ) {
+            continue;
+        }
+        let definition = rule.definition();
+        if let Some(group) = groups.iter_mut().find(|group| {
+            group.definition == definition && (group.mass - rule.mass()).abs() < MASS_EPS
+        }) {
+            if !group.specificities.contains(&rule.specificity()) {
+                group.specificities.push(rule.specificity());
             }
-            None => groups.push((*mass, vec![residue])),
+        } else {
+            groups.push(ModificationGroup {
+                mass: rule.mass(),
+                definition,
+                specificities: vec![rule.specificity()],
+            });
         }
     }
     groups
@@ -196,31 +300,15 @@ fn localize_mass(
     peptide: &Peptide,
     spectrum: &ProcessedSpectrum,
     ion_kinds: &[Kind],
-    mass: f32,
-    residues: &[u8],
+    group: &ModificationGroup,
     fragment_tol: Tolerance,
     max_charge: u8,
 ) -> Option<ModLocalization> {
-    // Candidate positions: residues matching the specificity that either
-    // already carry this mass or are currently unmodified (so we never displace
-    // a *different* modification when relocating this one).
-    let candidates: Vec<usize> = peptide
-        .sequence
-        .iter()
-        .enumerate()
-        .filter(|(idx, residue)| {
-            residues.contains(residue) && {
-                let m = peptide.modification_at(*idx);
-                m == 0.0 || (m - mass).abs() < MASS_EPS
-            }
-        })
-        .map(|(idx, _)| idx)
-        .collect();
-
-    // Number of copies currently placed on a candidate site.
+    let mass = group.mass;
+    let candidates = group.candidates(peptide);
     let k = candidates
         .iter()
-        .filter(|&&idx| (peptide.modification_at(idx) - mass).abs() < MASS_EPS)
+        .filter(|&&index| group.is_placed(peptide, index))
         .count();
 
     if k == 0 || candidates.is_empty() {
@@ -239,7 +327,7 @@ fn localize_mass(
             .collect();
         return Some(ModLocalization {
             mass,
-            label: crate::unimod::label_for(mass),
+            label: group.label(),
             site_count: k,
             candidate_sites: total_c,
             site_determining_ions: 0,
@@ -275,7 +363,7 @@ fn localize_mass(
     // Use the same number of impossible-site decoy candidates as valid target
     // candidates. Equal target/decoy search spaces make direct competition and
     // dataset-level FLR counting interpretable without a size correction.
-    let decoy_candidates = balanced_decoy_candidates(peptide, residues, total_c);
+    let decoy_candidates = balanced_decoy_candidates(peptide, &group.residues(), total_c);
     let mut scoring_candidates = candidates.clone();
     if let Some(decoys) = &decoy_candidates {
         scoring_candidates.extend(decoys.iter().copied());
@@ -401,7 +489,7 @@ fn localize_mass(
 
     Some(ModLocalization {
         mass,
-        label: crate::unimod::label_for(mass),
+        label: group.label(),
         site_count: k,
         candidate_sites: total_c,
         site_determining_ions: total_trials,

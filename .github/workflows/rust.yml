@@ -68,6 +68,8 @@ jobs:
       - name: Test benchmark tooling
         if: matrix.rust == '1.97.1'
         run: python3 -m unittest discover -s benchmarks/tests -v
+      - name: Run positional modification regression
+        run: cargo run --locked -p sage-core --example positional_modifications
       - name: Run VAT1_HUMAN search
         run: cargo run --locked -p sage-cli --bin sage -- tests/config.json --disable-telemetry-i-dont-want-to-improve-sage
       - name: Run original synthetic fixture

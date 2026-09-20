@@ -75,7 +75,7 @@ impl Runner {
                 if passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value)
                     && sage_core::ptm::has_localizable_modification(
                         &self.database[feature.peptide_idx],
-                        &self.database.potential_mods,
+                        &self.database.localization_mods,
                     )
                 {
                     work.entry(feature.file_id)
@@ -172,7 +172,7 @@ impl Runner {
                                 peptide,
                                 spectrum,
                                 &self.database.ion_kinds,
-                                &self.database.potential_mods,
+                                &self.database.localization_mods,
                                 self.parameters.fragment_tol,
                                 self.parameters.max_fragment_charge,
                                 feature.charge,

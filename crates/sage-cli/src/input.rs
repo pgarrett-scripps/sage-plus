@@ -425,6 +425,9 @@ impl Input {
         }
         ensure!(self.database.is_some(), "`database` must be configured");
         if let Some(database) = &self.database {
+            database
+                .validate_modification_keys()
+                .map_err(anyhow::Error::msg)?;
             ensure!(
                 database.fasta.is_some() || database.peptides.is_some(),
                 "Either `database.fasta` or `database.peptides` must be set"

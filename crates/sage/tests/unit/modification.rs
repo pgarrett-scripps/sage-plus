@@ -222,14 +222,12 @@ fn validate_var_mods_mixed() {
 }
 
 #[test]
-fn validate_var_mods_invalid_residue_skipped() {
+#[should_panic(expected = "invalid modification key `Z`")]
+fn validate_var_mods_invalid_residue_rejected() {
     let mut raw = HashMap::new();
     raw.insert("Z".to_string(), vec![VarModEntry::Mass(15.9949)]);
     raw.insert("M".to_string(), vec![VarModEntry::Mass(15.9949)]);
-    let result = validate_var_mods(Some(raw));
-    // Z is invalid — only M should survive
-    assert_eq!(result.len(), 1);
-    assert!(result.contains_key(&ModificationSpecificity::Residue(b'M')));
+    validate_var_mods(Some(raw));
 }
 
 #[test]
@@ -259,4 +257,39 @@ fn mass_offset_rejects_labels_and_zero_mass() {
             "{invalid}"
         );
     }
+}
+
+#[test]
+fn positional_keys_round_trip_and_reject_malformed_keys() {
+    for key in [
+        "K", "^", "$", "[", "]", "^K", "$K", "[K", "]K", "~K", "~O", "~U",
+    ] {
+        let specificity: ModificationSpecificity = key.parse().unwrap();
+        assert_eq!(specificity.to_string(), key);
+        assert_eq!(serde_json::to_value(specificity).unwrap(), key);
+    }
+    for key in [
+        "", "~", "~Z", "~k", "~KK", "KK", "K~", "^Z", "$?", "[!", "]1", "é", "~é", " K", "K ",
+    ] {
+        assert!(
+            key.parse::<ModificationSpecificity>().is_err(),
+            "accepted {key}"
+        );
+        for field in ["static_mods", "variable_mods"] {
+            let value = if field == "static_mods" {
+                serde_json::json!(42)
+            } else {
+                serde_json::json!([42])
+            };
+            let config = serde_json::json!({field: {key: value}});
+            assert!(
+                serde_json::from_value::<crate::database::Builder>(config).is_err(),
+                "accepted {field}.{key}"
+            );
+        }
+    }
+    assert!(!ModificationSpecificity::is_internal(
+        usize::MAX,
+        usize::MAX
+    ));
 }

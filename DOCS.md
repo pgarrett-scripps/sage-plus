@@ -560,6 +560,84 @@ Index size and database-build memory scale with the indexed modifications only, 
 search work grows with the number of offsets and tested placements. Prefiltering applies
 the same offset-aware retrieval, so `prefilter` may be combined with offsets.
 
+#### Positional residue modifications
+
+Use `~K` to modify lysines strictly inside a peptide. The first and last residues
+are excluded, including in peptides of length one or two. This works for static
+modifications, indexed variable modifications, and mass-offset modifications.
+
+| Key | Eligible site |
+| --- | --- |
+| `K` | Every lysine |
+| `^K` | Lysine at the first peptide residue |
+| `$K` | Lysine at the last peptide residue |
+| `~K` | Lysine at an internal peptide residue |
+| `[K` | Lysine at the protein N-terminal residue |
+| `]K` | Lysine at the protein C-terminal residue |
+| `^`, `$` | The peptide terminal groups themselves |
+| `[`, `]` | The protein terminal groups themselves |
+
+Combine keys to describe a union of allowed positions. For example, allow first
+and internal lysines, plus lysine at a protein C terminus:
+
+```json
+{
+  "database": {
+    "variable_mods": {
+      "^K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
+      "~K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
+      "]K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}]
+    }
+  }
+}
+```
+
+The shared name gives these entries one occurrence limit across their combined
+sites. Definitions with the same name must agree. Bare masses remain supported,
+but equal unnamed masses under different keys do not share an occurrence limit.
+For static modifications, each key takes one mass or object rather than an array.
+
+`~K` alone excludes H3K9 when it is the first residue of `KSTGGKAPR`. Adding `^K`
+allows that placement. To allow internal and last residues instead, use `~K` and
+`$K`. These are peptide-position rules, independent of enzyme selection. They do
+not alter digestion or infer whether a cleavage was blocked by a modification.
+The `]K` exception requires known protein-terminal context.
+
+Malformed keys now fail configuration loading instead of being omitted. Valid keys
+contain one supported uppercase residue, an optional positional prefix, or one of
+the four bare terminal-group symbols. Bare `~` is invalid.
+
+#### Preview modification placement
+
+Inspect a peptide without loading spectra or a FASTA:
+
+```shell
+sage config.json --preview-modifications KSTGGKAPR
+sage config.json --preview-modifications ASQKSTGGK --peptide-position cterm --preview-limit 100
+```
+
+The JSON output lists sequence-compatible sites, configured occurrence limits,
+and actual generated variants with names and masses. Residue positions are
+one-based. Terminal groups are reported separately. Site lists describe each rule
+before occupancy is resolved. Generated variants apply occupancy and shared limits.
+
+`--peptide-position` accepts `internal` (default), `nterm`, `cterm`, or `full` for
+protein-boundary context. `--preview-limit` defaults to 100 and accepts 1 through
+10000. A `truncated` flag marks a preview cut short by that bound. Configured
+`max_combinations` still applies to indexed expansion. Search-time offsets retain
+Beta 4's one-copy behavior and are added to indexed variants.
+
+Preview accepts a JSON file containing just `database`. It does not perform
+search-level validation, digest the peptide, or load PTM libraries. Library-backed
+configurations are rejected with an explanation. It writes JSON to standard output
+and does not create search outputs or send telemetry.
+
+Localization preserves the allowed residue positions and full modification
+identity. Distinct named modifications with equal masses are localized separately,
+and sites occupied by another definition remain fixed. True terminal-group
+modifications are not relocated. The mass-only core localization API remains
+available for callers without metadata, with its original mass-based identity.
+
 #### Modification channels
 
 Structured static and variable modifications may define `channel_offsets`. The effective mass is
@@ -886,7 +964,7 @@ psm_id  peptide            modification  position  residue  localization_probabi
 ```
 
 Notes:
-- All variable modifications are localized; terminal-specificity modifications (peptide/protein N- and C-term) are not relocated.
+- Variable residue modifications are localized within their configured positional rules. True peptide and protein terminal-group modifications are not relocated.
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
