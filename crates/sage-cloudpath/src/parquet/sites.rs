@@ -64,6 +64,16 @@ pub fn deserialize_ptm_library(bytes: Vec<u8>) -> parquet::errors::Result<PtmLib
             )));
         }
         sites.push(PtmLibrarySite {
+            attachment: columns
+                .get("attachment")
+                .map(|field| {
+                    text(field, "attachment").and_then(|value| {
+                        sage_core::ptm_library::Attachment::parse(&value)
+                            .map_err(ParquetError::General)
+                    })
+                })
+                .transpose()?
+                .unwrap_or_default(),
             protein: Arc::from(protein),
             position: position(required("position")?)?,
             residue: residue[0],
@@ -81,6 +91,7 @@ fn ptm_library_schema() -> parquet::errors::Result<Type> {
             required int32 position;
             required byte_array residue (utf8);
             required byte_array modification (utf8);
+            required byte_array attachment (utf8);
         }
         "#,
     )
@@ -94,6 +105,10 @@ pub fn serialize_ptm_library(sites: &[PtmLibrarySite]) -> parquet::errors::Resul
     }
     let schema = ptm_library_schema()?;
     let options = WriterProperties::builder()
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("ptm_library".into())),
+            KeyValue::new("sage.schema.version".into(), Some("2".into())),
+        ]))
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .build();
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
@@ -139,12 +154,23 @@ pub fn serialize_ptm_library(sites: &[PtmLibrarySite]) -> parquet::errors::Resul
                 .write_batch(&values, None, None)?;
             column.close()?;
         }
+        if let Some(mut column) = rg.next_column()? {
+            let values = sites
+                .iter()
+                .map(|site| ByteArray::from(site.attachment.as_str()))
+                .collect::<Vec<_>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, None, None)?;
+            column.close()?;
+        }
         rg.close()?;
     }
     writer.into_inner().map(|bytes| bytes.to_vec())
 }
 
 pub struct PtmSiteRecord {
+    pub attachment: String,
     pub psm_id: i64,
     pub filename: String,
     pub scannr: String,
@@ -168,6 +194,7 @@ pub struct PtmSiteRecord {
 }
 
 pub struct ProteinSiteRecord {
+    pub attachment: String,
     pub protein: String,
     pub peptide: String,
     pub residue: String,
@@ -307,6 +334,7 @@ fn ptm_site_schema() -> parquet::errors::Result<Type> {
             required int32 site_determining_ions_matched;
             required int32 site_determining_ions_total;
             required byte_array site_probabilities (utf8);
+            required byte_array attachment (utf8);
         }
         "#,
     )
@@ -327,6 +355,7 @@ fn protein_site_schema() -> parquet::errors::Result<Type> {
             required float best_delta_localization_score;
             required float best_localization_q_value;
             required float best_spectrum_q;
+            required byte_array attachment (utf8);
         }
         "#,
     )
@@ -335,6 +364,10 @@ fn protein_site_schema() -> parquet::errors::Result<Type> {
 pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
     let schema = ptm_site_schema()?;
     let options = WriterProperties::builder()
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("ptm_sites".into())),
+            KeyValue::new("sage.schema.version".into(), Some("2".into())),
+        ]))
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .build();
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
@@ -486,6 +519,14 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
                 .collect::<Vec<ByteArray>>(),
             ByteArrayType
         );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.attachment.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
+        );
         rg.close()?;
     }
 
@@ -495,6 +536,10 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
 pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
     let schema = protein_site_schema()?;
     let options = WriterProperties::builder()
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("sage.schema.name".into(), Some("protein_sites".into())),
+            KeyValue::new("sage.schema.version".into(), Some("2".into())),
+        ]))
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .build();
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
@@ -585,6 +630,14 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
                 .map(|r| r.best_spectrum_q)
                 .collect::<Vec<_>>(),
             FloatType
+        );
+        write_required_column!(
+            rg,
+            records
+                .iter()
+                .map(|r| r.attachment.as_str().into())
+                .collect::<Vec<ByteArray>>(),
+            ByteArrayType
         );
         rg.close()?;
     }

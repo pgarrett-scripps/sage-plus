@@ -37,7 +37,8 @@ impl Runner {
                     .iter()
                     .map(|s| {
                         format!(
-                            "{}{}:{:.4}",
+                            "{}:{}{}:{:.4}",
+                            s.attachment.as_str(),
                             s.residue as char,
                             s.position + 1,
                             s.probability
@@ -48,6 +49,10 @@ impl Runner {
 
                 for site in &m.best_sites {
                     rows.push(SiteRow {
+                        ambiguous: m.candidate_sites > m.site_count
+                            && (!m.delta_score.is_finite() || m.delta_score <= 0.0),
+                        protein_sites: peptide.protein_sites.clone(),
+                        attachment: site.attachment,
                         psm_id: feature.psm_id,
                         filename: filename.clone(),
                         scannr: feature.spec_id.clone(),
@@ -89,6 +94,7 @@ impl Runner {
         let records = rows
             .iter()
             .map(|row| PtmSiteRecord {
+                attachment: row.attachment.as_str().into(),
                 psm_id: row.psm_id as i64,
                 filename: row.filename.clone(),
                 scannr: row.scannr.clone(),
@@ -132,6 +138,7 @@ impl Runner {
         // the peptide maps to.
         #[derive(Clone)]
         struct Agg {
+            attachment: sage_core::ptm_library::Attachment,
             protein: String,
             peptide: String,
             residue: u8,
@@ -145,17 +152,27 @@ impl Runner {
             best_spectrum_q: f32,
         }
 
-        let mut map: HashMap<(String, String, usize, i64), Agg> = HashMap::new();
+        let mut map: HashMap<
+            (
+                String,
+                String,
+                usize,
+                String,
+                sage_core::ptm_library::Attachment,
+            ),
+            Agg,
+        > = HashMap::new();
         for row in &rows {
             for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
-                let mass_key = (row.modification_mass * 1e3).round() as i64;
                 let key = (
                     protein.to_string(),
                     row.peptide.clone(),
                     row.position,
-                    mass_key,
+                    row.modification.clone(),
+                    row.attachment,
                 );
                 let entry = map.entry(key).or_insert_with(|| Agg {
+                    attachment: row.attachment,
                     protein: protein.to_string(),
                     peptide: row.peptide.clone(),
                     residue: row.residue,
@@ -190,6 +207,7 @@ impl Runner {
         let records = aggregated
             .iter()
             .map(|agg| ProteinSiteRecord {
+                attachment: agg.attachment.as_str().into(),
                 protein: agg.protein.clone(),
                 peptide: agg.peptide.clone(),
                 residue: (agg.residue as char).to_string(),
@@ -243,6 +261,9 @@ impl Runner {
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
         for row in self.collect_site_rows(features, filenames) {
+            if row.ambiguous {
+                continue;
+            }
             if !known_names.contains(&row.modification) {
                 skipped_unnamed += 1;
                 continue;
@@ -256,10 +277,49 @@ impl Runner {
                 let Some(sequence) = proteins.get(protein) else {
                     continue;
                 };
+                let known_starts = row
+                    .protein_sites
+                    .iter()
+                    .filter(|occurrence| occurrence.protein.as_ref() == protein)
+                    .filter_map(|occurrence| occurrence.start)
+                    .collect::<Vec<_>>();
                 for (start, _) in sequence.match_indices(&row.peptide_sequence) {
+                    if !known_starts.is_empty() && !known_starts.contains(&(start as u32)) {
+                        continue;
+                    }
+                    let position = match (
+                        start == 0,
+                        start + row.peptide_sequence.len() == sequence.len(),
+                    ) {
+                        (true, true) => sage_core::enzyme::Position::Full,
+                        (true, false) => sage_core::enzyme::Position::Nterm,
+                        (false, true) => sage_core::enzyme::Position::Cterm,
+                        _ => sage_core::enzyme::Position::Internal,
+                    };
+                    let attachment = row.attachment.site(
+                        peptide_position as u32,
+                        row.peptide_sequence.len(),
+                        position,
+                    );
+                    let allowed = self.database_parameters.variable_mods.iter().any(
+                        |(specificity, entries)| {
+                            entries.iter().any(|entry| {
+                                entry.definition().name.as_deref()
+                                    == Some(row.modification.as_str())
+                            }) && attachment.is_some_and(|site| {
+                                specificity
+                                    .sites(row.peptide_sequence.as_bytes(), position)
+                                    .contains(&site)
+                            })
+                        },
+                    );
+                    if !allowed {
+                        continue;
+                    }
                     let protein_position = start + peptide_position;
                     if sequence.as_bytes().get(protein_position) == Some(&row.residue) {
                         sites.insert(sage_core::ptm_library::PtmLibrarySite {
+                            attachment: row.attachment,
                             protein: Arc::from(protein),
                             position: protein_position as u32,
                             residue: row.residue,
@@ -282,6 +342,7 @@ impl Runner {
                 .cmp(&b.protein)
                 .then_with(|| a.position.cmp(&b.position))
                 .then_with(|| a.modification.cmp(&b.modification))
+                .then_with(|| a.attachment.cmp(&b.attachment))
         });
         let parquet_path = self.make_path("results.sage.ptm-library.parquet");
         let bytes = sage_cloudpath::parquet::serialize_ptm_library(&sites)?;
@@ -291,13 +352,20 @@ impl Runner {
         let mut writer = csv::WriterBuilder::new()
             .delimiter(b'\t')
             .from_writer(Vec::new());
-        writer.write_record(["protein", "position", "residue", "modification"])?;
+        writer.write_record([
+            "protein",
+            "position",
+            "residue",
+            "modification",
+            "attachment",
+        ])?;
         for site in &sites {
             writer.write_record([
                 site.protein.as_ref(),
                 &(site.position + 1).to_string(),
                 std::str::from_utf8(&[site.residue])?,
                 site.modification.as_ref(),
+                site.attachment.as_str(),
             ])?;
         }
         writer.flush()?;

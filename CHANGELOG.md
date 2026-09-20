@@ -9,6 +9,33 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.6] - 2026-09-20
+
+### Added
+- Named static and variable modification dictionaries with one definition and shared
+  limits across explicit site strings. Terminal groups, boundary residues, internal
+  residues, and residue-conditioned terminal groups have distinct spellings.
+- Configuration migration through `--migrate-modifications` and library-aware
+  modification preview with protein accession and one-based peptide coordinates.
+- Typed terminal-group localization and version 2 PTM libraries and site reports.
+  TSV and Parquet outputs preserve attachment identity alongside protein coordinates.
+
+### Fixed
+- Library evidence for a residue cannot license an adjacent terminal-group attachment.
+- Localization obeys library-only site restrictions and excludes indistinguishable
+  attachment alternatives from reusable libraries.
+- Shared site matching covers static application, indexed and mass-offset placement,
+  memory estimation, localization, and retention and mobility feature counting.
+- Conflicting overlapping static definitions fail validation instead of depending
+  on hash-map iteration order.
+
+### Compatibility
+- Legacy symbol-keyed configuration remains readable and has an explicit migration path.
+  Four-column PTM libraries are read as residue attachments. Legacy terminal evidence
+  requires an attachment column, and strict four-column consumers need an update.
+- The Beta 5 tag was retained without publication. Beta 6 includes those changes.
+- No dependency upgrades are included. Terminal localization remains experimental.
+
 ## [v0.1.0-beta.5] - 2026-09-20
 
 ### Added

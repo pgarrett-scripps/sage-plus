@@ -1,0 +1,14 @@
+message schema {
+    required byte_array protein (utf8);
+    required byte_array peptide (utf8);
+    required byte_array residue (utf8);
+    required int32 position_in_peptide;
+    required byte_array modification (utf8);
+    required float modification_mass;
+    required int32 num_psms;
+    required float best_localization_probability;
+    required float best_delta_localization_score;
+    required float best_localization_q_value;
+    required float best_spectrum_q;
+    required byte_array attachment (utf8);
+}

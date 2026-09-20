@@ -1,0 +1,208 @@
+{
+  "checks": 29,
+  "results": [
+    {
+      "mode": "database",
+      "case": "first",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "first",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "first",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "nterm",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "nterm",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "nterm",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "last",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "last",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "last",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "cterm",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "cterm",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "cterm",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "both",
+      "phase": "discovery",
+      "library_sites": 2,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "both",
+      "phase": "guided",
+      "library_sites": 2,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "both",
+      "phase": "iteration",
+      "library_sites": 2,
+      "passed": true
+    },
+    {
+      "mode": "database",
+      "case": "ambiguous",
+      "phase": "discovery",
+      "library_sites": 0,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "first",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "first",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "first",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "nterm",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "nterm",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "nterm",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "last",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "last",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "last",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "cterm",
+      "phase": "discovery",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "cterm",
+      "phase": "guided",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "cterm",
+      "phase": "iteration",
+      "library_sites": 1,
+      "passed": true
+    },
+    {
+      "mode": "mass_offset",
+      "case": "ambiguous",
+      "phase": "discovery",
+      "library_sites": 0,
+      "passed": true
+    }
+  ]
+}

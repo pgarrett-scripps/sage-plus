@@ -18,10 +18,18 @@ pub fn generate_config_schema() -> String {
         .expect("deprecated compatibility field is present")
         .insert("deprecated".into(), true.into());
 
-    for field in ["static_mods", "variable_mods"] {
-        value["properties"]["database"]["properties"][field]["propertyNames"] = serde_json::json!({
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
-        });
+    let explicit = "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])";
+    for name in ["NamedStaticModification", "NamedVariableModification"] {
+        value["$defs"][name]["properties"]["sites"]["minItems"] = 1.into();
+        value["$defs"][name]["properties"]["sites"]["items"]["pattern"] = explicit.into();
+        value["$defs"][name]["additionalProperties"] = false.into();
+    }
+
+    value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
+    let legacy = "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])";
+    for name in ["StaticModConfig", "VariableModConfig"] {
+        value["$defs"][name]["anyOf"][1]["propertyNames"] = serde_json::json!({"pattern": legacy});
+        value["$defs"][name]["anyOf"][0]["propertyNames"] = serde_json::json!({"minLength":1});
     }
 
     let mut json =

@@ -31,3 +31,31 @@ fn detects_plain_and_compressed_tsv_paths() {
     assert!(is_tsv_path("s3://bucket/sites.tsv.gz"));
     assert!(!is_tsv_path("sites.parquet"));
 }
+
+#[test]
+fn typed_library_retains_distinct_attachments_and_checks_boundaries() {
+    use crate::enzyme::Position;
+    use crate::peptide::Site;
+    let library = PtmLibrary::from_tsv("protein\tposition\tresidue\tmodification\tattachment\nP1\t9\tK\tAcetyl\tresidue\nP1\t9\tK\tAcetyl\tpeptide_n_term\n").unwrap();
+    assert_eq!(library.len(), 2);
+    assert_eq!(
+        Attachment::PeptideNTerm.site(0, 5, Position::Internal),
+        Some(Site::Nterm)
+    );
+    assert_eq!(
+        Attachment::PeptideNTerm.site(1, 5, Position::Internal),
+        None
+    );
+    assert_eq!(
+        Attachment::ProteinNTerm.site(0, 5, Position::Internal),
+        None
+    );
+    assert_eq!(
+        Attachment::ProteinNTerm.site(0, 5, Position::Nterm),
+        Some(Site::Nterm)
+    );
+    assert!(PtmLibrary::from_tsv(
+        "protein\tposition\tresidue\tmodification\tattachment\nP1\t9\tK\tAcetyl\twrong\n"
+    )
+    .is_err());
+}

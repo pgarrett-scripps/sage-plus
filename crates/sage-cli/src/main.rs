@@ -139,9 +139,14 @@ fn main() -> anyhow::Result<()> {
                 .help("Stream versioned JSONL job events to PATH (use '-' for stdout)")
                 .value_hint(ValueHint::FilePath),
         )
+        .arg(Arg::new("migrate-modifications").long("migrate-modifications").action(clap::ArgAction::SetTrue)
+            .conflicts_with_all(["preview-modifications", "validate-only", "write-config-schema"])
+            .help("Print a configuration with named modifications and explicit sites to stdout"))
         .arg(Arg::new("preview-modifications").long("preview-modifications")
             .value_name("PEPTIDE").conflicts_with_all(["validate-only", "write-config-schema"])
             .help("Print eligible modification sites and bounded peptide variants as JSON"))
+        .arg(Arg::new("preview-protein").long("preview-protein").value_name("ACCESSION").requires_all(["preview-modifications", "preview-start"]))
+        .arg(Arg::new("preview-start").long("preview-start").value_name("POSITION").value_parser(value_parser!(u32).range(1..)).requires_all(["preview-modifications", "preview-protein"]))
         .arg(Arg::new("peptide-position").long("peptide-position")
             .requires("preview-modifications").default_value("internal")
             .value_parser(["internal", "nterm", "cterm", "full"])
@@ -174,6 +179,15 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if matches.get_flag("migrate-modifications") {
+        let path = matches
+            .get_one::<String>("parameters")
+            .expect("config path is required");
+        let migrated = sage_cli::modification_migration::migrate(&std::fs::read_to_string(path)?)?;
+        println!("{}", serde_json::to_string_pretty(&migrated)?);
+        return Ok(());
+    }
+
     if let Some(sequence) = matches.get_one::<String>("preview-modifications") {
         let path = matches
             .get_one::<String>("parameters")
@@ -181,7 +195,15 @@ fn main() -> anyhow::Result<()> {
         let config = std::fs::read_to_string(path)?;
         let position = matches.get_one::<String>("peptide-position").unwrap();
         let limit = *matches.get_one::<u32>("preview-limit").unwrap() as usize;
-        let preview = sage_cli::modification_preview::preview(&config, sequence, position, limit)?;
+        let context = matches.get_one::<String>("preview-protein").map(|protein| {
+            (
+                protein.as_str(),
+                *matches.get_one::<u32>("preview-start").unwrap(),
+            )
+        });
+        let preview = sage_cli::modification_preview::preview_with_context(
+            &config, sequence, position, limit, context,
+        )?;
         println!("{}", serde_json::to_string_pretty(&preview)?);
         return Ok(());
     }

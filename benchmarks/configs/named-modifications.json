@@ -1,0 +1,21 @@
+{
+  "database": {
+    "static_mods": {
+      "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}
+    },
+    "variable_mods": {
+      "Acetyl": {
+        "mass": 42.010565,
+        "sites": ["first_residue:K", "internal_residue:K", "protein_last:K"],
+        "max_count": 2
+      },
+      "Phospho": {
+        "mass": 79.966331,
+        "sites": ["S", "T", "Y"],
+        "max_count": 3,
+        "neutral_losses": [97.976896]
+      }
+    },
+    "max_variable_mods": 3
+  }
+}

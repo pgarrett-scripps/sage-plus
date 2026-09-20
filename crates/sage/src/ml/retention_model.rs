@@ -5,7 +5,6 @@
 
 use super::regression::LinearRegression;
 use crate::database::IndexedDatabase;
-use crate::enzyme::Position;
 use crate::mass::VALID_AA;
 use crate::modification::ModificationSpecificity;
 use crate::peptide::Peptide;
@@ -444,66 +443,20 @@ pub(crate) fn variable_mod_count(
     specificity: ModificationSpecificity,
     mass: f32,
 ) -> f64 {
-    let first = peptide.sequence.first().copied();
-    let last = peptide.sequence.last().copied();
-    let first_mass = nonzero_modification(peptide.modification_at(0));
-    let last_mass =
-        nonzero_modification(peptide.modification_at(peptide.sequence.len().saturating_sub(1)));
-    match specificity {
-        ModificationSpecificity::PeptideN(None) => {
-            usize::from(mass_matches(peptide.nterm, mass)) as f64
-        }
-        ModificationSpecificity::PeptideC(None) => {
-            usize::from(mass_matches(peptide.cterm, mass)) as f64
-        }
-        ModificationSpecificity::ProteinN(None)
-            if matches!(peptide.position, Position::Nterm | Position::Full) =>
-        {
-            usize::from(mass_matches(peptide.nterm, mass)) as f64
-        }
-        ModificationSpecificity::ProteinC(None)
-            if matches!(peptide.position, Position::Cterm | Position::Full) =>
-        {
-            usize::from(mass_matches(peptide.cterm, mass)) as f64
-        }
-        ModificationSpecificity::PeptideN(Some(residue)) if first == Some(residue) => {
-            usize::from(mass_matches(first_mass, mass)) as f64
-        }
-        ModificationSpecificity::PeptideC(Some(residue)) if last == Some(residue) => {
-            usize::from(mass_matches(last_mass, mass)) as f64
-        }
-        ModificationSpecificity::ProteinN(Some(residue))
-            if first == Some(residue)
-                && matches!(peptide.position, Position::Nterm | Position::Full) =>
-        {
-            usize::from(mass_matches(first_mass, mass)) as f64
-        }
-        ModificationSpecificity::ProteinC(Some(residue))
-            if last == Some(residue)
-                && matches!(peptide.position, Position::Cterm | Position::Full) =>
-        {
-            usize::from(mass_matches(last_mass, mass)) as f64
-        }
-        ModificationSpecificity::Residue(residue) => peptide
-            .sequence
-            .iter()
-            .enumerate()
-            .filter(|(index, aa)| {
-                **aa == residue && (peptide.modification_at(*index) - mass).abs() <= 1e-3
-            })
-            .count() as f64,
-        ModificationSpecificity::Internal(residue) => peptide
-            .sequence
-            .iter()
-            .enumerate()
-            .filter(|(index, aa)| {
-                ModificationSpecificity::is_internal(*index, peptide.sequence.len())
-                    && **aa == residue
-                    && (peptide.modification_at(*index) - mass).abs() <= 1e-3
-            })
-            .count() as f64,
-        _ => 0.0,
-    }
+    specificity
+        .sites(&peptide.sequence, peptide.position)
+        .into_iter()
+        .filter(|site| {
+            let observed = match site {
+                crate::peptide::Site::Nterm => peptide.nterm,
+                crate::peptide::Site::Cterm => peptide.cterm,
+                crate::peptide::Site::Sequence(i) => {
+                    nonzero_modification(peptide.modification_at(*i as usize))
+                }
+            };
+            mass_matches(observed, mass)
+        })
+        .count() as f64
 }
 
 fn nonzero_modification(mass: f32) -> Option<f32> {

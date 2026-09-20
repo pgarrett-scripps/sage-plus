@@ -1,0 +1,7 @@
+message schema {
+    required byte_array protein (utf8);
+    required int32 position;
+    required byte_array residue (utf8);
+    required byte_array modification (utf8);
+    required byte_array attachment (utf8);
+}

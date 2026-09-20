@@ -507,6 +507,112 @@
       },
       "type": "object"
     },
+    "NamedStaticModification": {
+      "additionalProperties": false,
+      "description": "Public definition keyed by modification identity, with explicit attachment rules.",
+      "properties": {
+        "channel_offsets": {
+          "additionalProperties": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "mass": {
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neutral_loss_mode": {
+          "$ref": "#/$defs/NeutralLossMode"
+        },
+        "neutral_losses": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "sites": {
+          "items": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "sites",
+        "mass"
+      ],
+      "type": "object"
+    },
+    "NamedVariableModification": {
+      "additionalProperties": false,
+      "description": "A variable modification with optional per-peptide occurrence limit and\noptional fragment neutral-loss behavior.",
+      "properties": {
+        "channel_offsets": {
+          "additionalProperties": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "mass": {
+          "format": "float",
+          "type": "number"
+        },
+        "max_count": {
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "neutral_loss_mode": {
+          "$ref": "#/$defs/NeutralLossMode"
+        },
+        "neutral_losses": {
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "search_mode": {
+          "$ref": "#/$defs/SearchMode"
+        },
+        "site_mode": {
+          "$ref": "#/$defs/SiteMode"
+        },
+        "sites": {
+          "items": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "sites",
+        "mass"
+      ],
+      "type": "object"
+    },
     "NeutralLossMode": {
       "enum": [
         "optional",
@@ -794,6 +900,28 @@
       ],
       "type": "string"
     },
+    "StaticModConfig": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/NamedStaticModification"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/StaticModEntry"
+          },
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+          },
+          "type": "object"
+        }
+      ]
+    },
     "StaticModEntry": {
       "anyOf": [
         {
@@ -950,6 +1078,31 @@
         }
       ],
       "description": "A variable modification entry may use the existing bare-mass syntax or the\nextensible object syntax."
+    },
+    "VariableModConfig": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/NamedVariableModification"
+          },
+          "propertyNames": {
+            "minLength": 1
+          },
+          "type": "object"
+        },
+        {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/VarModEntry"
+            },
+            "type": "array"
+          },
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+          },
+          "type": "object"
+        }
+      ]
     },
     "VariableModification": {
       "additionalProperties": false,
@@ -1193,35 +1346,28 @@
           "description": "Optional site library. Modification definitions remain in `variable_mods`."
         },
         "static_mods": {
-          "additionalProperties": {
-            "$ref": "#/$defs/StaticModEntry"
-          },
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StaticModConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Static modifications to add to matching amino acids. Entries may use\nthe existing bare mass or a structured modification object.",
-          "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
-          },
-          "type": [
-            "object",
-            "null"
-          ]
+          "description": "Named static definitions with mass and explicit sites.\nLegacy residue-keyed masses and objects remain readable."
         },
         "variable_mods": {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/VarModEntry"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VariableModConfig"
             },
-            "type": "array"
-          },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "description": "Variable modifications to add to matching amino acids.\nEach entry is either a bare mass (`15.9949`) or a structured object with\nmass, limits, display name, and optional neutral-loss behavior.",
-          "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO])(?![\\s\\S])"
-          },
-          "type": [
-            "object",
-            "null"
-          ]
+          "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nLegacy residue-keyed arrays remain readable."
         }
       },
       "type": "object"

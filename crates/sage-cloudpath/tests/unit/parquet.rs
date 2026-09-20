@@ -427,12 +427,14 @@ fn labeled_spectral_library_round_trips_channel_metadata() -> parquet::errors::R
 fn ptm_library_round_trip() {
     let sites = vec![
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P12345"),
             position: 41,
             residue: b'S',
             modification: Arc::from("Phospho"),
         },
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P12345"),
             position: 41,
             residue: b'S',
@@ -491,6 +493,7 @@ fn deserialize_custom_cleavage_library() -> parquet::errors::Result<()> {
 #[test]
 fn serialize_ptm_site_reports() {
     let ptm = serialize_ptm_sites(&[PtmSiteRecord {
+        attachment: "residue".into(),
         psm_id: 42,
         filename: "sample.mzML".into(),
         scannr: "scan=42".into(),
@@ -521,10 +524,11 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        20
+        21
     );
 
     let protein = serialize_protein_sites(&[ProteinSiteRecord {
+        attachment: "residue".into(),
         protein: "P12345".into(),
         peptide: "AAS[+79.966]AATAA".into(),
         residue: "S".into(),
@@ -546,6 +550,33 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        11
+        12
     );
+}
+
+#[test]
+fn typed_ptm_library_round_trip_preserves_all_attachments() {
+    use sage_core::ptm_library::Attachment;
+    let sites = [
+        Attachment::Residue,
+        Attachment::PeptideNTerm,
+        Attachment::PeptideCTerm,
+        Attachment::ProteinNTerm,
+        Attachment::ProteinCTerm,
+    ]
+    .into_iter()
+    .map(|attachment| PtmLibrarySite {
+        attachment,
+        protein: "P1".into(),
+        position: 0,
+        residue: b'K',
+        modification: "Acetyl".into(),
+    })
+    .collect::<Vec<_>>();
+    let bytes = serialize_ptm_library(&sites).unwrap();
+    let restored = deserialize_ptm_library(bytes).unwrap();
+    assert_eq!(restored.len(), 5);
+    for site in sites {
+        assert!(restored.iter().any(|record| record == &site));
+    }
 }

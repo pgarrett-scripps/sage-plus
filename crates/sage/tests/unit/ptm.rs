@@ -244,7 +244,7 @@ fn positional_localization_preserves_first_internal_and_protein_rules() {
     let mut truth = peptide("KAKAKAAK");
     truth.modifications = CompactModifications::from_sparse([(2, 42.0)]);
     let internal = [(ModificationSpecificity::Internal(b'K'), 42.0)];
-    let group = modification_groups(&internal).remove(0);
+    let group = modification_groups(&internal, &truth).remove(0);
     assert_eq!(group.candidates(&truth), vec![2, 4]);
     let loc = localize(
         &truth,
@@ -268,12 +268,16 @@ fn positional_localization_preserves_first_internal_and_protein_rules() {
         (ModificationSpecificity::PeptideN(Some(b'K')), 42.0),
         (ModificationSpecificity::ProteinC(Some(b'K')), 42.0),
     ];
-    let group = modification_groups(&combined).remove(0);
+    let group = modification_groups(&combined, &truth).remove(0);
     assert_eq!(group.candidates(&truth), vec![0, 2, 4]);
     truth.position = crate::enzyme::Position::Cterm;
+    let group = modification_groups(&combined, &truth).remove(0);
     assert_eq!(group.candidates(&truth), vec![0, 2, 4, 7]);
     let terminal = [(ModificationSpecificity::PeptideN(None), 42.0)];
-    assert!(modification_groups(&terminal).is_empty());
+    assert_eq!(
+        modification_groups(&terminal, &truth)[0].candidates(&truth),
+        vec![truth.sequence.len()]
+    );
 }
 
 #[test]
@@ -293,7 +297,7 @@ fn equal_mass_named_modifications_keep_identity_and_occupied_sites() {
         (ModificationSpecificity::PeptideN(Some(b'K')), first),
         (ModificationSpecificity::Internal(b'K'), internal),
     ];
-    let groups = modification_groups(&rules);
+    let groups = modification_groups(&rules, &truth);
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0].candidates(&truth), vec![0]);
     assert_eq!(groups[1].candidates(&truth), vec![2, 4]);
@@ -313,4 +317,65 @@ fn equal_mass_named_modifications_keep_identity_and_occupied_sites() {
     let other = definition("FixedOther");
     let truth = truth.with_mass_offset(Site::Sequence(4), &other);
     assert_eq!(groups[1].candidates(&truth), vec![2]);
+}
+
+#[test]
+fn terminal_localization_is_typed_and_boundary_ambiguity_is_not_promoted() {
+    use crate::ptm_library::Attachment;
+    let definition = Arc::new(ModificationDefinition {
+        name: Some("Acetyl".into()),
+        ..ModificationDefinition::bare(42.010565)
+    });
+    for (site, spelling, attachment) in [
+        (Site::Nterm, "peptide_n_term:K", Attachment::PeptideNTerm),
+        (Site::Cterm, "peptide_c_term:K", Attachment::PeptideCTerm),
+    ] {
+        let truth = peptide("KAAAAAAK").with_mass_offset(site, &definition);
+        let mut rules = vec![(
+            spelling.parse::<ModificationSpecificity>().unwrap(),
+            definition.clone(),
+        )];
+        let mut loc = localize(
+            &truth,
+            &synthetic_spectrum(&truth),
+            &[Kind::B, Kind::Y],
+            &rules,
+            Tolerance::Ppm(-10.0, 10.0),
+            None,
+            2,
+        );
+        assert_eq!(loc.mods.len(), 1);
+        assert_eq!(loc.mods[0].best_sites[0].attachment, attachment);
+        assert!(!loc.mods[0].decoy_winner);
+        loc.mods[0].set_competition_q_value(0.001);
+        assert_eq!(loc.mods[0].localization_q_value, 0.001);
+        rules.push((
+            if site == Site::Nterm {
+                ModificationSpecificity::PeptideN(Some(b'K'))
+            } else {
+                ModificationSpecificity::PeptideC(Some(b'K'))
+            },
+            definition.clone(),
+        ));
+        let mut ambiguous = localize(
+            &truth,
+            &synthetic_spectrum(&truth),
+            &[Kind::B, Kind::Y],
+            &rules,
+            Tolerance::Ppm(-10.0, 10.0),
+            None,
+            2,
+        );
+        assert_eq!(ambiguous.mods[0].candidate_sites, 2);
+        ambiguous.mods[0].set_competition_q_value(0.001);
+        assert_eq!(ambiguous.mods[0].localization_q_value, 1.0);
+        assert!(ambiguous.mods[0]
+            .all_sites
+            .iter()
+            .any(|s| s.attachment == Attachment::Residue));
+        assert!(ambiguous.mods[0]
+            .all_sites
+            .iter()
+            .any(|s| s.attachment == attachment));
+    }
 }

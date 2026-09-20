@@ -28,3 +28,7 @@ same exact peptidoform and precursor charge.
 Unlabeled searches write version 1 result schemas. A configured precursor-label search writes
 version 2 results. LFQ uses version 3 without labels and version 4 with labels. Protein site coordinates are one-based and inclusive.
 Spectral libraries use version 2 only when labeled entries are present.
+
+Beta 6 adds `ptm_library.v2.parquet.schema`, `ptm_sites.v2.parquet.schema`, and
+`protein_sites.v2.parquet.schema`. These schemas retain terminal-group versus residue
+attachment identity. Legacy PTM libraries without attachment are read as residue sites.

@@ -34,12 +34,14 @@ enum SiteClass {
 impl SiteClass {
     fn from_specificity(specificity: ModificationSpecificity) -> Self {
         match specificity {
-            ModificationSpecificity::PeptideN(None) | ModificationSpecificity::ProteinN(None) => {
-                Self::Nterm
-            }
-            ModificationSpecificity::PeptideC(None) | ModificationSpecificity::ProteinC(None) => {
-                Self::Cterm
-            }
+            ModificationSpecificity::PeptideN(None)
+            | ModificationSpecificity::ProteinN(None)
+            | ModificationSpecificity::PeptideNTerm(_)
+            | ModificationSpecificity::ProteinNTerm(_) => Self::Nterm,
+            ModificationSpecificity::PeptideC(None)
+            | ModificationSpecificity::ProteinC(None)
+            | ModificationSpecificity::PeptideCTerm(_)
+            | ModificationSpecificity::ProteinCTerm(_) => Self::Cterm,
             _ => Self::Residue,
         }
     }
@@ -439,34 +441,6 @@ impl CompactModifications {
             * self.entries.capacity()
             * std::mem::size_of::<EncodedModification>()
     }
-
-    fn relocate_mass(&mut self, mass: f32, candidates: &[usize], chosen: &[usize], epsilon: f32) {
-        let selected_id = self.entries.iter().find_map(|encoded| {
-            let record = self.lookup.record(encoded.modification_id);
-            (record.site == SiteClass::Residue
-                && candidates.contains(&(encoded.position as usize))
-                && (record.definition.mass - mass).abs() < epsilon)
-                .then_some(encoded.modification_id)
-        });
-        let Some(modification_id) = selected_id else {
-            return;
-        };
-        let lookup = self.lookup.clone();
-        self.entries.retain(|encoded| {
-            let record = lookup.record(encoded.modification_id);
-            !(record.site == SiteClass::Residue
-                && candidates.contains(&(encoded.position as usize))
-                && (record.definition.mass - mass).abs() < epsilon)
-        });
-        self.entries.extend(
-            chosen.iter().map(|position| EncodedModification {
-                position: u8::try_from(*position)
-                    .expect("PTM position exceeds compact modification encoding"),
-                modification_id,
-            }),
-        );
-        self.sort();
-    }
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -608,6 +582,7 @@ impl ModificationLookup {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LibrarySite {
+    pub attachment: crate::ptm_library::Attachment,
     pub position: u32,
     pub modification: Arc<str>,
 }
@@ -679,8 +654,61 @@ impl Peptide {
         chosen: &[usize],
         epsilon: f32,
     ) {
-        self.modifications
-            .relocate_mass(mass, candidates, chosen, epsilon);
+        let length = self.sequence.len();
+        let decode = |index| {
+            if index == length {
+                Site::Nterm
+            } else if index == length + 1 {
+                Site::Cterm
+            } else {
+                Site::Sequence(index as u32)
+            }
+        };
+        let candidates = candidates
+            .iter()
+            .map(|&index| decode(index))
+            .collect::<Vec<_>>();
+        let selected = self
+            .applied_modifications()
+            .find(|applied| {
+                candidates.contains(&applied.site)
+                    && (applied.modification.mass - mass).abs() < epsilon
+            })
+            .map(|applied| (Arc::new(applied.modification.clone()), applied.kind));
+        let Some((definition, kind)) = selected else {
+            return;
+        };
+        let mut retained = self
+            .applied_modifications()
+            .filter(|applied| {
+                !(candidates.contains(&applied.site) && applied.modification == definition.as_ref())
+            })
+            .map(|applied| AppliedModification {
+                site: applied.site,
+                modification: Arc::new(applied.modification.clone()),
+                kind: applied.kind,
+            })
+            .collect::<Vec<_>>();
+        retained.extend(chosen.iter().map(|&index| AppliedModification {
+            site: decode(index),
+            modification: definition.clone(),
+            kind,
+        }));
+        self.nterm = None;
+        self.cterm = None;
+        for applied in &retained {
+            match applied.site {
+                Site::Nterm => {
+                    self.nterm = Some(self.nterm.unwrap_or_default() + applied.modification.mass)
+                }
+                Site::Cterm => {
+                    self.cterm = Some(self.cterm.unwrap_or_default() + applied.modification.mass)
+                }
+                _ => (),
+            }
+        }
+        self.modifications = CompactModifications::from_applied(retained)
+            .expect("localized modifications fit compact lookup");
     }
 
     /// Append every site compatible with `specificity`, ignoring occupancy.
@@ -809,93 +837,23 @@ impl Peptide {
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
+        let sites = target.sites(&self.sequence, self.position);
         if !self.modifications.is_empty() {
             return self
                 .applied_modifications()
-                .filter(|applied| applied.modification.mass == mass)
-                .filter(|applied| match (target, applied.site, self.position) {
-                    (ModificationSpecificity::PeptideN(None), Site::Nterm, _) => true,
-                    (ModificationSpecificity::PeptideC(None), Site::Cterm, _) => true,
-                    (
-                        ModificationSpecificity::ProteinN(None),
-                        Site::Nterm,
-                        Position::Nterm | Position::Full,
-                    ) => true,
-                    (
-                        ModificationSpecificity::ProteinC(None),
-                        Site::Cterm,
-                        Position::Cterm | Position::Full,
-                    ) => true,
-                    (ModificationSpecificity::PeptideN(Some(residue)), Site::Sequence(0), _)
-                    | (
-                        ModificationSpecificity::ProteinN(Some(residue)),
-                        Site::Sequence(0),
-                        Position::Nterm | Position::Full,
-                    ) => self.sequence.first() == Some(&residue),
-                    (
-                        ModificationSpecificity::PeptideC(Some(residue)),
-                        Site::Sequence(index),
-                        _,
-                    )
-                    | (
-                        ModificationSpecificity::ProteinC(Some(residue)),
-                        Site::Sequence(index),
-                        Position::Cterm | Position::Full,
-                    ) => {
-                        index as usize == self.sequence.len().saturating_sub(1)
-                            && self.sequence.last() == Some(&residue)
-                    }
-                    (ModificationSpecificity::Residue(residue), Site::Sequence(index), _) => {
-                        self.sequence.get(index as usize) == Some(&residue)
-                    }
-                    (ModificationSpecificity::Internal(residue), Site::Sequence(index), _) => {
-                        ModificationSpecificity::is_internal(index as usize, self.sequence.len())
-                            && self.sequence.get(index as usize) == Some(&residue)
-                    }
-                    _ => false,
+                .filter(|applied| {
+                    applied.modification.mass == mass && sites.contains(&applied.site)
                 })
                 .count();
         }
-        match target {
-            ModificationSpecificity::PeptideN(r) | ModificationSpecificity::ProteinN(r) => {
-                if r.map(|resi| resi == *self.sequence.first().unwrap_or(&0))
-                    .unwrap_or(true)
-                    && self.nterm.unwrap_or_default() == mass
-                {
-                    1
-                } else {
-                    0
-                }
-            }
-            ModificationSpecificity::PeptideC(r) | ModificationSpecificity::ProteinC(r) => {
-                if r.map(|resi| resi == *self.sequence.last().unwrap_or(&0))
-                    .unwrap_or(true)
-                    && self.cterm.unwrap_or_default() == mass
-                {
-                    1
-                } else {
-                    0
-                }
-            }
-            ModificationSpecificity::Residue(resi) => self
-                .sequence
-                .iter()
-                .enumerate()
-                .filter(|(index, residue)| {
-                    resi == **residue && mass == self.modification_at(*index)
-                })
-                .count(),
-            ModificationSpecificity::Internal(resi) => self
-                .sequence
-                .iter()
-                .enumerate()
-                .filter(|(index, residue)| {
-                    ModificationSpecificity::is_internal(*index, self.sequence.len())
-                        && resi == **residue
-                        && mass == self.modification_at(*index)
-                })
-                .count(),
-        }
+        sites
+            .into_iter()
+            .filter(|site| match site {
+                Site::Nterm => self.nterm == Some(mass),
+                Site::Cterm => self.cterm == Some(mass),
+                Site::Sequence(i) => self.modification_at(*i as usize) == mass,
+            })
+            .count()
     }
 
     fn modification_mass(&self) -> f32 {
@@ -1029,74 +987,12 @@ impl Peptide {
         mass: f32,
         mod_idx: usize,
     ) {
-        match (target, self.position) {
-            (ModificationSpecificity::PeptideN(None), _) => acc.push((Site::Nterm, mass, mod_idx)),
-            (ModificationSpecificity::PeptideN(Some(resi)), _)
-                if resi == *self.sequence.first().unwrap_or(&0) =>
-            {
-                acc.push((Site::Sequence(0), mass, mod_idx))
-            }
-            (ModificationSpecificity::PeptideC(None), _) => acc.push((Site::Cterm, mass, mod_idx)),
-            (ModificationSpecificity::PeptideC(Some(resi)), _)
-                if resi == *self.sequence.last().unwrap_or(&0) =>
-            {
-                acc.push((
-                    Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    mass,
-                    mod_idx,
-                ))
-            }
-            (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full) => {
-                acc.push((Site::Nterm, mass, mod_idx))
-            }
-            (ModificationSpecificity::ProteinN(Some(resi)), Position::Nterm | Position::Full)
-                if resi == *self.sequence.first().unwrap_or(&0) =>
-            {
-                acc.push((Site::Sequence(0), mass, mod_idx))
-            }
-            (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full) => {
-                acc.push((Site::Cterm, mass, mod_idx))
-            }
-            (ModificationSpecificity::ProteinC(Some(resi)), Position::Cterm | Position::Full)
-                if resi == *self.sequence.last().unwrap_or(&0) =>
-            {
-                acc.push((
-                    Site::Sequence(self.sequence.len().saturating_sub(1) as u32),
-                    mass,
-                    mod_idx,
-                ))
-            }
-            (ModificationSpecificity::Residue(resi), _) => {
-                acc.extend(
-                    self.sequence
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, residue)| {
-                            if resi == *residue {
-                                Some((Site::Sequence(idx as u32), mass, mod_idx))
-                            } else {
-                                None
-                            }
-                        }),
-                );
-            }
-            (ModificationSpecificity::Internal(resi), _) => {
-                let len = self.sequence.len();
-                acc.extend(
-                    self.sequence
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, residue)| {
-                            if resi == *residue && ModificationSpecificity::is_internal(idx, len) {
-                                Some((Site::Sequence(idx as u32), mass, mod_idx))
-                            } else {
-                                None
-                            }
-                        }),
-                );
-            }
-            _ => {}
-        }
+        acc.extend(
+            target
+                .sites(&self.sequence, self.position)
+                .into_iter()
+                .map(|site| (site, mass, mod_idx)),
+        );
     }
 
     fn static_mods_all<M: ModificationSource>(
@@ -1119,63 +1015,20 @@ impl Peptide {
             } else {
                 ModificationKind::ChannelBase
             };
-            let mut sites = SmallVec::<[Site; 4]>::new();
-            match (*target, self.position) {
-                (ModificationSpecificity::PeptideN(None), _)
-                | (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full)
-                    if !nterm_occupied =>
-                {
-                    nterm_occupied = true;
-                    sites.push(Site::Nterm);
-                }
-                (ModificationSpecificity::PeptideC(None), _)
-                | (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full)
-                    if !cterm_occupied =>
-                {
-                    cterm_occupied = true;
-                    sites.push(Site::Cterm);
-                }
-                (ModificationSpecificity::PeptideN(Some(residue)), _)
-                | (
-                    ModificationSpecificity::ProteinN(Some(residue)),
-                    Position::Nterm | Position::Full,
-                ) if self.sequence.first() == Some(&residue) && !occupied[0] => {
-                    occupied[0] = true;
-                    sites.push(Site::Sequence(0));
-                }
-                (ModificationSpecificity::PeptideC(Some(residue)), _)
-                | (
-                    ModificationSpecificity::ProteinC(Some(residue)),
-                    Position::Cterm | Position::Full,
-                ) if self.sequence.last() == Some(&residue) => {
-                    let position = self.sequence.len().saturating_sub(1);
-                    if !occupied[position] {
-                        occupied[position] = true;
-                        sites.push(Site::Sequence(position as u32));
-                    }
-                }
-                (ModificationSpecificity::Residue(residue), _) => {
-                    for (position, observed) in self.sequence.iter().copied().enumerate() {
-                        if observed == residue && !occupied[position] {
-                            occupied[position] = true;
-                            sites.push(Site::Sequence(position as u32));
-                        }
-                    }
-                }
-                (ModificationSpecificity::Internal(residue), _) => {
-                    let len = self.sequence.len();
-                    for (position, observed) in self.sequence.iter().copied().enumerate() {
-                        if observed == residue
-                            && ModificationSpecificity::is_internal(position, len)
-                            && !occupied[position]
-                        {
-                            occupied[position] = true;
-                            sites.push(Site::Sequence(position as u32));
-                        }
-                    }
-                }
-                _ => {}
-            }
+            let sites = target
+                .sites(&self.sequence, self.position)
+                .into_iter()
+                .filter(|site| {
+                    let occupied = match site {
+                        Site::Nterm => &mut nterm_occupied,
+                        Site::Cterm => &mut cterm_occupied,
+                        Site::Sequence(i) => &mut occupied[*i as usize],
+                    };
+                    let available = !*occupied;
+                    *occupied = true;
+                    available
+                })
+                .collect::<Vec<_>>();
             for site in sites {
                 self.apply_site_with_kind(site, modification.clone(), kind, true);
             }
@@ -1255,29 +1108,17 @@ impl Peptide {
                     rule_idx,
                 );
                 for (site, _, _) in compatible {
-                    let library_supported = match (site, rule.modification.name.as_deref()) {
-                        (Site::Sequence(position), Some(name))
-                            if rule.site_mode != SiteMode::Exhaustive =>
-                        {
+                    let library_supported = rule.site_mode != SiteMode::Exhaustive
+                        && rule.modification.name.as_deref().is_some_and(|name| {
                             library_sites.iter().any(|library| {
-                                library.position == position
-                                    && library.modification.as_ref() == name
+                                library.modification.as_ref() == name
+                                    && library.attachment.site(
+                                        library.position,
+                                        self.sequence.len(),
+                                        self.position,
+                                    ) == Some(site)
                             })
-                        }
-                        (Site::Nterm, Some(name)) if rule.site_mode != SiteMode::Exhaustive => {
-                            library_sites.iter().any(|library| {
-                                library.position == 0 && library.modification.as_ref() == name
-                            })
-                        }
-                        (Site::Cterm, Some(name)) if rule.site_mode != SiteMode::Exhaustive => {
-                            let position = self.sequence.len().saturating_sub(1) as u32;
-                            library_sites.iter().any(|library| {
-                                library.position == position
-                                    && library.modification.as_ref() == name
-                            })
-                        }
-                        _ => false,
-                    };
+                        });
                     if rule.site_mode != SiteMode::Library || library_supported {
                         candidates.push(ModificationCandidate {
                             site,

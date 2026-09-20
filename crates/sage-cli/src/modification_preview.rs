@@ -20,6 +20,16 @@ pub fn preview(
     position: &str,
     limit: usize,
 ) -> anyhow::Result<Value> {
+    preview_with_context(config, sequence, position, limit, None)
+}
+
+pub fn preview_with_context(
+    config: &str,
+    sequence: &str,
+    position: &str,
+    limit: usize,
+    context: Option<(&str, u32)>,
+) -> anyhow::Result<Value> {
     ensure!(
         (1..=10000).contains(&limit),
         "preview limit must be between 1 and 10000"
@@ -34,23 +44,43 @@ pub fn preview(
     builder
         .validate_modification_keys()
         .map_err(anyhow::Error::msg)?;
-    ensure!(builder.ptm_library.is_none(), "preview does not load PTM libraries. Use an exhaustive configuration to inspect sequence rules");
     let mut parameters = builder.make_parameters();
     parameters.validate_channels().map_err(anyhow::Error::msg)?;
     parameters
         .validate_compact_modifications()
         .map_err(anyhow::Error::msg)?;
-    parameters
-        .validate_ptm_library(&Default::default())
-        .map_err(anyhow::Error::msg)?;
-    ensure!(
+    if let Some(settings) = &parameters.ptm_library {
+        ensure!(
+            context.is_some(),
+            "library preview requires --preview-protein and --preview-start"
+        );
+        let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
+            sage_core::ptm_library::PtmLibrary::from_tsv(&sage_cloudpath::util::read_text(
+                &settings.path,
+            )?)
+            .map_err(anyhow::Error::msg)?
+        } else {
+            sage_cloudpath::parquet::deserialize_ptm_library(sage_cloudpath::util::read_bytes(
+                &settings.path,
+            )?)?
+        };
         parameters
-            .variable_mods
-            .values()
-            .flatten()
-            .all(|entry| entry.site_mode() == SiteMode::Exhaustive),
-        "preview requires exhaustive site_mode because no protein site library is loaded"
-    );
+            .validate_ptm_library(&library)
+            .map_err(anyhow::Error::msg)?;
+        parameters.loaded_ptm_library = Some(std::sync::Arc::new(library));
+    } else {
+        parameters
+            .validate_ptm_library(&Default::default())
+            .map_err(anyhow::Error::msg)?;
+        ensure!(
+            parameters
+                .variable_mods
+                .values()
+                .flatten()
+                .all(|entry| entry.site_mode() == SiteMode::Exhaustive),
+            "preview requires a PTM library for non-exhaustive site_mode"
+        );
+    }
     let protein_position = match position {
         "internal" => Position::Internal,
         "nterm" => Position::Nterm,
@@ -61,6 +91,10 @@ pub fn preview(
     let digest = Digest {
         sequence: sequence.into(),
         position: protein_position,
+        protein: context.map_or("", |(protein, _)| protein).into(),
+        protein_start: context
+            .map(|(_, start)| start.checked_sub(1).context("preview-start is one-based"))
+            .transpose()?,
         ..Default::default()
     };
     let peptide = Peptide::try_from(digest.clone()).map_err(anyhow::Error::msg)?;
@@ -114,16 +148,21 @@ fn rules(parameters: &Parameters, peptide: &Peptide) -> Vec<Value> {
         let mut sites = Vec::new();
         peptide.compatible_sites(*specificity, &mut sites);
         let definition = entry.definition();
-        output.push(json!({"kind": "static", "key": specificity.to_string(),
+        output.push(json!({"kind": "static", "key": specificity.explicit_name(),
             "mass": definition.mass, "name": definition.name.as_deref(),
             "eligible_sites": sites.into_iter().map(site_value).collect::<Vec<_>>() }));
     }
+    let resolved = parameters.localization_rules(peptide);
     for (specificity, entries) in &parameters.variable_mods {
         for entry in entries {
             let mut sites = Vec::new();
-            peptide.compatible_sites(*specificity, &mut sites);
             let definition = entry.definition();
-            output.push(json!({"kind": "variable", "key": specificity.to_string(),
+            if let Some(rule) = resolved.iter().find(|rule| {
+                rule.specificity == *specificity && rule.definition.as_ref() == &definition
+            }) {
+                sites.extend_from_slice(&rule.sites);
+            }
+            output.push(json!({"kind": "variable", "key": specificity.explicit_name(),
                 "mass": definition.mass, "name": definition.name.as_deref(),
                 "max_count": entry.max_count(),
                 "search_mode": entry.search_mode(),
@@ -178,5 +217,36 @@ mod tests {
             result["rules"][0]["eligible_sites"],
             json!([{"position":3}])
         );
+    }
+}
+
+#[cfg(test)]
+mod library_tests {
+    use super::*;
+
+    #[test]
+    fn library_preview_preserves_attachment_and_protein_coordinates() {
+        let path =
+            std::env::temp_dir().join(format!("sage-beta6-preview-{}.tsv", std::process::id()));
+        std::fs::write(&path,"protein\tposition\tresidue\tmodification\tattachment\nP1\t9\tK\tAcetyl\tpeptide_n_term\n").unwrap();
+        let config = json!({"database":{
+            "variable_mods":{"Acetyl":{"mass":42.010565,"sites":["first_residue:K","peptide_n_term:K"],"max_count":1,"site_mode":"library"}},
+            "ptm_library":{"path":path}
+        }}).to_string();
+        assert!(preview(&config, "KAAAK", "internal", 100).is_err());
+        let value =
+            preview_with_context(&config, "KAAAK", "internal", 100, Some(("P1", 9))).unwrap();
+        assert_eq!(value["variants"].as_array().unwrap().len(), 2);
+        let modified = value["variants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| !v["modifications"].as_array().unwrap().is_empty())
+            .unwrap();
+        assert_eq!(modified["modifications"][0]["site"]["terminal_group"], "N");
+        let other =
+            preview_with_context(&config, "KAAAK", "internal", 100, Some(("P1", 10))).unwrap();
+        assert_eq!(other["variants"].as_array().unwrap().len(), 1);
+        std::fs::remove_file(path).unwrap();
     }
 }

@@ -409,6 +409,9 @@ pub struct SpectralLibraryRunStats {
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
+    ambiguous: bool,
+    protein_sites: Arc<[sage_core::enzyme::ProteinOccurrence]>,
+    attachment: sage_core::ptm_library::Attachment,
     psm_id: usize,
     filename: String,
     scannr: String,
