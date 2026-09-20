@@ -52,7 +52,7 @@ The beta.3 security dependency gate passes, as recorded in
 [`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
 validation and publication gates for the current release in
 [`benchmarks/BETA5_RELEASE.md`](benchmarks/BETA5_RELEASE.md), and the previous release's in
-[`benchmarks/BETA3_RELEASE.md`](benchmarks/BETA3_RELEASE.md).
+[`benchmarks/BETA4_RELEASE.md`](benchmarks/BETA4_RELEASE.md).
 The workflow audits the complete lockfile and runs the storage patch compatibility tests before
 packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 
