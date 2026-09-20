@@ -60,8 +60,8 @@ VAT1 matched-fragment output is also byte-identical. Recorded hashes are in
 - [x] Schema syntax checked against valid and malformed modification keys.
 - [x] Final workspace and minimal-feature tests.
 - [x] Strict Clippy and formatting.
-- [ ] Optimized release build and storage patch tests.
+- [x] Optimized release build and storage patch tests.
 - [x] Existing-fixture regression against the published Beta 4 executable.
-- [ ] Hosted required checks and release preparation pull request merge.
+- [x] Hosted required checks and release preparation pull request merge ([PR #25](https://github.com/pgarrett-scripps/sage-plus/pull/25)).
 - [ ] Manual release packaging and native archive inspection.
 - [ ] Annotated Beta 5 tag and successful publication with all assets.

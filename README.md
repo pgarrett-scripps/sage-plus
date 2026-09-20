@@ -45,6 +45,24 @@ agent-facing capabilities.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
 
+## Beta.5 positional modifications
+
+Use `~K` to restrict a modification to internal peptide residues. Combine `^K`
+and `~K` to include the first residue, or `~K` and `$K` to include the last.
+The same syntax works for static, indexed variable, and mass-offset modifications.
+Entries sharing a name retain one occurrence limit across their combined sites.
+
+Preview compatible sites and generated variants before searching:
+
+```shell
+sage config.json --preview-modifications KSTGGKAPR
+```
+
+Localization now preserves positional restrictions and distinguishes named
+modifications with equal masses. Malformed modification keys fail configuration
+loading. See [the positional modification guide](DOCS.md#positional-residue-modifications)
+and [release validation](benchmarks/BETA5_RELEASE.md).
+
 ## Beta.4 mass offset search
 
 A variable modification can set `"search_mode": "mass_offset"` to be searched as a
