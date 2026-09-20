@@ -15,7 +15,6 @@ dependencies = [
   "pypandoc-binary",  # Word export: bundles pandoc, so no system install
   "cairosvg",         # rasterizes math SVGs for the Word path
   "pillow",           # crops those rasters to their ink
-  "textstat",         # sharper syllable counts for the readability report
   "codespell",        # the misspelling dictionary the spelling check reads
   "matplotlib",       # just viz: the manuscript diagnostics in viz/
   "wordcloud",        # just viz: the word cloud, which is for fun
