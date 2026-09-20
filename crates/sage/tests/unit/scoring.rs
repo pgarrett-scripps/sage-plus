@@ -853,6 +853,7 @@ mod mass_offsets {
     fn library_offsets_use_library_sites_and_mirror_them_on_decoys() {
         let mut parameters = parameters(SearchMode::MassOffset, SiteMode::Library);
         parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![PtmLibrarySite {
+            attachment: Default::default(),
             protein: "P1".into(),
             position: 8,
             residue: b'S',

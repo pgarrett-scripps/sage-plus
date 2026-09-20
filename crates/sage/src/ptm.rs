@@ -43,6 +43,7 @@ const MAX_ARRANGEMENTS: usize = 4096;
 /// Localization confidence for a single candidate site.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct SiteScore {
+    pub attachment: crate::ptm_library::Attachment,
     /// 0-based residue index within the peptide.
     pub position: usize,
     /// Amino acid residue at this position.
@@ -135,10 +136,9 @@ pub fn localize<R: LocalizationRule>(
 ) -> Localization {
     let max_charge = max_fragment_charge(user_max_fragment_charge, precursor_charge);
 
-    // Group allowed residue sites by modification identity. Terminal groups
-    // remain fixed and are excluded from localization.
+    // Group physical attachment sites by modification identity.
     let mut mods = Vec::new();
-    for group in modification_groups(potential_mods) {
+    for group in modification_groups(potential_mods, peptide) {
         if let Some(loc) = localize_mass(
             peptide,
             spectrum,
@@ -159,12 +159,14 @@ pub fn has_localizable_modification<R: LocalizationRule>(
     peptide: &Peptide,
     potential_mods: &[R],
 ) -> bool {
-    modification_groups(potential_mods).iter().any(|group| {
-        group
-            .candidates(peptide)
-            .iter()
-            .any(|&index| group.is_placed(peptide, index))
-    })
+    modification_groups(potential_mods, peptide)
+        .iter()
+        .any(|group| {
+            group
+                .candidates(peptide)
+                .iter()
+                .any(|&index| group.is_placed(peptide, index))
+        })
 }
 
 /// Full definitions preserve identity. Mass-only rules remain supported for callers
@@ -173,6 +175,31 @@ pub trait LocalizationRule {
     fn specificity(&self) -> ModificationSpecificity;
     fn mass(&self) -> f32;
     fn definition(&self) -> Option<Arc<ModificationDefinition>>;
+    fn sites(&self, peptide: &Peptide) -> Vec<Site> {
+        self.specificity()
+            .sites(&peptide.sequence, peptide.position)
+    }
+}
+
+pub struct ResolvedLocalizationRule {
+    pub specificity: ModificationSpecificity,
+    pub definition: Arc<ModificationDefinition>,
+    pub sites: Vec<Site>,
+}
+
+impl LocalizationRule for ResolvedLocalizationRule {
+    fn specificity(&self) -> ModificationSpecificity {
+        self.specificity
+    }
+    fn mass(&self) -> f32 {
+        self.definition.mass
+    }
+    fn definition(&self) -> Option<Arc<ModificationDefinition>> {
+        Some(self.definition.clone())
+    }
+    fn sites(&self, _: &Peptide) -> Vec<Site> {
+        self.sites.clone()
+    }
 }
 
 impl LocalizationRule for (ModificationSpecificity, f32) {
@@ -203,39 +230,33 @@ struct ModificationGroup {
     mass: f32,
     definition: Option<Arc<ModificationDefinition>>,
     specificities: Vec<ModificationSpecificity>,
+    sites: Vec<Site>,
 }
 
 impl ModificationGroup {
     fn is_placed(&self, peptide: &Peptide, index: usize) -> bool {
-        if (peptide.modification_at(index) - self.mass).abs() >= MASS_EPS {
-            return false;
-        }
-        self.definition.as_ref().is_none_or(|definition| {
-            peptide.applied_modifications().any(|applied| {
-                applied.site == Site::Sequence(index as u32)
-                    && applied.modification == definition.as_ref()
-            })
+        let site = decode_site(index, peptide.sequence.len());
+        peptide.applied_modifications().any(|applied| {
+            applied.site == site
+                && (applied.modification.mass - self.mass).abs() < MASS_EPS
+                && self
+                    .definition
+                    .as_ref()
+                    .is_none_or(|definition| applied.modification == definition.as_ref())
         })
     }
 
     fn candidates(&self, peptide: &Peptide) -> Vec<usize> {
-        let mut sites = Vec::new();
-        for specificity in &self.specificities {
-            peptide.compatible_sites(*specificity, &mut sites);
-        }
-        let mut candidates = sites
-            .into_iter()
+        let mut candidates = self
+            .sites
+            .iter()
+            .copied()
             .filter_map(|site| {
-                if let Site::Sequence(index) = site {
-                    let index = index as usize;
-                    let occupied = peptide
-                        .applied_modifications()
-                        .any(|applied| applied.site == site);
-                    if !occupied || self.is_placed(peptide, index) {
-                        return Some(index);
-                    }
-                }
-                None
+                let index = encode_site(site, peptide.sequence.len());
+                let occupied = peptide
+                    .applied_modifications()
+                    .any(|applied| applied.site == site);
+                (!occupied || self.is_placed(peptide, index)).then_some(index)
             })
             .collect::<Vec<_>>();
         candidates.sort_unstable();
@@ -266,18 +287,43 @@ impl ModificationGroup {
     }
 }
 
-fn modification_groups<R: LocalizationRule>(potential_mods: &[R]) -> Vec<ModificationGroup> {
+fn encode_site(site: Site, length: usize) -> usize {
+    match site {
+        Site::Nterm => length,
+        Site::Cterm => length + 1,
+        Site::Sequence(i) => i as usize,
+    }
+}
+fn decode_site(index: usize, length: usize) -> Site {
+    if index == length {
+        Site::Nterm
+    } else if index == length + 1 {
+        Site::Cterm
+    } else {
+        Site::Sequence(index as u32)
+    }
+}
+fn site_score(index: usize, peptide: &Peptide, probability: f32) -> SiteScore {
+    let site = decode_site(index, peptide.sequence.len());
+    let position = match site {
+        Site::Nterm => 0,
+        Site::Cterm => peptide.sequence.len() - 1,
+        Site::Sequence(i) => i as usize,
+    };
+    SiteScore {
+        attachment: crate::ptm_library::Attachment::from_site(site),
+        position,
+        residue: peptide.sequence[position],
+        probability,
+    }
+}
+
+fn modification_groups<R: LocalizationRule>(
+    potential_mods: &[R],
+    peptide: &Peptide,
+) -> Vec<ModificationGroup> {
     let mut groups: Vec<ModificationGroup> = Vec::new();
     for rule in potential_mods {
-        if matches!(
-            rule.specificity(),
-            ModificationSpecificity::PeptideN(None)
-                | ModificationSpecificity::PeptideC(None)
-                | ModificationSpecificity::ProteinN(None)
-                | ModificationSpecificity::ProteinC(None)
-        ) {
-            continue;
-        }
         let definition = rule.definition();
         if let Some(group) = groups.iter_mut().find(|group| {
             group.definition == definition && (group.mass - rule.mass()).abs() < MASS_EPS
@@ -285,11 +331,13 @@ fn modification_groups<R: LocalizationRule>(potential_mods: &[R]) -> Vec<Modific
             if !group.specificities.contains(&rule.specificity()) {
                 group.specificities.push(rule.specificity());
             }
+            group.sites.extend(rule.sites(peptide));
         } else {
             groups.push(ModificationGroup {
                 mass: rule.mass(),
                 definition,
                 specificities: vec![rule.specificity()],
+                sites: rule.sites(peptide),
             });
         }
     }
@@ -323,7 +371,7 @@ fn localize_mass(
         let placed: Vec<usize> = candidates
             .iter()
             .copied()
-            .filter(|&idx| (peptide.modification_at(idx) - mass).abs() < MASS_EPS)
+            .filter(|&idx| group.is_placed(peptide, idx))
             .collect();
         return Some(ModLocalization {
             mass,
@@ -339,19 +387,11 @@ fn localize_mass(
             localization_q_value: 1.0,
             best_sites: placed
                 .iter()
-                .map(|&p| SiteScore {
-                    position: p,
-                    residue: peptide.sequence[p],
-                    probability: f32::NAN,
-                })
+                .map(|&p| site_score(p, peptide, f32::NAN))
                 .collect(),
             all_sites: candidates
                 .iter()
-                .map(|&p| SiteScore {
-                    position: p,
-                    residue: peptide.sequence[p],
-                    probability: f32::NAN,
-                })
+                .map(|&p| site_score(p, peptide, f32::NAN))
                 .collect(),
         });
     }
@@ -402,11 +442,32 @@ fn localize_mass(
 
     // AScore delta: best - second-best arrangement score.
     arrangements.sort_by(|a, b| b.score.total_cmp(&a.score));
-    let delta_score = if arrangements.len() >= 2 {
+    let mut delta_score = if arrangements.len() >= 2 {
         (arrangements[0].score - arrangements[1].score) as f32
     } else {
         0.0
     };
+    if let Some(best) = arrangements.first() {
+        let signature = |sites: &[usize]| {
+            let mut mapped = sites
+                .iter()
+                .map(|&index| match decode_site(index, peptide.sequence.len()) {
+                    Site::Nterm => 0,
+                    Site::Cterm => peptide.sequence.len() - 1,
+                    Site::Sequence(i) => i as usize,
+                })
+                .collect::<Vec<_>>();
+            mapped.sort_unstable();
+            mapped
+        };
+        if arrangements
+            .iter()
+            .skip(1)
+            .any(|alternative| signature(&alternative.sites) == signature(&best.sites))
+        {
+            delta_score = 0.0;
+        }
+    }
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
@@ -469,11 +530,7 @@ fn localize_mass(
     let all_sites: Vec<SiteScore> = candidates
         .iter()
         .enumerate()
-        .map(|(i, &pos)| SiteScore {
-            position: pos,
-            residue: peptide.sequence[pos],
-            probability: marginals[i] as f32,
-        })
+        .map(|(i, &pos)| site_score(pos, peptide, marginals[i] as f32))
         .collect();
 
     // Choose the `k` sites with the highest marginal probability as the
@@ -602,11 +659,20 @@ fn score_arrangement(
             let c_in_region = match kind {
                 Kind::A | Kind::B | Kind::C => {
                     // prefix [0, idx]
-                    candidates.iter().filter(|&&p| p <= idx).count()
+                    candidates
+                        .iter()
+                        .filter(|&&p| p <= idx || p == variant.sequence.len())
+                        .count()
                 }
                 Kind::X | Kind::Y | Kind::Z => {
                     // suffix [idx + 1, len - 1]
-                    candidates.iter().filter(|&&p| p > idx).count()
+                    candidates
+                        .iter()
+                        .filter(|&&p| {
+                            (p > idx && p < variant.sequence.len())
+                                || p == variant.sequence.len() + 1
+                        })
+                        .count()
                 }
             };
             if !is_site_determining(c_in_region, total_c, k) {

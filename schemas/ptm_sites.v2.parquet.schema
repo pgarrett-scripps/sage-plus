@@ -1,0 +1,23 @@
+message schema {
+    required int64 psm_id;
+    required byte_array filename (utf8);
+    required byte_array scannr (utf8);
+    required byte_array peptide (utf8);
+    required byte_array proteins (utf8);
+    required int32 charge;
+    required float spectrum_q;
+    required float peptide_q;
+    required byte_array modification (utf8);
+    required float modification_mass;
+    required int32 position;
+    required byte_array residue (utf8);
+    required float localization_probability;
+    required float delta_localization_score;
+    required float target_decoy_score;
+    required float localization_q_value;
+    required int32 candidate_sites;
+    required int32 site_determining_ions_matched;
+    required int32 site_determining_ions_total;
+    required byte_array site_probabilities (utf8);
+    required byte_array attachment (utf8);
+}

@@ -290,25 +290,15 @@ For additional information about configuration options and output file formats, 
     "peptide_max_mass": 5000.0,     // Optional[float] {default=5000.0}, Maximum monoisotopic mass of peptides to fragment
     "ion_kinds": ["b", "y"],        // Optional[List[str]] {default=["b","y"]} Which fragment ions to generate and search?
     "min_ion_index": 2,     // Optional[int] {default=2}, Do not generate b1/b2/y1/y2 ions for preliminary searching. Does not affect full scoring of PSMs
-    "static_mods": {        // Static modification masses or structured objects
-      "^": 304.207,         // Apply static modification to N-terminus of peptide
-      "K": 304.207,         // Apply static modification to lysine
-      "C": {"mass": 57.0215, "name": "Carbamidomethyl"}
+    "static_mods": {
+      "TMT": {"mass": 304.207, "sites": ["peptide_n_term", "K"]},
+      "Carbamidomethyl": {"mass": 57.0215, "sites": ["C"]}
     },
-    "variable_mods": {    // Variable modification masses or structured objects
-      "M": [{             // Variable mods are applied *before* static mod
-        "mass": 15.9949,
-        "max_count": 1,
-        "name": "Oxidation",
-        "neutral_losses": [17.0265],
-        "neutral_loss_mode": "optional"
-      }],
-      "K": [{"mass": 42.0106, "max_count": 1}, 14.0157],
-      "^Q": [-17.026549],
-      "^E": [-18.010565], // Applied to N-terminal glutamic acid
-      "$": [49.2, 22.9],  // Applied to peptide C-terminus
-      "[": [42.0],          // Applied to protein N-terminus
-      "]": [111.0]          // Applied to protein C-terminus
+    "variable_mods": {
+      "Oxidation": {"mass": 15.9949, "sites": ["M"], "max_count": 1},
+      "Acetyl": {"mass": 42.0106, "sites": ["K"], "max_count": 1},
+      "PyroGlu-Q": {"mass": -17.026549, "sites": ["first_residue:Q"]},
+      "PyroGlu-E": {"mass": -18.010565, "sites": ["first_residue:E"]}
     },
     "max_variable_mods": 2, // Optional[int] {default=2} Limit modifications on each peptide
     "max_total_variable_mods": 2, // Exhaustive + PTM-library placements
@@ -459,280 +449,242 @@ Example:
 
 ### Modifications
 
-Peptides may contain at most 255 residues. A database may use at most 255 distinct
-modification definition, site-class, and provenance combinations. Sage validates these limits
-before database construction and reports a configuration error when either is exceeded.
-
-#### Static Modifications
-
-- **static_mods**: Dictionary with characters as keys and bare masses or structured modification objects. Represents static modifications applied to amino acids or termini (default: {}). Static modifications are applied after variable modifications.
-  - Example: Apply a static modification of 304.207 to the N-terminus of the peptide and lysine, and 57.0215 to cysteine.
-    ```json
-    "database": {
-      "static_mods": {
-        "^": 304.207,
-        "K": 304.207,
-        "C": {"mass": 57.0215, "name": "Carbamidomethyl"}
-      }
-    }
-    ```
-
-#### Variable Modifications
-
-- **max_variable_mods**: Integer. Limit the total variable modifications on each peptide (default: 2).
-- **max_total_variable_mods**: Integer. Limit exhaustive and PTM-library-supported variable modifications combined. Defaults to `max_variable_mods` and cannot be lower.
-- **max_combinations**: Integer. Optional hard cap on the total variants generated per input peptide, including the unmodified form. Variants with fewer modifications are retained first. Values below 1 are treated as 1 (default: unlimited).
-- **static_mods** and **variable_mods** accept existing bare numeric masses or structured objects. Structured objects require `mass` and may contain `name`, `neutral_losses`, and `neutral_loss_mode`; variable modifications may additionally contain `max_count` and `site_mode`.
-- **name**: Optional display label. Named peptide modifications render as `[Name]`; unnamed and legacy entries retain numeric mass rendering.
-- **neutral_losses**: Optional list of positive neutral-loss masses. During full scoring, retained and loss forms from the same cleavage and charge are alternatives and contribute at most one match. When multiple applicable modified sites occur in one fragment, their allowed loss choices are combined and duplicate total losses are removed.
-- **neutral_loss_mode**: Either `"optional"` (default) or `"required"`. Optional mode generates the retained fragment plus configured losses. Required mode suppresses the retained form for fragments containing the modification and requires at least one configured neutral loss. Preliminary indexing retains one canonical form per cleavage to avoid favoring modifications with more configured fragment alternatives.
-- **site_mode**: Either `"exhaustive"` (default), `"library"`, or `"both"`. Library-backed modes require `name` and `max_count`. Entries with the same name across residue specificities are one logical modification and must have identical mass, limit, name, and neutral-loss settings.
-- **search_mode**: Either `"database"` (default) or `"mass_offset"`. See [Mass offset modifications](#mass-offset-modifications).
-  - Example: Apply a variable modification of 15.9949 to methionine, 49.2022 to the C-terminus of the peptide, 42.0 to the N-terminus of the protein, and 111.0 to the C-terminus of the protein.
-    ```jsonc
-    "database": {
-      "variable_mods": {
-        "M": [{
-          "mass": 15.9949,
-          "name": "Oxidation",
-          "neutral_losses": [17.0265],
-          "neutral_loss_mode": "optional"
-        }],
-        "K": [{"mass": 42.0106, "max_count": 1, "name": "Acetyl"}, 14.0157],
-        "^Q": [-17.026549],
-        "^E": [-18.010565], // Applied to N-terminal glutamic acid
-        "$": [49.2022],     // Applied to peptide C-terminus
-        "[": 42.0,          // Applied to protein N-terminus
-        "]": 111.0          // Applied to protein C-terminus
-      }
-    }
-    ```
-
-#### Mass offset modifications
-
-A variable modification with `"search_mode": "mass_offset"` is not expanded into the
-fragment index. Instead every spectrum is searched once per configured offset: the
-precursor window is translated by the offset mass, and fragment lookups are performed
-both unshifted and shifted, so peptides are retrieved on evidence from fragments that do
-and do not carry the modification. Offset and ordinary candidates are then scored,
-ranked, and target-decoy competed together.
-
-```jsonc
-"database": {
-  "variable_mods": {
-    "S": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-    "T": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-    "Y": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-    "M": [{"mass": 15.994915, "name": "Oxidation"}]  // still indexed
-  }
-}
-```
-
-Offset and indexed modifications combine: the example above searches oxidized and
-unmodified peptides from the index, each with and without a phospho offset.
-
-Behavior and limits:
-
-- **At most one offset copy is placed on a peptide**, independent of `max_count`,
-  `max_variable_mods`, `max_total_variable_mods`, and `max_combinations`, which continue
-  to govern indexed modifications only. Two copies of the same offset, or two different
-  offsets on one peptide, are not searched.
-- **Every compatible placement competes as its own candidate**, exactly as the expanded
-  peptidoforms of a database search would, so score differences and `delta_next` keep
-  their usual meaning. Site confidence still comes from PTM localization.
-- **Candidate sites** follow the configured specificities and exclude residues and
-  termini that already carry a static or variable modification.
-- **Sites are restricted by the PTM library** when `site_mode` is `"library"`, which
-  requires `name`. Decoy placements use the mirrored coordinates of the reversed
-  sequence, so targets and decoys receive equal numbers of library placements.
-- **The assigned offset is not reported as precursor mass error.** `calcmass`,
-  `delta_mass`, mass calibration, and rescoring all see the placed peptidoform.
-- **Reported identities are ordinary peptidoforms.** A placed peptide renders,
-  quantifies, and localizes exactly like the equivalent indexed peptide, and a placement
-  matching an indexed peptidoform reuses that peptide's identity.
-- Offsets are rejected with channel-aware labels (`channel_offsets`) and require a
-  non-zero mass. At most 254 distinct offsets may be configured.
-- Fragments retaining the modification are shifted by its mass, or by mass minus the
-  first configured neutral loss when `neutral_loss_mode` is `"required"`. Modifications
-  that are entirely lost during fragmentation are better modeled with `neutral_losses`.
-
-Index size and database-build memory scale with the indexed modifications only, while
-search work grows with the number of offsets and tested placements. Prefiltering applies
-the same offset-aware retrieval, so `prefilter` may be combined with offsets.
-
-#### Positional residue modifications
-
-Use `~K` to modify lysines strictly inside a peptide. The first and last residues
-are excluded, including in peptides of length one or two. This works for static
-modifications, indexed variable modifications, and mass-offset modifications.
-
-| Key | Eligible site |
-| --- | --- |
-| `K` | Every lysine |
-| `^K` | Lysine at the first peptide residue |
-| `$K` | Lysine at the last peptide residue |
-| `~K` | Lysine at an internal peptide residue |
-| `[K` | Lysine at the protein N-terminal residue |
-| `]K` | Lysine at the protein C-terminal residue |
-| `^`, `$` | The peptide terminal groups themselves |
-| `[`, `]` | The protein terminal groups themselves |
-
-Combine keys to describe a union of allowed positions. For example, allow first
-and internal lysines, plus lysine at a protein C terminus:
+Define each modification once under its stable name in `static_mods` or
+`variable_mods`. Each definition contains `mass` and a nonempty `sites` list.
+The same site syntax works for static, indexed variable, and mass-offset search.
 
 ```json
 {
   "database": {
+    "static_mods": {
+      "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}
+    },
     "variable_mods": {
-      "^K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
-      "~K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
-      "]K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}]
-    }
+      "Acetyl": {
+        "mass": 42.010565,
+        "sites": ["first_residue:K", "internal_residue:K", "protein_last:K"],
+        "max_count": 2
+      },
+      "Phospho": {
+        "mass": 79.966331,
+        "sites": ["S", "T", "Y"],
+        "max_count": 3,
+        "neutral_losses": [97.976896]
+      }
+    },
+    "max_variable_mods": 3
   }
 }
 ```
 
-The shared name gives these entries one occurrence limit across their combined
-sites. Definitions with the same name must agree. Bare masses remain supported,
-but equal unnamed masses under different keys do not share an occurrence limit.
-For static modifications, each key takes one mass or object rather than an array.
+The dictionary key is the modification identity used by localization and site
+libraries. A separate `name` field is unnecessary. If present, it must equal the
+key. Equal masses do not merge distinct identities. All sites in one definition
+share its `max_count`, neutral losses, channel offsets, and search policy.
+Use distinct names when those policies need to differ.
 
-`~K` alone excludes H3K9 when it is the first residue of `KSTGGKAPR`. Adding `^K`
-allows that placement. To allow internal and last residues instead, use `~K` and
-`$K`. These are peptide-position rules, independent of enzyme selection. They do
-not alter digestion or infer whether a cleavage was blocked by a modification.
-The `]K` exception requires known protein-terminal context.
+#### Explicit site vocabulary
 
-Malformed keys now fail configuration loading instead of being omitted. Valid keys
-contain one supported uppercase residue, an optional positional prefix, or one of
-the four bare terminal-group symbols. Bare `~` is invalid.
+| Site | Attachment |
+| --- | --- |
+| `K` | Any K residue |
+| `first_residue:K` | First peptide residue, if K |
+| `internal_residue:K` | K strictly between the first and last peptide residues |
+| `last_residue:K` | Last peptide residue, if K |
+| `protein_first:K` | First protein residue, if K |
+| `protein_last:K` | Last protein residue, if K |
+| `peptide_n_term` | Peptide N-terminal group, any boundary residue |
+| `peptide_c_term` | Peptide C-terminal group, any boundary residue |
+| `protein_n_term` | Protein N-terminal group |
+| `protein_c_term` | Protein C-terminal group |
+| `peptide_n_term:K` | Peptide N-terminal group only when the first residue is K |
+| `peptide_c_term:K` | Peptide C-terminal group only when the last residue is K |
+| `protein_n_term:K` | Protein N-terminal group only when the first residue is K |
+| `protein_c_term:K` | Protein C-terminal group only when the last residue is K |
+
+Substitute any supported uppercase one-letter residue for K. Each string encodes
+one complete rule. Entries are alternatives. Overlapping entries count the same
+physical attachment once.
+
+A terminal-group attachment and a modification on its adjacent residue are distinct
+sites and can coexist if the limits allow it. For example,
+`["peptide_n_term:K", "first_residue:K"]` allows either attachment on a peptide
+starting with K. A limit of one permits alternatives, while a limit of two also
+permits both simultaneously. Identical fragment evidence does not establish which
+attachment occurred.
+
+Use `["peptide_n_term", "peptide_c_term"]` to permit either terminal group regardless
+of boundary residue. No residue wildcard or additional field is required.
+
+#### Static and variable behavior
+
+Static definitions apply at matching unoccupied sites after variable modifications,
+preserving the existing variable-before-static behavior. Conflicting fixed
+definitions that can occupy the same site are rejected. One name cannot appear in
+both static and variable sections.
+
+For indexed variable modifications, `max_count` limits occurrences of that identity
+across all its sites. `max_variable_mods` limits exhaustive placements per peptide.
+`max_total_variable_mods` limits exhaustive and library-supported placements combined
+and defaults to `max_variable_mods`. `max_combinations` caps generated variants,
+including the unmodified form. Existing mass-offset limitations are described below.
+
+Optional `neutral_losses` contains positive fragment-loss masses.
+`neutral_loss_mode` is `optional` by default or `required` to omit the retained
+fragment form. Required mode needs at least one loss. Masses and channel offsets
+must be finite. Static definitions do not accept variable-only limits or policies.
+
+#### Positional residue modifications
+
+The Acetyl example includes first and internal lysines, plus protein-last lysines.
+It therefore includes H3K9 when K is the first residue of `KSTGGKAPR`.
+An internal-only rule would exclude that placement. Protein position is evaluated
+from the digest context, independently of which enzyme generated the peptide.
+
+Length-one and length-two peptides have no internal residues. On a length-one
+peptide, first and last refer to the same residue and do not double-apply a mod.
+
+#### Mass offset modifications
+
+Set `search_mode` to `mass_offset` on a named variable definition:
+
+```json
+{
+  "variable_mods": {
+    "Phospho": {
+      "mass": 79.966331,
+      "sites": ["S", "T", "Y"],
+      "search_mode": "mass_offset"
+    },
+    "Oxidation": {"mass": 15.994915, "sites": ["M"]}
+  }
+}
+```
+
+An offset is searched at scoring time instead of expanded into the fragment index.
+Each spectrum is searched against a translated precursor window with both shifted
+and unshifted fragment lookups. Every eligible placement competes as a candidate.
+Offsets and ordinary indexed candidates are scored and target-decoy competed together.
+
+At most one offset copy is placed on a peptide. This is independent of `max_count`,
+`max_variable_mods`, `max_total_variable_mods`, and `max_combinations`, which govern
+indexed modifications. Multiple offsets are not combined. Offset and indexed
+modifications can coexist at different unoccupied sites.
+
+Offsets follow explicit sites and typed library restrictions. They require nonzero
+mass, cannot use `channel_offsets`, and are limited to 254 distinct definitions.
+Fragments retain the offset mass, or mass minus the first required neutral loss.
+The placed peptidoform supplies mass error, FDR, quantification, localization, and
+output identity. The offset is not reported as precursor mass error. Prefiltering
+uses the same offset-aware retrieval.
 
 #### Preview modification placement
-
-Inspect a peptide without loading spectra or a FASTA:
 
 ```shell
 sage config.json --preview-modifications KSTGGKAPR
 sage config.json --preview-modifications ASQKSTGGK --peptide-position cterm --preview-limit 100
+sage library-config.json --preview-modifications KSTGGKAPR --preview-protein P68431 --preview-start 9
 ```
 
-The JSON output lists sequence-compatible sites, configured occurrence limits,
-and actual generated variants with names and masses. Residue positions are
-one-based. Terminal groups are reported separately. Site lists describe each rule
-before occupancy is resolved. Generated variants apply occupancy and shared limits.
+Preview prints explicit rules, eligible physical sites, limits, and bounded generated
+variants without reading spectra. `--peptide-position` supplies protein boundary
+context and defaults to `internal`. Library preview loads the configured TSV or
+Parquet library and requires an accession and one-based peptide start coordinate.
+It trusts the supplied sequence and boundary context rather than loading a FASTA.
+The limit ranges from 1 to 10000. `truncated` reports when returned variants were
+limited. Static and variable occupancy is reflected in generated variants.
 
-`--peptide-position` accepts `internal` (default), `nterm`, `cterm`, or `full` for
-protein-boundary context. `--preview-limit` defaults to 100 and accepts 1 through
-10000. A `truncated` flag marks a preview cut short by that bound. Configured
-`max_combinations` still applies to indexed expansion. Search-time offsets retain
-Beta 4's one-copy behavior and are added to indexed variants.
+#### Migration from symbol keys
 
-Preview accepts a JSON file containing just `database`. It does not perform
-search-level validation, digest the peptide, or load PTM libraries. Library-backed
-configurations are rejected with an explanation. It writes JSON to standard output
-and does not create search outputs or send telemetry.
+Existing residue-keyed numeric and structured configurations remain readable.
+New named definitions accept only explicit spellings in `sites`. Do not mix named
+and legacy entries within one section.
 
-Localization preserves the allowed residue positions and full modification
-identity. Distinct named modifications with equal masses are localized separately,
-and sites occupied by another definition remain fixed. True terminal-group
-modifications are not relocated. The mass-only core localization API remains
-available for callers without metadata, with its original mass-based identity.
+```shell
+sage old-config.json --migrate-modifications > new-config.json
+```
+
+The command prints a converted configuration and leaves its input untouched.
+Repeated named entries are grouped only when their definitions agree. Unnamed
+entries receive distinct deterministic `legacy_static_mods_N` or
+`legacy_variable_mods_N` identities, preserving separate occurrence limits.
+It does not infer chemical identity from mass.
+
+Legacy bare `^`, `$`, `[`, and `]` become the corresponding terminal-group names.
+Legacy `^K`, `$K`, `[K`, and `]K` become first/last residue rules, preserving their
+meaning. `~K` becomes `internal_residue:K`.
 
 #### Modification channels
 
-Structured static and variable modifications may define `channel_offsets`. The effective mass is
-the modification's `mass` plus the selected channel offset. Static versus variable placement keeps
-its normal meaning, while every channel-aware modification on a peptide resolves to one coherent
-channel.
+Both static and variable definitions may contain `channel_offsets`. Effective mass
+is the base mass plus the selected offset. All channel-aware modifications on one
+peptide resolve to one coherent channel.
 
 ```json
-"database": {
+{
   "static_mods": {
-    "C": {"mass": 57.021464, "name": "Carbamidomethyl"},
-    "K": {
+    "SILAC-K": {
       "mass": 0.0,
-      "name": "SILAC-K",
-      "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
+      "sites": ["K"],
+      "channel_offsets": {"light": 0.0, "heavy": 8.014199}
     },
-    "R": {
+    "SILAC-R": {
       "mass": 0.0,
-      "name": "SILAC-R",
-      "channel_offsets": {"light": 0.0, "medium": 6.020129, "heavy": 10.008269}
+      "sites": ["R"],
+      "channel_offsets": {"light": 0.0, "heavy": 10.008269}
     }
-  },
-  "variable_mods": {
-    "M": [{"mass": 15.994915, "name": "Oxidation"}]
   }
 }
 ```
 
-The same field is valid on a variable modification. For example, an optional two-channel lysine
-label can be written as `{"mass": 0.0, "name": "Optional-Lys8", "max_count": 2,
-"channel_offsets": {"light": 0.0, "heavy": 8.014199}}`.
-
-All `channel_offsets` dictionaries must contain exactly the same channel names and at least two
-chemically distinct channels. A unique channel whose offsets are all zero is inferred as the
-reference channel. Variable channel modifications consume the existing variable-modification and
-combination limits. Chemically identical zero-offset variants are searched once, while their full
-set of channel partners is retained for LFQ extraction.
-
-When `quant.lfq` is enabled, one identified channel can seed extraction of its configured channel
-partners at their exact precursor masses. `lfq.parquet` schema version 2 records `label_channel`,
-`label_group`, and `ratio_to_reference`. Without channel-aware modifications, Sage retains the
-existing LFQ behavior and writes schema version 1.
-
-Current label channels assume complete incorporation with fixed site mass shifts. Partial
-incorporation, whole-proteome nitrogen labeling, NeuCode resolution, and isotope-purity correction
-are not yet modeled.
+All channel dictionaries must contain the same names and at least two chemically
+distinct channels. The unique channel whose offsets are all zero is the reference.
+Variable channel modifications consume normal indexed-modification budgets.
+Zero-offset duplicates are searched once while channel partners remain available
+for LFQ. Complete incorporation and fixed mass shifts are assumed. Partial
+incorporation and isotope-purity correction are not modeled.
 
 #### PTM site libraries
 
-A PTM library is a Parquet or TSV table containing observed locations only. Modification
-masses, names, limits, and neutral losses remain defined in `variable_mods`. The format is
-selected from the `.parquet`, `.tsv`, or `.tsv.gz` filename extension.
+A library contains observed locations. Modification chemistry and search settings
+remain in the named definitions. `site_mode` selects:
 
-Required columns are `protein` (UTF-8), `position` (one-based integer), `residue`
-(one-letter UTF-8), and `modification` (the exact configured modification name).
-Additional evidence columns are allowed and ignored during database construction.
-When `ptm_library` is configured, every variable modification must specify `max_count`;
-library-referenced modifications must also have a unique, non-empty `name`.
+- `exhaustive`, the default, generates candidates from the configured sites.
+- `library` requires a matching typed library attachment as well as a configured site.
+- `both` allows exhaustive placement and recognizes matching library-supported sites.
 
-```json
-"database": {
-  "variable_mods": {
-    "S": [{
-      "name": "Phospho",
-      "mass": 79.966331,
-      "max_count": 3,
-      "site_mode": "both",
-      "neutral_losses": [97.976896]
-    }]
-  },
-  "max_variable_mods": 1,
-  "max_total_variable_mods": 3,
-  "max_combinations": 1000,
-  "ptm_library": {
-    "path": "discovery-sites.tsv",
-    "strict": true
-  }
-}
-```
+Set `database.ptm_library` to `{"path": "sites.tsv", "strict": true}`.
+TSV, TSV.gz, and Parquet are supported. When a library is configured, indexed
+variable modifications require `max_count`. Names are supplied by dictionary keys.
+Library-supported indexed placements bypass `max_variable_mods` but still consume
+`max_total_variable_mods` and the shared per-modification limit. Library evidence
+never overrides the configured site restrictions.
 
-`max_variable_mods` limits placements generated exhaustively. Library-supported
-placements do not consume that budget, but do consume `max_total_variable_mods`, the
-named modification's `max_count`, and `max_combinations`. All candidates are enumerated
-together before decoy generation and indexing. With no library configured, existing
-modification behavior is unchanged.
+Beta 6 writes five columns: `protein`, `position`, `residue`, `modification`, and
+`attachment`. Position is a one-based protein coordinate. Modification is the exact
+configured identity. Attachment is `residue`, `peptide_n_term`, `peptide_c_term`,
+`protein_n_term`, or `protein_c_term`. Additional evidence columns may be present.
 
-When PTM localization is enabled for a FASTA search, Sage also writes both
-`results.sage.ptm-library.parquet` and `results.sage.ptm-library.tsv`. They contain the
-passing localized sites whose modification names match the configured variable
-modifications; either file can be supplied to a later search through `ptm_library.path`.
-  - Syntax:
-    "^X": Modification to be applied to amino acid X if it appears at the N-terminus of a peptide
-    "$X": Modification to be applied to amino acid X if it appears at the C-terminus of a peptide
-    "[X": Modification to be applied to amino acid X if it appears at the N-terminus of a protein
-    "]X": Modification to be applied to amino acid X if it appears at the C-terminus of a protein
+For a terminal-group record, position identifies its adjacent boundary residue.
+A peptide N-terminal record supports only peptides starting there, and a C-terminal
+record supports only peptides ending there. Protein-terminal records additionally
+require the corresponding protein-terminal digest context. Terminal observations
+are exported with peptide-terminal attachment names and remain constrained by the
+configured protein-terminal rules when reused.
+
+A residue observation never supports a terminal-group attachment at the same
+coordinate. Library unions must include attachment in their identity key.
+Legacy four-column libraries are read as residue attachments. Manually authored
+legacy terminal libraries must add explicit attachment values before reuse.
+Consumers that insist on exactly four columns need an update before reading Beta 6
+output. Do not silently discard attachment when merging libraries.
+
+With localization enabled, FASTA searches emit
+`results.sage.ptm-library.tsv` and `results.sage.ptm-library.parquet`.
+Typed Parquet library and site reports embed schema version 2. Equal-scoring or
+indistinguishable attachment alternatives are excluded from the reusable library,
+even with a permissive localization threshold. Preserve the named definitions
+alongside the library, because the location table does not embed chemical masses.
 
 ### Decoys
 
@@ -929,7 +881,7 @@ modification sites are searched and is not a spectral library.
 
 ## PTM Site Localization
 
-When `ptm_localization.enabled` is true, sage attempts to pinpoint which residue carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
+When `ptm_localization.enabled` is true, sage attempts to pinpoint which physical attachment carries each variable modification on a confidently-identified peptide, analogous to MaxQuant's site tables or MSFragger/PTMProphet.
 
 Example configuration:
 
@@ -941,8 +893,8 @@ Example configuration:
 }
 ```
 
-For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification delta mass it carries, sage:
-1. recovers the candidate residues from the search's modification specificity rules (e.g. all S/T/Y for Phospho),
+For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification identity it carries, sage:
+1. recovers candidate residue and terminal attachments from the configured sites and library restrictions,
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
 4. scores a balanced set of impossible-site decoy arrangements alongside the valid target arrangements,
@@ -964,7 +916,8 @@ psm_id  peptide            modification  position  residue  localization_probabi
 ```
 
 Notes:
-- Variable residue modifications are localized within their configured positional rules. True peptide and protein terminal-group modifications are not relocated.
+- Residue and terminal-group modifications are localized within their configured rules. Site reports include `attachment`, and terminal coordinates identify the adjacent residue.
+- The current backbone-ion model cannot distinguish equal masses on a terminal group and its adjacent residue in some configurations. Such alternatives retain ambiguity and are excluded from reusable libraries. Terminal localization is experimental and has synthetic regression coverage, not an empirical FLR calibration study.
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.

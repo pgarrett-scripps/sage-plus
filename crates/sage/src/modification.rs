@@ -565,9 +565,111 @@ pub enum ModificationSpecificity {
     Residue(u8),
     /// Residue that is neither the first nor the last residue of the peptide
     Internal(u8),
+    PeptideNTerm(u8),
+    PeptideCTerm(u8),
+    ProteinNTerm(u8),
+    ProteinCTerm(u8),
 }
 
 impl ModificationSpecificity {
+    /// Explicit public spelling of one complete attachment rule.
+    pub fn explicit_name(self) -> String {
+        match self {
+            Self::Residue(r) => (r as char).to_string(),
+            Self::Internal(r) => format!("internal_residue:{}", r as char),
+            Self::PeptideN(Some(r)) => format!("first_residue:{}", r as char),
+            Self::PeptideC(Some(r)) => format!("last_residue:{}", r as char),
+            Self::ProteinN(Some(r)) => format!("protein_first:{}", r as char),
+            Self::ProteinC(Some(r)) => format!("protein_last:{}", r as char),
+            Self::PeptideN(None) => "peptide_n_term".into(),
+            Self::PeptideC(None) => "peptide_c_term".into(),
+            Self::ProteinN(None) => "protein_n_term".into(),
+            Self::ProteinC(None) => "protein_c_term".into(),
+            Self::PeptideNTerm(r) => format!("peptide_n_term:{}", r as char),
+            Self::PeptideCTerm(r) => format!("peptide_c_term:{}", r as char),
+            Self::ProteinNTerm(r) => format!("protein_n_term:{}", r as char),
+            Self::ProteinCTerm(r) => format!("protein_c_term:{}", r as char),
+        }
+    }
+
+    /// Select physical attachment sites using one matcher for every consumer.
+    pub fn sites(
+        self,
+        sequence: &[u8],
+        position: crate::enzyme::Position,
+    ) -> Vec<crate::peptide::Site> {
+        use crate::enzyme::Position;
+        use crate::peptide::Site;
+        let Some(last) = sequence.len().checked_sub(1) else {
+            return Vec::new();
+        };
+        let protein_n = matches!(position, Position::Nterm | Position::Full);
+        let protein_c = matches!(position, Position::Cterm | Position::Full);
+        match self {
+            Self::Residue(r) | Self::Internal(r) => sequence
+                .iter()
+                .enumerate()
+                .filter(|(i, observed)| {
+                    **observed == r
+                        && (!matches!(self, Self::Internal(_))
+                            || Self::is_internal(*i, sequence.len()))
+                })
+                .map(|(i, _)| Site::Sequence(i as u32))
+                .collect(),
+            Self::PeptideN(None) => vec![Site::Nterm],
+            Self::PeptideC(None) => vec![Site::Cterm],
+            Self::ProteinN(None) if protein_n => vec![Site::Nterm],
+            Self::ProteinC(None) if protein_c => vec![Site::Cterm],
+            Self::PeptideN(Some(r)) if sequence[0] == r => vec![Site::Sequence(0)],
+            Self::PeptideC(Some(r)) if sequence[last] == r => vec![Site::Sequence(last as u32)],
+            Self::ProteinN(Some(r)) if protein_n && sequence[0] == r => vec![Site::Sequence(0)],
+            Self::ProteinC(Some(r)) if protein_c && sequence[last] == r => {
+                vec![Site::Sequence(last as u32)]
+            }
+            Self::PeptideNTerm(r) if sequence[0] == r => vec![Site::Nterm],
+            Self::PeptideCTerm(r) if sequence[last] == r => vec![Site::Cterm],
+            Self::ProteinNTerm(r) if protein_n && sequence[0] == r => vec![Site::Nterm],
+            Self::ProteinCTerm(r) if protein_c && sequence[last] == r => vec![Site::Cterm],
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn overlaps(self, other: Self) -> bool {
+        use crate::enzyme::Position;
+        let residue = |rule| match rule {
+            Self::Residue(r)
+            | Self::Internal(r)
+            | Self::PeptideNTerm(r)
+            | Self::PeptideCTerm(r)
+            | Self::ProteinNTerm(r)
+            | Self::ProteinCTerm(r) => Some(r),
+            Self::PeptideN(r) | Self::PeptideC(r) | Self::ProteinN(r) | Self::ProteinC(r) => r,
+        };
+        let mut alphabet = vec![b'A'];
+        alphabet.extend(residue(self));
+        alphabet.extend(residue(other));
+        alphabet.sort_unstable();
+        alphabet.dedup();
+        for &first in &alphabet {
+            for &middle in &alphabet {
+                for &last in &alphabet {
+                    let sequence = [first, middle, last];
+                    for length in 1..=3 {
+                        let left = self.sites(&sequence[..length], Position::Full);
+                        if other
+                            .sites(&sequence[..length], Position::Full)
+                            .iter()
+                            .any(|site| left.contains(site))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Is `index` an internal position of a peptide with `len` residues?
     pub fn is_internal(index: usize, len: usize) -> bool {
         index > 0 && index < len.saturating_sub(1)
@@ -576,6 +678,15 @@ impl ModificationSpecificity {
 
 impl Display for ModificationSpecificity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if matches!(
+            self,
+            Self::PeptideNTerm(_)
+                | Self::PeptideCTerm(_)
+                | Self::ProteinNTerm(_)
+                | Self::ProteinCTerm(_)
+        ) {
+            return f.write_str(&self.explicit_name());
+        }
         let r = match self {
             ModificationSpecificity::PeptideN(r) => {
                 f.write_char('^')?;
@@ -598,6 +709,7 @@ impl Display for ModificationSpecificity {
                 f.write_char('~')?;
                 Some(*r)
             }
+            _ => unreachable!(),
         };
 
         if let Some(r) = r {
@@ -628,6 +740,31 @@ impl FromStr for ModificationSpecificity {
     type Err = InvalidModification;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (kind, residue) = s.split_once(':').map_or((s, None), |(k, r)| (k, Some(r)));
+        let aa = match residue {
+            Some(r) if r.len() == 1 && VALID_AA.contains(&r.as_bytes()[0]) => Some(r.as_bytes()[0]),
+            Some(_) => return Err(InvalidModification::TooLong(s.into())),
+            None => None,
+        };
+        let explicit = match (kind, aa) {
+            ("peptide_n_term", None) => Some(Self::PeptideN(None)),
+            ("peptide_c_term", None) => Some(Self::PeptideC(None)),
+            ("protein_n_term", None) => Some(Self::ProteinN(None)),
+            ("protein_c_term", None) => Some(Self::ProteinC(None)),
+            ("peptide_n_term", Some(r)) => Some(Self::PeptideNTerm(r)),
+            ("peptide_c_term", Some(r)) => Some(Self::PeptideCTerm(r)),
+            ("protein_n_term", Some(r)) => Some(Self::ProteinNTerm(r)),
+            ("protein_c_term", Some(r)) => Some(Self::ProteinCTerm(r)),
+            ("first_residue", Some(r)) => Some(Self::PeptideN(Some(r))),
+            ("last_residue", Some(r)) => Some(Self::PeptideC(Some(r))),
+            ("internal_residue", Some(r)) => Some(Self::Internal(r)),
+            ("protein_first", Some(r)) => Some(Self::ProteinN(Some(r))),
+            ("protein_last", Some(r)) => Some(Self::ProteinC(Some(r))),
+            _ => None,
+        };
+        if let Some(explicit) = explicit {
+            return Ok(explicit);
+        }
         let bytes = s.as_bytes();
         if bytes.is_empty() {
             return Err(InvalidModification::Empty);
@@ -662,23 +799,217 @@ impl FromStr for ModificationSpecificity {
     }
 }
 
-/// Deserialize modification maps without dropping malformed site rules.
+/// Public definition keyed by modification identity, with explicit attachment rules.
+#[derive(schemars::JsonSchema)]
+pub struct NamedStaticModification {
+    pub sites: Vec<String>,
+    #[serde(flatten)]
+    pub details: StaticModification,
+}
+
+#[derive(schemars::JsonSchema)]
+pub struct NamedVariableModification {
+    pub sites: Vec<String>,
+    #[serde(flatten)]
+    pub details: VariableModification,
+}
+
+#[derive(schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum StaticModConfig {
+    Named(BTreeMap<String, NamedStaticModification>),
+    Legacy(HashMap<String, StaticModEntry>),
+}
+
+#[derive(schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum VariableModConfig {
+    Named(BTreeMap<String, NamedVariableModification>),
+    Legacy(HashMap<String, Vec<VarModEntry>>),
+}
+
+pub trait ModMapValue: serde::de::DeserializeOwned {
+    fn named(value: serde_json::Value) -> Result<Self, String>;
+    fn merge(&mut self, other: Self) -> Result<(), String>;
+}
+
+impl ModMapValue for StaticModEntry {
+    fn named(value: serde_json::Value) -> Result<Self, String> {
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+    fn merge(&mut self, other: Self) -> Result<(), String> {
+        if self.definition() != other.definition() {
+            return Err("different static modifications target the same site rule".into());
+        }
+        Ok(())
+    }
+}
+
+impl ModMapValue for Vec<VarModEntry> {
+    fn named(value: serde_json::Value) -> Result<Self, String> {
+        serde_json::from_value(value)
+            .map(|v| vec![v])
+            .map_err(|e| e.to_string())
+    }
+    fn merge(&mut self, other: Self) -> Result<(), String> {
+        self.extend(other);
+        Ok(())
+    }
+}
+
+/// Normalize named definitions and legacy configurations into one engine model.
 pub fn deserialize_mod_map<'de, D, T>(
     deserializer: D,
 ) -> Result<Option<HashMap<String, T>>, D::Error>
 where
     D: Deserializer<'de>,
-    T: Deserialize<'de>,
+    T: ModMapValue,
 {
-    let input = Option::<HashMap<String, T>>::deserialize(deserializer)?;
-    if let Some(entries) = &input {
-        for key in entries.keys() {
-            key.parse::<ModificationSpecificity>().map_err(|_| {
-                de::Error::custom(format!("invalid modification key `{key}`. Use a residue, ^, $, [, ], or a residue prefixed by ^, $, [, ], ~"))
+    let Some(input) = Option::<BTreeMap<String, serde_json::Value>>::deserialize(deserializer)?
+    else {
+        return Ok(None);
+    };
+    let named = input.values().any(|value| value.get("sites").is_some());
+    let mut result: HashMap<String, T> = HashMap::new();
+    for (id, mut value) in input {
+        if !named {
+            let specificity = id.parse::<ModificationSpecificity>().map_err(|_| de::Error::custom(format!("invalid modification key `{id}`. Named definitions require a nonempty `sites` array")))?;
+            let entry: T = serde_json::from_value(value).map_err(de::Error::custom)?;
+            let key = specificity.to_string();
+            if let Some(existing) = result.get_mut(&key) {
+                existing.merge(entry).map_err(de::Error::custom)?
+            } else {
+                result.insert(key, entry);
+            }
+            continue;
+        }
+        if id.trim().is_empty() || id.trim() != id || id.chars().any(char::is_control) {
+            return Err(de::Error::custom("modification IDs must be nonempty and have no surrounding whitespace or control characters"));
+        }
+        let object = value.as_object_mut().ok_or_else(|| {
+            de::Error::custom(
+                "named and legacy modification declarations cannot be mixed in one section",
+            )
+        })?;
+        let sites: Vec<String> =
+            serde_json::from_value(object.remove("sites").ok_or_else(|| {
+                de::Error::custom(format!("modification `{id}` requires `sites`"))
+            })?)
+            .map_err(de::Error::custom)?;
+        if sites.is_empty() {
+            return Err(de::Error::custom(format!(
+                "modification `{id}` has no sites"
+            )));
+        }
+        if let Some(name) = object.get("name") {
+            if name.as_str() != Some(id.as_str()) {
+                return Err(de::Error::custom(format!(
+                    "modification `{id}` must not override its identity with a different name"
+                )));
+            }
+        }
+        object.insert("name".into(), serde_json::Value::String(id.clone()));
+        if object.get("max_count").and_then(|v| v.as_u64()) == Some(0) {
+            return Err(de::Error::custom("max_count must be positive"));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for site in sites {
+            let specificity = site.parse::<ModificationSpecificity>().map_err(|_| {
+                de::Error::custom(format!("invalid site `{site}` for modification `{id}`"))
             })?;
+            if specificity.explicit_name() != site {
+                return Err(de::Error::custom(format!(
+                    "use explicit site `{}` instead of `{site}`",
+                    specificity.explicit_name()
+                )));
+            }
+            if !seen.insert(specificity) {
+                continue;
+            }
+            let entry = T::named(value.clone()).map_err(de::Error::custom)?;
+            let key = specificity.to_string();
+            if let Some(existing) = result.get_mut(&key) {
+                existing.merge(entry).map_err(de::Error::custom)?
+            } else {
+                result.insert(key, entry);
+            }
         }
     }
-    Ok(input)
+    Ok(Some(result))
+}
+
+fn named_modifications<'a>(
+    entries: impl Iterator<Item = (ModificationSpecificity, &'a dyn NamedEntry)>,
+) -> serde_json::Value {
+    let mut named = BTreeMap::<String, serde_json::Value>::new();
+    for (site, entry) in entries {
+        let mut value = entry.json();
+        let name = value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .expect("named serialization requires names")
+            .to_string();
+        value.as_object_mut().unwrap().remove("name");
+        let object = named.entry(name).or_insert_with(|| {
+            value["sites"] = serde_json::json!([]);
+            value
+        });
+        object["sites"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(site.explicit_name()));
+    }
+    for value in named.values_mut() {
+        let sites = value["sites"].as_array_mut().unwrap();
+        sites.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+        sites.dedup();
+    }
+    serde_json::to_value(named).unwrap()
+}
+
+trait NamedEntry {
+    fn json(&self) -> serde_json::Value;
+}
+impl NamedEntry for StaticModEntry {
+    fn json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap()
+    }
+}
+impl NamedEntry for VarModEntry {
+    fn json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap()
+    }
+}
+
+pub fn serialize_static_mods<S: serde::Serializer>(
+    mods: &HashMap<ModificationSpecificity, StaticModEntry>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if mods.values().all(|m| m.definition().name.is_some()) {
+        named_modifications(mods.iter().map(|(s, m)| (*s, m as &dyn NamedEntry)))
+            .serialize(serializer)
+    } else {
+        mods.serialize(serializer)
+    }
+}
+
+pub fn serialize_variable_mods<S: serde::Serializer>(
+    mods: &HashMap<ModificationSpecificity, Vec<VarModEntry>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    if mods
+        .values()
+        .flatten()
+        .all(|m| m.definition().name.is_some())
+    {
+        named_modifications(
+            mods.iter()
+                .flat_map(|(s, entries)| entries.iter().map(move |m| (*s, m as &dyn NamedEntry))),
+        )
+        .serialize(serializer)
+    } else {
+        mods.serialize(serializer)
+    }
 }
 
 pub fn validate_mods(

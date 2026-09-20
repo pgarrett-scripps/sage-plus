@@ -1,0 +1,24 @@
+{
+  "baseline": "v0.1.0-beta.4",
+  "candidate": "v0.1.0-beta.6",
+  "results": [
+    {
+      "fixture": "vat1",
+      "artifact": "results.sage.parquet",
+      "sha256": "ac150b861aecb9e7b12ca22e793004e36dc14f25aec8e57297d9bc6169325cc1",
+      "byte_identical": true
+    },
+    {
+      "fixture": "vat1",
+      "artifact": "matched_fragments.sage.parquet",
+      "sha256": "bd27cd1b3299f7cf1e96250e010e110ba3c678a8a2c1e9bc1ea4586678d3b412",
+      "byte_identical": true
+    },
+    {
+      "fixture": "synthetic",
+      "artifact": "results.sage.parquet",
+      "sha256": "9be1b5bb21102acdd6b00b69fc0346e633e4c5b444ee8ed968c826c06575a581",
+      "byte_identical": true
+    }
+  ]
+}

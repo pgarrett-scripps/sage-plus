@@ -1,5 +1,6 @@
 use super::*;
 use crate::database::PeptideIx;
+use crate::enzyme::Position;
 
 fn synthetic_retention_data(count: usize) -> (IndexedDatabase, Vec<Feature>) {
     const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";

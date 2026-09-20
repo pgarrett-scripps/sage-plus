@@ -89,16 +89,16 @@ pub struct Builder {
     /// Minimum ion index to be generated: 1 will remove b1/y1 ions
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
-    /// Static modifications to add to matching amino acids. Entries may use
-    /// the existing bare mass or a structured modification object.
+    /// Named static definitions with mass and explicit sites.
+    /// Legacy residue-keyed masses and objects remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
-    #[schemars(with = "Option<HashMap<String, StaticModEntry>>")]
+    #[schemars(with = "Option<crate::modification::StaticModConfig>")]
     pub static_mods: Option<HashMap<String, StaticModEntry>>,
-    /// Variable modifications to add to matching amino acids.
-    /// Each entry is either a bare mass (`15.9949`) or a structured object with
-    /// mass, limits, display name, and optional neutral-loss behavior.
+    /// Named variable definitions with mass, explicit sites, and optional
+    /// per-modification limits, library policy, and fragment behavior.
+    /// Legacy residue-keyed arrays remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
-    #[schemars(with = "Option<HashMap<String, Vec<VarModEntry>>>")]
+    #[schemars(with = "Option<crate::modification::VariableModConfig>")]
     pub variable_mods: Option<HashMap<String, Vec<VarModEntry>>>,
     /// Limit number of variable modifications on a peptide
     pub max_variable_mods: Option<usize>,
@@ -195,7 +195,9 @@ pub struct Parameters {
     pub peptide_max_mass: f32,
     pub ion_kinds: Vec<Kind>,
     pub min_ion_index: usize,
+    #[serde(serialize_with = "crate::modification::serialize_static_mods")]
     pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
+    #[serde(serialize_with = "crate::modification::serialize_variable_mods")]
     pub variable_mods: HashMap<ModificationSpecificity, Vec<VarModEntry>>,
     pub max_variable_mods: usize,
     pub max_combinations: Option<usize>,
@@ -420,7 +422,81 @@ impl Parameters {
         groups
     }
 
+    /// Resolve localization permissions using the same typed library evidence as search.
+    pub fn localization_rules(
+        &self,
+        peptide: &Peptide,
+    ) -> Vec<crate::ptm::ResolvedLocalizationRule> {
+        self.variable_mods
+            .iter()
+            .flat_map(|(specificity, entries)| {
+                entries.iter().map(move |entry| {
+                    let definition = Arc::new(entry.definition());
+                    let mut sites = specificity.sites(&peptide.sequence, peptide.position);
+                    if entry.site_mode() == SiteMode::Library {
+                        sites.retain(|candidate| {
+                            self.loaded_ptm_library.as_ref().is_some_and(|library| {
+                                peptide.protein_sites.iter().any(|occurrence| {
+                                    let Some(start) = occurrence.start else {
+                                        return false;
+                                    };
+                                    library.sites_for(&occurrence.protein).iter().any(|record| {
+                                        let Some(index) = record.position.checked_sub(start) else {
+                                            return false;
+                                        };
+                                        definition.name.as_deref()
+                                            == Some(record.modification.as_ref())
+                                            && peptide.sequence.get(index as usize)
+                                                == Some(&record.residue)
+                                            && record.attachment.site(
+                                                index,
+                                                peptide.sequence.len(),
+                                                peptide.position,
+                                            ) == Some(*candidate)
+                                    })
+                                })
+                            })
+                        });
+                    }
+                    crate::ptm::ResolvedLocalizationRule {
+                        specificity: *specificity,
+                        definition,
+                        sites,
+                    }
+                })
+            })
+            .collect()
+    }
+
     pub fn validate_ptm_library(&self, library: &PtmLibrary) -> Result<(), String> {
+        let static_rules = self.static_mods.iter().collect::<Vec<_>>();
+        for (index, (left, left_entry)) in static_rules.iter().enumerate() {
+            let left_definition = left_entry.definition();
+            for (right, right_entry) in &static_rules[index + 1..] {
+                let right_definition = right_entry.definition();
+                if left_definition != right_definition
+                    && (left.overlaps(**right)
+                        || (left_definition.name.is_some()
+                            && left_definition.name == right_definition.name))
+                {
+                    return Err(format!("conflicting static modifications at `{}` and `{}`. A physical attachment can have only one fixed definition", left.explicit_name(), right.explicit_name()));
+                }
+            }
+        }
+        let static_names = self
+            .static_mods
+            .values()
+            .filter_map(|entry| entry.definition().name)
+            .collect::<HashSet<_>>();
+        if let Some(name) = self
+            .variable_mods
+            .values()
+            .flatten()
+            .filter_map(|entry| entry.definition().name)
+            .find(|name| static_names.contains(name))
+        {
+            return Err(format!("modification `{name}` is defined in both static_mods and variable_mods. Use distinct IDs for different application policies"));
+        }
         if self.max_total_variable_mods < self.max_variable_mods {
             return Err(
                 "database.max_total_variable_mods must be at least database.max_variable_mods"
@@ -764,7 +840,11 @@ impl Parameters {
                     .filter(|site| {
                         sequence.get((site.position - start) as usize) == Some(&site.residue)
                     })
-                    .map(|site| ((site.position - start) as usize, site.modification.clone()))
+                    .filter_map(|site| {
+                        site.attachment
+                            .site(site.position - start, sequence.len(), digest.position)
+                            .map(|attachment| (attachment, site.modification.clone()))
+                    })
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
@@ -774,17 +854,17 @@ impl Parameters {
 
         for rule in &rules {
             let mut add_site = |site: usize| {
-                let library_position = if site == nterm {
-                    0
+                let library_site = if site == nterm {
+                    Site::Nterm
                 } else if site == cterm {
-                    sequence.len().saturating_sub(1)
+                    Site::Cterm
                 } else {
-                    site
+                    Site::Sequence(site as u32)
                 };
                 let supported = rule.site_mode != SiteMode::Exhaustive
                     && rule.modification.name.as_ref().is_some_and(|name| {
                         !sequence.is_empty()
-                            && library_sites.contains(&(library_position, name.clone()))
+                            && library_sites.contains(&(library_site, name.clone()))
                     });
                 if rule.site_mode != SiteMode::Library || supported {
                     candidates
@@ -794,52 +874,12 @@ impl Parameters {
                 }
             };
 
-            match (rule.specificity, digest.position) {
-                (ModificationSpecificity::PeptideN(None), _) => add_site(nterm),
-                (ModificationSpecificity::PeptideN(Some(residue)), _)
-                    if sequence.first() == Some(&residue) =>
-                {
-                    add_site(0)
-                }
-                (ModificationSpecificity::PeptideC(None), _) => add_site(cterm),
-                (ModificationSpecificity::PeptideC(Some(residue)), _)
-                    if sequence.last() == Some(&residue) =>
-                {
-                    add_site(sequence.len().saturating_sub(1))
-                }
-                (ModificationSpecificity::ProteinN(None), Position::Nterm | Position::Full) => {
-                    add_site(nterm)
-                }
-                (
-                    ModificationSpecificity::ProteinN(Some(residue)),
-                    Position::Nterm | Position::Full,
-                ) if sequence.first() == Some(&residue) => add_site(0),
-                (ModificationSpecificity::ProteinC(None), Position::Cterm | Position::Full) => {
-                    add_site(cterm)
-                }
-                (
-                    ModificationSpecificity::ProteinC(Some(residue)),
-                    Position::Cterm | Position::Full,
-                ) if sequence.last() == Some(&residue) => {
-                    add_site(sequence.len().saturating_sub(1))
-                }
-                (ModificationSpecificity::Residue(residue), _) => {
-                    for (index, candidate) in sequence.iter().enumerate() {
-                        if *candidate == residue {
-                            add_site(index);
-                        }
-                    }
-                }
-                (ModificationSpecificity::Internal(residue), _) => {
-                    for (index, candidate) in sequence.iter().enumerate() {
-                        if *candidate == residue
-                            && ModificationSpecificity::is_internal(index, sequence.len())
-                        {
-                            add_site(index);
-                        }
-                    }
-                }
-                _ => {}
+            for site in rule.specificity.sites(sequence, digest.position) {
+                add_site(match site {
+                    Site::Nterm => nterm,
+                    Site::Cterm => cterm,
+                    Site::Sequence(i) => i as usize,
+                });
             }
         }
 
@@ -1041,6 +1081,7 @@ impl Parameters {
                                         (peptide.sequence.get(position as usize)
                                             == Some(&site.residue))
                                         .then(|| LibrarySite {
+                                            attachment: site.attachment,
                                             position,
                                             modification: site.modification.clone(),
                                         })
@@ -1967,15 +2008,7 @@ impl IndexedDatabase {
         });
         if offset.site_mode == SiteMode::Library {
             let supported = self.library_offset_positions(peptide, offset);
-            let last = peptide.sequence.len().saturating_sub(1) as u32;
-            sites.retain(|site| {
-                let position = match site {
-                    Site::Nterm => 0,
-                    Site::Cterm => last,
-                    Site::Sequence(index) => *index,
-                };
-                supported.contains(&position)
-            });
+            sites.retain(|site| supported.contains(site));
         }
         sites.sort_unstable();
         sites.dedup();
@@ -1985,7 +2018,7 @@ impl IndexedDatabase {
     /// Peptide-local positions supported by the site library. Decoys use the
     /// mirrored target coordinates of their reversed sequence, so target and
     /// decoy hypotheses receive the same number of library placements.
-    fn library_offset_positions(&self, peptide: &Peptide, offset: &MassOffset) -> Vec<u32> {
+    fn library_offset_positions(&self, peptide: &Peptide, offset: &MassOffset) -> Vec<Site> {
         let (Some(library), Some(name)) = (&self.offset_library, offset.definition.name.as_deref())
         else {
             return Vec::new();
@@ -2012,11 +2045,20 @@ impl IndexedDatabase {
                 if target_sequence.get(position as usize) != Some(&site.residue) {
                     continue;
                 }
-                positions.push(if peptide.decoy && (1..last).contains(&position) {
+                let index = if peptide.decoy
+                    && (1..last).contains(&position)
+                    && site.attachment == crate::ptm_library::Attachment::Residue
+                {
                     last - position
                 } else {
                     position
-                });
+                };
+                if let Some(site) =
+                    site.attachment
+                        .site(index, peptide.sequence.len(), peptide.position)
+                {
+                    positions.push(site)
+                }
             }
         }
         positions

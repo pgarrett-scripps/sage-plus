@@ -293,3 +293,66 @@ fn positional_keys_round_trip_and_reject_malformed_keys() {
         usize::MAX
     ));
 }
+
+#[test]
+fn explicit_sites_round_trip_and_distinguish_attachment() {
+    use crate::enzyme::Position;
+    use crate::peptide::Site;
+    for (text, sites) in [
+        (
+            "K",
+            vec![Site::Sequence(0), Site::Sequence(2), Site::Sequence(4)],
+        ),
+        ("first_residue:K", vec![Site::Sequence(0)]),
+        ("last_residue:K", vec![Site::Sequence(4)]),
+        ("internal_residue:K", vec![Site::Sequence(2)]),
+        ("peptide_n_term:K", vec![Site::Nterm]),
+        ("peptide_c_term:K", vec![Site::Cterm]),
+        ("protein_n_term:K", vec![Site::Nterm]),
+        ("protein_c_term:K", vec![Site::Cterm]),
+        ("protein_first:K", vec![Site::Sequence(0)]),
+        ("protein_last:K", vec![Site::Sequence(4)]),
+    ] {
+        let specificity: ModificationSpecificity = text.parse().unwrap();
+        assert_eq!(specificity.explicit_name(), text);
+        assert_eq!(specificity.sites(b"KAKAK", Position::Full), sites, "{text}");
+        assert!(specificity.sites(b"", Position::Full).is_empty());
+    }
+    assert!("peptide_n_term:K"
+        .parse::<ModificationSpecificity>()
+        .unwrap()
+        .sites(b"AK", Position::Internal)
+        .is_empty());
+    assert!("protein_n_term"
+        .parse::<ModificationSpecificity>()
+        .unwrap()
+        .sites(b"KA", Position::Internal)
+        .is_empty());
+    for sequence in [b"K".as_slice(), b"KK".as_slice()] {
+        assert!("internal_residue:K"
+            .parse::<ModificationSpecificity>()
+            .unwrap()
+            .sites(sequence, Position::Full)
+            .is_empty());
+    }
+}
+
+#[test]
+fn named_definitions_reject_ambiguous_or_invalid_configuration() {
+    use crate::database::Builder;
+    for value in [
+        serde_json::json!({"Acetyl":{"mass":42,"sites":[]}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["^K"]}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["peptide_n_term:KK"]}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["first_residue"]}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["K"],"name":"Other"}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["K"],"max_count":0}}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["K"]},"M":[16]}),
+        serde_json::json!({"Acetyl":{"mass":42,"sites":["K"],"unknown":true}}),
+    ] {
+        assert!(
+            serde_json::from_value::<Builder>(serde_json::json!({"variable_mods":value})).is_err(),
+            "{value}"
+        );
+    }
+}

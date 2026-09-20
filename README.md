@@ -45,6 +45,32 @@ agent-facing capabilities.
 
 Most additions are opt-in, and upstream Sage defaults are retained where practical.
 
+## Beta.6 named modifications and explicit sites
+
+Define a modification once and list its complete attachment rules:
+
+```json
+"variable_mods": {
+  "Acetyl": {
+    "mass": 42.010565,
+    "sites": ["first_residue:K", "internal_residue:K", "protein_last:K"],
+    "max_count": 2
+  },
+  "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "max_count": 3}
+}
+```
+
+`peptide_n_term:K` modifies the terminal group when the peptide starts with K.
+`first_residue:K` modifies the K residue itself. Typed site libraries preserve this
+distinction through search, localization, and reuse. Ambiguous attachments are not
+promoted into the reusable library. Static definitions use the same site vocabulary.
+
+Convert older configurations with `sage old.json --migrate-modifications > new.json`.
+Library-aware previews accept `--preview-protein` and `--preview-start`.
+See [the modification guide](DOCS.md#modifications) and
+[Beta 6 validation](benchmarks/BETA6_RELEASE.md). PTM libraries and site reports now
+carry an attachment column, which requires updates in consumers expecting four columns.
+
 ## Beta.5 positional modifications
 
 Use `~K` to restrict a modification to internal peptide residues. Combine `^K`
@@ -61,7 +87,8 @@ sage config.json --preview-modifications KSTGGKAPR
 Localization now preserves positional restrictions and distinguishes named
 modifications with equal masses. Malformed modification keys fail configuration
 loading. See [the positional modification guide](DOCS.md#positional-residue-modifications)
-and [release validation](benchmarks/BETA5_RELEASE.md).
+and [release validation](benchmarks/BETA5_RELEASE.md). Beta 5 was tagged but not published.
+Its changes are included in Beta 6.
 
 ## Beta.4 mass offset search
 

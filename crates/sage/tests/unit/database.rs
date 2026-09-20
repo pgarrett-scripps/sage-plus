@@ -286,7 +286,10 @@ fn structured_variable_mod_config_round_trips() {
     assert!(k_entries[1].is_object());
     assert!(k_entries[1].get("max_count").is_none());
     assert!(serialized["variable_mods"]["M"][0].is_number());
-    assert_eq!(serialized["static_mods"]["C"]["name"], "Carbamidomethyl");
+    assert_eq!(
+        serialized["static_mods"]["Carbamidomethyl"]["sites"],
+        serde_json::json!(["C"])
+    );
 }
 
 #[test]
@@ -514,7 +517,7 @@ fn ptm_library_configuration_round_trips() {
 
     let serialized = serde_json::to_value(params).unwrap();
     assert_eq!(serialized["ptm_library"]["path"], "sites.parquet");
-    assert_eq!(serialized["variable_mods"]["S"][0]["site_mode"], "both");
+    assert_eq!(serialized["variable_mods"]["Phospho"]["site_mode"], "both");
 }
 
 #[test]
@@ -711,12 +714,14 @@ fn protein_site_library_adds_targeted_combinations() {
     let mut parameters = builder.make_parameters();
     parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P1"),
             position: 1,
             residue: b'S',
             modification: Arc::from("Phospho"),
         },
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P1"),
             position: 2,
             residue: b'S',
@@ -764,12 +769,14 @@ fn library_sites_from_different_proteins_are_not_combined() {
     let mut parameters = builder.make_parameters();
     parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P1"),
             position: 1,
             residue: b'S',
             modification: Arc::from("Phospho"),
         },
         PtmLibrarySite {
+            attachment: Default::default(),
             protein: Arc::from("P2"),
             position: 2,
             residue: b'S',
@@ -850,6 +857,7 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
     assert!(validate(vec![("S", entry(offset, SiteMode::Library, None))], &empty).is_err());
 
     let library = PtmLibrary::new(vec![crate::ptm_library::PtmLibrarySite {
+        attachment: Default::default(),
         protein: "P1".into(),
         position: 0,
         residue: b'S',
@@ -1016,6 +1024,7 @@ fn internal_library_sites_respect_position_in_both_search_modes() {
         parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(
             [0, 2, 4]
                 .map(|position| PtmLibrarySite {
+                    attachment: Default::default(),
                     protein: "H3".into(),
                     position,
                     residue: b'K',
@@ -1056,4 +1065,120 @@ fn internal_label_channels_keep_terminal_residues_unmodified() {
         .iter()
         .all(|p| p.modification_at(0) == 0.0 && p.modification_at(4) == 0.0));
     assert!(variants.iter().any(|p| p.modification_at(2) == 8.0));
+}
+
+#[test]
+fn named_modifications_share_limits_and_preserve_terminal_identity() {
+    let config = serde_json::json!({
+        "variable_mods": {"Acetyl":{"mass":42.010565,"sites":["first_residue:K","internal_residue:K","peptide_n_term:K"],"max_count":1}},
+        "generate_decoys":false,"peptide_min_mass":0,"max_variable_mods":3
+    });
+    let params = serde_json::from_value::<Builder>(config)
+        .unwrap()
+        .make_parameters();
+    params.validate_ptm_library(&PtmLibrary::default()).unwrap();
+    let output = serde_json::to_value(&params).unwrap();
+    assert_eq!(
+        output["variable_mods"]["Acetyl"]["sites"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let round_trip = serde_json::from_value::<Builder>(output)
+        .unwrap()
+        .make_parameters();
+    let digest = Digest {
+        sequence: "KAKAK".into(),
+        position: Position::Internal,
+        ..Default::default()
+    };
+    let variants = round_trip.modify_digests(group_digests(vec![digest]));
+    assert_eq!(variants.len(), 4);
+    assert!(variants
+        .iter()
+        .all(|p| p.applied_modifications().count() <= 1));
+    assert!(variants
+        .iter()
+        .any(|p| p.nterm.is_some() && p.modification_at(0) == 0.0));
+    assert!(variants
+        .iter()
+        .any(|p| p.nterm.is_none() && p.modification_at(0) > 0.0));
+}
+
+#[test]
+fn typed_library_separates_terminal_from_boundary_residue_in_both_modes() {
+    use crate::ptm_library::Attachment;
+    for mode in ["database", "mass_offset"] {
+        for (attachment, expected) in [
+            (Attachment::Residue, Site::Sequence(0)),
+            (Attachment::PeptideNTerm, Site::Nterm),
+        ] {
+            let mut params = serde_json::from_value::<Builder>(serde_json::json!({
+                "variable_mods":{"Acetyl":{"mass":42.010565,"sites":["first_residue:K","peptide_n_term:K"],"site_mode":"library","max_count":1,"search_mode":mode}},
+                "ptm_library":{"path":"unused.tsv"},"generate_decoys":false,"peptide_min_mass":0
+            })).unwrap().make_parameters();
+            params.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
+                crate::ptm_library::PtmLibrarySite {
+                    attachment,
+                    protein: "P1".into(),
+                    position: 8,
+                    residue: b'K',
+                    modification: "Acetyl".into(),
+                },
+            ])));
+            params
+                .validate_ptm_library(params.loaded_ptm_library.as_ref().unwrap())
+                .unwrap();
+            let digest = Digest {
+                sequence: "KAAAK".into(),
+                protein: "P1".into(),
+                protein_start: Some(8),
+                position: Position::Internal,
+                ..Default::default()
+            };
+            let peptide = Peptide::try_from(digest.clone()).unwrap();
+            let allowed = params
+                .localization_rules(&peptide)
+                .into_iter()
+                .flat_map(|r| r.sites)
+                .collect::<Vec<_>>();
+            assert_eq!(allowed, vec![expected]);
+            let peptides = params.modify_digests(group_digests(vec![digest]));
+            if mode == "database" {
+                let applied = peptides
+                    .iter()
+                    .flat_map(|p| p.applied_modifications().map(|m| m.site))
+                    .collect::<Vec<_>>();
+                assert_eq!(applied, vec![expected]);
+            } else {
+                let db = params.build_from_peptides(peptides);
+                assert_eq!(
+                    db.mass_offset_sites(&db.peptides[0], &db.mass_offsets[0]),
+                    vec![expected]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn named_static_modifications_apply_terminal_and_residue_sites_separately() {
+    let params = serde_json::from_value::<Builder>(serde_json::json!({
+        "static_mods":{"Label":{"mass":42.0,"sites":["peptide_n_term:K","first_residue:K","K"]}},
+        "generate_decoys":false,"peptide_min_mass":0
+    }))
+    .unwrap()
+    .make_parameters();
+    let digest = Digest {
+        sequence: "KAK".into(),
+        position: Position::Internal,
+        ..Default::default()
+    };
+    let peptides = params.modify_digests(group_digests(vec![digest]));
+    assert_eq!(peptides.len(), 1);
+    assert_eq!(peptides[0].nterm, Some(42.0));
+    assert_eq!(peptides[0].modification_at(0), 42.0);
+    assert_eq!(peptides[0].modification_at(2), 42.0);
+    assert_eq!(peptides[0].applied_modifications().count(), 3);
 }

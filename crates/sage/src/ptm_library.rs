@@ -1,9 +1,92 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Attachment identity is independent of the adjacent residue coordinate.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Attachment {
+    #[default]
+    Residue,
+    PeptideNTerm,
+    PeptideCTerm,
+    ProteinNTerm,
+    ProteinCTerm,
+}
+
+impl Attachment {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Residue => "residue",
+            Self::PeptideNTerm => "peptide_n_term",
+            Self::PeptideCTerm => "peptide_c_term",
+            Self::ProteinNTerm => "protein_n_term",
+            Self::ProteinCTerm => "protein_c_term",
+        }
+    }
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "residue" => Ok(Self::Residue),
+            "peptide_n_term" => Ok(Self::PeptideNTerm),
+            "peptide_c_term" => Ok(Self::PeptideCTerm),
+            "protein_n_term" => Ok(Self::ProteinNTerm),
+            "protein_c_term" => Ok(Self::ProteinCTerm),
+            _ => Err(format!("invalid PTM attachment `{value}`")),
+        }
+    }
+    pub fn site(
+        self,
+        index: u32,
+        length: usize,
+        position: crate::enzyme::Position,
+    ) -> Option<crate::peptide::Site> {
+        use crate::enzyme::Position;
+        use crate::peptide::Site;
+        if index as usize >= length {
+            return None;
+        }
+        match self {
+            Self::Residue => Some(Site::Sequence(index)),
+            Self::PeptideNTerm if index == 0 => Some(Site::Nterm),
+            Self::PeptideCTerm if index as usize + 1 == length => Some(Site::Cterm),
+            Self::ProteinNTerm
+                if index == 0 && matches!(position, Position::Nterm | Position::Full) =>
+            {
+                Some(Site::Nterm)
+            }
+            Self::ProteinCTerm
+                if index as usize + 1 == length
+                    && matches!(position, Position::Cterm | Position::Full) =>
+            {
+                Some(Site::Cterm)
+            }
+            _ => None,
+        }
+    }
+    pub fn from_site(site: crate::peptide::Site) -> Self {
+        match site {
+            crate::peptide::Site::Nterm => Self::PeptideNTerm,
+            crate::peptide::Site::Cterm => Self::PeptideCTerm,
+            crate::peptide::Site::Sequence(_) => Self::Residue,
+        }
+    }
+}
+
 /// One observed PTM location loaded from a site-library file.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PtmLibrarySite {
+    pub attachment: Attachment,
     pub protein: Arc<str>,
     /// Zero-based protein position. File representations are one-based.
     pub position: u32,
@@ -33,6 +116,7 @@ impl PtmLibrary {
                 a.position
                     .cmp(&b.position)
                     .then_with(|| a.modification.cmp(&b.modification))
+                    .then_with(|| a.attachment.cmp(&b.attachment))
             });
         }
         let len = seen.len();
@@ -76,6 +160,7 @@ impl PtmLibrary {
         let position = column("position")?;
         let residue = column("residue")?;
         let modification = column("modification")?;
+        let attachment = headers.iter().position(|header| header == "attachment");
 
         let mut sites = Vec::new();
         for (index, record) in reader.records().enumerate() {
@@ -104,6 +189,10 @@ impl PtmLibrary {
             }
             let modification = field(modification, "modification")?;
             sites.push(PtmLibrarySite {
+                attachment: attachment
+                    .map(|column| field(column, "attachment").and_then(Attachment::parse))
+                    .transpose()?
+                    .unwrap_or_default(),
                 protein: Arc::from(protein),
                 position,
                 residue: residue[0].to_ascii_uppercase(),

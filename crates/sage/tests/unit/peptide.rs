@@ -789,10 +789,12 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
     ];
     let library = vec![
         LibrarySite {
+            attachment: Default::default(),
             position: 1,
             modification: Arc::from("Phospho"),
         },
         LibrarySite {
+            attachment: Default::default(),
             position: 2,
             modification: Arc::from("Phospho"),
         },
@@ -840,10 +842,12 @@ fn named_max_count_is_shared_across_residue_rules() {
     });
     let library = vec![
         LibrarySite {
+            attachment: Default::default(),
             position: 0,
             modification: Arc::from("Phospho"),
         },
         LibrarySite {
+            attachment: Default::default(),
             position: 1,
             modification: Arc::from("Phospho"),
         },
