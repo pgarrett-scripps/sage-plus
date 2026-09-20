@@ -1,0 +1,8 @@
+area,update,reader impact
+Input and configuration,"mzMLb, shared metadata, JSON Schema","Validate configs, use standard builds"
+Peptide storage,Protein-backed spans and compact records,Rust constructors may need conversions
+Fragment index,Lossless six-byte exact-mass records,Lower memory with bounded buckets
+Spectrum preprocessing,Scored envelopes and fragment charges,Boolean settings remain valid
+Exact prefilter,Chunked paired target-decoy filtering,Lower memory with added runtime
+Outputs and quantification,Typed protein occurrences and toggles,Select embedded Parquet schema metadata
+Release engineering,Native HDF5 and pinned CI actions,Consistent cross-platform archives

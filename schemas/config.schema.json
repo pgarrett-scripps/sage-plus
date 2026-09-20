@@ -670,6 +670,21 @@
       ],
       "type": "string"
     },
+    "SearchMode": {
+      "description": "Controls how a variable modification enters the search.",
+      "oneOf": [
+        {
+          "const": "database",
+          "description": "Expand modified peptidoforms while building the fragment index.",
+          "type": "string"
+        },
+        {
+          "const": "mass_offset",
+          "description": "Keep the index unmodified and test at most one copy of this\nmodification per peptide as a search-time precursor and fragment offset.",
+          "type": "string"
+        }
+      ]
+    },
     "SiteMode": {
       "description": "Controls where candidates for a variable modification are generated.",
       "oneOf": [
@@ -974,6 +989,9 @@
             "type": "number"
           },
           "type": "array"
+        },
+        "search_mode": {
+          "$ref": "#/$defs/SearchMode"
         },
         "site_mode": {
           "$ref": "#/$defs/SiteMode"

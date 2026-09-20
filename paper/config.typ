@@ -9,15 +9,21 @@
 // Nothing below this block should need editing to start a new paper.
 // =============================================================================
 
-#let paper-title = "Sage Plus Development and Benchmark Report"
+#let paper-title = "Development and Evaluation of Sage Plus"
 
 // Short form used on the audiobook cover art. Keep it to a couple of words.
 #let paper-wordmark = "sage plus"
 
 // Shown under the wordmark on the cover. \n breaks the line.
-#let paper-cover-subtitle = "Repository Technical Report"
+#let paper-cover-subtitle = "Development and Evaluation"
 
-#let paper-authors = ()
+#let paper-authors = (
+  (
+    name: "Sage Plus Contributors",
+    email: "github.com/pgarrett-scripps/sage-plus",
+    affiliation: "Sage Plus project",
+  ),
+)
 
 #let paper-keywords = (
   "proteomics",
@@ -26,7 +32,6 @@
   "entrapment",
   "benchmarking",
   "label-free quantification",
-  "phosphorylation",
 )
 
 #let paper-date = "September 2026"
@@ -45,18 +50,16 @@
 #import "stats.typ": lit, s
 
 #let paper-abstract = [
-  Sage was developed by Michael R. Lazear and the upstream Sage contributors.
-  Sage Plus is an independently versioned downstream distribution of that
-  engine. Its extensions address input support, typed analytical output, memory
-  use, execution controls, and modification-aware analysis. This report
-  documents those changes and evaluates their consequences by comparing Sage
-  #lit("v0.15.0-beta.2") with Sage Plus #lit("v0.1.0-beta.3") using matched
-  public spectra, references, and search settings. The evaluation covered
-  computational resources, worker scaling, identification agreement, peptide
-  entrapment, synthetic phosphorylation, and label-free quantification. Repeated
-  searches of selected human and mixed-species files used #s(
-    "pilot.PXD001468.rss_reduction",
-  ) and #s(
+  We developed Sage Plus as an independently versioned downstream distribution
+  of the Sage proteomics search engine. The extensions address input support,
+  typed analytical output, memory use, execution controls, and
+  modification-aware analysis. This chapter documents those changes and
+  evaluates their consequences by comparing Sage #lit("v0.15.0-beta.2") with
+  Sage Plus #lit("v0.1.0-beta.3") using matched public spectra, references, and
+  search settings. The evaluation covered computational resources, worker
+  scaling, identification agreement, peptide entrapment, and label-free
+  quantification. Repeated searches of selected human and mixed-species files
+  used #s("pilot.PXD001468.rss_reduction") and #s(
     "pilot.PXD028735.rss_reduction",
   ) percent less peak resident memory with Sage Plus. Runtime favored Sage Plus
   in the repeated public searches but favored Sage with entrapment-expanded
@@ -65,14 +68,11 @@
   ) to #s("pilot.overlap.max"). Disagreement included both changed assignments
   and identical assignments crossing different confidence thresholds. Mean
   peptide entrapment estimates were similar, with conditional difference
-  intervals spanning zero. Matched quantification measured species-ratio
-  accuracy, preparation variability, and coverage, while a human-only control
-  revealed accepted foreign-species signal in both engines. Neither release
-  produced a jointly accepted peptide set in the restricted synthetic
-  phosphorylation challenge. The development achieved lower memory use while
-  preserving substantial identification agreement on the tested workloads.
-  Validation also exposed limits in peptide acceptance and recipient-file
-  quantitative confidence, defining priorities for further development.
+  intervals spanning zero. Label-free quantification produced nearly identical
+  ratios on shared features, while a human-only control revealed accepted
+  foreign-species signal in both engines. Sage Plus used less memory while
+  retaining high identification agreement on the tested workloads. Confidence in
+  cross-run extracted intensities remains unresolved.
 ]
 
 // -----------------------------------------------------------------------------

@@ -1,0 +1,6 @@
+suite,comparison,baseline_wall_seconds,candidate_wall_seconds,baseline_rss_mib,candidate_rss_mib,baseline_psms,candidate_psms,baseline_peptides,candidate_peptides,baseline_database_peptides,candidate_database_peptides,output_check
+conventional,beta.1 to beta.2,6.60,6.01,2123.9,1497.5,2209,2203,1409,1409,,,peptides identical
+bounded modifications,beta.1 to beta.2,16.87,13.84,5463.5,3339.5,2257,2256,1456,1458,,,expected ID change
+synthetic database,beta.1 to beta.2,3.38,3.03,1049.0,790.1,,,,,,,resources only
+exact prefilter,off to on,6.12,11.11,1501.3,613.4,2203,2203,1409,1409,2803578,1031633,byte-identical
+supplied charges,inferred to supplied,0.95,0.91,24.2,24.2,3300,3300,,,,,stable checksums

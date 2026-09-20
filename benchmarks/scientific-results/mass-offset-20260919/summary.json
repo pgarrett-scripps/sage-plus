@@ -1,0 +1,151 @@
+{
+  "entrapment": {
+    "indexed": [
+      {
+        "combined_fdp": 0.010978956999085087,
+        "entrapments": 6,
+        "lower_bound_fdp": 0.0054894784995425435,
+        "nominal_q": 0.01,
+        "peptides_outside_pairing": 0,
+        "targets": 1087
+      },
+      {
+        "combined_fdp": 0.07686017988552739,
+        "entrapments": 47,
+        "lower_bound_fdp": 0.038430089942763694,
+        "nominal_q": 0.05,
+        "peptides_outside_pairing": 0,
+        "targets": 1176
+      }
+    ],
+    "offset": [
+      {
+        "combined_fdp": 0.014285714285714285,
+        "entrapments": 8,
+        "lower_bound_fdp": 0.007142857142857143,
+        "nominal_q": 0.01,
+        "peptides_outside_pairing": 0,
+        "targets": 1112
+      },
+      {
+        "combined_fdp": 0.07504078303425775,
+        "entrapments": 46,
+        "lower_bound_fdp": 0.037520391517128875,
+        "nominal_q": 0.05,
+        "peptides_outside_pairing": 0,
+        "targets": 1180
+      }
+    ]
+  },
+  "environment": {
+    "platform": "Linux-6.8.0-35-generic-x86_64-with-glibc2.39",
+    "processor_count": 16,
+    "threads": 8
+  },
+  "evidence_root": "/mnt/data1/sage-plus-scientific/mass-offset-20260919",
+  "executable": {
+    "/mnt/data1/build-cache/sage-plus-mass-offset/release/sage": "4046e0291e36c8cd1a0db83b5b1cae04c7e9a64025d56b602b502de064252ba9"
+  },
+  "localization": [
+    {
+      "agreement": {
+        "accepted_indexed": 3141,
+        "accepted_offset": 3141,
+        "same_peptidoform": 3141,
+        "same_peptidoform_and_score": 3141,
+        "shared_spectra": 3142
+      },
+      "indexed": {
+        "correct_site_events": 1128,
+        "database_peptides": 885456,
+        "incorrect_site_events": 15,
+        "scope": "site events at 1% spectrum and 1% localization q, against synthesis-defined sites; includes identification error",
+        "site_error_fraction": 0.013123359580052493
+      },
+      "offset": {
+        "correct_site_events": 1127,
+        "database_peptides": 203040,
+        "incorrect_site_events": 15,
+        "scope": "site events at 1% spectrum and 1% localization q, against synthesis-defined sites; includes identification error",
+        "site_error_fraction": 0.013134851138353765
+      },
+      "spectra": "HCD_1"
+    },
+    {
+      "agreement": {
+        "accepted_indexed": 1958,
+        "accepted_offset": 1958,
+        "same_peptidoform": 1959,
+        "same_peptidoform_and_score": 1959,
+        "shared_spectra": 1959
+      },
+      "indexed": {
+        "correct_site_events": 876,
+        "database_peptides": 885456,
+        "incorrect_site_events": 1,
+        "scope": "site events at 1% spectrum and 1% localization q, against synthesis-defined sites; includes identification error",
+        "site_error_fraction": 0.0011402508551881414
+      },
+      "offset": {
+        "correct_site_events": 876,
+        "database_peptides": 203040,
+        "incorrect_site_events": 1,
+        "scope": "site events at 1% spectrum and 1% localization q, against synthesis-defined sites; includes identification error",
+        "site_error_fraction": 0.0011402508551881414
+      },
+      "spectra": "HCD_2"
+    }
+  ],
+  "scale": [
+    {
+      "configuration": "indexed",
+      "database_fragments": 200253366,
+      "database_peptides": 6620199,
+      "offset_psms": 0,
+      "peak_rss_mib": 3026.71484375,
+      "peptides": 11196,
+      "psms": 20266,
+      "search_stage_seconds": 6.1215,
+      "trials": 2,
+      "wall_seconds": 19.765
+    },
+    {
+      "configuration": "offsets-1",
+      "database_fragments": 161315508,
+      "database_peptides": 5602995,
+      "offset_psms": 4169,
+      "peak_rss_mib": 2578.849609375,
+      "peptides": 11252,
+      "psms": 20385,
+      "search_stage_seconds": 14.1545,
+      "trials": 2,
+      "wall_seconds": 26.395
+    },
+    {
+      "configuration": "offsets-2",
+      "database_fragments": 161315508,
+      "database_peptides": 5602995,
+      "offset_psms": 7334,
+      "peak_rss_mib": 2646.87890625,
+      "peptides": 11321,
+      "psms": 20448,
+      "search_stage_seconds": 23.5275,
+      "trials": 2,
+      "wall_seconds": 36.224000000000004
+    },
+    {
+      "configuration": "offsets-3",
+      "database_fragments": 161315508,
+      "database_peptides": 5602995,
+      "offset_psms": 10292,
+      "peak_rss_mib": 2603.40625,
+      "peptides": 11682,
+      "psms": 20704,
+      "search_stage_seconds": 33.2145,
+      "trials": 2,
+      "wall_seconds": 46.55
+    }
+  ],
+  "schema_version": 1,
+  "scope": "Mass offset search against the equivalent database expansion. Engineering evidence on public spectra; not an independent biological study."
+}

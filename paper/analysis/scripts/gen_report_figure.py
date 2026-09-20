@@ -1,197 +1,234 @@
 """Generate comparative release figures from the audited report snapshots."""
 import numpy as np
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib.ticker import PercentFormatter
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+from matplotlib.ticker import PercentFormatter, ScalarFormatter, StrMethodFormatter
+from _figure_style import (
+    plt, COLORS, INK, MUTED, GRID, TEAL, PURPLE, engine_style,
+    engine_legend, panel, save_figure,
+)
 from _assets import record
-from _scientific import PAPER, INPUTS, ENGINE, load
-from _report import report, REPORT_INPUTS, workloads
-
-COLORS = {'upstream':'#32658a','plus':'#d87532'}
-plt.rcParams.update({'font.family':'DejaVu Sans','font.size':10,'axes.titlesize':11,'axes.labelsize':10,'axes.spines.top':False,'axes.spines.right':False,'legend.frameon':False,'figure.facecolor':'white','savefig.facecolor':'white'})
+from _scientific import PAPER, INPUTS, ENGINE
+from _report import report, workloads
 
 
-def finish(fig,name,desc):
-    target=PAPER/'figures'/f'report-{name}.png'
-    fig.savefig(target,dpi=320,bbox_inches='tight',metadata={'Software':None})
-    plt.close(fig)
-    sections={'identification':'public','disagreement':'public','scaling':'scaling','ptm':'ptm','lfq':'lfq','control':'lfq'}
-    inputs=INPUTS if name=='workloads' else [f'analysis/data/report-extension/{sections[name]}.json']
-    record(f'fig.report-{name}',str(target.relative_to(PAPER)),kind='figure',inputs=inputs,desc=desc)
-
-
-def label(ax,letter,title):
-    ax.set_title(f'{letter}  {title}',loc='left',fontweight='bold',pad=12)
-    ax.grid(axis='y',color='#e6eaee',linewidth=.7,zorder=0)
-    ax.set_axisbelow(True)
+def finish(fig, name, desc):
+    target = PAPER / "figures" / f"report-{name}.png"
+    save_figure(fig, target)
+    sections = {"identification": "public", "disagreement": "public",
+                "scaling": "scaling", "ptm": "ptm", "lfq": "lfq", "control": "lfq"}
+    inputs = INPUTS if name == "workloads" else [
+        f"analysis/data/report-extension/{sections[name]}.json"]
+    record(f"fig.report-{name}", str(target.relative_to(PAPER)), kind="figure",
+           inputs=inputs, desc=desc)
+    vector = target.parent / "vector" / target.with_suffix(".svg").name
+    record(f"fig.report-{name}-vector", str(vector.relative_to(PAPER)), kind="figure",
+           inputs=inputs, desc=f"Scalable companion: {desc}")
 
 
 def identification():
-    rows=report('public')
-    names=['HEK 1','HEK 2','A Alpha','B Alpha','A Beta','B Beta']
-    fig,axes=plt.subplots(2,2,figsize=(8,6.6),layout='constrained')
-    for ax,metric,title,letter in zip(axes[0],('target_psms','target_peptidoforms'),('Accepted spectrum matches','Accepted peptidoforms'),('A','B')):
-        for e,offset in (('upstream',-.18),('plus',.18)):
-            ax.bar(np.arange(6)+offset,[r['engines'][e]['0.01'][metric]/1000 for r in rows],.34,color=COLORS[e],label=ENGINE[e])
-        ax.set_xticks(range(6),names,rotation=35,ha='right')
-        ax.set_ylabel('Accepted targets (thousands)')
-        label(ax,letter,title)
-    axes[0,0].legend(fontsize=9)
-    for ax,study,letter in zip(axes[1],('PXD001468','PXD028735'),('C','D')):
-        selected=[r for r in rows if study in r['pair']]
-        qs=(.001,.005,.01,.02,.05)
-        for metric,marker,text in (('target_psms','o','PSMs'),('target_peptidoforms','s','Peptidoforms')):
-            curves=np.array([[100*(r['engines']['plus'][str(q)][metric]/r['engines']['upstream'][str(q)][metric]-1) for q in qs] for r in selected])
-            color='#804f87' if metric=='target_peptidoforms' else '#287b79'
-            ax.plot(np.array(qs)*100,curves.mean(axis=0),marker=marker,color=color,label=text)
-            ax.fill_between(np.array(qs)*100,curves.min(axis=0),curves.max(axis=0),color=color,alpha=.12)
-        ax.axhline(0,color='#555',lw=.8)
-        ax.set_xscale('log')
-        ax.set_xticks([.1,.5,1,2,5],['0.1','0.5','1','2','5'])
-        ax.set_xlabel('Reported q threshold (%)')
-        ax.set_ylabel('Sage Plus change from Sage (%)')
-        label(ax,letter,'HEK threshold response' if study=='PXD001468' else 'Mixture threshold response')
-    axes[1,0].legend(fontsize=9)
-    finish(fig,'identification','Public PSM and peptidoform yields and nominal-threshold response')
+    rows = report("public")
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.4), sharey=True, layout="constrained")
+    for ax, study, letter in zip(axes, ("PXD001468", "PXD028735"), "AB"):
+        selected = [r for r in rows if study in r["pair"]]
+        qs = (.001, .005, .01, .02, .05)
+        for metric, marker, text, color in (
+            ("target_psms", "o", "PSMs", TEAL),
+            ("target_peptidoforms", "s", "Peptidoforms", PURPLE),
+        ):
+            curves = np.array([[100 * (r["engines"]["plus"][str(q)][metric] /
+                r["engines"]["upstream"][str(q)][metric] - 1) for q in qs] for r in selected])
+            ax.fill_between(np.array(qs) * 100, curves.min(axis=0), curves.max(axis=0),
+                            color=color, alpha=.12, linewidth=0)
+            ax.plot(np.array(qs) * 100, curves.mean(axis=0), marker=marker,
+                    markersize=5, color=color, linewidth=1.6, label=text)
+        ax.axhline(0, color=MUTED, linewidth=.9)
+        ax.set_xscale("log")
+        ax.set_xticks([.1, .5, 1, 2, 5], ["0.1", "0.5", "1", "2", "5"])
+        ax.minorticks_off()
+        ax.set_xlabel("Nominal q-value (%)")
+        panel(ax, letter, "HEK" if study == "PXD001468" else "Mixture")
+    axes[0].set_ylabel("Sage Plus yield change (%)")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="outside upper center", ncol=2)
+    finish(fig, "identification", "Public PSM and peptidoform nominal-threshold response")
 
 
 def disagreement():
-    rows=report('public')
-    names=['HEK 1','HEK 2','A Alpha','B Alpha','A Beta','B Beta']
-    fig,axes=plt.subplots(1,2,figsize=(8,3.8),layout='constrained')
-    cats=[('same_assignment_above_threshold','Same assignment, above q','#77a9b5'),('different_assignment','Different rank-one assignment','#d3a34b'),('no_matching_rank_one_spectrum_charge','No matched spectrum and charge','#9b86ad')]
-    for ax,e,letter in zip(axes,('upstream','plus'),('A','B')):
-        left=np.zeros(6)
-        for key,title,color in cats:
-            vals=np.array([r['disagreement'][e].get(key,0) for r in rows])
-            ax.barh(range(6),vals,left=left,color=color,label=title)
-            left+=vals
-        ax.set_yticks(range(6),names)
-        ax.invert_yaxis()
-        ax.set_xlabel('Engine-only accepted PSMs')
-        ax.set_xlim(0,1150)
-        label(ax,letter,f'{ENGINE[e]} only')
-    handles,labels=axes[0].get_legend_handles_labels()
-    fig.legend(handles,labels,loc='outside lower center',ncol=1,fontsize=9)
-    finish(fig,'disagreement','Decomposition of accepted PSM disagreement using raw rank-one output')
+    rows = report("public")
+    names = ["HEK 1", "HEK 2", "A Alpha", "B Alpha", "A Beta", "B Beta"]
+    positions = np.array([0, 1, 2.5, 3.5, 4.5, 5.5])
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.8), sharey=True, layout="constrained")
+    categories = [
+        ("same_assignment_above_threshold", "Same assignment,\nabove threshold", "#75A7B2"),
+        ("different_assignment", "Different rank-one\nassignment", "#CFA34C"),
+        ("no_matching_rank_one_spectrum_charge", "No matched spectrum\nand charge", "#9B86AD"),
+    ]
+    for ax, engine, letter in zip(axes, ("upstream", "plus"), "AB"):
+        totals = np.array([sum(r["disagreement"][engine].values()) for r in rows])
+        left = np.zeros(len(rows))
+        for key, text, color in categories:
+            values = np.array([r["disagreement"][engine].get(key, 0) for r in rows]) / totals
+            ax.barh(positions, values, left=left, height=.67, color=color,
+                    edgecolor="white", linewidth=.3, label=text)
+            left += values
+        ax.set_yticks(positions, names)
+        ax.set_ylim(6.05, -.65)
+        ax.set_xlim(0, 1.26)
+        ax.set_xticks([0, .25, .5, .75, 1])
+        ax.xaxis.set_major_formatter(PercentFormatter(1))
+        ax.spines["bottom"].set_bounds(0, 1)
+        ax.spines["left"].set_visible(False)
+        ax.tick_params(axis="y", length=0, pad=6)
+        for position, total in zip(positions, totals):
+            ax.text(1.035, position, f"n={total:,}", va="center", fontsize=9, color=MUTED)
+        panel(ax, letter, f"{ENGINE[engine]} only", grid=None)
+        ax.set_xlabel("Share of engine-only PSMs")
+    handles = [Patch(facecolor=color, label=text) for _, text, color in categories]
+    fig.legend(handles=handles, loc="outside lower center", ncol=3, fontsize=9,
+               handlelength=1.2, columnspacing=1.5)
+    finish(fig, "disagreement", "Decomposition of accepted PSM disagreement using raw rank-one output")
 
 
 def tradeoff():
-    rows=workloads()
-    fig,axes=plt.subplots(1,2,figsize=(8,3.8),layout='constrained')
-    for ax,key,title,letter in zip(axes,('seconds','rss'),('Wall time ratio','Peak memory ratio'),('A','B')):
-        values=[r['engines']['plus'][key]/r['engines']['upstream'][key] for r in rows]
-        for i,(row,value) in enumerate(zip(rows,values)):
-            color=['#287b79','#804f87','#737b83'][i//2]
-            ax.plot([1,value],[i,i],color=color,lw=2)
-            ax.scatter(value,i,color=color,s=45,zorder=3)
-            ax.annotate(f'{value:.2f}',(value,i),xytext=(5,5),textcoords='offset points',fontsize=9)
-        ax.set_yticks(range(len(rows)),[r['label'] for r in rows])
-        ax.invert_yaxis()
-        ax.axvline(1,color='#555',lw=.8,ls='--')
-        ax.set_xlim(.6,1.35)
-        ax.set_xlabel('Sage Plus / Sage')
-        label(ax,letter,title)
-    fig.supxlabel('Green: repeated public input    Purple: file and seed summaries    Gray: local context',fontsize=8)
-    finish(fig,'workloads','Within-workload performance ratios with distinct replication designs')
+    rows = [r for r in workloads() if r["kind"] != "Contextual local timing"]
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.45), sharey=True, layout="constrained")
+    for ax, key, title, letter in zip(axes, ("seconds", "rss"),
+                                     ("Wall time", "Peak resident memory"), "AB"):
+        values = [r["engines"]["plus"][key] / r["engines"]["upstream"][key] for r in rows]
+        for i, value in enumerate(values):
+            color, marker = (TEAL, "o") if i < 2 else (PURPLE, "D")
+            ax.plot([1, value], [i, i], color=color, linewidth=1.8, zorder=2)
+            ax.scatter(value, i, color=color, marker=marker, s=45, zorder=3)
+            ax.annotate(f"{value:.2f}", (value, i), xytext=(0, 9),
+                        textcoords="offset points", ha="center", fontsize=10, color=INK)
+        ax.set_yticks(range(len(rows)), [r["label"] for r in rows])
+        ax.set_ylim(3.5, -.7)
+        ax.axvline(1, color=MUTED, linewidth=1, linestyle=(0, (3, 3)))
+        ax.set_xlim(.6, 1.3)
+        ax.set_xticks([.6, .8, 1, 1.2])
+        ax.set_xlabel("Sage Plus / Sage")
+        ax.spines["left"].set_visible(False)
+        ax.tick_params(axis="y", length=0, pad=7)
+        panel(ax, letter, title, grid="x")
+    fig.legend(handles=[
+        Line2D([], [], marker="o", linestyle="none", color=TEAL, label="Repeated public searches"),
+        Line2D([], [], marker="D", linestyle="none", color=PURPLE, label="Across files and seeds"),
+    ], loc="outside lower center", ncol=2, fontsize=9.5)
+    finish(fig, "workloads", "Within-workload performance ratios with distinct replication designs")
 
 
 def scaling():
-    rows=report('scaling')
-    fig,axes=plt.subplots(1,3,figsize=(8.4,3.2),layout='constrained')
-    for e in ('upstream','plus'):
-        baseline=np.median([r['seconds'] for r in rows if r['engine']==e and r['threads']==1 and not r['warmup']])
-        for ax,key in zip(axes,('seconds','rss','speedup')):
-            groups=[[r for r in rows if r['engine']==e and r['threads']==t and not r['warmup']] for t in (1,2,4,8)]
-            values=[np.median([r['seconds' if key=='speedup' else key] for r in g]) for g in groups]
-            if key=='speedup':
-                values=baseline/np.array(values)
-            elif key=='rss':
-                values=np.array(values)/1024
-            ax.plot((1,2,4,8),values,'o-',color=COLORS[e],label=ENGINE[e])
-            if key!='speedup':
-                for t,g in zip((1,2,4,8),groups):
-                    ax.scatter([t]*len(g),[r[key]/(1024 if key=='rss' else 1) for r in g],s=10,color=COLORS[e],alpha=.5)
-    for ax,letter,title,y in zip(axes,'ABC',('Wall time','Peak resident memory','Parallel speedup'),('Seconds','GiB','One-worker time / time')):
-        label(ax,letter,title)
-        ax.set_xticks([1,2,4,8])
-        ax.set_xlabel('Workers')
-        ax.set_ylabel(y)
-    axes[0].legend(fontsize=9)
-    finish(fig,'scaling','Matched release thread scaling with warmups excluded')
+    rows = report("scaling")
+    workers = (1, 2, 4, 8)
+    fig, axes = plt.subplots(1, 3, figsize=(7.5, 3.2), layout="constrained")
+    for engine in ("upstream", "plus"):
+        baseline = np.median([r["seconds"] for r in rows if r["engine"] == engine
+                              and r["threads"] == 1 and not r["warmup"]])
+        for ax, key in zip(axes, ("seconds", "rss", "speedup")):
+            groups = [[r for r in rows if r["engine"] == engine and r["threads"] == t
+                       and not r["warmup"]] for t in workers]
+            values = [np.median([r["seconds" if key == "speedup" else key] for r in group])
+                      for group in groups]
+            if key == "speedup":
+                values = baseline / np.array(values)
+            elif key == "rss":
+                values = np.array(values) / 1024
+            if key != "speedup":
+                for t, group in zip(workers, groups):
+                    ax.scatter([t] * len(group), [r[key] / (1024 if key == "rss" else 1)
+                               for r in group], s=12, color=COLORS[engine], alpha=.35, zorder=2)
+            ax.plot(workers, values, **engine_style(engine), zorder=3)
+    for ax, letter, title, ylabel in zip(axes, "ABC",
+        ("Wall time", "Peak memory", "Speedup"),
+        ("Seconds", "Resident memory (GiB)", "Relative to one worker")):
+        panel(ax, letter, title)
+        ax.set_xscale("log", base=2)
+        ax.set_xticks(workers)
+        ax.xaxis.set_major_formatter(ScalarFormatter())
+        ax.minorticks_off()
+        ax.set_xlim(.85, 9.4)
+        ax.set_xlabel("Workers")
+        ax.set_ylabel(ylabel)
+    axes[0].set_ylim(0, 44)
+    axes[0].set_yticks([0, 10, 20, 30, 40])
+    axes[1].set_ylim(1.3, 2.2)
+    axes[1].set_yticks([1.4, 1.6, 1.8, 2, 2.2])
+    axes[2].set_ylim(.8, 4.4)
+    axes[2].set_yticks([1, 2, 3, 4], ["1×", "2×", "3×", "4×"])
+    engine_legend(fig)
+    finish(fig, "scaling", "Matched release thread scaling with warmups excluded")
 
 
 def ptm():
-    rows=report('ptm')
-    fig,axes=plt.subplots(1,2,figsize=(8,3.5),layout='constrained')
-    for ax,lib,letter in zip(axes,(1,2),'AB'):
-        for e,offset in (('upstream',-.18),('plus',.18)):
-            r=next(r for r in rows if r['engine']==e and r['library']==lib)
-            vals=[r['spectrum_accepted'],r['joint_accepted']]
-            ax.bar(np.arange(2)+offset,vals,.34,color=COLORS[e],label=ENGINE[e])
-            for x,y in zip(np.arange(2)+offset,vals):
-                ax.text(x,y+60,f'{y:,}',ha='center',fontsize=10,color=COLORS[e])
-        ax.set_xticks([0,1],['Spectrum q ≤ 1%','Spectrum and peptide\nq ≤ 1%'])
-        ax.set_ylabel('Accepted target PSMs')
-        ax.set_ylim(0,max(r['spectrum_accepted'] for r in rows)*1.23)
-        label(ax,letter,f'Synthetic HCD {lib}')
-    axes[0].legend(fontsize=9,loc='upper right')
-    finish(fig,'ptm','Synthetic PTM acceptance under spectrum-only and joint peptide filters')
+    rows = report("ptm")
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.25), sharey=True, layout="constrained")
+    for ax, library, letter in zip(axes, (1, 2), "AB"):
+        for engine, offset in (("upstream", -.19), ("plus", .19)):
+            row = next(r for r in rows if r["engine"] == engine and r["library"] == library)
+            values = [row["spectrum_accepted"], row["joint_accepted"]]
+            bars = ax.bar(np.arange(2) + offset, values, .32, color=COLORS[engine])
+            ax.bar_label(bars, labels=[f"{value:,}" for value in values], padding=5, fontsize=10)
+            ax.scatter([1 + offset], [0], marker="_", color=COLORS[engine], s=100, clip_on=False)
+        ax.set_xticks([0, 1], ["Spectrum only", "Spectrum + peptide"])
+        ax.set_ylim(0, max(r["spectrum_accepted"] for r in rows) * 1.18)
+        ax.set_yticks([0, 1000, 2000, 3000])
+        ax.yaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+        ax.set_xlabel("Acceptance filters at q ≤ 1%")
+        panel(ax, letter, f"Synthetic HCD {library}")
+    axes[0].set_ylabel("Accepted target PSMs")
+    fig.legend(handles=[Patch(facecolor=COLORS[e], label=ENGINE[e])
+                        for e in ("upstream", "plus")], loc="outside upper center", ncol=2)
+    finish(fig, "ptm", "Synthetic PTM acceptance under spectrum-only and joint peptide filters")
 
 
 def quantification():
-    q=report('lfq')
-    fig,axes=plt.subplots(2,3,figsize=(8.5,6),layout='constrained')
-    species=('human','yeast','ecoli')
-    expected=(0,-1,2)
-    for ax,sp,exp,letter in zip(axes[0],species,expected,'ABC'):
-        for row in q['engines']:
-            values=list(row['ratios'][sp].values())
-            ax.hist(values,bins=np.linspace(-5,6,89),density=False,weights=np.ones(len(values))/len(values),histtype='step',linewidth=1.5,color=COLORS[row['engine']],label=ENGINE[row['engine']])
-        ax.axvline(exp,color='#555',ls='--',lw=.8)
-        ax.set_xlim(exp-2,exp+2)
-        ax.set_xlabel('Observed log₂(B/A)')
-        ax.set_ylabel('Fraction per bin')
-        label(ax,letter,{'human':'Human','yeast':'Yeast','ecoli':'E. coli'}[sp])
-    axes[0,0].legend(fontsize=9)
-    for ax,key,title,letter in zip(axes[1],('median_absolute_log2_error','median_preparation_cv','missing_fraction_observed_union'),('Absolute ratio error','Preparation CV','Feature missingness'),'DEF'):
-        for row,offset in zip(q['engines'],(-.18,.18)):
-            vals=[row['species'][sp][key]*(100 if key!='median_absolute_log2_error' else 1) for sp in species]
-            ax.bar(np.arange(3)+offset,vals,.34,color=COLORS[row['engine']])
-        ax.set_xticks(range(3),['Human','Yeast','E. coli'])
-        ax.set_ylabel('Median |log₂ ratio error|' if key=='median_absolute_log2_error' else ('Median CV (%)' if key=='median_preparation_cv' else 'Missing file slots (%)'))
-        label(ax,letter,title)
-    finish(fig,'lfq','Matched LFQ distributions, ratio error, preparation variability and missingness')
+    quant = report("lfq")
+    fig, axes = plt.subplots(1, 3, figsize=(7.5, 3.15), sharey=True, layout="constrained")
+    for ax, species, expected, letter, title in zip(axes, ("human", "yeast", "ecoli"),
+        (0, -1, 2), "ABC", ("Human", "Yeast", r"$\it{E.\ coli}$")):
+        for row in quant["engines"]:
+            values = list(row["ratios"][species].values())
+            ax.hist(values, bins=np.linspace(-5, 6, 89), density=False,
+                    weights=np.ones(len(values)) / len(values), histtype="step",
+                    **engine_style(row["engine"], markers=False))
+        ax.axvline(expected, color=MUTED, linestyle=":", linewidth=1.2, zorder=1)
+        ax.set_xlim(expected - 2, expected + 2)
+        ax.set_xticks(np.arange(expected - 2, expected + 3))
+        ax.set_ylim(0, .20)
+        ax.set_yticks([0, .05, .10, .15, .20])
+        ax.yaxis.set_major_formatter(PercentFormatter(1, decimals=0))
+        panel(ax, letter, title)
+    axes[0].set_ylabel("Fraction of ratio pairs per bin")
+    fig.supxlabel("Observed log₂(B/A)", fontsize=10.5)
+    engine_legend(fig, markers=False, extra=[Line2D([], [], color=MUTED,
+                  linestyle=":", linewidth=1.2, label="Expected ratio")])
+    finish(fig, "lfq", "Matched LFQ species-ratio distributions")
 
 
 def control():
-    rows=report('lfq')['engines']
-    fig,axes=plt.subplots(1,3,figsize=(8.5,3.6),layout='constrained')
-    for e,offset in (('upstream',-.18),('plus',.18)):
-        row=next(r for r in rows if r['engine']==e)
-        axes[0].bar(np.arange(2)+offset,[row['thresholds'][q]['target_precursors']/1000 for q in ('0.01','0.05')],.34,color=COLORS[e],label=ENGINE[e])
-    axes[0].set_xticks([0,1],['1%','5%'])
-    axes[0].set_xlabel('LFQ q threshold')
-    axes[0].set_ylabel('Target precursors (thousands)')
-    label(axes[0],'A','Quantification yield')
-    for i,row in enumerate(rows):
-        c=row['control']
-        for ax,total,foreign in ((axes[1],c['quantified'],c['foreign']),(axes[2],c['without_strict_ms2'],c['foreign_without_strict_ms2'])):
-            ax.bar(i,total-foreign,color='#94b8bf',label='Human' if i==0 else None)
-            ax.bar(i,foreign,bottom=total-foreign,color='#a86674',label='Foreign' if i==0 else None)
-            ax.text(i,total+max(200,total*.03),f'{foreign/total:.1%}',ha='center',fontsize=9)
-    for ax,letter,title in zip(axes[1:],'BC',('Human-only control','No direct MS2 support')):
-        ax.set_xticks([0,1],['Sage','Sage Plus'])
-        ax.set_ylabel('Positive quantified file rows')
-        label(ax,letter,title)
-        ax.margins(y=.2)
-    axes[0].legend(fontsize=8)
-    axes[1].set_ylim(0,max(r['control']['quantified'] for r in rows)*1.38)
-    axes[1].legend(fontsize=8,loc='upper right')
-    finish(fig,'control','LFQ threshold yield and species-absent control diagnostics for both releases')
+    rows = report("lfq")["engines"]
+    fig, ax = plt.subplots(figsize=(5.8, 3.35), layout="constrained")
+    for engine, offset in (("upstream", -.16), ("plus", .16)):
+        counts = next(r["control"] for r in rows if r["engine"] == engine)
+        fractions = [counts["foreign"] / counts["quantified"],
+                     counts["foreign_without_strict_ms2"] / counts["without_strict_ms2"]]
+        bars = ax.bar(np.arange(2) + offset, fractions, .27, color=COLORS[engine])
+        ax.bar_label(bars, labels=[f"{value:.1%}" for value in fractions], padding=5,
+                     fontsize=11)
+    ax.set_xticks([0, 1], ["All accepted\ncontrol rows", "Without direct\nMS2 support"])
+    ax.set_ylabel("Foreign-species fraction")
+    ax.set_xlim(-.6, 1.6)
+    ax.set_ylim(0, .8)
+    ax.set_yticks([0, .2, .4, .6, .8])
+    ax.yaxis.set_major_formatter(PercentFormatter(1))
+    ax.grid(axis="y", color=GRID, linewidth=.65)
+    ax.set_axisbelow(True)
+    fig.legend(handles=[Patch(facecolor=COLORS[e], label=ENGINE[e])
+                        for e in ("upstream", "plus")], loc="outside upper center", ncol=2)
+    finish(fig, "control", "Foreign-species fractions in all accepted and MS2-unsupported human-only control rows")
 
 
-if __name__ == '__main__':
-    for function in (identification,disagreement,tradeoff,scaling,ptm,quantification,control):
+if __name__ == "__main__":
+    for function in (identification, disagreement, tradeoff, scaling, ptm, quantification, control):
         function()

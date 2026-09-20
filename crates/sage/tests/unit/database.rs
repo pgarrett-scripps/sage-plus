@@ -696,6 +696,7 @@ fn protein_site_library_adds_targeted_combinations() {
         variable_mods: Some(HashMap::from([(
             "S".into(),
             vec![VarModEntry::Detailed(VariableModification {
+                search_mode: SearchMode::Database,
                 mass: 79.96633,
                 max_count: Some(2),
                 name: Some("Phospho".into()),
@@ -748,6 +749,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
         variable_mods: Some(HashMap::from([(
             "S".into(),
             vec![VarModEntry::Detailed(VariableModification {
+                search_mode: SearchMode::Database,
                 mass: 79.96633,
                 max_count: Some(2),
                 name: Some("Phospho".into()),
@@ -785,4 +787,83 @@ fn library_sites_from_different_proteins_are_not_combined() {
         .find(|peptide| peptide.modification_at(1) != 0.0)
         .unwrap();
     assert_eq!(first_site.proteins.as_slice(), &[Arc::from("P1")]);
+}
+
+#[test]
+fn mass_offset_validation_rejects_ambiguous_definitions() {
+    use crate::modification::{NeutralLossMode, VariableModification};
+    let entry = |search_mode, site_mode, name: Option<&str>| {
+        VarModEntry::Detailed(VariableModification {
+            mass: 79.966_33,
+            max_count: Some(1),
+            name: name.map(str::to_string),
+            neutral_losses: Vec::new(),
+            neutral_loss_mode: NeutralLossMode::Optional,
+            site_mode,
+            search_mode,
+            channel_offsets: Default::default(),
+        })
+    };
+    let validate = |mods: Vec<(&str, VarModEntry)>, library: &PtmLibrary| {
+        let mut variable_mods: HashMap<String, Vec<VarModEntry>> = HashMap::new();
+        for (site, entry) in mods {
+            variable_mods.entry(site.into()).or_default().push(entry);
+        }
+        Builder {
+            variable_mods: Some(variable_mods),
+            ..Default::default()
+        }
+        .make_parameters()
+        .validate_ptm_library(library)
+    };
+    let empty = PtmLibrary::default();
+    let offset = SearchMode::MassOffset;
+    let database = SearchMode::Database;
+    let exhaustive = SiteMode::Exhaustive;
+
+    assert!(validate(
+        vec![
+            ("S", entry(offset, exhaustive, Some("Phospho"))),
+            ("T", entry(offset, exhaustive, Some("Phospho"))),
+        ],
+        &empty
+    )
+    .is_ok());
+    let mixed = validate(
+        vec![
+            ("S", entry(offset, exhaustive, Some("Phospho"))),
+            ("T", entry(database, exhaustive, Some("Phospho"))),
+        ],
+        &empty,
+    )
+    .unwrap_err();
+    assert!(mixed.contains("cannot use both"), "{mixed}");
+    assert!(validate(
+        vec![
+            ("S", entry(offset, exhaustive, Some("Phospho"))),
+            ("T", entry(offset, SiteMode::Both, Some("Phospho"))),
+        ],
+        &empty
+    )
+    .unwrap_err()
+    .contains("inconsistent"));
+    assert!(validate(vec![("S", entry(offset, SiteMode::Library, None))], &empty).is_err());
+
+    let library = PtmLibrary::new(vec![crate::ptm_library::PtmLibrarySite {
+        protein: "P1".into(),
+        position: 0,
+        residue: b'S',
+        modification: "Phospho".into(),
+    }]);
+    assert!(validate(
+        vec![("S", entry(offset, SiteMode::Library, Some("Phospho")))],
+        &library
+    )
+    .is_ok());
+    assert!(validate(
+        vec![("S", entry(offset, exhaustive, Some("Phospho")))],
+        &library
+    )
+    .unwrap_err()
+    .contains("site_mode"));
 }

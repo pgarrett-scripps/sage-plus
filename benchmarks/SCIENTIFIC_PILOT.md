@@ -1,8 +1,8 @@
-# Scientific pilot protocol
+# Scientific pilot for the paper and dissertation
 
 The September 14, 2026 pilot runs all large acquisitions and search outputs under
 `/data/sage-plus-scientific/20260914`. The released beta.3 executable remains
-frozen. No scoring defaults or earlier result values are changed by this work.
+frozen. No scoring defaults or manuscript result values are changed by this work.
 
 ## Experiments
 
@@ -123,7 +123,7 @@ The exported LFQ q-value belongs to a precursor peak and is repeated across
 files. It does not quantify confidence in each transfer. The engine's internal
 discovery counter uses 5%, so the report also shows yields at that threshold
 while preserving the primary 1% analysis. These reporting units must remain
-distinct in the benchmark report.
+distinct in the dissertation.
 
 ## Running and auditing
 

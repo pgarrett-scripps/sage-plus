@@ -2,16 +2,20 @@
   "_about": "Numbers the manuscript states in prose, read as #s(\"<id>\"). Scripts own each entry's value; fmt, unit, desc and expect are the author's to edit here. Entries with origin.by = \"hand\" are entirely yours.",
   "sources": {
     "analysis/scripts/gen_stats.py": {
-      "analysis/scripts/gen_stats.py": "sha256:520215b03caf0d0f032194397ba6c9b80c9e35e4f1131e0fe37911d1f846ba85",
+      "analysis/scripts/gen_stats.py": "sha256:0f08b78fddb143aeed38ec247afef5b47e95c335f0f4056cdee1a6c00ba6deee",
       "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
       "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+      "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+      "analysis/scripts/_mass_offset.py": "sha256:f96d029d6f6ff5c56de05f8fb7cdc90e6ee6e158f651adeda7e2f76f56899340",
       "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
       "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
       "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
       "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
       "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
       "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
-      "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc"
+      "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
+      "analysis/data/matched-fdp.json": "sha256:3d43d1bd7b28f5dcf5215ce078a682d91e2a0976f139b1f57cd03ee69caf271c",
+      "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae"
     }
   },
   "values": {
@@ -27,6 +31,447 @@
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
         "at": "2026-09-15T07:10:53Z"
+      }
+    },
+    "matched.fdp.max": {
+      "value": 0.9999469524163175,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Achieved conservative paired FDP bound across selected thresholds in percent",
+      "expect": {
+        "min": 0,
+        "max": 1
+      },
+      "checksum": "v2:7ebcd1b7c21d9cf9",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-18T08:09:56Z"
+      }
+    },
+    "matched.fdp.min": {
+      "value": 0.9829798853190134,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Achieved conservative paired FDP bound across selected thresholds in percent",
+      "expect": {
+        "min": 0,
+        "max": 1
+      },
+      "checksum": "v2:0655700258e3d0ac",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-18T08:09:56Z"
+      }
+    },
+    "matched.human.change": {
+      "value": 0.1598051042399092,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "Mean paired target peptide yield change at the common estimated FDP ceiling in percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:838034a7fc3393c1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-18T08:09:56Z"
+      }
+    },
+    "matched.hye.change": {
+      "value": 0.1589338792204261,
+      "fmt": "+.2f",
+      "unit": "",
+      "desc": "Mean paired target peptide yield change at the common estimated FDP ceiling in percent",
+      "expect": {
+        "min": -100,
+        "max": 100
+      },
+      "checksum": "v2:8359b96a5f09718b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-18T08:09:56Z"
+      }
+    },
+    "offset.agreement.differing": {
+      "value": 1,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Spectra whose accepted peptidoform differs between modes",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:6b86b273ff34fce1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.agreement.same": {
+      "value": 5100,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Spectra whose accepted peptidoform is identical in both modes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:1299c06d517825c0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.agreement.spectra": {
+      "value": 5101,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Phosphopeptide spectra compared between search modes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:36a4f11f8ddfc296",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.entrapment.indexed.fdp": {
+      "value": 1.0978956999085088,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "indexed combined entrapment FDP percent at one percent peptide q",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:1c6ce6b7faace41c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.entrapment.indexed.peptides": {
+      "value": 1093,
+      "fmt": ",",
+      "unit": "",
+      "desc": "indexed accepted paired peptides at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:1ff7b91c979ea344",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.entrapment.offset.fdp": {
+      "value": 1.4285714285714286,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "offset combined entrapment FDP percent at one percent peptide q",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:af9232d6ed15a065",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.entrapment.offset.peptides": {
+      "value": 1120,
+      "fmt": ",",
+      "unit": "",
+      "desc": "offset accepted paired peptides at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:829f00a11ddfdebb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.indexed.psms": {
+      "value": 20266,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Indexed accepted PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:f75348514e1d35d8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.indexed.rss": {
+      "value": 3026.71484375,
+      "fmt": ",.0f",
+      "unit": "",
+      "desc": "Indexed median peak resident MiB",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:61d6a42b9ccda766",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.indexed.search": {
+      "value": 6.1215,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Indexed median search stage seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:df62246d93f83fb3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.1.rss": {
+      "value": 2578.849609375,
+      "fmt": ",.0f",
+      "unit": "",
+      "desc": "One offset median peak resident MiB",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:67c28c1d0529d0cb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.1.search": {
+      "value": 14.1545,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "One offset median search stage seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:56a5e6456f16199d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.2.search": {
+      "value": 23.5275,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Two offsets median search stage seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:46ea1ae808164dae",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.3.psms": {
+      "value": 20704,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Three offsets accepted PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:b5c1fa5ed96d3bad",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.3.rss": {
+      "value": 2603.40625,
+      "fmt": ",.0f",
+      "unit": "",
+      "desc": "Three offsets median peak resident MiB",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:80c7ceaced7de3bc",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.offsets.3.search": {
+      "value": 33.2145,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Three offsets median search stage seconds",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:606bafa85b5a3774",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.peptides.indexed": {
+      "value": 6620199,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Indexed search database peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:4e5555195053f403",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.peptides.offset": {
+      "value": 5602995,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Offset search database peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:d281a4280fda9d76",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.peptides.reduction": {
+      "value": 15.365157452215561,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Offset reduction in indexed peptides percent",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:3705e084014d8a19",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.rss.reduction": {
+      "value": 14.7970739727866,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Offset reduction in peak resident memory percent",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:40677259bc819856",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.search.multiplier": {
+      "value": 2.312260066977048,
+      "fmt": ".1f",
+      "unit": "times",
+      "desc": "Search stage multiplier for one offset",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 20
+      },
+      "checksum": "v2:8926d5d5babea86b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.search.per_offset": {
+      "value": 9.031,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Mean added search seconds per configured offset",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 60
+      },
+      "checksum": "v2:e5b33d0ab4b1d5cc",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.sites.indexed.correct": {
+      "value": 2004,
+      "fmt": ",",
+      "unit": "",
+      "desc": "indexed localized site events consistent with synthesis",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:483029d526219f81",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.sites.indexed.error": {
+      "value": 0.7920792079207921,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "indexed inconsistent site event percent",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:a044907017ab81e8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.sites.offset.correct": {
+      "value": 2003,
+      "fmt": ",",
+      "unit": "",
+      "desc": "offset localized site events consistent with synthesis",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:77459b9b941bcb47",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
+      }
+    },
+    "offset.sites.offset.error": {
+      "value": 0.79247152055473,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "offset inconsistent site event percent",
+      "expect": {
+        "sign": "+",
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:e40c063bed3ceb19",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-19T23:07:58Z"
       }
     },
     "pilot.PXD001468.plus.rss": {

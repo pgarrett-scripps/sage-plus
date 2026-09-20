@@ -172,11 +172,12 @@ def keep_table_captions(path: Path) -> None:
             property_on(paragraph, "w:keepNext")
     for table in dom.getElementsByTagName("w:tbl"):
         cells = table.getElementsByTagName("w:tc")
-        headers = ["".join(node.firstChild.data for node in cell.getElementsByTagName("w:t") if node.firstChild) for cell in cells[:5]]
-        development_table = headers == ["Area", "Upstream Sage behavior", "Sage Plus change", "Motivation", "Expected consequence"]
+        headers = ["".join(node.firstChild.data for node in cell.getElementsByTagName("w:t") if node.firstChild) for cell in cells[:6]]
+        development_table = headers[:3] == ["Area", "Sage Plus change", "Evaluation in this chapter"]
+        scaling_table = headers == ["Engine", "Workers", "Seconds", "Time range", "Peak MiB", "PSM range"]
         if development_table:
             # The narrative inventory needs wider change columns and left alignment.
-            widths = (1200, 1850, 2200, 1800, 1950)
+            widths = (1800, 3300, 3900)
             properties = table.getElementsByTagName("w:tblPr")[0]
             for name, attributes in (
                 ("w:tblInd", {"w:w": "0", "w:type": "dxa"}),
@@ -194,7 +195,7 @@ def keep_table_captions(path: Path) -> None:
                 column.setAttributeNS(namespace, "w:w", str(width))
             for index, cell in enumerate(cells):
                 for width in cell.getElementsByTagName("w:tcW"):
-                    width.setAttributeNS(namespace, "w:w", str(widths[index % 5]))
+                    width.setAttributeNS(namespace, "w:w", str(widths[index % len(widths)]))
                     width.setAttributeNS(namespace, "w:type", "dxa")
                 for paragraph in cell.getElementsByTagName("w:p"):
                     property_on(paragraph, "w:jc")
@@ -212,7 +213,7 @@ def keep_table_captions(path: Path) -> None:
             for name in ("w:sz", "w:szCs"):
                 elements = properties.getElementsByTagName(name)
                 element = elements[0] if elements else dom.createElementNS(namespace, name)
-                element.setAttributeNS(namespace, "w:val", "18" if development_table else "20")
+                element.setAttributeNS(namespace, "w:val", "18" if development_table or scaling_table else "20")
                 if not elements:
                     properties.appendChild(element)
         following = table.nextSibling

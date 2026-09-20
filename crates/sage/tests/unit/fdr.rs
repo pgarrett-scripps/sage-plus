@@ -91,3 +91,75 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
 
     assert_eq!(features[0].peptide_q, 1.0);
 }
+
+#[test]
+fn sparse_decoys_use_finite_count_based_confidence() {
+    let mut scores = FnvHashMap::default();
+    for ix in 0..200_u32 {
+        scores.insert(
+            ix,
+            Competition {
+                forward: 10.0 + ix as f32 / 200.0,
+                foward_ix: Some(ix),
+                ..Default::default()
+            },
+        );
+    }
+    scores.insert(
+        200,
+        Competition {
+            reverse: 1.0,
+            reverse_ix: Some(200_u32),
+            ..Default::default()
+        },
+    );
+    assert!(Competition::fit_kde(&scores).is_none());
+    let (q, passing) = Competition::assign_q_value(scores, 0.01);
+    assert_eq!(passing, 200);
+    assert_eq!(q[&0], 0.005);
+    assert_eq!(q[&199], 0.005);
+    assert_eq!(q[&200], 0.01);
+}
+
+#[test]
+fn count_confidence_is_identical_for_ties_and_keeps_plus_one() {
+    let mut rows = vec![
+        Row {
+            ix: 0,
+            decoy: false,
+            score: 2.0,
+            q: 1.0,
+        },
+        Row {
+            ix: 1,
+            decoy: false,
+            score: 1.0,
+            q: 1.0,
+        },
+        Row {
+            ix: 2,
+            decoy: true,
+            score: 1.0,
+            q: 1.0,
+        },
+    ];
+    assign_count_q_values(&mut rows, 0.01);
+    assert!(rows.iter().all(|row| row.q == 1.0));
+    rows.reverse();
+    assign_count_q_values(&mut rows, 0.01);
+    assert!(rows.iter().all(|row| row.q == 1.0));
+}
+
+#[test]
+fn empty_and_decoy_only_count_confidence_are_conservative() {
+    let mut empty: Vec<Row<u32>> = Vec::new();
+    assert_eq!(assign_count_q_values(&mut empty, 0.01), 0);
+    let mut rows = vec![Row {
+        ix: 0,
+        decoy: true,
+        score: 1.0,
+        q: 0.0,
+    }];
+    assert_eq!(assign_count_q_values(&mut rows, 0.01), 0);
+    assert_eq!(rows[0].q, 1.0);
+}

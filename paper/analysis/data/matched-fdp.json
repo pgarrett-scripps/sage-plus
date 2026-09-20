@@ -1,0 +1,455 @@
+{
+  "analysis_sources_sha256": {
+    "/home/ty/Repos/sage-plus/benchmarks/scientific_entrapment.py": "34198631b1a0f08ebf7aa57ed324b31267e0e709bf54839f4af415a41b3d9724",
+    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_matched_fdp.py": "edd9ced1804242d78e21da6461e9fe3731d6f01ac751e057c834be45f1f1a867"
+  },
+  "ceiling": 0.01,
+  "curve_file": "analysis/results/matched-fdp-curves.json.gz",
+  "curve_sha256": "0e2ac070b194f55485cf10c6c96121d47f2cb900c2eb86b47b5f722ad8477d76",
+  "inputs_sha256": {
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-plus/calibration.json": "bef3422ef4c622cfe482a99e796d0ed8e2ca7e79c98a64a59bbbe262e6f3d97c",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-plus/fdrbench-input.tsv": "9cc2828de3b9da47594586d4b5af1ce98c79e3649610246d04887b00b7f0f9ab",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-upstream/calibration.json": "b6d27b3a0574af8aae738d69444bee7d9dded77f3a727d686a95a9a488d0beb1",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-upstream/fdrbench-input.tsv": "f573bfe25b75f21edbe2ef257fad4c53d2f3e2a5cfc1c237c797de845665a7e9",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-plus/calibration.json": "bf41314bbcf15db5b26113e43b5292b71ac1a06178bc997e5137767321c141b3",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-plus/fdrbench-input.tsv": "28461e8833458fd3b5f718aca5673421ca4d6d9d017f9f8e42531a87789f0083",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-upstream/calibration.json": "108261a0d921fa1f012feabc227245f0a36cc92d8eacf524ce28d9baa2522c05",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-upstream/fdrbench-input.tsv": "ad44444b4a204c5f2745c8b793a99454583e81037f9c501b7d109ac7581fafdc",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/paired.txt": "78a6fb00e89331ef6c3df7ec68edbd5fcbb1bf8969bb32fa083da2d44fd950ef",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-plus/calibration.json": "32e95b2a9bd7264b606685c3406220dea15d0a7340c53fdaa42ca4902bd0af5b",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-plus/fdrbench-input.tsv": "645021943abadb462fe4b26377e26553301aceee4c66870f66ddf659d2e0fe31",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-upstream/calibration.json": "11a500ee2c1e73da58e809783327fcdad2c7be32da8b8b19ad14ff862b2cbfbd",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-upstream/fdrbench-input.tsv": "cee16addef8d1d8ab016b4ea396463134607df7880f06654f19fd69b7c931472",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-plus/calibration.json": "dfaa214f33ca83d56cd6b4a439fb659109c75d04c4e5e94b91d6f6748200b49a",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-plus/fdrbench-input.tsv": "a0ef23440f534b51fa725bbd08abdfb23afdfa9bb6014618fab3bb4b059340cf",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-upstream/calibration.json": "22f8d7fd2cc219299b1a319fa6eac57405c411bd56370b6dcab6c5ac88dce3c0",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-upstream/fdrbench-input.tsv": "2b59df0aad3c091790a4c68d7e3da85cf6794edd278eef03d676a91d711185b5",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/paired.txt": "4e2c0c74ce9346f146e8010260bd5a75f441970213ae9ee07f62653e0aa6e542",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-plus/calibration.json": "1bdef87900108e3799d30fa26debefbfa5028621a06bf0bd139bcb1beaa9fa58",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-plus/fdrbench-input.tsv": "f44ba30bd5d99adaa4f2d5559a8223e2fe3ccc968b8d28f6565fe863411b2d4e",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-upstream/calibration.json": "666890675c212e85cf251b2680e3f895e79c227d56ffd7a25b1ba43c63b4d3e3",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-upstream/fdrbench-input.tsv": "02e7863365358f943e29ff4111a7042df39c94f8481a915a627f3661a84363af",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-plus/calibration.json": "185fab35ee9956f2f1236432147dd9488df71c561ff8a9d6e842f3d3ce497c02",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-plus/fdrbench-input.tsv": "668e35e02dab419116cd3c99f61bb925f211fb75ae9db98dced70bef4b731950",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-upstream/calibration.json": "eca3acaad21bbe8ee32fc0f424081b2b106555628bb8eac9fa935bd23f2b9294",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-upstream/fdrbench-input.tsv": "1b2c41d413bd0c53081b55361616c688426442b03efe3bdaa2ea274d76185b14",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/paired.txt": "83371520cc512c401df0b97db80f6f3332ae08ac4a9453deceb5e5ba990c8f21",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-plus/calibration.json": "87eeb27d51ee374934478ebd8c1c09def5e634b344f99c8425c319f86542ed9c",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-plus/fdrbench-input.tsv": "3dd769e64be353e57d085aa8d57482e4fc5b2b3ea26c23e4c8d5d682e44e3954",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-upstream/calibration.json": "aa1fccd8395dab76c2f3153fec0c9d778a3ba55e66eb404ae57d4c3b72e04d3a",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-upstream/fdrbench-input.tsv": "cf5432457605e777c6ae6a29f06a3499cabca6347a3c223632714aeba268cc54",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-plus/calibration.json": "95e8aa0fbca99b2f76b21d9360911bd350d367fb8a0fe0eef9c6eba5aaa2ae3b",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-plus/fdrbench-input.tsv": "4830fb2d610a071e5fc17b629a02cc5957362d4f73815bf9ac033d3719e3e6af",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-upstream/calibration.json": "ec438d6c472301cfb66936fefd039c8c02711ff598db60629d739d1d8b27d2c0",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-upstream/fdrbench-input.tsv": "feb0580e9f8ee564eb737b10d19b203a7baf83cd6925a8ddb7803f9129dd0b8f",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/paired.txt": "3f4ba945de7292ae17f700106de9bc6fea519c51162a57d73a287e7ab61b1e58",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-plus/calibration.json": "1e8fc51cb9db5fda698f6c9c585c0ebafaf51adf42d1dc89301de8ea7bd6ebb0",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-plus/fdrbench-input.tsv": "250e4be6c47a31cc88f7fe589e47733e9e6ec37e8474e0c5cdca1803ff9eb308",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-upstream/calibration.json": "a5ad300b59504173eb817eb89c2b8504a3ed46590c2cbd4676c6e9c1602f143f",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-upstream/fdrbench-input.tsv": "f9b45b5051f27e9acf0e6b06afcb11a121610186a650a803a5ad3880cf5f562f",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-plus/calibration.json": "04f3db350bf77982e5340b8b012a38d4bc676a155b2e47dbb3713a9efa7539f1",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-plus/fdrbench-input.tsv": "87daddb5bf3a9828852ce8829ff111dc5a218cf3434828eefb584c5580d8b005",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-upstream/calibration.json": "41c19ddaf3c57ae65839b0b168493d61650f793939dde1d84250af85a1452a21",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-upstream/fdrbench-input.tsv": "52486cadac9da13d1ba477283fe408039b8054845131a7a5d0338363c9360a5b",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/paired.txt": "f1c5484972003262a559732f3981411066357a664096a42e204d93f88491dde4",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-plus/calibration.json": "b0da1e826b9e19d737759e2f1bd487f4203c5b1aa2d0ae3b770d48e5b5f7043b",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-plus/fdrbench-input.tsv": "a6c5ff9f14557b15ed23e00a742367c4f822393febe606c8d0915ec20fc7c7a7",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-upstream/calibration.json": "bec04c912f6b3679844e72a0b7fb6b0edaa644e460a50a30d575186ab0f0aa37",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-upstream/fdrbench-input.tsv": "9a22114964b24e90ccf6bbedcce51ca6e91d8dc9806b4d0124739431dc39ef0f",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-plus/calibration.json": "9412028df37d774fd915b57d3d40e9faecf98eb2285e3bb278f9aee0bfd364b5",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-plus/fdrbench-input.tsv": "bac8e5db417b11a93c0de43b6ecf10c5a2eff9f7f7bc91815b606e9a15192243",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-upstream/calibration.json": "8ccdec2dd06146ca074ef392290e85282f9b13d49709c28982b698cc357d2a9d",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-upstream/fdrbench-input.tsv": "e27d3ad906b4fd920781ddbcca5bf89897276244764f7a66cff16aaa375ef880",
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/paired.txt": "06dd3ce363996501e9bb88809deedfebb1d3259089849b2146288a7717898941"
+  },
+  "runs": [
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 9213,
+        "entrapments": 46,
+        "nominal_q": 0.008714286,
+        "numerator": 92,
+        "paired_fdp": 0.009985889503961794,
+        "targets": 9167
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 9227,
+        "entrapments": 46,
+        "nominal_q": 0.008019331,
+        "numerator": 92,
+        "paired_fdp": 0.009970738051370977,
+        "targets": 9181
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 10987,
+        "entrapments": 55,
+        "nominal_q": 0.010483957,
+        "numerator": 108,
+        "paired_fdp": 0.009829798853190134,
+        "targets": 10932
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 11027,
+        "entrapments": 56,
+        "nominal_q": 0.011421272,
+        "numerator": 109,
+        "paired_fdp": 0.0098848281490886,
+        "targets": 10971
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 9194,
+        "entrapments": 45,
+        "nominal_q": 0.008143713,
+        "numerator": 91,
+        "paired_fdp": 0.009897759408309767,
+        "targets": 9149
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 9243,
+        "entrapments": 45,
+        "nominal_q": 0.009545117,
+        "numerator": 91,
+        "paired_fdp": 0.009845288326300985,
+        "targets": 9198
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 10911,
+        "entrapments": 54,
+        "nominal_q": 0.009509552,
+        "numerator": 109,
+        "paired_fdp": 0.009989918430941252,
+        "targets": 10857
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 10889,
+        "entrapments": 54,
+        "nominal_q": 0.008583848,
+        "numerator": 108,
+        "paired_fdp": 0.009918266140141426,
+        "targets": 10835
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 9266,
+        "entrapments": 47,
+        "nominal_q": 0.011721534,
+        "numerator": 92,
+        "paired_fdp": 0.009928771854090222,
+        "targets": 9219
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 9270,
+        "entrapments": 47,
+        "nominal_q": 0.0104592675,
+        "numerator": 92,
+        "paired_fdp": 0.009924487594390506,
+        "targets": 9223
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 11010,
+        "entrapments": 55,
+        "nominal_q": 0.010910371,
+        "numerator": 109,
+        "paired_fdp": 0.009900090826521345,
+        "targets": 10955
+      },
+      "study": "human"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 11018,
+        "entrapments": 55,
+        "nominal_q": 0.010458722,
+        "numerator": 109,
+        "paired_fdp": 0.009892902523143947,
+        "targets": 10963
+      },
+      "study": "human"
+    },
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 37706,
+        "entrapments": 194,
+        "nominal_q": 0.011265551,
+        "numerator": 376,
+        "paired_fdp": 0.009971887763220708,
+        "targets": 37512
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 37702,
+        "entrapments": 193,
+        "nominal_q": 0.0106398985,
+        "numerator": 377,
+        "paired_fdp": 0.009999469524163175,
+        "targets": 37509
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 37165,
+        "entrapments": 188,
+        "nominal_q": 0.009633695,
+        "numerator": 370,
+        "paired_fdp": 0.00995560339028656,
+        "targets": 36977
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260914,
+      "selected": {
+        "denominator": 37353,
+        "entrapments": 190,
+        "nominal_q": 0.010140115,
+        "numerator": 372,
+        "paired_fdp": 0.009959039434583568,
+        "targets": 37163
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 37154,
+        "entrapments": 190,
+        "nominal_q": 0.009072834,
+        "numerator": 371,
+        "paired_fdp": 0.00998546589869193,
+        "targets": 36964
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 37132,
+        "entrapments": 191,
+        "nominal_q": 0.00846649,
+        "numerator": 370,
+        "paired_fdp": 0.009964451147258429,
+        "targets": 36941
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 37153,
+        "entrapments": 187,
+        "nominal_q": 0.009469699,
+        "numerator": 370,
+        "paired_fdp": 0.009958818937905418,
+        "targets": 36966
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260915,
+      "selected": {
+        "denominator": 37046,
+        "entrapments": 189,
+        "nominal_q": 0.008957812,
+        "numerator": 370,
+        "paired_fdp": 0.009987583004912811,
+        "targets": 36857
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "upstream",
+      "file": 0,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 37306,
+        "entrapments": 190,
+        "nominal_q": 0.009484826,
+        "numerator": 372,
+        "paired_fdp": 0.009971586339998928,
+        "targets": 37116
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 0,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 37478,
+        "entrapments": 191,
+        "nominal_q": 0.0093187485,
+        "numerator": 373,
+        "paired_fdp": 0.00995250546987566,
+        "targets": 37287
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "upstream",
+      "file": 1,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 37094,
+        "entrapments": 188,
+        "nominal_q": 0.009266024,
+        "numerator": 369,
+        "paired_fdp": 0.009947700436728312,
+        "targets": 36906
+      },
+      "study": "hye"
+    },
+    {
+      "engine": "plus",
+      "file": 1,
+      "seed": 20260916,
+      "selected": {
+        "denominator": 37227,
+        "entrapments": 190,
+        "nominal_q": 0.009153477,
+        "numerator": 372,
+        "paired_fdp": 0.009992747199613183,
+        "targets": 37037
+      },
+      "study": "hye"
+    }
+  ],
+  "scope": "Post hoc threshold selection on the same entrapment observations used to estimate FDP. Descriptive yield at a common estimated ceiling, not held-out error control or a sensitivity test.",
+  "selection": "Largest target count among complete observed q-value steps at or below the conservative paired FDP ceiling. Ties choose the largest q-value.",
+  "summaries": [
+    {
+      "engines": {
+        "plus": {
+          "fdp_max": 0.009970738051370977,
+          "fdp_min": 0.009845288326300985,
+          "mean_fdp": 0.009906085130739407,
+          "mean_targets": 10061.833333333334,
+          "q_max": 0.011421272,
+          "q_min": 0.008019331
+        },
+        "upstream": {
+          "fdp_max": 0.009989918430941252,
+          "fdp_min": 0.009829798853190134,
+          "mean_fdp": 0.009922038146169085,
+          "mean_targets": 10046.5,
+          "q_max": 0.011721534,
+          "q_min": 0.008143713
+        }
+      },
+      "max_paired_percent_change": 0.535577658760511,
+      "mean_paired_percent_change": 0.1598051042399092,
+      "min_paired_percent_change": -0.20263424518743856,
+      "study": "human"
+    },
+    {
+      "engines": {
+        "plus": {
+          "fdp_max": 0.009999469524163175,
+          "fdp_min": 0.00995250546987566,
+          "mean_fdp": 0.009975965963401138,
+          "mean_targets": 37132.333333333336,
+          "q_max": 0.0106398985,
+          "q_min": 0.00846649
+        },
+        "upstream": {
+          "fdp_max": 0.00998546589869193,
+          "fdp_min": 0.009947700436728312,
+          "mean_fdp": 0.00996517712780531,
+          "mean_targets": 37073.5,
+          "q_max": 0.011265551,
+          "q_min": 0.009072834
+        }
+      },
+      "max_paired_percent_change": 0.5030153879438615,
+      "mean_paired_percent_change": 0.1589338792204261,
+      "min_paired_percent_change": -0.2948655521289867,
+      "study": "hye"
+    }
+  ]
+}

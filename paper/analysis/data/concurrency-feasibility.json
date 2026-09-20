@@ -1,0 +1,11 @@
+{
+  "checked_at": "2026-09-18T08:08:10.613376+00:00",
+  "status": "deferred",
+  "reason": "Available memory below the existing search runner minimum, with nearly exhausted swap. No searches launched.",
+  "required_available_bytes": 8589934592,
+  "available_bytes": 5811281920,
+  "swap_total_bytes": 8589930496,
+  "swap_free_bytes": 147456,
+  "runner": "benchmarks/run_scientific.py",
+  "protocol": "paper/REPRODUCIBILITY.md"
+}

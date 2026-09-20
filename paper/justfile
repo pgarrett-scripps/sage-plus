@@ -824,7 +824,3 @@ _record-build name srchash:
 # Remove the built PDF and Word export
 clean:
   rm -f paper.pdf paper-draft.pdf paper.docx paper.docx.html
-
-# Refresh the reviewed PDF snapshot published with the repository report.
-public-report: paper
-  cp paper.pdf report.pdf

@@ -1,0 +1,5 @@
+library_sites,eligible_sites,modification_classes,max_total_modifications,max_combinations,trials,wall_seconds,peak_rss_mib,database_peptides,database_fragments,psms,accepted_peptides,source_report
+0,3720985,4,3,4,3,12.25,1584.1,2803578,80833042,2203,1409,benchmarks/results/20260901-140350-feature
+50000,3720985,4,3,4,3,12.72,1681.8,3030517,89341256,2206,1412,benchmarks/results/20260901-140443-feature
+200000,3720985,4,3,4,3,14.53,2085.5,3775367,117638808,2203,1414,benchmarks/results/20260901-140538-feature
+500000,3720985,4,3,4,3,17.72,2826.1,5271114,172112992,2199,1420,benchmarks/results/20260901-140640-feature

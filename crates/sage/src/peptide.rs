@@ -683,6 +683,56 @@ impl Peptide {
             .relocate_mass(mass, candidates, chosen, epsilon);
     }
 
+    /// Append every site compatible with `specificity`, ignoring occupancy.
+    pub fn compatible_sites(&self, specificity: ModificationSpecificity, sites: &mut Vec<Site>) {
+        let mut compatible = Vec::new();
+        self.push_resi(&mut compatible, specificity, 0.0, 0);
+        sites.extend(compatible.into_iter().map(|(site, _, _)| site));
+    }
+
+    /// Return a copy carrying one additional modification at `site`. Used for
+    /// search-time mass offsets, which are not part of the indexed expansion.
+    pub fn with_mass_offset(
+        &self,
+        site: Site,
+        definition: &Arc<ModificationDefinition>,
+    ) -> Peptide {
+        let mut peptide = self.clone();
+        let lookup = ModificationLookup::from_definitions([(
+            site,
+            definition.clone(),
+            ModificationKind::Ordinary,
+        )])
+        .unwrap_or_else(|error| panic!("{error}"));
+        peptide.modifications.install_lookup(lookup);
+        match site {
+            Site::Nterm => {
+                peptide.nterm = Some(peptide.nterm.unwrap_or_default() + definition.mass);
+            }
+            Site::Cterm => {
+                peptide.cterm = Some(peptide.cterm.unwrap_or_default() + definition.mass);
+            }
+            Site::Sequence(_) => {}
+        }
+        peptide
+            .modifications
+            .push(site, definition, ModificationKind::Ordinary);
+        peptide.modifications.sort();
+        // Sum in the same order as database expansion so equivalent offset
+        // and indexed peptidoforms have bit-identical masses and tie-breaks.
+        // Decoys inherit the mass of their forward target.
+        let target_order = if peptide.decoy && peptide.sequence.len() > 2 {
+            peptide.sequence.reversed_internal()
+        } else {
+            peptide.sequence.clone()
+        };
+        peptide.monoisotopic = target_order
+            .iter()
+            .fold(H2O, |mass, residue| mass + monoisotopic(*residue))
+            + peptide.modifications.total_mass();
+        peptide
+    }
+
     pub fn initial_sort(&self, other: &Self) -> std::cmp::Ordering {
         self.sequence
             .cmp(&other.sequence)

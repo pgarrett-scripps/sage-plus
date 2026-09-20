@@ -56,6 +56,8 @@ __pycache__/
 # figures/ and si/ ARE tracked, so a fresh clone compiles the PDF without
 # re-running an analysis that may take hours.
 analysis/data/*
+!analysis/data/matched-fdp.json
+!analysis/data/concurrency-feasibility.json
 !analysis/data/development-changes.json
 !analysis/data/report-extension/
 analysis/data/report-extension/*
@@ -66,9 +68,3 @@ analysis/.venv/
 # The manuscript resolved to plain Typst for pandoc-based exports.
 # Derived from paper.typ + stats.json + assets.json on demand.
 paper.resolved.typ
-
-# Local render and editor state.
-tmp/
-output/
-.claude/
-.vscode/

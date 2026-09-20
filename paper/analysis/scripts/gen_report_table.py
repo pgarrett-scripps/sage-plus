@@ -42,7 +42,7 @@ def main():
     for t in (1,2,4,8):
         for e in ('upstream','plus'):
             g=[r for r in scale if r['engine']==e and r['threads']==t and not r['warmup']]
-            rows.append([ENGINE[e],t,fmt(median(r['seconds'] for r in g),'.2f'),f"{min(r['seconds'] for r in g):.2f} to {max(r['seconds'] for r in g):.2f}",fmt(median(r['rss'] for r in g),'.1f'),f"{min(r['target_psms'] for r in g):,} to {max(r['target_psms'] for r in g):,}"])
+            rows.append([ENGINE[e],t,fmt(median(r['seconds'] for r in g),'.2f'),f"{min(r['seconds'] for r in g):.2f} to {max(r['seconds'] for r in g):.2f}",fmt(median(r['rss'] for r in g),'.1f'),(f"{g[0]['target_psms']:,}" if len({r['target_psms'] for r in g}) == 1 else f"{min(r['target_psms'] for r in g):,} to {max(r['target_psms'] for r in g):,}")])
     table('scaling',['Engine','Workers','Seconds','Time range','Peak MiB','PSM range'],rows)
     pilot,_=load()
     table('ptm-diagnostic',['HCD input','Consistent sites','Inconsistent sites','Inconsistent (%)','Jointly accepted sites'],[[r['job'].split('-')[1],r['correct_site_events'],r['incorrect_site_events'],fmt(100*r['empirical_site_error_fraction'],'.2f'),r['joint_psm_peptide_localization_1pct']['correct_site_events']+r['joint_psm_peptide_localization_1pct']['incorrect_site_events']] for r in pilot['ptm'] if r['suite']=='ptm' and r['job'].endswith('-all')])

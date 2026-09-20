@@ -46,6 +46,20 @@ pub enum SiteMode {
     Both,
 }
 
+/// Controls how a variable modification enters the search.
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Serialize, schemars::JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// Expand modified peptidoforms while building the fragment index.
+    #[default]
+    Database,
+    /// Keep the index unmodified and test at most one copy of this
+    /// modification per peptide as a search-time precursor and fragment offset.
+    MassOffset,
+}
+
 fn is_optional(mode: &NeutralLossMode) -> bool {
     *mode == NeutralLossMode::Optional
 }
@@ -168,12 +182,18 @@ pub struct VariableModification {
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "is_exhaustive")]
     pub site_mode: SiteMode,
+    #[serde(default, skip_serializing_if = "is_database")]
+    pub search_mode: SearchMode,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channel_offsets: BTreeMap<String, f32>,
 }
 
 fn is_exhaustive(mode: &SiteMode) -> bool {
     *mode == SiteMode::Exhaustive
+}
+
+fn is_database(mode: &SearchMode) -> bool {
+    *mode == SearchMode::Database
 }
 
 impl<'de> Deserialize<'de> for VariableModification {
@@ -196,6 +216,8 @@ impl<'de> Deserialize<'de> for VariableModification {
             #[serde(default)]
             site_mode: SiteMode,
             #[serde(default)]
+            search_mode: SearchMode,
+            #[serde(default)]
             channel_offsets: BTreeMap<String, f32>,
         }
 
@@ -207,6 +229,18 @@ impl<'de> Deserialize<'de> for VariableModification {
             raw.neutral_loss_mode,
             &raw.channel_offsets,
         )?;
+        if raw.search_mode == SearchMode::MassOffset {
+            if raw.mass.abs() < 1e-5 {
+                return Err(de::Error::custom(
+                    "search_mode `mass_offset` requires a non-zero modification mass",
+                ));
+            }
+            if !raw.channel_offsets.is_empty() {
+                return Err(de::Error::custom(
+                    "search_mode `mass_offset` does not support channel_offsets",
+                ));
+            }
+        }
         Ok(Self {
             mass: raw.mass,
             max_count: raw.max_count,
@@ -214,6 +248,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
             site_mode: raw.site_mode,
+            search_mode: raw.search_mode,
             channel_offsets: raw.channel_offsets,
         })
     }
@@ -484,6 +519,13 @@ impl VarModEntry {
         match self {
             VarModEntry::Mass(_) => SiteMode::Exhaustive,
             VarModEntry::Detailed(modification) => modification.site_mode,
+        }
+    }
+
+    pub fn search_mode(&self) -> SearchMode {
+        match self {
+            VarModEntry::Mass(_) => SearchMode::Database,
+            VarModEntry::Detailed(modification) => modification.search_mode,
         }
     }
 

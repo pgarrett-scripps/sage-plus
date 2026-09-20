@@ -17,7 +17,9 @@ ranges are fine (`5–15 min`), as is the hyphen in a compound modifier.
 **Colons are fine.** Use them to introduce a list, an example, or a definition,
 which is what they are for.
 
-**No semicolons.** Use periods, commas, colons, or parentheses.
+**Semicolons sparingly.** A semicolon joining two clauses is almost always two
+sentences that have not been split yet. The one place to keep it is separating
+items in a list whose items already contain commas.
 
 Applies to running prose only. Typst markup keeps its own punctuation
 (`#figure(caption: [...])`).
@@ -175,9 +177,13 @@ examples of the kind of thing worth pinning down once.
 - Software named as its authors name it, with version on first mention.
 - Accession numbers given in full, with the repository, at first mention.
 
-## Report status
+## Target journal
 
-This is repository technical documentation. There is no target journal or author
-byline. Keep upstream Sage attribution explicit, preserve negative results, and
-identify the exact evaluated releases. Changes to the report do not imply a new
-software release or a claim of upstream endorsement.
+Fill this in for your submission and delete the placeholders.
+
+- **Journal:**
+- **Word limits:** main text, abstract (check with `just wordcount`)
+- **Reference style:** set `paper-bib-style` in `config.typ`
+- **Figure requirements:** format, resolution, color mode
+- **Submission format:** PDF or Word (`just docx`)
+- **Known deviations from this file's house style:**

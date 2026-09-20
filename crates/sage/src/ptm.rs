@@ -83,6 +83,21 @@ pub struct ModLocalization {
     pub all_sites: Vec<SiteScore>,
 }
 
+impl ModLocalization {
+    /// A target-decoy separation cannot resolve equally scoring target arrangements.
+    /// Keep such arrangements in the competition population but do not accept one
+    /// arbitrary site assignment as a confidently localized result.
+    pub fn set_competition_q_value(&mut self, q_value: f32) {
+        self.localization_q_value = if self.candidate_sites > self.site_count
+            && (!self.delta_score.is_finite() || self.delta_score <= 0.0)
+        {
+            1.0
+        } else {
+            q_value
+        };
+    }
+}
+
 /// All per-modification localization results for a single PSM.
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct Localization {

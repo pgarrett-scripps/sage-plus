@@ -49,12 +49,29 @@ impl<Ix: Default + Send> Competition<Ix> {
         self.reverse >= self.forward
     }
 
-    fn fit_kde<K, B>(scores: &HashMap<K, Self, B>) -> Estimator {
+    fn fit_kde<K, B>(scores: &HashMap<K, Self, B>) -> Option<Estimator> {
         let (scores, decoys): (Vec<f64>, Vec<bool>) = scores
             .values()
             .map(|score| (score.score() as f64, score.is_decoy()))
             .unzip();
-        crate::ml::kde::Builder::default().build(&scores, &decoys)
+        for class in [false, true] {
+            let sample = scores
+                .iter()
+                .zip(&decoys)
+                .filter_map(|(score, decoy)| (*decoy == class).then_some(*score))
+                .collect::<Vec<_>>();
+            if sample.len() < 2
+                || sample.iter().any(|score| !score.is_finite())
+                || !sample.iter().any(|score| *score != sample[0])
+            {
+                return None;
+            }
+        }
+        let estimator = crate::ml::kde::Builder::default().build(&scores, &decoys);
+        scores
+            .iter()
+            .all(|score| estimator.posterior_error(*score).is_finite())
+            .then_some(estimator)
     }
 
     fn assign_q_value<K, B>(
@@ -86,6 +103,19 @@ impl<Ix: Default + Send> Competition<Ix> {
             .collect::<Vec<Row<Ix>>>();
 
         scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
+
+        if estimator.is_none() {
+            log::warn!("peptide/protein confidence model is underdetermined, using target-decoy counts with a +1 correction");
+            let passing = assign_count_q_values(&mut scores, threshold);
+            return (
+                scores
+                    .into_iter()
+                    .map(|score| (score.ix, score.q))
+                    .collect(),
+                passing,
+            );
+        }
+        let estimator = estimator.unwrap();
 
         let mut decoy = 1.0;
         let mut target = 0.0;
@@ -119,6 +149,40 @@ impl<Ix: Default + Send> Competition<Ix> {
             passing,
         )
     }
+}
+
+/// Assign count-based q-values at complete score thresholds, keeping ties together.
+fn assign_count_q_values<Ix>(scores: &mut [Row<Ix>], threshold: f32) -> usize {
+    scores.sort_by(|a, b| b.score.total_cmp(&a.score));
+    let mut decoys = 1.0_f64;
+    let mut targets = 0.0_f64;
+    let mut start = 0;
+    while start < scores.len() {
+        let mut end = start + 1;
+        while end < scores.len() && scores[end].score == scores[start].score {
+            end += 1;
+        }
+        for row in &scores[start..end] {
+            if row.decoy {
+                decoys += 1.0;
+            } else {
+                targets += 1.0;
+            }
+        }
+        let q = (decoys / targets).min(1.0) as f32;
+        for row in &mut scores[start..end] {
+            row.q = q;
+        }
+        start = end;
+    }
+    let mut minimum = 1.0_f32;
+    let mut passing = 0;
+    for row in scores.iter_mut().rev() {
+        minimum = minimum.min(row.q);
+        row.q = minimum;
+        passing += usize::from(!row.decoy && row.q <= threshold);
+    }
+    passing
 }
 
 pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
@@ -264,20 +328,6 @@ pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> u
 }
 
 pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {
-    // let mut map: FnvHashMap<PeptideIx, Competition<(PeptideIx, bool)>> = FnvHashMap::default();
-    // for (key, (peak, _)) in peaks.iter() {
-    //     let entry = map.entry(key.0).or_default();
-    //     match key.1 {
-    //         true => {
-    //             entry.reverse = entry.reverse.max(peak.score as f32);
-    //             entry.reverse_ix = Some(*key);
-    //         }
-    //         false => {
-    //             entry.forward = entry.forward.max(peak.score as f32);
-    //             entry.foward_ix = Some(*key);
-    //         }
-    //     }
-    // }
     let mut scores = peaks
         .par_iter()
         .map(|(&(ix, decoy), quantified)| Row {
@@ -288,28 +338,7 @@ pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPe
         })
         .collect::<Vec<_>>();
 
-    scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
-
-    let mut decoy = 1.0;
-    let mut target = 0.0;
-    for score in scores.iter_mut() {
-        match score.decoy {
-            true => decoy += 1.0,
-            false => target += 1.0,
-        };
-        score.q = decoy / target;
-    }
-    // Q-value is the minimum q-value at any given score threshold
-    // `q = q[::-1].cummin()[::-1] in python`
-    let mut q_min = 1.0f32;
-    let mut passing = 0;
-    for score in scores.iter_mut().rev() {
-        q_min = q_min.min(score.q);
-        score.q = q_min;
-        if q_min <= 0.05 && !score.decoy {
-            passing += 1;
-        }
-    }
+    let passing = assign_count_q_values(&mut scores, 0.05);
 
     let scores = scores
         .into_par_iter()

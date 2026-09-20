@@ -1,0 +1,13 @@
+release,commit,session,trial,wall_seconds,peak_rss_mib,source_report
+Sage v0.15.0-beta.2,df9219951cc9a54c,20260901-130552-search,1,5.49,1956.9297,benchmarks/results/20260901-130552-search/records.json
+Sage v0.15.0-beta.2,df9219951cc9a54c,20260901-130552-search,2,5.59,1973.6914,benchmarks/results/20260901-130552-search/records.json
+Sage v0.15.0-beta.2,df9219951cc9a54c,20260901-130552-search,3,5.56,1867.3086,benchmarks/results/20260901-130552-search/records.json
+Sage Plus beta.1,e85a193c84423ca1,20260901-130822-search,1,6.48,2128.0195,benchmarks/results/20260901-130822-search/records.json
+Sage Plus beta.1,e85a193c84423ca1,20260901-130822-search,2,6.47,2140.7266,benchmarks/results/20260901-130822-search/records.json
+Sage Plus beta.1,e85a193c84423ca1,20260901-130822-search,3,6.51,2126.8789,benchmarks/results/20260901-130822-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130552-search,1,6.11,1498.7930,benchmarks/results/20260901-130552-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130552-search,2,6.22,1498.1406,benchmarks/results/20260901-130552-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130552-search,3,6.25,1506.1445,benchmarks/results/20260901-130552-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130822-search,1,5.89,1498.6367,benchmarks/results/20260901-130822-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130822-search,2,6.03,1500.6602,benchmarks/results/20260901-130822-search/records.json
+Sage Plus beta.2,5aeb56852fc176e9,20260901-130822-search,3,5.89,1496.7305,benchmarks/results/20260901-130822-search/records.json

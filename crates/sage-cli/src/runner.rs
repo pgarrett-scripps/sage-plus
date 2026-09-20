@@ -384,6 +384,15 @@ pub struct ModificationRunStats {
     pub label_channels: usize,
     #[serde(default)]
     pub labeled_peptides: usize,
+    /// Distinct search-time mass offset definitions.
+    #[serde(default)]
+    pub mass_offset_definitions: usize,
+    /// Reported candidate PSMs whose peptidoform includes a mass offset.
+    #[serde(default)]
+    pub mass_offset_psms: usize,
+    /// Distinct offset peptidoforms not already present in the index.
+    #[serde(default)]
+    pub mass_offset_peptidoforms: usize,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

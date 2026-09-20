@@ -1,0 +1,454 @@
+{
+  "hek_regression": [
+    {
+      "all_psm_identities_equal": true,
+      "baseline_only": 0,
+      "candidate_only": 0,
+      "jaccard": 1.0,
+      "job": "hek-regression-0",
+      "maximum_peptide_q_difference": 0.0,
+      "maximum_score_difference": 0.0,
+      "q": 0.01,
+      "shared_target_psms": 16917
+    },
+    {
+      "all_psm_identities_equal": true,
+      "baseline_only": 0,
+      "candidate_only": 0,
+      "jaccard": 1.0,
+      "job": "hek-regression-1",
+      "maximum_peptide_q_difference": 0.0,
+      "maximum_score_difference": 0.0,
+      "q": 0.01,
+      "shared_target_psms": 19471
+    }
+  ],
+  "inputs": {
+    "/data/sage-plus-scientific/20260914/ptm-truth/truth.tsv": "ec388dee961b19169760d337bfa43f7e6edd708246054930decb7bb5e742a2e2",
+    "/data/sage-plus-scientific/20260914/references/ecoli.fasta": "a8052a607a98d2444c9d5dd685bd1370150df8c5570c3116811544bbf3d093a2",
+    "/data/sage-plus-scientific/20260914/references/human.fasta": "dffdff3807ec6eb7e752035b5475aaefa26d1b36e513e3344198d521a2169c42",
+    "/data/sage-plus-scientific/20260914/references/yeast.fasta": "1aaa81860c8bda68e81e4290703d871c7c8bd12a928038772fbc91b7e17b342a",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-plus/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
+    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-plus/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/hek-regression-0/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/hek-regression-1/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-1-plus-all-ties/results.sage.ptm-sites.parquet": "371be7dc49edff547f5acdcb3b2f9189c5abfaa9ce56c05142c92780d71f6e5e",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-1-plus-oracle-0-ties/results.sage.ptm-sites.parquet": "64e7c2928fe4bdf203df83cfd150c3b9786988d3a22e7c372761e63b60acdfe6",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-1-plus-oracle-100-ties/results.sage.ptm-sites.parquet": "2bbb5698e8964595bc0af6fac79c610c26fbbb53f7489f7f84e19e02999018f3",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-1-plus-oracle-25-ties/results.sage.ptm-sites.parquet": "fe487bd4a218277c2e68ed9e8776718d054d7fee15d62943aa740f5c35d5bf00",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-1-plus-oracle-50-ties/results.sage.ptm-sites.parquet": "4d74ad208bcea89888e394cb347c03d8a1a1e6a8dccfa449f7b3ca70c8f7eb7a",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-2-plus-all-ties/results.sage.ptm-sites.parquet": "b55e62c4f3adf8a9628e7626a6e9e63750f4c68f262208eddaeb75763d23392a",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-2-plus-oracle-0-ties/results.sage.ptm-sites.parquet": "64e7c2928fe4bdf203df83cfd150c3b9786988d3a22e7c372761e63b60acdfe6",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-2-plus-oracle-100-ties/results.sage.ptm-sites.parquet": "0951e5d04c61fd3d60796cafa0dbd376280224245278717d76aa1590d6c8c522",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-2-plus-oracle-25-ties/results.sage.ptm-sites.parquet": "a791b35ee29399dc9c22dd5874cb93376f0f88d086c928f3211965b442682e36",
+    "/data/sage-plus-scientific/hardening-20260914/runs-ptm-ties/ptm-library-2-plus-oracle-50-ties/results.sage.ptm-sites.parquet": "8260d5951a093284a56f48565f135f7bc7e3dc6133a4f5b68fc485cfc95156c0",
+    "/data/sage-plus-scientific/hardening-20260914/runs/mbr-0/lfq.parquet": "b7e9795ccb6d769c87b8bc1d13fdd96f340d1d00a10c4f9b066226fa6b67f871",
+    "/data/sage-plus-scientific/hardening-20260914/runs/mbr-1/lfq.parquet": "a062cce580885aa797da9d24407918bed422eeed4e81cab74090336c27f3219b",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-1-plus-all/results.sage.ptm-sites.parquet": "bedc74b6231f194e63a00c2eaceeafa905849eefd3235cf957e2902c1bbee50b",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-1-plus-oracle-0/results.sage.ptm-sites.parquet": "64e7c2928fe4bdf203df83cfd150c3b9786988d3a22e7c372761e63b60acdfe6",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-1-plus-oracle-100/results.sage.ptm-sites.parquet": "597db67ffa7e21fda2a283e81db4644c3377190c3ede86d440209e8d4c9a633a",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-1-plus-oracle-25/results.sage.ptm-sites.parquet": "6e744391bb1ffb487b443d192e1942348bef5921439483c9ddef8f0de91701af",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-1-plus-oracle-50/results.sage.ptm-sites.parquet": "cb0c2d82dbc45ece0d16f61be98d06c08865f4cf2154f1d177f58806659b7a1f",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-2-plus-all/results.sage.ptm-sites.parquet": "0e2cbcc46699b7d30878cd32692195861a442630638c99e1f12193682bc3d50b",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-2-plus-oracle-0/results.sage.ptm-sites.parquet": "64e7c2928fe4bdf203df83cfd150c3b9786988d3a22e7c372761e63b60acdfe6",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-2-plus-oracle-100/results.sage.ptm-sites.parquet": "98f6a04ba147b52ae85b11555c25bea8b1d3ac7b89ffb346b245b6268636b812",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-2-plus-oracle-25/results.sage.ptm-sites.parquet": "972a611a35cf15f437b23a565989df0f152e8f86f58d6b9df1a8cbcbdb92f600",
+    "/data/sage-plus-scientific/hardening-20260914/runs/ptm-library-2-plus-oracle-50/results.sage.ptm-sites.parquet": "cfabf87e8d643e115764f080226e36bee0996a0aef338974fd03b1c4fd63990d",
+    "/home/ty/Repos/sage-plus/benchmarks/SCIENTIFIC_HARDENING.md": "bbda307002902aebfe92a5612ea87a49de72d026e86877360f35156a05034a82",
+    "/home/ty/Repos/sage-plus/benchmarks/analyze_hardening.py": "2217ec45d0ba0e26c3d424d4a931f4402e688cfc23c9736fe9a3ffbf5b0e3b2b"
+  },
+  "lfq": [
+    {
+      "by_file": {
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML": {
+          "decoy_candidates": 0,
+          "target_candidates": 0,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 0
+        },
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML": {
+          "decoy_candidates": 0,
+          "target_candidates": 0,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 0
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML": {
+          "decoy_candidates": 0,
+          "target_candidates": 0,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 0
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML": {
+          "decoy_candidates": 0,
+          "target_candidates": 0,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 0
+        },
+        "LFQ_Orbitrap_DDA_Human_01.mzML": {
+          "decoy_candidates": 0,
+          "target_candidates": 0,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 0
+        }
+      },
+      "estimate_table": {
+        "/data/sage-plus-scientific/hardening-20260914/runs/mbr-0/experimental-transfer-q.tsv": "1ebb295b7158dad5326f3248285491101842d04ab4704d12694ef2c5d32d9f4e"
+      },
+      "job": "mbr-0",
+      "pure_human": [
+        {
+          "ambiguous_or_unmapped_excluded": 0,
+          "endpoint": "legacy_precursor_1pct",
+          "foreign_fraction": null,
+          "foreign_rows": 0,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 0
+        },
+        {
+          "ambiguous_or_unmapped_excluded": 0,
+          "endpoint": "experimental_transfer_1pct",
+          "foreign_fraction": null,
+          "foreign_rows": 0,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 0
+        },
+        {
+          "ambiguous_or_unmapped_excluded": 0,
+          "endpoint": "experimental_transfer_5pct",
+          "foreign_fraction": null,
+          "foreign_rows": 0,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 0
+        }
+      ]
+    },
+    {
+      "by_file": {
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML": {
+          "decoy_candidates": 2844,
+          "target_candidates": 17932,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 5446
+        },
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML": {
+          "decoy_candidates": 2922,
+          "target_candidates": 17204,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 4438
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML": {
+          "decoy_candidates": 3012,
+          "target_candidates": 18040,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 5205
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML": {
+          "decoy_candidates": 3084,
+          "target_candidates": 17606,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 3791
+        },
+        "LFQ_Orbitrap_DDA_Human_01.mzML": {
+          "decoy_candidates": 3653,
+          "target_candidates": 22191,
+          "target_transfers_1pct": 0,
+          "target_transfers_5pct": 69
+        }
+      },
+      "estimate_table": {
+        "/data/sage-plus-scientific/hardening-20260914/runs/mbr-1/experimental-transfer-q.tsv": "3da1ecbb509abcdf15cd427bf1283816672f0a3032325055072bf046be0e464b"
+      },
+      "job": "mbr-1",
+      "pure_human": [
+        {
+          "ambiguous_or_unmapped_excluded": 132,
+          "endpoint": "legacy_precursor_1pct",
+          "foreign_fraction": 0.6683492027073534,
+          "foreign_rows": 5826,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 8717
+        },
+        {
+          "ambiguous_or_unmapped_excluded": 0,
+          "endpoint": "experimental_transfer_1pct",
+          "foreign_fraction": null,
+          "foreign_rows": 0,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 0
+        },
+        {
+          "ambiguous_or_unmapped_excluded": 4,
+          "endpoint": "experimental_transfer_5pct",
+          "foreign_fraction": 0.6,
+          "foreign_rows": 39,
+          "interpretation": "No calibration claim. Foreign assignments are a diagnostic under purity and reference assumptions.",
+          "unconfirmed_control_rows": 65
+        }
+      ]
+    }
+  ],
+  "ptm": [
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-all",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 1172,
+        "empirical_site_error_fraction": 0.09147286821705426,
+        "incorrect_site_events": 118,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 1290
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-0",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 0,
+        "empirical_site_error_fraction": null,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 0
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-100",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 1173,
+        "empirical_site_error_fraction": 0.08287724784988272,
+        "incorrect_site_events": 106,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 1279
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-25",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 461,
+        "empirical_site_error_fraction": 0.1478743068391867,
+        "incorrect_site_events": 80,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 541
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-50",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 761,
+        "empirical_site_error_fraction": 0.10785463071512309,
+        "incorrect_site_events": 92,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 853
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-all",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 880,
+        "empirical_site_error_fraction": 0.01675977653631285,
+        "incorrect_site_events": 15,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 895
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-0",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 0,
+        "empirical_site_error_fraction": null,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 0
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-100",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 880,
+        "empirical_site_error_fraction": 0.01675977653631285,
+        "incorrect_site_events": 15,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 895
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-25",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 414,
+        "empirical_site_error_fraction": 0.05045871559633028,
+        "incorrect_site_events": 22,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 436
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-50",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 659,
+        "empirical_site_error_fraction": 0.028023598820058997,
+        "incorrect_site_events": 19,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 678
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-all-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 1128,
+        "empirical_site_error_fraction": 0.013123359580052493,
+        "incorrect_site_events": 15,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 1290
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-0-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 0,
+        "empirical_site_error_fraction": null,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 0
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-100-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 1129,
+        "empirical_site_error_fraction": 0.0008849557522123894,
+        "incorrect_site_events": 1,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 1279
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-25-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 434,
+        "empirical_site_error_fraction": 0.0,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 541
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-1-plus-oracle-50-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 708,
+        "empirical_site_error_fraction": 0.0,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 853
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-all-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 876,
+        "empirical_site_error_fraction": 0.0011402508551881414,
+        "incorrect_site_events": 1,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 895
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-0-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 0,
+        "empirical_site_error_fraction": null,
+        "incorrect_site_events": 0,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 0
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-100-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 876,
+        "empirical_site_error_fraction": 0.0011402508551881414,
+        "incorrect_site_events": 1,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 895
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-25-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 411,
+        "empirical_site_error_fraction": 0.0024271844660194173,
+        "incorrect_site_events": 1,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 436
+    },
+    {
+      "confidence_fallback_logged": true,
+      "job": "ptm-library-2-plus-oracle-50-ties",
+      "joint_1pct_synthesis_consistency": {
+        "correct_site_events": 657,
+        "empirical_site_error_fraction": 0.001519756838905775,
+        "incorrect_site_events": 1,
+        "unassessable_site_events": 0,
+        "unit": "site events, distinct from arrangement-level FLR"
+      },
+      "peptide_q_one_rows": 0,
+      "site_rows": 678
+    }
+  ],
+  "scope": "Previously inspected pilot data. File scores and transfer estimates remain experimental. PTM truth mapping remains unaudited.",
+  "status": "development_evaluation"
+}

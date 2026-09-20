@@ -14,6 +14,26 @@ See [README.md](README.md) for the repeatable commands and report format.
 - Candidate: `95fbbab`, the final integrated code before the release metadata commit
 - Trials: one warmup followed by three measured runs
 
+### Upstream Sage versus Sage Plus
+
+Three HEK workloads were run on September 1, 2026 with upstream Sage
+`v0.15.0-beta.2` at commit `df921995` and Sage Plus beta.2 release code at commit
+`5aeb568`. Each workload used identical input files and search parameters for
+both binaries, eight threads, one warmup, and three measured trials.
+
+| Workload | Sage wall | Sage Plus wall | Wall change | Sage peak RSS | Sage Plus peak RSS | RSS change |
+|---|---:|---:|---:|---:|---:|---:|
+| Conventional | 5.38 s | 6.45 s | +19.9% | 1,911.4 MiB | 1,494.8 MiB | -21.8% |
+| Common modifications | 11.94 s | 12.14 s | +1.7% | 5,495.6 MiB | 3,698.5 MiB | -32.7% |
+| Broad PTMs | 25.74 s | 29.07 s | +12.9% | 12,278.0 MiB | 7,792.3 MiB | -36.5% |
+
+Sage Plus used less peak memory in every matched workload. Upstream Sage was
+faster in every workload. Upstream Sage emitted its legacy TSV output and did
+not provide the run-summary fields used for direct accepted-identification
+comparisons. The raw reports are `benchmarks/results/20260901-142107-search/`,
+`benchmarks/results/20260901-142158-search/`, and
+`benchmarks/results/20260901-142340-search/`.
+
 ### Conventional database search
 
 The conventional workload searches a 219 MB mzML against 2,803,578 target and decoy peptides and
@@ -53,6 +73,35 @@ This workload adds variable methionine oxidation and peptide N-terminal acetylat
 
 The candidate was 18.0 percent faster and used 38.9 percent less peak RSS. It returned one fewer
 PSM and two more peptides at one-percent FDR.
+
+### Modification-specific PTM search comparison
+
+This candidate-only workload used the conventional HEK mzML and reviewed-human FASTA. It includes
+a conventional search with no variable PTMs and an exhaustive search that applies phospho,
+oxidation, acetyl, and deamidation definitions at every compatible residue. A seeded reservoir
+sample selected exact sites for nested libraries containing 0, 50,000, 200,000, or 500,000 of the
+3,720,985 eligible FASTA residues. Exhaustive and site-library searches allowed up to three PTMs
+and four total variants per peptide. A 64-variant exhaustive configuration failed preflight with an
+estimated 117.83 GiB additional modified-peptide peak. An eight-variant configuration also exceeded
+available memory. Every reported PTM condition was rerun with the shared four-variant cap.
+
+| Condition | Median wall time | Median peak RSS | Database peptides | Fragments | PSMs at 1% FDR | Peptides at 1% FDR |
+|---|---:|---:|---:|---:|---:|---:|
+| Conventional | 6.07 s | 1,499.7 MiB | 2,803,578 | 80,833,042 | 2,203 | 1,409 |
+| Exhaustive four-PTM | 24.96 s | 4,605.5 MiB | 10,787,909 | 317,149,388 | 2,267 | 1,497 |
+| Site library, 0 | 12.25 s | 1,584.1 MiB | 2,803,578 | 80,833,042 | 2,203 | 1,409 |
+| Site library, 50,000 | 12.72 s | 1,681.8 MiB | 3,030,517 | 89,341,256 | 2,206 | 1,412 |
+| Site library, 200,000 | 14.53 s | 2,085.5 MiB | 3,775,367 | 117,638,808 | 2,203 | 1,414 |
+| Site library, 500,000 | 17.72 s | 2,826.1 MiB | 5,271,114 | 172,112,992 | 2,199 | 1,420 |
+
+Against exhaustive enumeration, the 500,000-site library reduced wall time by 29.0 percent, peak
+RSS by 38.6 percent, database peptides by 51.1 percent, and theoretical fragments by 45.7 percent.
+From the empty library to 500,000 sites, wall time increased by 44.7 percent and peak RSS increased
+by 78.4 percent. Every condition produced one stable result hash across its three measured trials.
+Identification counts are descriptive because each condition searches a different modified-peptide
+space. The raw reports are `20260901-140801-feature`, `20260901-140156-feature`,
+`20260901-140350-feature`, `20260901-140443-feature`, `20260901-140538-feature`, and
+`20260901-140640-feature`.
 
 ### Feature-heavy SILAC search
 

@@ -1,133 +1,535 @@
 {
   "_about": "Figures and tables the manuscript includes, referenced as #fig(\"<id>\") / #tbl(\"<id>\"). Written by the scripts in analysis/scripts/; see analysis/scripts/_assets.py.",
   "values": {
-    "fig.report-control": {
-      "path": "figures/report-control.png",
+    "fig.endpoint-agreement": {
+      "path": "figures/endpoint-agreement.png",
       "kind": "figure",
-      "desc": "LFQ threshold yield and species-absent control diagnostics for both releases",
-      "hash": "sha256:8e6fe5c01fa324d9c66db498c69345ea4c320f476a98b48a0bb20aa2bdaa0da9",
+      "desc": "Shared PSM fraction and engine-only counts for each public file",
+      "hash": "sha256:6ee4bb2a4ccfcfa2391a32351e295f245683ab0f0a86b51c8e19fa1657ea05eb",
       "origin": {
-        "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:07:28Z"
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:34:48Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.endpoint-agreement-vector": {
+      "path": "figures/vector/endpoint-agreement.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Shared PSM fraction and engine-only counts for each public file",
+      "hash": "sha256:b260b7c0a7b83dea354bcad03974d6b9e8a06e67c00a75b6be5e67f70e6fc7fc",
+      "origin": {
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:34:48Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.endpoint-lfq": {
+      "path": "figures/endpoint-lfq.png",
+      "kind": "figure",
+      "desc": "Species-level LFQ bias, absolute error, preparation variability, and missingness",
+      "hash": "sha256:869e2d69e80016a1c7d934d77a9884d7ef0e87e8992890de50dd389592c226ff",
+      "origin": {
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:35:36Z"
       },
       "inputs": {
         "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.endpoint-lfq-vector": {
+      "path": "figures/vector/endpoint-lfq.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Species-level LFQ bias, absolute error, preparation variability, and missingness",
+      "hash": "sha256:29400f4ecc0499c79f56e5337872668c2d3ddf6b663a0ab94763cdb04fca56af",
+      "origin": {
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:35:36Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.endpoint-timing": {
+      "path": "figures/endpoint-timing.png",
+      "kind": "figure",
+      "desc": "Public timing and memory medians with measured trials and ranges",
+      "hash": "sha256:aa3a1c35ebf92e435d77f73692740e1c7fb590e37c2dcabd9ce1d1f19d45f9b0",
+      "origin": {
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:34:47Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.endpoint-timing-vector": {
+      "path": "figures/vector/endpoint-timing.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Public timing and memory medians with measured trials and ranges",
+      "hash": "sha256:e286027de61507b642c72493c252c8451a7c09dcf353d12dc206c10d1e443ee8",
+      "origin": {
+        "by": "analysis/scripts/gen_endpoint_figure.py",
+        "at": "2026-09-18T08:34:47Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_endpoint_figure.py": "sha256:7f2de217ce514ac9fa429817e6c911e21ead35b7370fbe2bce5d453473252da9"
+      }
+    },
+    "fig.fdrbench-modification-strata": {
+      "path": "figures/fdrbench_modification_strata.png",
+      "kind": "figure",
+      "desc": "Exploratory paired FDP calibration by modification stratum",
+      "hash": "sha256:0e68b5d168f764834d4981c54dc327ce2cf48569572a1797e42c7774f6d91f64",
+      "origin": {
+        "by": "analysis/scripts/gen_fdrbench_modification_figure.py",
+        "at": "2026-09-02T02:00:55Z"
+      },
+      "inputs": {
+        "analysis/scripts/fdrbench_validation_results.csv": "sha256:5c3e67e07d7678331be9c26c1adb71eaea49ad13a1e48e344d1b16fa2cd7f079",
+        "analysis/scripts/gen_fdrbench_modification_figure.py": "sha256:03404ea30fd4313405af1ef1ceb4cb780df81c59c362b56c2b84a978003cb120"
+      }
+    },
+    "fig.fdrbench-validation": {
+      "path": "figures/fdrbench_validation.png",
+      "kind": "figure",
+      "desc": "Repeated shuffled entrapment calibration and matched-FDP yield",
+      "hash": "sha256:4525d3635e51e7f528e8e29148561230d37112ecc7da789974b03d4f2382bef2",
+      "origin": {
+        "by": "analysis/scripts/gen_fdrbench_validation_figure.py",
+        "at": "2026-09-02T01:58:02Z"
+      },
+      "inputs": {
+        "analysis/scripts/fdrbench_validation_results.csv": "sha256:5c3e67e07d7678331be9c26c1adb71eaea49ad13a1e48e344d1b16fa2cd7f079",
+        "analysis/scripts/gen_fdrbench_validation_figure.py": "sha256:3b2490c085eed44fc31e77cb2095c6f8e8b37381057bb900c012796314774894"
+      }
+    },
+    "fig.mass-offset": {
+      "path": "figures/mass_offset.png",
+      "kind": "figure",
+      "desc": "Mass offset search cost, index size, memory, and error behavior.",
+      "hash": "sha256:261f75c75d099f2da0ef51b6332c41071acc1fc03f784e9b9371353271753d59",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_figure.py",
+        "at": "2026-09-19T23:07:45Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_mass_offset.py": "sha256:f96d029d6f6ff5c56de05f8fb7cdc90e6ee6e158f651adeda7e2f76f56899340",
+        "analysis/scripts/gen_mass_offset_figure.py": "sha256:52bc0bff778952afc828afc31e38f996145cb13405c2d2035a416d0a2d6b9f8f"
+      }
+    },
+    "fig.mass-offset-vector": {
+      "path": "figures/vector/mass_offset.svg",
+      "kind": "figure",
+      "desc": "Scalable companion to the mass offset figure.",
+      "hash": "sha256:9f570ff0d32ac48cf6590b72adfee7343d603f47dd3881e7f924b017ec00bf4a",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_figure.py",
+        "at": "2026-09-19T23:09:33Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_mass_offset.py": "sha256:f96d029d6f6ff5c56de05f8fb7cdc90e6ee6e158f651adeda7e2f76f56899340",
+        "analysis/scripts/gen_mass_offset_figure.py": "sha256:52bc0bff778952afc828afc31e38f996145cb13405c2d2035a416d0a2d6b9f8f"
+      }
+    },
+    "fig.prefilter": {
+      "path": "figures/exact_prefilter.png",
+      "kind": "figure",
+      "desc": "Exact-prefilter wall time, memory, and database size",
+      "hash": "sha256:b673018bff2c1c4c6c8a92a1acf937a8d5f7b37d2c9b9ed703ad1b33ed491418",
+      "origin": {
+        "by": "analysis/scripts/gen_prefilter_figure.py",
+        "at": "2026-09-01T20:32:31Z"
+      },
+      "inputs": {
+        "analysis/scripts/benchmark_results.csv": "sha256:411b09fc5d2f29c4e6680c89d09a3c9deb347129aa007b3b5fd8cdc089aa0e28",
+        "analysis/scripts/gen_prefilter_figure.py": "sha256:7fd205136b3c0537ddb977ce42414fff6f8d39547484e1a0eae69ab5705ece66"
+      }
+    },
+    "fig.ptm-comparison": {
+      "path": "figures/ptm_strategy_comparison.png",
+      "kind": "figure",
+      "desc": "Conventional, exhaustive, and site-specific PTM search comparison",
+      "hash": "sha256:fc8fbadcf1d4543a229c4b322d0897adb17b8be35a4c4fcb329505fe2eb49e6b",
+      "origin": {
+        "by": "analysis/scripts/gen_ptm_comparison_figure.py",
+        "at": "2026-09-01T21:12:25Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_ptm_comparison_figure.py": "sha256:5b23e0539be0e1d1743ce8dbb335c96487b5607b7fa5191524303e0835921354",
+        "analysis/scripts/ptm_comparison_results.csv": "sha256:fe2539e6da4fd5d8af1cfc7b9049e73de5f8f02c1b019b54981614f419cbe39e"
+      }
+    },
+    "fig.ptm-library": {
+      "path": "figures/ptm_library_scaling.png",
+      "kind": "figure",
+      "desc": "Dense PTM site-library scaling with conventional and exhaustive baselines",
+      "hash": "sha256:0c8d07647e783190fa8949c87a5541b5c779196f0ce61a670221cc23b544e1a9",
+      "origin": {
+        "by": "analysis/scripts/gen_ptm_library_figure.py",
+        "at": "2026-09-01T21:12:26Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_ptm_library_figure.py": "sha256:811f7bf8c48ec47217278855b7ed9c11dc6413749b3acbbaa27954a244b2dbed",
+        "analysis/scripts/ptm_comparison_results.csv": "sha256:fe2539e6da4fd5d8af1cfc7b9049e73de5f8f02c1b019b54981614f419cbe39e",
+        "analysis/scripts/ptm_library_results.csv": "sha256:dc7b6784e11bae6978506cacdca4869ee23beadca5d14a106ce4aaa5db80dfa1"
+      }
+    },
+    "fig.release-comparison": {
+      "path": "figures/release_comparison.png",
+      "kind": "figure",
+      "desc": "Matched workload comparison between upstream Sage and Sage Plus",
+      "hash": "sha256:7bf5dd8c63f9548ebc9c655c25a44709af04e3dd8138e745cd32824e8ccabeb8",
+      "origin": {
+        "by": "analysis/scripts/gen_release_comparison_figure.py",
+        "at": "2026-09-01T21:32:07Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_release_comparison_figure.py": "sha256:6af11d9ce3e66ca4d58b3db6dfa48d5c61297a07fd8f52fd681513263accc5c7",
+        "analysis/scripts/sage_vs_plus_results.csv": "sha256:88ac7a2655c44d9f57e3b88ac03055729ddd2f8664e853c2f168bcd41616b854"
+      }
+    },
+    "fig.report-control": {
+      "path": "figures/report-control.png",
+      "kind": "figure",
+      "desc": "Foreign-species fractions in all accepted and MS2-unsupported human-only control rows",
+      "hash": "sha256:8af32f66488cb58a46d6f0abd04cb125b8fa7c05aac876730d211c744d0cdbc6",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:25:34Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-control-vector": {
+      "path": "figures/vector/report-control.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Foreign-species fractions in all accepted and MS2-unsupported human-only control rows",
+      "hash": "sha256:5776e682e680c0b0a9db3fcec2e115afeb4702604e4054739751021d9d68239d",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:39Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-disagreement": {
       "path": "figures/report-disagreement.png",
       "kind": "figure",
       "desc": "Decomposition of accepted PSM disagreement using raw rank-one output",
-      "hash": "sha256:9d245492b643bcf9edf5f1a17337ce0928dc12e79d7654cca93bebe7f8f4efef",
+      "hash": "sha256:a4f929513bb5bff83c607eadd58a8a9c12f0cf42a094cdd546ad08ef0fddc777",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:05:50Z"
+        "at": "2026-09-18T08:26:09Z"
       },
       "inputs": {
         "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-disagreement-vector": {
+      "path": "figures/vector/report-disagreement.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Decomposition of accepted PSM disagreement using raw rank-one output",
+      "hash": "sha256:403bd95644d8e1c4b5d8e456d9afaae1dbbccd2dcddb51acbdaf5c4d166ab56a",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:37Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-identification": {
       "path": "figures/report-identification.png",
       "kind": "figure",
-      "desc": "Public PSM and peptidoform yields and nominal-threshold response",
-      "hash": "sha256:2cb2c10e076203bed4ec96a51e66d7d9eed54c3826edbc4a1af624860eebc811",
+      "desc": "Public PSM and peptidoform nominal-threshold response",
+      "hash": "sha256:0423f035c6a89dd7c5fe89b47926b1483b8301d3190c324c6ce375e39552714e",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:02:02Z"
+        "at": "2026-09-18T08:25:32Z"
       },
       "inputs": {
         "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-identification-vector": {
+      "path": "figures/vector/report-identification.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Public PSM and peptidoform nominal-threshold response",
+      "hash": "sha256:061ff252534f5d845f33a5b67c85afbe582aa116ec420f98d9721dec1b5756bd",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:36Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-lfq": {
       "path": "figures/report-lfq.png",
       "kind": "figure",
-      "desc": "Matched LFQ distributions, ratio error, preparation variability and missingness",
-      "hash": "sha256:26582ec42ae2d31a8b6102be31286a09e4f357084140dd260a6b591c9ea1e83e",
+      "desc": "Matched LFQ species-ratio distributions",
+      "hash": "sha256:336526fffe0f93be00583c1e30d83e5d4a3c3126be25bb1836c64f03ff759206",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:07:27Z"
+        "at": "2026-09-18T08:25:34Z"
       },
       "inputs": {
         "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-lfq-vector": {
+      "path": "figures/vector/report-lfq.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Matched LFQ species-ratio distributions",
+      "hash": "sha256:d446b91aebd56b5d7a2a6d0e5d583757116d2be88c27f217a6d010b3ab156c0a",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:39Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-ptm": {
       "path": "figures/report-ptm.png",
       "kind": "figure",
       "desc": "Synthetic PTM acceptance under spectrum-only and joint peptide filters",
-      "hash": "sha256:9504f847c49a8db6b5ef9ae66ff52873efc88b9be926cb84edfb5fc50a9d89c0",
+      "hash": "sha256:ab9d8d44816ff4ad4ac8f52e7afd92f8ce681ac4da3505d3c6f2aead6b478de8",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:02:03Z"
+        "at": "2026-09-18T08:25:33Z"
       },
       "inputs": {
         "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-ptm-vector": {
+      "path": "figures/vector/report-ptm.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Synthetic PTM acceptance under spectrum-only and joint peptide filters",
+      "hash": "sha256:8eab9d3e34955d6c573fa5ba22a4273c9d5eb979068d4c7dff2dcbe092e001f1",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:38Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-scaling": {
       "path": "figures/report-scaling.png",
       "kind": "figure",
       "desc": "Matched release thread scaling with warmups excluded",
-      "hash": "sha256:b66bcd6bd01067c6ba5cf2be48f52b412919fac08feaaabece4deec04759bfb5",
+      "hash": "sha256:d63c58318f302f1002dfd15b6dec5e8ea8b310ad7efe61e81ea500b368befbcc",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:05:51Z"
+        "at": "2026-09-18T08:25:33Z"
       },
       "inputs": {
         "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-scaling-vector": {
+      "path": "figures/vector/report-scaling.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Matched release thread scaling with warmups excluded",
+      "hash": "sha256:1cfc95a5f7d253bdf5987b17a39e26fb7d3264a5ff4cde9c3d609b0ff62adf1d",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:38Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
       }
     },
     "fig.report-workloads": {
       "path": "figures/report-workloads.png",
       "kind": "figure",
       "desc": "Within-workload performance ratios with distinct replication designs",
-      "hash": "sha256:edbe039f9052e7fb835ca0809a622c0b6c0d16f4065f97934435302d49708140",
+      "hash": "sha256:42ceeb71dde6f062ff396451aba655ebe347d32437b30775d5c2983e2de5a5c5",
       "origin": {
         "by": "analysis/scripts/gen_report_figure.py",
-        "at": "2026-09-15T08:02:02Z"
+        "at": "2026-09-18T08:25:32Z"
       },
       "inputs": {
         "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
         "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_figure.py": "sha256:488d4a87b6d8f737f5da29a376d142f54204083436e573524440a08608d03dbf"
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.report-workloads-vector": {
+      "path": "figures/vector/report-workloads.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Within-workload performance ratios with distinct replication designs",
+      "hash": "sha256:cf9dd05e97fe36b30d0a65d26481368ce285e6443e2594ff7140a14066fc55cd",
+      "origin": {
+        "by": "analysis/scripts/gen_report_figure.py",
+        "at": "2026-09-18T08:30:37Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_report_figure.py": "sha256:3bed84db71f5c63d8d0b24aebd0ea86e7bfc2a3ef8d489ff5e5e277b2a8f3d16"
+      }
+    },
+    "fig.scientific-entrapment-detail": {
+      "path": "figures/scientific-entrapment-detail.png",
+      "kind": "figure",
+      "desc": "Threshold calibration and file-by-seed paired differences for the frozen release pair",
+      "hash": "sha256:6f9bdd4e267e5aa501e7e7a8ac5f8be29f922f1e7c9621d074a97f3456837be9",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_figure.py",
+        "at": "2026-09-18T08:27:06Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_figure.py": "sha256:a2ae9b36ca6bd2f647d04ac0366148fae40bab30591223f7070f5032f3ca533f"
+      }
+    },
+    "fig.scientific-entrapment-detail-vector": {
+      "path": "figures/vector/scientific-entrapment-detail.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Threshold calibration and file-by-seed paired differences for the frozen release pair",
+      "hash": "sha256:571ffd4af0b47edc8adcb11e4eb32a111e7fd4773f40d0ec2f3881e438e8d040",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_figure.py",
+        "at": "2026-09-18T08:30:40Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_figure.py": "sha256:a2ae9b36ca6bd2f647d04ac0366148fae40bab30591223f7070f5032f3ca533f"
       }
     },
     "fig.scientific-entrapment-pilot": {
       "path": "figures/scientific-entrapment-pilot.png",
       "kind": "figure",
-      "desc": "Threshold calibration and file-by-seed paired differences for the frozen release pair",
-      "hash": "sha256:b7d26084cc5b38b0e1ffefc8566477f5465540307a0e4d3faac2384eba296a71",
+      "desc": "Study mean paired FDP differences and conditional bootstrap intervals at one percent",
+      "hash": "sha256:96e5961f3073deec0cb5c3e8d6f0cd7655aa5822a766976aadaaa8b54d08a7be",
       "origin": {
         "by": "analysis/scripts/gen_scientific_figure.py",
-        "at": "2026-09-15T08:05:53Z"
+        "at": "2026-09-18T08:25:36Z"
       },
       "inputs": {
         "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
         "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_scientific_figure.py": "sha256:f660d3b8b76f988510cffc44875cdfff6ee0345178e03ed211940e2bad945893"
+        "analysis/scripts/gen_scientific_figure.py": "sha256:a2ae9b36ca6bd2f647d04ac0366148fae40bab30591223f7070f5032f3ca533f"
+      }
+    },
+    "fig.scientific-entrapment-pilot-vector": {
+      "path": "figures/vector/scientific-entrapment-pilot.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Study mean paired FDP differences and conditional bootstrap intervals at one percent",
+      "hash": "sha256:a73223faf7f2a0bd4b433b34655ad9818921bd135126f6c3b75f363a62b60a97",
+      "origin": {
+        "by": "analysis/scripts/gen_scientific_figure.py",
+        "at": "2026-09-18T08:30:41Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_scientific_figure.py": "sha256:a2ae9b36ca6bd2f647d04ac0366148fae40bab30591223f7070f5032f3ca533f"
       }
     },
     "fig.scientific-public-timing-pilot": {
@@ -142,22 +544,398 @@
       "inputs": {
         "../benchmarks/scientific-results/20260914/figures/figures.json": "sha256:db7dec76584b69d110bdee7302fd9bf77442e9a3b62b6b9ca5c3d241e0e0e4fe",
         "../benchmarks/scientific-results/20260914/figures/public-timing-pilot.png": "sha256:7d95dd55cc535a294ec28a5c2d3893909b3a57e37e503428ee42d630b71d658a",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_scientific_figure.py": "sha256:f660d3b8b76f988510cffc44875cdfff6ee0345178e03ed211940e2bad945893"
+        "analysis/scripts/gen_scientific_figure.py": "sha256:a2ae9b36ca6bd2f647d04ac0366148fae40bab30591223f7070f5032f3ca533f"
+      }
+    },
+    "fig.sequence-storage": {
+      "path": "figures/sequence_storage_memory.png",
+      "kind": "figure",
+      "desc": "Peak-memory reductions from shared protein-backed sequences",
+      "hash": "sha256:547bc0c21df8900fcbffc5556f253a3e84a00994c2b376205bb33a7849f9baef",
+      "origin": {
+        "by": "analysis/scripts/gen_sequence_storage_figure.py",
+        "at": "2026-09-01T19:53:07Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_sequence_storage_figure.py": "sha256:6f66c0116d02851ee610f93e661e4857964289a83a9e9bad7771b04e9691246b",
+        "analysis/scripts/sequence_storage_results.csv": "sha256:9c2bc54042736a3ad2f4775f2c6a6ad47652d7ac68da46186c4a524ecc696b43"
+      }
+    },
+    "fig.supplement-entrapment-resources": {
+      "path": "figures/supplement-entrapment-resources.png",
+      "kind": "figure",
+      "desc": "Entrapment resource measurements across files and seeds",
+      "hash": "sha256:95fe62eb3501de2697f39d0177cea3f24059cacf53dadfa5d62cd817208034b3",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:19Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-entrapment-resources-vector": {
+      "path": "figures/vector/supplement-entrapment-resources.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Entrapment resource measurements across files and seeds",
+      "hash": "sha256:220b761aa13b171b32de4271d8cec1092778de550e43bbcc963717ed4ecbf3d1",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:19Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-lfq-shared": {
+      "path": "figures/supplement-lfq-shared.png",
+      "kind": "figure",
+      "desc": "Ratio error and between-engine differences on identical accepted pairs",
+      "hash": "sha256:b4fde985160c2be6bdc0a204129a4421c190500baec8bea822d85a9ab4356068",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:22Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-lfq-shared-vector": {
+      "path": "figures/vector/supplement-lfq-shared.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Ratio error and between-engine differences on identical accepted pairs",
+      "hash": "sha256:b6bd7e82ffc00d79d6dff642b245a28099427eaaa27812e75a4ccbf00bde89ad",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:22Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-local": {
+      "path": "figures/supplement-local.png",
+      "kind": "figure",
+      "desc": "Contextual local timing, memory, and PSM yield",
+      "hash": "sha256:aa7b4886f3aab8648c74850ff430dec5657916a41a14ed95893a4e608e147dab",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:20Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-local-vector": {
+      "path": "figures/vector/supplement-local.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Contextual local timing, memory, and PSM yield",
+      "hash": "sha256:283907dcbc1d57d7d7844da015b64381d15c3144ff3e9b836b6dc10709cf3ce2",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:20Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-matched-fdp": {
+      "path": "figures/supplement-matched-fdp.png",
+      "kind": "figure",
+      "desc": "Exploratory peptide yield, achieved FDP, and selected thresholds at the one-percent ceiling",
+      "hash": "sha256:e561e2cc184ccf9d6c51b5640093aed695ab2fd5c8a803fbc7cf1af4da325937",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:21Z"
+      },
+      "inputs": {
+        "analysis/data/matched-fdp.json": "sha256:3d43d1bd7b28f5dcf5215ce078a682d91e2a0976f139b1f57cd03ee69caf271c",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-matched-fdp-vector": {
+      "path": "figures/vector/supplement-matched-fdp.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Exploratory peptide yield, achieved FDP, and selected thresholds at the one-percent ceiling",
+      "hash": "sha256:62422d160f21afc818d2c0ebbb5e1b11683adef81f25e68b8755e19d9354cc56",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:21Z"
+      },
+      "inputs": {
+        "analysis/data/matched-fdp.json": "sha256:3d43d1bd7b28f5dcf5215ce078a682d91e2a0976f139b1f57cd03ee69caf271c",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-ptm-diagnostic": {
+      "path": "figures/supplement-ptm-diagnostic.png",
+      "kind": "figure",
+      "desc": "Secondary Sage Plus synthesis consistency before the primary peptide filter",
+      "hash": "sha256:cf3505d3f5506cd37741c661f17edc636a8e106b9370809410c628796968b046",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T19:19:50Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-ptm-diagnostic-vector": {
+      "path": "figures/vector/supplement-ptm-diagnostic.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Secondary Sage Plus synthesis consistency before the primary peptide filter",
+      "hash": "sha256:5cc20eef076c2888a8fd1d22b1e8ad5542385bb9a17fae4b2d32ba762794a40e",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T19:19:50Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-public-counts": {
+      "path": "figures/supplement-public-counts.png",
+      "kind": "figure",
+      "desc": "Absolute accepted PSM, peptidoform, and decoy PSM counts for public inputs",
+      "hash": "sha256:ab3d6801745697d9e5465a37e758f9c0f9d48efc2101d8ca826796ce39702ccd",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:21Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-public-counts-vector": {
+      "path": "figures/vector/supplement-public-counts.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Absolute accepted PSM, peptidoform, and decoy PSM counts for public inputs",
+      "hash": "sha256:c5092c48365a5b8bfd47b9224dc47567bedc3de3e58872e69aa055f57551a970",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:21Z"
+      },
+      "inputs": {
+        "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-threshold-yield": {
+      "path": "figures/supplement-threshold-yield.png",
+      "kind": "figure",
+      "desc": "Mean target peptide yield across prespecified nominal q-value thresholds",
+      "hash": "sha256:72f9252860265e6d6d0e8e216f8a7cea29691c292fa42590492b142243506420",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:20Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "fig.supplement-threshold-yield-vector": {
+      "path": "figures/vector/supplement-threshold-yield.svg",
+      "kind": "figure",
+      "desc": "Scalable companion: Mean target peptide yield across prespecified nominal q-value thresholds",
+      "hash": "sha256:c4524be9a04e5b72025283f7e957ffcab9ba2d9935a1720a1dd023de0b4f5252",
+      "origin": {
+        "by": "analysis/scripts/gen_supplement_figure.py",
+        "at": "2026-09-18T18:31:20Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
+        "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+        "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
+        "analysis/scripts/gen_supplement_figure.py": "sha256:df72fd09d433e8b05813a5231f48e0f020a5e7108c76b0016a56f52523f96e6a"
+      }
+    },
+    "tbl.benchmarks": {
+      "path": "si/benchmark_table.typ",
+      "kind": "table",
+      "desc": "Paired release and feature benchmark medians",
+      "hash": "sha256:67f1e01574f8c051d3db863078050c5ac771d6a0b3a5793e640e4eca109b6929",
+      "origin": {
+        "by": "analysis/scripts/gen_benchmark_table.py",
+        "at": "2026-09-01T19:37:08Z"
+      },
+      "inputs": {
+        "analysis/scripts/benchmark_results.csv": "sha256:411b09fc5d2f29c4e6680c89d09a3c9deb347129aa007b3b5fd8cdc089aa0e28",
+        "analysis/scripts/gen_benchmark_table.py": "sha256:6ef55fd38860fae21c9f236146090d241611f6e323bdd84ffe2c99e0c97ace0f"
+      }
+    },
+    "tbl.changes": {
+      "path": "si/change_summary_table.typ",
+      "kind": "table",
+      "desc": "Beta.2 change areas and reader impact",
+      "hash": "sha256:3eeda7083ffa57b4321497dd2e7175bff45336894fbce44bc4775fb3af3b6475",
+      "origin": {
+        "by": "analysis/scripts/gen_change_summary_table.py",
+        "at": "2026-09-01T19:56:26Z"
+      },
+      "inputs": {
+        "analysis/scripts/change_summary.csv": "sha256:9b4f647cfb616acf079de871e30a427ec936b7b95ba2e90dfc163e3f0429d876",
+        "analysis/scripts/gen_change_summary_table.py": "sha256:d8c14385ddad741b062054f0f7b5fb709749134bcc7e1cc56bf9beb9a9d62cc8"
       }
     },
     "tbl.development": {
       "path": "si/development.typ",
       "kind": "table",
-      "desc": "Released Sage Plus changes, design motivations, and expected consequences",
-      "hash": "sha256:d63aa45983e15b975bac57e597b19565eb4b157419e38594457d6d110e422dea",
+      "desc": "Released Sage Plus changes and evaluation coverage",
+      "hash": "sha256:c50d23e715774094c3cdf120403eb8ba74080b3033a97e2743e15dc770ca4135",
       "origin": {
         "by": "analysis/scripts/gen_development_table.py",
-        "at": "2026-09-15T17:42:53Z"
+        "at": "2026-09-18T07:43:02Z"
       },
       "inputs": {
-        "analysis/data/development-changes.json": "sha256:e1d2bcd1838c6856639c17694f26441ba6fe625d97447dd89bb1586f572a0997",
-        "analysis/scripts/gen_development_table.py": "sha256:0885983870a35518d099aa78c002f79578b32dac63361ce778b5185ee23d763e"
+        "analysis/data/development-changes.json": "sha256:5adcaf92d964aa57aa5338fa327f61e8f9f71bbbed8e0da4f8da52fccb21efb0",
+        "analysis/scripts/gen_development_table.py": "sha256:e8ad2f51b7afeb3c1594dbabb9f47f2b7bb6faf6983bdf3d4062e1d2cb15de20"
+      }
+    },
+    "tbl.fdrbench-validation": {
+      "path": "si/fdrbench_validation_table.typ",
+      "kind": "table",
+      "desc": "Repeated paired entrapment calibration and matched-FDP yield",
+      "hash": "sha256:945ef93e0e3ae4bdf942cf70eba95977cfbcd0fa8b8a6c2ede7bd5df23fdad50",
+      "origin": {
+        "by": "analysis/scripts/gen_fdrbench_validation_table.py",
+        "at": "2026-09-02T02:00:54Z"
+      },
+      "inputs": {
+        "analysis/scripts/fdrbench_validation_results.csv": "sha256:5c3e67e07d7678331be9c26c1adb71eaea49ad13a1e48e344d1b16fa2cd7f079",
+        "analysis/scripts/gen_fdrbench_validation_table.py": "sha256:535454b580db9380d8190a902abc9be93efdd7f24db46bf087502cc9c3e648ca"
+      }
+    },
+    "tbl.mass-offset": {
+      "path": "si/mass_offset_table.typ",
+      "kind": "table",
+      "desc": "Mass offset cost, index size, and accepted identifications.",
+      "hash": "sha256:c6936d986673f0eb9e4977c0b0f9bc166be9667c0d428928f271654a8f403434",
+      "origin": {
+        "by": "analysis/scripts/gen_mass_offset_table.py",
+        "at": "2026-09-19T23:07:26Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae",
+        "analysis/scripts/_mass_offset.py": "sha256:f96d029d6f6ff5c56de05f8fb7cdc90e6ee6e158f651adeda7e2f76f56899340",
+        "analysis/scripts/gen_mass_offset_table.py": "sha256:12bce8e3e0b1f3d6e6851709c11e9749fc7cccf51701550e8aeaabd31ca165ca"
+      }
+    },
+    "tbl.matched-fdp": {
+      "path": "si/matched_fdp.typ",
+      "kind": "table",
+      "desc": "Target peptide yield at a common estimated one-percent paired FDP ceiling",
+      "hash": "sha256:ff73b49d34f2747937c7c7322748ac6cdeafd36a7a070e8b5aec2d8eefe3fc99",
+      "origin": {
+        "by": "analysis/scripts/gen_matched_fdp_table.py",
+        "at": "2026-09-18T08:09:40Z"
+      },
+      "inputs": {
+        "analysis/data/matched-fdp.json": "sha256:3d43d1bd7b28f5dcf5215ce078a682d91e2a0976f139b1f57cd03ee69caf271c",
+        "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
+        "analysis/scripts/gen_matched_fdp_table.py": "sha256:f33bb8601dbe0d6176c70f7dbec5c624ce5856a75d027e05c2713927ed878978"
+      }
+    },
+    "tbl.ptm-library": {
+      "path": "si/ptm_library_table.typ",
+      "kind": "table",
+      "desc": "Conventional, exhaustive, and PTM site-library medians",
+      "hash": "sha256:d24c15c4e43e9978a9180ab4c916a8649ec5707f962ae07d61bf43277cdd42b5",
+      "origin": {
+        "by": "analysis/scripts/gen_ptm_library_table.py",
+        "at": "2026-09-01T21:12:27Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_ptm_library_table.py": "sha256:9376d281855c629444adafcaffd787872acbc2c3c2c4d549e05d4f5daa222ab9",
+        "analysis/scripts/ptm_comparison_results.csv": "sha256:fe2539e6da4fd5d8af1cfc7b9049e73de5f8f02c1b019b54981614f419cbe39e",
+        "analysis/scripts/ptm_library_results.csv": "sha256:dc7b6784e11bae6978506cacdca4869ee23beadca5d14a106ce4aaa5db80dfa1"
+      }
+    },
+    "tbl.release-comparison": {
+      "path": "si/release_comparison_table.typ",
+      "kind": "table",
+      "desc": "Matched workload medians for upstream Sage and Sage Plus",
+      "hash": "sha256:43ca2d47c1c8de47e3d4082d88a8e49db048b8d46e784261ce31367003404ea4",
+      "origin": {
+        "by": "analysis/scripts/gen_benchmark_table.py",
+        "at": "2026-09-01T21:32:07Z"
+      },
+      "inputs": {
+        "analysis/scripts/gen_benchmark_table.py": "sha256:6ef55fd38860fae21c9f236146090d241611f6e323bdd84ffe2c99e0c97ace0f",
+        "analysis/scripts/sage_vs_plus_results.csv": "sha256:88ac7a2655c44d9f57e3b88ac03055729ddd2f8664e853c2f168bcd41616b854"
       }
     },
     "tbl.report-control": {
@@ -179,7 +957,7 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.report-lfq": {
@@ -201,7 +979,7 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.report-lfq-shared": {
@@ -223,7 +1001,7 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.report-ptm-diagnostic": {
@@ -245,7 +1023,7 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.report-public-counts": {
@@ -267,17 +1045,17 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.report-scaling": {
       "path": "si/report_scaling.typ",
       "kind": "table",
       "desc": "Expanded latest-release report scaling",
-      "hash": "sha256:543308226b0ed6c37afb2930bb2db534356a1407ef321a82f1c8ca44230a8da8",
+      "hash": "sha256:aeddaf5ad08b4cf3552559976e8cafd2798ac36153d66891eaa6f1192ba2f472",
       "origin": {
         "by": "analysis/scripts/gen_report_table.py",
-        "at": "2026-09-15T08:05:44Z"
+        "at": "2026-09-18T07:46:15Z"
       },
       "inputs": {
         "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
@@ -289,7 +1067,7 @@
         "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
         "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
         "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-        "analysis/scripts/gen_report_table.py": "sha256:fee1249404b73c6e26bf73518e5920a0212b9fdf49c9c67445a7daf534b208ae"
+        "analysis/scripts/gen_report_table.py": "sha256:1e76a16095fe97620dfca27861c8c0131564318d831108906f01ed2ee53e3b1d"
       }
     },
     "tbl.scientific-enlarged": {
