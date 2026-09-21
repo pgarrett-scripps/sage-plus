@@ -1,0 +1,12 @@
+{
+  "analysis_repository": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source",
+  "evidence": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected",
+  "executables": {
+    "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage": "065f9c7b445d2d5f4d3f23be007f123231e135b0344a586a656666585f8c402e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage": "fc0b47f9904d6a20af8309749c6818353eab188cfa8d3da4da261d75bbcf9c45"
+  },
+  "extension": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected",
+  "sage_plus_commit": "3e30135fb8786ec8a12c1f62e0ff9300e57f9567",
+  "sage_plus_version": "v0.1.0-beta.6",
+  "sage_version": "v0.15.0-beta.2"
+}

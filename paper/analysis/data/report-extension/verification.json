@@ -2,12 +2,12 @@
   "completed_jobs": 34,
   "scope": "The original pilot and post hoc report extension use the frozen released pair. No claim of reserved validation. Search outputs and source identities verified.",
   "snapshot_sha256": {
-    "lfq.json": "b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
-    "plan.json": "393ada557f78736cba85bcd7b05bfae717dbb3e5774d2d7e06b4fb8cb8537cdd",
-    "ptm.json": "9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
-    "public.json": "b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
-    "scaling.json": "8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8"
+    "lfq.json": "6876bac44fc6b064e0b68ad16242ce0b8f6ac8cdfaf56f79a19663511e69a657",
+    "plan.json": "e4435571bbd570bbeec205aaa7f16381580a9d38b243b1ec7bd8dcdcf51cd81b",
+    "ptm.json": "f34ab13df7f79561c758ad7653b78d3257d1b7e54db6efd18872c1ee09d64c6f",
+    "public.json": "ca3d6ff8c0d8dadbb3d1ee8274f91038268bd53bcfc469806ecad556aede3cd1",
+    "scaling.json": "14781e59641d7bb8e721ee68318fde3872f128ae6697a3c0c1b8fd26cab8a78d"
   },
-  "source_files_verified": 314,
+  "source_files_verified": 351,
   "status": "verified"
 }

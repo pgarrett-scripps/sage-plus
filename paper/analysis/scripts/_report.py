@@ -12,7 +12,7 @@ def report(name):
 
 def scale_summary():
     rows = report('scaling')
-    return [dict(engine=e, threads=t, seconds=median(r['seconds'] for r in rows if r['engine']==e and r['threads']==t and not r['warmup']), rss=median(r['rss'] for r in rows if r['engine']==e and r['threads']==t and not r['warmup'])) for e in ('upstream','plus') for t in (1,2,4,8)]
+    return [dict(engine=e, threads=t, seconds=median(r['seconds'] for r in rows if r['engine']==e and r['threads']==t and not r['warmup'] and r['status']=='complete'), rss=median(r['rss'] for r in rows if r['engine']==e and r['threads']==t and not r['warmup'] and r['status']=='complete')) for e in ('upstream','plus') for t in (1,2,4,8)]
 
 
 def workloads():
@@ -21,9 +21,9 @@ def workloads():
     for study,label in (('PXD001468','HEK public'),('PXD028735','Mixture public')):
         output.append(dict(label=label,kind='Repeated fixed input',engines={r['engine']:dict(seconds=r['seconds'],rss=r['rss']) for r in timing(pilot) if r['study']==study}))
     for study,label in (('human','HEK entrapment'),('hye','Mixture entrapment')):
-        output.append(dict(label=label,kind='Across files and seeds',engines={e:{k:median(r[source] for r in pilot['jobs'] if r['suite'].startswith(f'entrapment-{study}-') and r['engine']==e) for k,source in (('seconds','wall_seconds'),('rss','peak_rss_mib'))} for e in ('upstream','plus')}))
+        output.append(dict(label=label,kind='Across files and seeds',engines={e:{k:median(r[source] for r in pilot['jobs'] if r['suite'].startswith(f'entrapment-{study}-') and r['engine']==e and r['status']=='complete') for k,source in (('seconds','wall_seconds'),('rss','peak_rss_mib'))} for e in ('upstream','plus')}))
     for work,label in (('standard','Local standard'),('common-mods','Local modified')):
-        output.append(dict(label=label,kind='Contextual local timing',engines={e:{k:median(r[source] for r in pilot['jobs'] if r['suite']=='local-paired' and r['workload']==work and r['engine']==e and not r['warmup']) for k,source in (('seconds','wall_seconds'),('rss','peak_rss_mib'))} for e in ('upstream','plus')}))
+        output.append(dict(label=label,kind='Contextual local timing',engines={e:{k:median(r[source] for r in pilot['jobs'] if r['suite']=='local-paired' and r['workload']==work and r['engine']==e and not r['warmup'] and r['status']=='complete') for k,source in (('seconds','wall_seconds'),('rss','peak_rss_mib'))} for e in ('upstream','plus')}))
     return output
 
 
@@ -45,9 +45,17 @@ def add_report_stats(st):
         st.add(f'report.{engine}.threshold_disagreement',100*same/total,fmt='.1f',desc='Percent of engine-only accepted PSMs with the identical assignment above threshold in the other engine',between=(0,100))
     for row in report('ptm'):
         for key in ('spectrum_accepted','joint_accepted'):
-            if row['engine'] != 'upstream' or (key == 'joint_accepted' and row['library'] != 1):
-                continue
             st.add(f"report.ptm.{row['library']}.{row['engine']}.{key}",row[key],fmt=',',desc=f"Synthetic HCD {row['library']} {row['engine']} {key}",between=(0,1000000))
+    pilot, _ = load()
+    for row in pilot['ptm']:
+        if row['suite'] != 'ptm' or not row['job'].endswith('-all'):
+            continue
+        library = row['job'].split('-')[1]
+        joint = row['joint_psm_peptide_localization_1pct']
+        for name, value in (('sites', joint['correct_site_events'] + joint['incorrect_site_events']),
+                            ('inconsistent', joint['incorrect_site_events'])):
+            st.add(f'report.ptm.{library}.plus.{name}', value, fmt=',',
+                desc=f'Synthetic HCD {library} joint confidence {name}', between=(0,1000000))
     for r in workloads()[2:4]:
         for key in ('seconds','rss'):
             value=100*(r['engines']['plus'][key]/r['engines']['upstream'][key]-1)

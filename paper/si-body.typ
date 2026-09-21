@@ -10,19 +10,19 @@ text.
 Sage `v0.15.0-beta.2` was obtained from #link(
   "https://github.com/lazear/sage",
 )[the Sage repository], source commit
-`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus `v0.1.0-beta.3` was
+`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus `v0.1.0-beta.6` was
 obtained from #link("https://github.com/pgarrett-scripps/sage-plus")[the Sage
-  Plus repository], source commit `9bfc8acbc3002d83aa3f27af5f848376b5c5c9be`.
+  Plus repository], source commit `3e30135fb8786ec8a12c1f62e0ff9300e57f9567`.
 FDRBench `1.1.1` used source commit `3b619a9acf60d7292fb651a00da55f58cb67fb79`.
 
-The local benchmark archive is
-`/data/sage-plus-scientific/20260914/artifacts/sage-plus-scientific-pilot-20260914.tar.gz`.
-Executable hashes, configurations, and input identities are recorded with the
-repository summary at `benchmarks/scientific-results/20260914/`. Large spectra
-remain at the paths recorded in the archive manifests. The worker-scaling and
-LFQ extension records are retained at
-`/data/sage-plus-scientific/report-extension-20260915`. These locations are
-local evidence records, not an external deposition.
+The comparison was refreshed using the published Sage Plus Linux executable,
+verified against the release SHA256SUMS manifest. The evidence directory is
+`runs/paper-refresh-20260920/`, relative to the Sage Plus working repository.
+Its `evidence/` and `extension/` directories retain commands, configurations,
+executable and input hashes, run outcomes, and analytical outputs. Large spectra
+and unchanged reference inputs remain at their recorded acquisition paths. These
+are local reproducibility records, not an external deposition. All comparative
+results in this manuscript use the release pair specified above.
 
 = Development source map <sec:si-development>
 
@@ -100,6 +100,16 @@ assumptions silently resolved by the amendment.
 = Additional paired resource measurements <sec:si-resource>
 
 @tbl:si-timing retains the exact summaries behind the public timing figure.
+@tbl:execution includes all comparative attempts, including warmups and
+failures.
+
+#figure(
+  tbl("tbl.execution"),
+  caption: [Execution outcomes for the two compared engines. Attempts include
+    warmups and any explicitly recorded repeat after a failure. Completed
+    searches passed output extraction. Failed attempts are retained separately
+    and excluded from successful-run resource and identification summaries.],
+) <tbl:execution>
 
 @fig:si-enlarged gives the absolute resource measurements for the entrapment
 workloads compared on a relative scale in @fig:workloads.
@@ -116,27 +126,21 @@ workloads compared on a relative scale in @fig:workloads.
 
 The local HEK conventional and common-modification results appear in
 @fig:si-local. These searches used the same frozen release pair as the main
-text. Acquisition could overlap these runs, so their wall times are not part of
-the controlled public timing endpoint. The common-modification workload adds
-methionine oxidation and peptide N-terminal acetylation under the shared search
-configuration. The local biological input has unverified redistribution
-provenance and is not offered as a public replication dataset.
+text. Their wall times are reported separately from the public timing endpoint.
+The common-modification workload adds methionine oxidation and peptide
+N-terminal acetylation under the shared search configuration. The local
+biological input has unverified redistribution provenance and is not offered as
+a public replication dataset.
 
 #figure(
   fig("fig.supplement-local", width: 100%),
   caption: [Contextual local HEK searches with standard and common-modification
     settings. Panels compare wall time (A), peak resident memory (B), and
-    accepted target PSMs (C). Large markers and labels show medians of three
+    accepted target PSMs (C). Large markers and labels show medians of completed
     measured trials after one warmup. Faint points show individual trials,
     offset vertically. PSMs pass the reported one-percent spectrum q-value
-    threshold. Possible acquisition overlap limits timing interpretation.],
+    threshold. Unverified biological input provenance limits interpretation.],
 ) <fig:si-local>
-
-The broad PTM workload did not complete with either engine under the selected
-limits. Plus applied its additional modified-database guard and Sage encountered
-allocation failure under the shared address-space ceiling. Failed warmups and
-attempts are retained. Their elapsed time is not summarized as the time required
-to finish the search.
 
 = Threshold-dependent entrapment results <sec:si-thresholds>
 
@@ -307,49 +311,72 @@ repairs made after the released snapshot.
 
 == Peptide acceptance
 
-Evaluation of the new PTM functionality identified a limit of the released
-workflow. The restricted phosphorylation challenge produced the same
-spectrum-level accepted counts in both releases. Each engine accepted #s(
-  "report.ptm.1.upstream.spectrum_accepted",
-) target PSMs in the first HCD file and #s(
-  "report.ptm.2.upstream.spectrum_accepted",
-) in the second. Requiring the peptide threshold reduced the accepted sets to
-#s("report.ptm.1.upstream.joint_accepted") for both releases and both files.
-@fig:ptm shows this loss at the confidence-filtering stage.
+Both engines accepted #s("report.ptm.1.upstream.spectrum_accepted") target PSMs
+in the first HCD file and #s("report.ptm.2.upstream.spectrum_accepted") in the
+second at the spectrum threshold. Adding the peptide threshold retained #s(
+  "report.ptm.1.plus.joint_accepted",
+) and #s("report.ptm.2.plus.joint_accepted") PSMs in Sage Plus, respectively.
+Upstream Sage retained #s("report.ptm.1.upstream.joint_accepted") in each file.
+@fig:ptm distinguishes spectrum-level acceptance from the joint confidence rule.
 
-All retained rank-one matches had peptide q-values equal to one. The shared
-peptide acceptance stage therefore precluded site-accuracy evaluation before the
-Sage Plus localization cutoff was considered. Omitting the peptide filter does
-not produce a validated phosphosite set. Sparse decoy evidence further limits
-interpretation of this restricted synthetic search.
+The count-based fallback in Sage Plus permits peptide acceptance when density
+modeling is underdetermined. This behavior does not by itself establish error
+calibration. Sparse decoy evidence in this restricted synthetic database limits
+interpretation, and the absence of accepted upstream peptides prevents a matched
+site-accuracy comparison.
 
 #figure(
   fig("fig.report-ptm", width: 100%),
   caption: [Acceptance stages in the matched synthetic phosphorylation search.
-    Panels A and B correspond to the two HCD input files. Bars compare target
-    PSMs passing the spectrum threshold alone with those passing both spectrum
-    and peptide thresholds at one percent. The joint accepted sets are empty in
-    both engines. The figure reports successful search outputs with failed
-    primary acceptance, not search failures or a zero localization-error
-    estimate.],
+    Panels A and B show the two HCD inputs. Bars count target PSMs passing the
+    spectrum threshold alone or both spectrum and peptide thresholds at one
+    percent. Sage Plus retains a joint accepted set in each file. Sage retains
+    none. These are confidence-filtering outcomes from completed searches.],
 ) <fig:ptm>
 
 == Site diagnostic
 
-@fig:si-ptm-diagnostic records the released Sage Plus site output after spectrum
-and localization filtering, showing the events withheld by the primary peptide
-confidence requirement.
+After the joint spectrum, peptide, and localization confidence requirements,
+Sage Plus retained #s("report.ptm.1.plus.sites") and #s(
+  "report.ptm.2.plus.sites",
+) assessable site events in the two HCD files. The synthesis-inconsistent counts
+were #s("report.ptm.1.plus.inconsistent") and #s(
+  "report.ptm.2.plus.inconsistent",
+), respectively (@fig:si-ptm-diagnostic). Consistency pools unambiguous
+synthesis truth across libraries because the acquisition-to-library assignment
+was not independently verified. It includes identification and localization
+discrepancies and is not an arrangement-level false-localization rate estimate.
 
 #figure(
   fig("fig.supplement-ptm-diagnostic", width: 100%),
-  caption: [Secondary Sage Plus synthesis-consistency diagnostic. Bars partition
-    site events into synthesis-consistent and inconsistent events, with counts
-    and inconsistent fractions labeled. Events pass spectrum and localization
-    q-values at one percent but omit the peptide filter. Restoring that filter
-    accepts no sites in either file. Consistency uses pooled unambiguous
-    synthesis truth with file-to-library mapping unaudited. It is not an
-    arrangement-level localization error estimate.],
+  caption: [Sage Plus synthesis consistency after joint confidence filtering.
+    Bars partition assessable site events into synthesis-consistent and
+    inconsistent events. Spectrum, peptide, and localization q-values must each
+    be at most one percent. Counts and inconsistent fractions are labeled. The
+    acquisition-to-library mapping remains unaudited, so this diagnostic does
+    not establish localization-error calibration.],
 ) <fig:si-ptm-diagnostic>
+
+= Attachment identity and modification reuse <sec:si-attachments>
+
+The published Sage Plus executable passed #s("named.checks") synthetic CLI
+checks. The fixtures test first and last residue placements, N-terminal and
+C-terminal groups, and indexed and mass-offset search. The same named definition
+shares its occurrence limit across listed sites. Tests cover discovery, guided
+reuse, and iteration, checking that attachment identity survives each step.
+Indistinguishable first-residue and terminal-group alternatives must not
+generate reusable evidence, including at permissive reporting thresholds. These
+tests assess implementation correctness rather than empirical
+terminal-localization calibration. The schematic in @fig:modification-model
+describes the tested identity distinction.
+
+PTM-library and site-report schemas preserve attachment identity alongside
+protein coordinates. Legacy four-column libraries represent residue evidence.
+Terminal-group evidence requires an explicit attachment field. This distinction
+prevents a residue annotation from authorizing a neighboring terminal group.
+Migration accepts legacy modification syntax, and library-aware previews expose
+eligible sites before spectrum searching. The fixture configuration, binary
+identity, and check outcomes accompany the refreshed analysis records.
 
 #pagebreak()
 = Tables <sec:si-tables>
@@ -362,9 +389,11 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
 #figure(
   tbl("tbl.scientific-timing"),
   caption: [Public timing medians for the specified Sage and Sage Plus releases.
-    Parentheses contain observed minimum and maximum wall times, not confidence
-    intervals. Peak memory is maximum resident set size in MiB. Target PSMs pass
-    the reported one-percent spectrum q-value threshold. Warmups are excluded.],
+    Completed trials are shown against planned measured attempts, with failures
+    excluded from timing summaries. Parentheses contain observed minimum and
+    maximum wall times, not confidence intervals. Peak memory is maximum
+    resident set size in MiB. Target PSMs pass the reported one-percent spectrum
+    q-value threshold. Warmups are excluded.],
 ) <tbl:si-timing>
 
 #figure(
@@ -378,11 +407,11 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
 
 #figure(
   tbl("tbl.report-scaling"),
-  caption: [Matched worker-scaling summaries from the report extension. Seconds
-    and peak resident MiB are medians. Time and PSM ranges span measured
-    repeats. A single PSM count indicates identical yield in every repeat.
-    Warmups remain in the execution records but are excluded from these
-    summaries.],
+  caption: [Matched worker-scaling summaries. Completed measured trial counts
+    are shown for each engine and worker setting. Seconds and peak resident MiB
+    are medians. Time and PSM ranges span measured repeats. A single PSM count
+    indicates identical yield in every repeat. Warmups remain in the execution
+    records but are excluded from these summaries.],
 ) <tbl:si-scaling>
 
 #figure(
@@ -407,7 +436,7 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
   tbl("tbl.mass-offset"),
   caption: [Mass offset cost, index size, and accepted identifications on one
     public HEK file. Search and wall seconds and peak resident memory are
-    medians of two measured searches; database and identification counts are
+    medians of two measured searches. Database and identification counts are
     identical across those repeats. Offset PSMs count reported candidates of any
     rank whose peptidoform carries an offset, including decoys.],
 ) <tbl:si-mass-offset>

@@ -3,6 +3,6 @@
 table.header([#text(size: 8pt)[Study]], [#text(size: 8pt)[Engine]], [#text(size: 8pt)[Mean target peptides]], [#text(size: 8pt)[FDP range (%)]], [#text(size: 8pt)[q-value range (%)]]),
 [#text(size: 8pt)[HEK]], [#text(size: 8pt)[Sage]], [#text(size: 8pt)[10,046.5]], [#text(size: 8pt)[0.983 to 0.999]], [#text(size: 8pt)[0.814 to 1.172]],
 [#text(size: 8pt)[HEK]], [#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[10,061.8]], [#text(size: 8pt)[0.985 to 0.997]], [#text(size: 8pt)[0.802 to 1.142]],
-[#text(size: 8pt)[Mixture]], [#text(size: 8pt)[Sage]], [#text(size: 8pt)[37,073.5]], [#text(size: 8pt)[0.995 to 0.999]], [#text(size: 8pt)[0.907 to 1.127]],
-[#text(size: 8pt)[Mixture]], [#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[37,132.3]], [#text(size: 8pt)[0.995 to 1.000]], [#text(size: 8pt)[0.847 to 1.064]],
+[#text(size: 8pt)[Mixture]], [#text(size: 8pt)[Sage]], [#text(size: 8pt)[37,069.0]], [#text(size: 8pt)[0.995 to 0.999]], [#text(size: 8pt)[0.907 to 1.127]],
+[#text(size: 8pt)[Mixture]], [#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[37,132.5]], [#text(size: 8pt)[0.995 to 1.000]], [#text(size: 8pt)[0.847 to 1.064]],
 )

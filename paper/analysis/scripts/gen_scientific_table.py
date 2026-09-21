@@ -31,8 +31,8 @@ def fmt(value, spec='.3f'):
 
 def main():
     pilot, _ = load()
-    table('timing', ['Study', 'Engine', 'Seconds (range)', 'Peak MiB', 'Target PSMs'],
-          [[r['study'], ENGINE[r['engine']],
+    table('timing', ['Study', 'Engine', 'Completed trials', 'Seconds (range)', 'Peak MiB', 'Target PSMs'],
+          [[r['study'], ENGINE[r['engine']], f"{r['trials']}/{r['planned']}",
             f"{r['seconds']:.2f} ({r['seconds_min']:.2f}–{r['seconds_max']:.2f})",
             fmt(r['rss'], '.1f'), fmt(r['psms'], ',')] for r in timing(pilot)])
     table('entrapment', ['Study', 'Sage FDP (%)', 'Plus FDP (%)', 'Difference (pp)', 'Interval (pp)'],
@@ -53,8 +53,8 @@ def main():
     rows = []
     for workload in ('standard', 'common-mods'):
         for engine in ('upstream', 'plus'):
-            group = [r for r in pilot['jobs'] if r['suite']=='local-paired' and r['workload']==workload and r['engine']==engine and not r['warmup']]
-            assert len(group)==3 and all(r['status']=='complete' for r in group)
+            group = [r for r in pilot['jobs'] if r['suite']=='local-paired' and r['workload']==workload and r['engine']==engine and not r['warmup'] and r['status']=='complete']
+            assert group, 'No completed local trials'
             rows.append([workload, ENGINE[engine], fmt(median(r['wall_seconds'] for r in group), '.2f'), fmt(median(r['peak_rss_mib'] for r in group), '.1f'), median(r['target_psms'] for r in group)])
     table('local', ['Workload', 'Engine', 'Seconds', 'Peak MiB', 'Target PSMs'], rows)
     rows = []

@@ -1,10 +1,10 @@
 {
   "analysis_sources_sha256": {
-    "/home/ty/Repos/sage-plus/benchmarks/analyze_scientific.py": "d5a189cc421b18f60607906415f18dc6e5f7e7f4ea6c767767f8f00093015ea0",
-    "/home/ty/Repos/sage-plus/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
-    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_report.py": "6e8ed0b1d304396340d777dc09cea905d77584c5d1b0379afa1055ead824ee12"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/analyze_scientific.py": "d5bf59e7752f190c36f8a3803fe688860807ea4b1268d52d43aedc4383289009",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/paper/analysis/scripts/collect_report.py": "d4ed7b8cc95bf0216bd27d0ece3b0fbfd54569004fe8a15d564be9133b43a647"
   },
   "data": [
     {
@@ -12,8 +12,8 @@
       "joint_accepted": 0,
       "library": 1,
       "peptide_q_one_fraction": 1.0,
-      "rss": 612.15625,
-      "seconds": 1.5,
+      "rss": 585.34765625,
+      "seconds": 1.34,
       "spectrum_accepted": 3141,
       "thresholds": {
         "0.001": {
@@ -50,11 +50,11 @@
     },
     {
       "engine": "plus",
-      "joint_accepted": 0,
+      "joint_accepted": 3141,
       "library": 1,
-      "peptide_q_one_fraction": 1.0,
-      "rss": 451.0390625,
-      "seconds": 1.92,
+      "peptide_q_one_fraction": 0.0,
+      "rss": 451.96484375,
+      "seconds": 1.64,
       "spectrum_accepted": 3141,
       "thresholds": {
         "0.001": {
@@ -65,27 +65,27 @@
         },
         "0.005": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 1132,
           "target_psms": 3141,
-          "target_sequences": 0
+          "target_sequences": 719
         },
         "0.01": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 1132,
           "target_psms": 3141,
-          "target_sequences": 0
+          "target_sequences": 719
         },
         "0.02": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 1132,
           "target_psms": 3141,
-          "target_sequences": 0
+          "target_sequences": 719
         },
         "0.05": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 1132,
           "target_psms": 3141,
-          "target_sequences": 0
+          "target_sequences": 719
         }
       }
     },
@@ -94,8 +94,8 @@
       "joint_accepted": 0,
       "library": 2,
       "peptide_q_one_fraction": 1.0,
-      "rss": 586.3125,
-      "seconds": 1.42,
+      "rss": 613.5703125,
+      "seconds": 1.29,
       "spectrum_accepted": 1958,
       "thresholds": {
         "0.001": {
@@ -132,11 +132,11 @@
     },
     {
       "engine": "plus",
-      "joint_accepted": 0,
+      "joint_accepted": 1958,
       "library": 2,
-      "peptide_q_one_fraction": 1.0,
-      "rss": 450.890625,
-      "seconds": 1.89,
+      "peptide_q_one_fraction": 0.0,
+      "rss": 451.14453125,
+      "seconds": 1.62,
       "spectrum_accepted": 1958,
       "thresholds": {
         "0.001": {
@@ -147,43 +147,43 @@
         },
         "0.005": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 874,
           "target_psms": 1958,
-          "target_sequences": 0
+          "target_sequences": 615
         },
         "0.01": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 874,
           "target_psms": 1958,
-          "target_sequences": 0
+          "target_sequences": 615
         },
         "0.02": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 874,
           "target_psms": 1958,
-          "target_sequences": 0
+          "target_sequences": 615
         },
         "0.05": {
           "decoy_psms": 1,
-          "target_peptidoforms": 0,
+          "target_peptidoforms": 874,
           "target_psms": 1958,
-          "target_sequences": 0
+          "target_sequences": 615
         }
       }
     }
   ],
   "inputs_sha256": {
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-plus-all/identification-metrics.json": "34f60fa6fbb2f82f04a1e61eb6b58dc6e60a55b215c24b6fb959ccc91af0c96d",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-plus-all/result.json": "8a77d4565b8e12231522c14822fb6748f7fa5d44a7206068741f03ed418e926b",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-plus-all/results.sage.parquet": "d4fd4eca776349cefd4eab0501faba26bf991af783011ac1d522c6cccc355992",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-upstream-all/identification-metrics.json": "34f60fa6fbb2f82f04a1e61eb6b58dc6e60a55b215c24b6fb959ccc91af0c96d",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-upstream-all/result.json": "a40c5ee79fb8aa93c293e7ffd25e2fd5b68a8cd4c0b5701b32f776164d07dd86",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-1-upstream-all/results.sage.tsv": "0c63b8c238d925966c0882e219a9ef0baab0a5b2d02bf4f94283b4d15c336f6b",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-plus-all/identification-metrics.json": "fbbc122318709b36e526de9a80ac01051f98343bebc4d6ad466eddba3b75e4f8",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-plus-all/result.json": "5a0927599d86948484dc35954d61f890efd988242bf6ea966090a9315c0ed79c",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-plus-all/results.sage.parquet": "97b61b77d41252c612df2a2b6d5807f4d7f2593547fc680a55a2582ff55bb622",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-upstream-all/identification-metrics.json": "fbbc122318709b36e526de9a80ac01051f98343bebc4d6ad466eddba3b75e4f8",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-upstream-all/result.json": "0f6fcc3d0140cba7580745545cd7a8556a0b5ec508bac89e83001f33d3a14fc4",
-    "/data/sage-plus-scientific/20260914/runs/ptm/library-2-upstream-all/results.sage.tsv": "32211fe94541a57be10b90af996af088a746c3f237643d1b66b2142e5671201c"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-plus-all/identification-metrics.json": "206d49e0165d88191847179bdfb9376055dfcb45dfcd01d01792cea854564251",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-plus-all/result.json": "6bc89c92156f46d76b404a502f6421026ed853eb5c678421ce3eb2e9f82f5565",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-plus-all/results.sage.parquet": "e6070a42a6fb1ba77b693f155b2845132c5f43211d130b30cd141a7870d6737f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-upstream-all/identification-metrics.json": "34f60fa6fbb2f82f04a1e61eb6b58dc6e60a55b215c24b6fb959ccc91af0c96d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-upstream-all/result.json": "baac21df87e097889164fa25955ffd3d8c5c9e76670be0b26003101a0690687e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-1-upstream-all/results.sage.tsv": "03dd45179c992dfd2b53e028bcfce0ee7cc34ea986fa854db84cc99d9bd572ce",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-plus-all/identification-metrics.json": "5ad3398e6546923bc2ab14a42e0b41c320843b7dc475b4343ee9a0dab46016d6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-plus-all/result.json": "2762c8644f84719e592f28cd58a17ed6f00c13cbe86c9014949a948e4786c9a2",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-plus-all/results.sage.parquet": "3289ab36c53f707a0af57eb8e256ca1e8e32af5c6ebaa64a7ede331f615bbb64",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-upstream-all/identification-metrics.json": "fbbc122318709b36e526de9a80ac01051f98343bebc4d6ad466eddba3b75e4f8",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-upstream-all/result.json": "b946770564c6055416b9ba9f1c393fec201b969297271792dada0b2c1ca7aa85",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/ptm/library-2-upstream-all/results.sage.tsv": "3ccaff837eb0f043b4c0a1f2f86f7a6c26433bfbffc80ac92361ab9011806f01"
   }
 }

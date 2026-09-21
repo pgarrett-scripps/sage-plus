@@ -16,7 +16,7 @@ import json
 from pathlib import Path
 from statistics import median
 
-from provenance import atomic_json
+from provenance import atomic_json, file_identities, sha256
 from scientific_metrics import localization_metrics, read_table
 
 REPO = Path(__file__).resolve().parents[1]
@@ -44,15 +44,16 @@ def agreement(indexed: Path, offset: Path) -> dict:
 
 
 def localization(job: Path, truth: dict[str, set[int]]) -> dict:
-    rows = read_table(job / "results.sage.ptm-sites.parquet")
+    rows = [row for row in read_table(job / "results.sage.ptm-sites.parquet")
+            if float(row["peptide_q"]) <= 0.01]
     names = {row["filename"] for row in rows}
     mapping = {(name, sequence): positions for name in names for sequence, positions in truth.items()}
     metrics = localization_metrics(rows, mapping)
     return {"correct_site_events": metrics["correct_site_events"],
             "incorrect_site_events": metrics["incorrect_site_events"],
             "site_error_fraction": metrics["empirical_site_error_fraction"],
-            "scope": "site events at 1% spectrum and 1% localization q, against "
-                     "synthesis-defined sites; includes identification error"}
+            "scope": "site events at 1% spectrum, peptide, and localization q, against "
+                     "synthesis-defined sites. Includes identification error"}
 
 
 def entrapment(job: Path, labels: dict[str, str]) -> list[dict]:
@@ -109,6 +110,12 @@ def main() -> int:
     matrix = json.loads((args.root / "matrix.json").read_text())
     records = matrix["jobs"]
     assert all(r["exit_status"] == 0 for r in records), "matrix contains failed jobs"
+    verified = {}
+    for record in records:
+        for name, expected in (record["inputs"] | record["config"] | record["outputs"]).items():
+            if name not in verified:
+                verified[name] = sha256(Path(name))
+            assert verified[name] == expected, f"Changed mass-offset evidence: {name}"
 
     with args.truth.open() as handle:
         truth = {row["sequence"]: {int(p) for p in row["positions"].split(",")}
@@ -132,10 +139,14 @@ def main() -> int:
     summary = {
         "schema_version": 1,
         "scope": "Mass offset search against the equivalent database expansion. "
-                 "Engineering evidence on public spectra; not an independent biological study.",
+                 "Engineering evidence on public spectra. Not an independent biological study.",
         "executable": matrix["executable"],
         "environment": matrix["environment"],
         "evidence_root": str(args.root),
+        "verified_evidence_sha256": verified,
+        "inputs_sha256": file_identities([
+            args.root / "matrix.json", args.truth, pairs,
+            Path(__file__).resolve(), Path(__file__).with_name("scientific_metrics.py")]),
         "scale": scale(records),
         "localization": localization_rows,
         "entrapment": {mode: entrapment(args.root / "entrapment" / mode, labels)

@@ -156,6 +156,16 @@ def keep_table_captions(path: Path) -> None:
     dom = minidom.parseString(document)
     namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+    # Pandoc wraps a table figure in a one-cell table. Remove that wrapper so
+    # the data table uses the page width and its caption remains a sibling.
+    for table in list(dom.getElementsByTagName("w:tbl")):
+        styles = table.getElementsByTagName("w:tblStyle")
+        nested = table.getElementsByTagName("w:tbl")
+        if styles and styles[0].getAttribute("w:val") == "FigureTable" and len(nested) == 1:
+            inner = nested[0]
+            inner.parentNode.removeChild(inner)
+            table.parentNode.replaceChild(inner, table)
+
     def property_on(paragraph, name):
         properties = next((node for node in paragraph.childNodes if getattr(node, "tagName", "") == "w:pPr"), None)
         if properties is None:
@@ -164,8 +174,17 @@ def keep_table_captions(path: Path) -> None:
         if not properties.getElementsByTagName(name):
             properties.appendChild(dom.createElementNS(namespace, name))
 
+    bibliography = False
     for paragraph in dom.getElementsByTagName("w:p"):
         text = "".join(node.firstChild.data for node in paragraph.getElementsByTagName("w:t") if node.firstChild)
+        if text == "References":
+            bibliography = True
+        if text == "Supporting Information":
+            bibliography = False
+            property_on(paragraph, "w:pageBreakBefore")
+        if bibliography:
+            for numbering in list(paragraph.getElementsByTagName("w:numPr")):
+                numbering.parentNode.removeChild(numbering)
         if re.match(r"^(Figure|Table)\s", text):
             property_on(paragraph, "w:keepLines")
         if paragraph.getElementsByTagName("w:drawing"):
@@ -175,6 +194,11 @@ def keep_table_captions(path: Path) -> None:
         headers = ["".join(node.firstChild.data for node in cell.getElementsByTagName("w:t") if node.firstChild) for cell in cells[:6]]
         development_table = headers[:3] == ["Area", "Sage Plus change", "Evaluation in this chapter"]
         scaling_table = headers == ["Engine", "Workers", "Seconds", "Time range", "Peak MiB", "PSM range"]
+        mass_offset_table = headers == ["Configuration", "Search", "Wall", "Peak RSS", "DB peptides", "Fragments"]
+        if mass_offset_table:
+            widths = (1250, 850, 850, 1200, 1400, 1550, 1100, 1160)
+            for column, width in zip(table.getElementsByTagName("w:gridCol"), widths):
+                column.setAttributeNS(namespace, "w:w", str(width))
         if development_table:
             # The narrative inventory needs wider change columns and left alignment.
             widths = (1800, 3300, 3900)
@@ -213,7 +237,7 @@ def keep_table_captions(path: Path) -> None:
             for name in ("w:sz", "w:szCs"):
                 elements = properties.getElementsByTagName(name)
                 element = elements[0] if elements else dom.createElementNS(namespace, name)
-                element.setAttributeNS(namespace, "w:val", "18" if development_table or scaling_table else "20")
+                element.setAttributeNS(namespace, "w:val", "18" if development_table or scaling_table or mass_offset_table else "20")
                 if not elements:
                     properties.appendChild(element)
         following = table.nextSibling
@@ -250,6 +274,84 @@ def keep_table_captions(path: Path) -> None:
             target.writestr(item, output if item.filename == "word/document.xml" else data)
 
 
+def manuscript_style(path: Path) -> None:
+    """Keep Word headings black and make short comparison tables legible."""
+    with ZipFile(path) as archive:
+        entries = [(item, archive.read(item.filename)) for item in archive.infolist()]
+    data = dict((item.filename, content) for item, content in entries)
+    namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def child(dom, parent, name):
+        existing = next((node for node in parent.childNodes
+                         if getattr(node, "tagName", "") == name), None)
+        if existing is None:
+            existing = dom.createElementNS(namespace, name)
+            if name in ("w:tcPr", "w:trPr", "w:tblPr", "w:pPr", "w:rPr") and parent.tagName != "w:style":
+                parent.insertBefore(existing, parent.firstChild)
+            else:
+                parent.appendChild(existing)
+        return existing
+
+    styles = minidom.parseString(data["word/styles.xml"])
+    for style in styles.getElementsByTagName("w:style"):
+        name = style.getAttribute("w:styleId")
+        if name in ("Title", "Subtitle") or name.startswith("Heading"):
+            properties = child(styles, style, "w:rPr")
+            color = child(styles, properties, "w:color")
+            for attribute in ("w:themeColor", "w:themeTint", "w:themeShade"):
+                if color.hasAttribute(attribute):
+                    color.removeAttribute(attribute)
+            color.setAttribute("w:val", "000000")
+            child(styles, properties, "w:u").setAttribute("w:val", "none")
+            for border in list(style.getElementsByTagName("w:pBdr")):
+                border.parentNode.removeChild(border)
+    document = minidom.parseString(data["word/document.xml"])
+    first = document.getElementsByTagName("w:body")[0].getElementsByTagName("w:p")[0]
+    props = child(document, first, "w:pPr")
+    child(document, props, "w:pStyle").setAttribute("w:val", "Title")
+    section = document.getElementsByTagName("w:sectPr")[-1]
+    page = child(document, section, "w:pgSz")
+    page.setAttribute("w:w", "12240")
+    page.setAttribute("w:h", "15840")
+    margins = child(document, section, "w:pgMar")
+    for name, value in (("top", 1440), ("bottom", 1440), ("left", 1440),
+                        ("right", 1440), ("header", 720), ("footer", 720), ("gutter", 0)):
+        margins.setAttribute(f"w:{name}", str(value))
+    for table in document.getElementsByTagName("w:tbl"):
+        props = child(document, table, "w:tblPr")
+        child(document, props, "w:tblLayout").setAttribute("w:type", "fixed")
+        width = child(document, props, "w:tblW")
+        width.setAttribute("w:type", "dxa")
+        width.setAttribute("w:w", "9360")
+        columns = table.getElementsByTagName("w:gridCol")
+        original = [int(column.getAttribute("w:w") or "1") for column in columns]
+        widths = [round(9360 * value / sum(original)) for value in original]
+        widths[-1] += 9360 - sum(widths)
+        for column, value in zip(columns, widths):
+            column.setAttribute("w:w", str(value))
+        for row in table.getElementsByTagName("w:tr"):
+            for cell, value in zip(row.getElementsByTagName("w:tc"), widths):
+                cell_width = child(document, child(document, cell, "w:tcPr"), "w:tcW")
+                cell_width.setAttribute("w:type", "dxa")
+                cell_width.setAttribute("w:w", str(value))
+        borders = child(document, props, "w:tblBorders")
+        for edge in ("top", "bottom", "left", "right", "insideH", "insideV"):
+            border = child(document, borders, f"w:{edge}")
+            for key, value in (("val", "single"), ("sz", "4"), ("color", "D9D9D9")):
+                border.setAttribute(f"w:{key}", value)
+        rows = table.getElementsByTagName("w:tr")
+        if rows:
+            child(document, child(document, rows[0], "w:trPr"), "w:tblHeader")
+            for cell in rows[0].getElementsByTagName("w:tc"):
+                shade = child(document, child(document, cell, "w:tcPr"), "w:shd")
+                shade.setAttribute("w:fill", "F2F2F2")
+    data["word/styles.xml"] = styles.toxml(encoding="UTF-8")
+    data["word/document.xml"] = document.toxml(encoding="UTF-8")
+    with ZipFile(path, "w") as archive:
+        for item, content in entries:
+            archive.writestr(item, data[item.filename])
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print(__doc__.strip().splitlines()[-1], file=sys.stderr)
@@ -273,6 +375,7 @@ def main() -> int:
         staged.unlink(missing_ok=True)
 
     keep_table_captions(out)
+    manuscript_style(out)
     print(f"wrote {out.name} ({out.stat().st_size / 1e6:.1f} MB)")
     return 0
 

@@ -1,5 +1,16 @@
 # Working in this directory
 
+## Scientific comparison scope
+
+The paper compares the upstream Sage release with the latest published Sage
+Plus release as one current comparison. Do not organize the paper around
+successive Sage Plus versions or add historical release comparisons. Refresh
+measurements when the evaluated executable changes, and keep exact versions,
+commits, and executable hashes in the methods and reproducibility records.
+Describe new capabilities as part of the current Sage Plus workflow, with
+figures and validation appropriate to the claims.
+
+
 Instructions for an agent editing the manuscript. Read [README.md](README.md) for
 what the pipeline does and [STYLE.md](STYLE.md) for prose conventions. If the
 task is moving an existing manuscript onto this scaffold, follow

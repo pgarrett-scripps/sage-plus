@@ -6,8 +6,8 @@
   table.header(
     [#text(size: 6.7pt, weight: "bold")[Configuration]], [#text(size: 6.7pt, weight: "bold")[Search]], [#text(size: 6.7pt, weight: "bold")[Wall]], [#text(size: 6.7pt, weight: "bold")[Peak RSS]], [#text(size: 6.7pt, weight: "bold")[DB peptides]], [#text(size: 6.7pt, weight: "bold")[Fragments]], [#text(size: 6.7pt, weight: "bold")[PSMs]], [#text(size: 6.7pt, weight: "bold")[Offset PSMs]],
   ),
-    [#text(size: 6.7pt)[Indexed]], [#text(size: 6.7pt)[6.1 s]], [#text(size: 6.7pt)[19.8 s]], [#text(size: 6.7pt)[3,027 MiB]], [#text(size: 6.7pt)[6,620,199]], [#text(size: 6.7pt)[200,253,366]], [#text(size: 6.7pt)[20,266]], [#text(size: 6.7pt)[0]],
-    [#text(size: 6.7pt)[One offset]], [#text(size: 6.7pt)[14.2 s]], [#text(size: 6.7pt)[26.4 s]], [#text(size: 6.7pt)[2,579 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,385]], [#text(size: 6.7pt)[4,169]],
-    [#text(size: 6.7pt)[Two offsets]], [#text(size: 6.7pt)[23.5 s]], [#text(size: 6.7pt)[36.2 s]], [#text(size: 6.7pt)[2,647 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,448]], [#text(size: 6.7pt)[7,334]],
-    [#text(size: 6.7pt)[Three offsets]], [#text(size: 6.7pt)[33.2 s]], [#text(size: 6.7pt)[46.5 s]], [#text(size: 6.7pt)[2,603 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,704]], [#text(size: 6.7pt)[10,292]],
+    [#text(size: 6.7pt)[Indexed]], [#text(size: 6.7pt)[6.2 s]], [#text(size: 6.7pt)[20.2 s]], [#text(size: 6.7pt)[2,999 MiB]], [#text(size: 6.7pt)[6,620,199]], [#text(size: 6.7pt)[200,253,366]], [#text(size: 6.7pt)[20,266]], [#text(size: 6.7pt)[0]],
+    [#text(size: 6.7pt)[One offset]], [#text(size: 6.7pt)[14.0 s]], [#text(size: 6.7pt)[26.0 s]], [#text(size: 6.7pt)[2,619 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,385]], [#text(size: 6.7pt)[4,169]],
+    [#text(size: 6.7pt)[Two offsets]], [#text(size: 6.7pt)[23.4 s]], [#text(size: 6.7pt)[35.8 s]], [#text(size: 6.7pt)[2,598 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,448]], [#text(size: 6.7pt)[7,334]],
+    [#text(size: 6.7pt)[Three offsets]], [#text(size: 6.7pt)[32.7 s]], [#text(size: 6.7pt)[45.8 s]], [#text(size: 6.7pt)[2,619 MiB]], [#text(size: 6.7pt)[5,602,995]], [#text(size: 6.7pt)[161,315,508]], [#text(size: 6.7pt)[20,704]], [#text(size: 6.7pt)[10,292]],
 )
