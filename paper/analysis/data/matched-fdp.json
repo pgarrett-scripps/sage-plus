@@ -1,66 +1,66 @@
 {
   "analysis_sources_sha256": {
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_entrapment.py": "34198631b1a0f08ebf7aa57ed324b31267e0e709bf54839f4af415a41b3d9724",
-    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_matched_fdp.py": "edd9ced1804242d78e21da6461e9fe3731d6f01ac751e057c834be45f1f1a867"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_entrapment.py": "34198631b1a0f08ebf7aa57ed324b31267e0e709bf54839f4af415a41b3d9724",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/paper/analysis/scripts/collect_matched_fdp.py": "9bb2bec6db9381727525464dcedb525beb46b8eeefed253c2f0803d8ea398640"
   },
   "ceiling": 0.01,
   "curve_file": "analysis/results/matched-fdp-curves.json.gz",
-  "curve_sha256": "0e2ac070b194f55485cf10c6c96121d47f2cb900c2eb86b47b5f722ad8477d76",
+  "curve_sha256": "c73ef99c4c760327c7947206557d30ff59e04db572ec54df3b11611996407c42",
   "inputs_sha256": {
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-plus/calibration.json": "bef3422ef4c622cfe482a99e796d0ed8e2ca7e79c98a64a59bbbe262e6f3d97c",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-plus/fdrbench-input.tsv": "9cc2828de3b9da47594586d4b5af1ce98c79e3649610246d04887b00b7f0f9ab",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-upstream/calibration.json": "b6d27b3a0574af8aae738d69444bee7d9dded77f3a727d686a95a9a488d0beb1",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-0-upstream/fdrbench-input.tsv": "f573bfe25b75f21edbe2ef257fad4c53d2f3e2a5cfc1c237c797de845665a7e9",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-plus/calibration.json": "bf41314bbcf15db5b26113e43b5292b71ac1a06178bc997e5137767321c141b3",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-plus/fdrbench-input.tsv": "28461e8833458fd3b5f718aca5673421ca4d6d9d017f9f8e42531a87789f0083",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-upstream/calibration.json": "108261a0d921fa1f012feabc227245f0a36cc92d8eacf524ce28d9baa2522c05",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/file-1-upstream/fdrbench-input.tsv": "ad44444b4a204c5f2745c8b793a99454583e81037f9c501b7d109ac7581fafdc",
     "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260914/paired.txt": "78a6fb00e89331ef6c3df7ec68edbd5fcbb1bf8969bb32fa083da2d44fd950ef",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-plus/calibration.json": "32e95b2a9bd7264b606685c3406220dea15d0a7340c53fdaa42ca4902bd0af5b",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-plus/fdrbench-input.tsv": "645021943abadb462fe4b26377e26553301aceee4c66870f66ddf659d2e0fe31",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-upstream/calibration.json": "11a500ee2c1e73da58e809783327fcdad2c7be32da8b8b19ad14ff862b2cbfbd",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-0-upstream/fdrbench-input.tsv": "cee16addef8d1d8ab016b4ea396463134607df7880f06654f19fd69b7c931472",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-plus/calibration.json": "dfaa214f33ca83d56cd6b4a439fb659109c75d04c4e5e94b91d6f6748200b49a",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-plus/fdrbench-input.tsv": "a0ef23440f534b51fa725bbd08abdfb23afdfa9bb6014618fab3bb4b059340cf",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-upstream/calibration.json": "22f8d7fd2cc219299b1a319fa6eac57405c411bd56370b6dcab6c5ac88dce3c0",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/file-1-upstream/fdrbench-input.tsv": "2b59df0aad3c091790a4c68d7e3da85cf6794edd278eef03d676a91d711185b5",
     "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260915/paired.txt": "4e2c0c74ce9346f146e8010260bd5a75f441970213ae9ee07f62653e0aa6e542",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-plus/calibration.json": "1bdef87900108e3799d30fa26debefbfa5028621a06bf0bd139bcb1beaa9fa58",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-plus/fdrbench-input.tsv": "f44ba30bd5d99adaa4f2d5559a8223e2fe3ccc968b8d28f6565fe863411b2d4e",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-upstream/calibration.json": "666890675c212e85cf251b2680e3f895e79c227d56ffd7a25b1ba43c63b4d3e3",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-0-upstream/fdrbench-input.tsv": "02e7863365358f943e29ff4111a7042df39c94f8481a915a627f3661a84363af",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-plus/calibration.json": "185fab35ee9956f2f1236432147dd9488df71c561ff8a9d6e842f3d3ce497c02",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-plus/fdrbench-input.tsv": "668e35e02dab419116cd3c99f61bb925f211fb75ae9db98dced70bef4b731950",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-upstream/calibration.json": "eca3acaad21bbe8ee32fc0f424081b2b106555628bb8eac9fa935bd23f2b9294",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/file-1-upstream/fdrbench-input.tsv": "1b2c41d413bd0c53081b55361616c688426442b03efe3bdaa2ea274d76185b14",
     "/data/sage-plus-scientific/20260914/runs/entrapment-human-20260916/paired.txt": "83371520cc512c401df0b97db80f6f3332ae08ac4a9453deceb5e5ba990c8f21",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-plus/calibration.json": "87eeb27d51ee374934478ebd8c1c09def5e634b344f99c8425c319f86542ed9c",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-plus/fdrbench-input.tsv": "3dd769e64be353e57d085aa8d57482e4fc5b2b3ea26c23e4c8d5d682e44e3954",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-upstream/calibration.json": "aa1fccd8395dab76c2f3153fec0c9d778a3ba55e66eb404ae57d4c3b72e04d3a",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-0-upstream/fdrbench-input.tsv": "cf5432457605e777c6ae6a29f06a3499cabca6347a3c223632714aeba268cc54",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-plus/calibration.json": "95e8aa0fbca99b2f76b21d9360911bd350d367fb8a0fe0eef9c6eba5aaa2ae3b",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-plus/fdrbench-input.tsv": "4830fb2d610a071e5fc17b629a02cc5957362d4f73815bf9ac033d3719e3e6af",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-upstream/calibration.json": "ec438d6c472301cfb66936fefd039c8c02711ff598db60629d739d1d8b27d2c0",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/file-1-upstream/fdrbench-input.tsv": "feb0580e9f8ee564eb737b10d19b203a7baf83cd6925a8ddb7803f9129dd0b8f",
     "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260914/paired.txt": "3f4ba945de7292ae17f700106de9bc6fea519c51162a57d73a287e7ab61b1e58",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-plus/calibration.json": "1e8fc51cb9db5fda698f6c9c585c0ebafaf51adf42d1dc89301de8ea7bd6ebb0",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-plus/fdrbench-input.tsv": "250e4be6c47a31cc88f7fe589e47733e9e6ec37e8474e0c5cdca1803ff9eb308",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-upstream/calibration.json": "a5ad300b59504173eb817eb89c2b8504a3ed46590c2cbd4676c6e9c1602f143f",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-0-upstream/fdrbench-input.tsv": "f9b45b5051f27e9acf0e6b06afcb11a121610186a650a803a5ad3880cf5f562f",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-plus/calibration.json": "04f3db350bf77982e5340b8b012a38d4bc676a155b2e47dbb3713a9efa7539f1",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-plus/fdrbench-input.tsv": "87daddb5bf3a9828852ce8829ff111dc5a218cf3434828eefb584c5580d8b005",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-upstream/calibration.json": "41c19ddaf3c57ae65839b0b168493d61650f793939dde1d84250af85a1452a21",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/file-1-upstream/fdrbench-input.tsv": "52486cadac9da13d1ba477283fe408039b8054845131a7a5d0338363c9360a5b",
     "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260915/paired.txt": "f1c5484972003262a559732f3981411066357a664096a42e204d93f88491dde4",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-plus/calibration.json": "b0da1e826b9e19d737759e2f1bd487f4203c5b1aa2d0ae3b770d48e5b5f7043b",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-plus/fdrbench-input.tsv": "a6c5ff9f14557b15ed23e00a742367c4f822393febe606c8d0915ec20fc7c7a7",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-upstream/calibration.json": "bec04c912f6b3679844e72a0b7fb6b0edaa644e460a50a30d575186ab0f0aa37",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-0-upstream/fdrbench-input.tsv": "9a22114964b24e90ccf6bbedcce51ca6e91d8dc9806b4d0124739431dc39ef0f",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-plus/calibration.json": "9412028df37d774fd915b57d3d40e9faecf98eb2285e3bb278f9aee0bfd364b5",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-plus/fdrbench-input.tsv": "bac8e5db417b11a93c0de43b6ecf10c5a2eff9f7f7bc91815b606e9a15192243",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-upstream/calibration.json": "8ccdec2dd06146ca074ef392290e85282f9b13d49709c28982b698cc357d2a9d",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/file-1-upstream/fdrbench-input.tsv": "e27d3ad906b4fd920781ddbcca5bf89897276244764f7a66cff16aaa375ef880",
-    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/paired.txt": "06dd3ce363996501e9bb88809deedfebb1d3259089849b2146288a7717898941"
+    "/data/sage-plus-scientific/20260914/runs/entrapment-hye-20260916/paired.txt": "06dd3ce363996501e9bb88809deedfebb1d3259089849b2146288a7717898941",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260914/file-0-plus/calibration.json": "d86832b727818706c0a385bb16b8e33f4727a58024566a628c3de9546951cd7d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260914/file-0-upstream/calibration.json": "a553e4dbad7227f2fccd1aa725d9855d9283f23653e01be648e83e6693cad531",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260914/file-1-plus/calibration.json": "f03ffc748d11727cd0ee3816e351cd771e185119efbb26aa673f8e294d5a024c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260914/file-1-upstream/calibration.json": "caad521451e91d8ee1b4c7891836d3f49dab4a324aae9ab6eadb13fe2965349a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260915/file-0-plus/calibration.json": "66287bc16413a20264b635f4dbb87690b07abfece33321ea4108bf1f58666152",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260915/file-0-upstream/calibration.json": "63c843e04a5bb3debaa23cb5941449775a2eeda66643511564665dc310cba537",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260915/file-1-plus/calibration.json": "4c4bd75539e5f1b50482a7c702b6ca5f44f6337fab54ca21d5a9feceb70e1774",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260915/file-1-upstream/calibration.json": "988701f4a3f904a043bb4b2468fa0cb1b7e1b313bb71db0fd5b001107c955558",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260916/file-0-plus/calibration.json": "2ad259c49592c81762f0a5b610829b5610509472c370f48eda7cd5d954a3da85",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260916/file-0-upstream/calibration.json": "16c0f787f2f7c9b84ec8ca6fcb3f3c9744d2626ebc522465b1d5443f588d6840",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260916/file-1-plus/calibration.json": "ceb992e3186264dcc8aa65381e5c2987575c771ca1e213f875c00ae2a15c8f8c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-human-20260916/file-1-upstream/calibration.json": "11c0d809f3af374aa322037fe317c5f2fd9b86d1386a8f7661d9f768186cf490",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260914/file-0-plus/calibration.json": "43d6b67e7bb8eb98ad089145edb081c3be01e1f105de10aa9fb307bb64834053",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260914/file-0-upstream/calibration.json": "04ba8d8afbb46e2bea1c13ca4a541bad1b6466da37a577696252b4300f3cedda",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260914/file-1-plus/calibration.json": "ade169ffd459809ecea3433b5c96072735176d07efc302e6d791e854bdfb3241",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260914/file-1-upstream/calibration.json": "3d302a172831e08182cd4472bfc34f85bd3cc994d0d2db38e395ac1e877844cb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260915/file-0-plus/calibration.json": "825774585f910be8b641619388e473f38aa150a006ba2b00a3e143553b7b9109",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260915/file-0-upstream/calibration.json": "f79f893656b288423fe5e2318a95e439ccc7bd9ddd91e00bba69e989e56f4bdb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260915/file-1-plus/calibration.json": "6cc3a188628f1b09660bc62e8466ef94313c13aeee293d24fadd9b965e03518c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260915/file-1-upstream/calibration.json": "dc64278c78fa3dc289edfe99f620c7cf1b3632c049da01aa9238a1486a779581",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260916/file-0-plus/calibration.json": "88bd5851219c618f7cb81b1bc1ab732fccf6d0c120f8ece9d8791cc204773f25",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260916/file-0-upstream/calibration.json": "391fb98a8d55442de4bb43bffd45dfcef60f11e5b504ed64ed28ec473c15cf2d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260916/file-1-plus/calibration.json": "dbd06804e85d0017d4d4dcc000fb13a069a8781462895973a0427b148e3b2981",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/entrapment-hye-20260916/file-1-upstream/calibration.json": "19a70dba833829ec9f6de3e7214e006f566dbf3e520193aa040ea2b3cd04b994",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260914/file-0-plus/fdrbench-input.tsv": "9cc2828de3b9da47594586d4b5af1ce98c79e3649610246d04887b00b7f0f9ab",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260914/file-0-upstream/fdrbench-input.tsv": "f573bfe25b75f21edbe2ef257fad4c53d2f3e2a5cfc1c237c797de845665a7e9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260914/file-1-plus/fdrbench-input.tsv": "28461e8833458fd3b5f718aca5673421ca4d6d9d017f9f8e42531a87789f0083",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260914/file-1-upstream/fdrbench-input.tsv": "ad44444b4a204c5f2745c8b793a99454583e81037f9c501b7d109ac7581fafdc",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260915/file-0-plus/fdrbench-input.tsv": "645021943abadb462fe4b26377e26553301aceee4c66870f66ddf659d2e0fe31",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260915/file-0-upstream/fdrbench-input.tsv": "a127b9505d48edfcea3e0cf50345384a308fdbda01e73e7aba33a72254c9f7d8",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260915/file-1-plus/fdrbench-input.tsv": "a0ef23440f534b51fa725bbd08abdfb23afdfa9bb6014618fab3bb4b059340cf",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260915/file-1-upstream/fdrbench-input.tsv": "2b59df0aad3c091790a4c68d7e3da85cf6794edd278eef03d676a91d711185b5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260916/file-0-plus/fdrbench-input.tsv": "f44ba30bd5d99adaa4f2d5559a8223e2fe3ccc968b8d28f6565fe863411b2d4e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260916/file-0-upstream/fdrbench-input.tsv": "02e7863365358f943e29ff4111a7042df39c94f8481a915a627f3661a84363af",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260916/file-1-plus/fdrbench-input.tsv": "668e35e02dab419116cd3c99f61bb925f211fb75ae9db98dced70bef4b731950",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-human-20260916/file-1-upstream/fdrbench-input.tsv": "1b2c41d413bd0c53081b55361616c688426442b03efe3bdaa2ea274d76185b14",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260914/file-0-plus/fdrbench-input.tsv": "3dd769e64be353e57d085aa8d57482e4fc5b2b3ea26c23e4c8d5d682e44e3954",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260914/file-0-upstream/fdrbench-input.tsv": "cf5432457605e777c6ae6a29f06a3499cabca6347a3c223632714aeba268cc54",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260914/file-1-plus/fdrbench-input.tsv": "4830fb2d610a071e5fc17b629a02cc5957362d4f73815bf9ac033d3719e3e6af",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260914/file-1-upstream/fdrbench-input.tsv": "43d9fe5b9e5931f9105a97226753d7dd444a4ccf0310f065194eeec0f5989cfb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260915/file-0-plus/fdrbench-input.tsv": "ee68df008c0b013fe1afa8a49c5036e49876780e7fb34012072e532b4895c07f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260915/file-0-upstream/fdrbench-input.tsv": "f9b45b5051f27e9acf0e6b06afcb11a121610186a650a803a5ad3880cf5f562f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260915/file-1-plus/fdrbench-input.tsv": "ae13ed1bd37bf0b7292a8198a4a4f99411da0a2662d3ab140eef886cb1898e35",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260915/file-1-upstream/fdrbench-input.tsv": "9f8b422981bf7bab70b63c0e8d55b92ed8464e1b81dc720e529d6099dde6ee18",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260916/file-0-plus/fdrbench-input.tsv": "a6c5ff9f14557b15ed23e00a742367c4f822393febe606c8d0915ec20fc7c7a7",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260916/file-0-upstream/fdrbench-input.tsv": "9a22114964b24e90ccf6bbedcce51ca6e91d8dc9806b4d0124739431dc39ef0f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260916/file-1-plus/fdrbench-input.tsv": "bac8e5db417b11a93c0de43b6ecf10c5a2eff9f7f7bc91815b606e9a15192243",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence/runs/entrapment-hye-20260916/file-1-upstream/fdrbench-input.tsv": "666feee44f213b43f8d960e55c069570c1a14abcac1a25a77c8bcd06c0c224b9"
   },
   "runs": [
     {
@@ -126,7 +126,7 @@
       "selected": {
         "denominator": 9194,
         "entrapments": 45,
-        "nominal_q": 0.008143713,
+        "nominal_q": 0.008143765,
         "numerator": 91,
         "paired_fdp": 0.009897759408309767,
         "targets": 9149
@@ -264,12 +264,12 @@
       "file": 1,
       "seed": 20260914,
       "selected": {
-        "denominator": 37165,
+        "denominator": 37151,
         "entrapments": 188,
-        "nominal_q": 0.009633695,
+        "nominal_q": 0.009596274,
         "numerator": 370,
-        "paired_fdp": 0.00995560339028656,
-        "targets": 36977
+        "paired_fdp": 0.009959355064466636,
+        "targets": 36963
       },
       "study": "hye"
     },
@@ -306,12 +306,12 @@
       "file": 0,
       "seed": 20260915,
       "selected": {
-        "denominator": 37132,
+        "denominator": 37133,
         "entrapments": 191,
-        "nominal_q": 0.00846649,
+        "nominal_q": 0.008465682,
         "numerator": 370,
-        "paired_fdp": 0.009964451147258429,
-        "targets": 36941
+        "paired_fdp": 0.009964182802359087,
+        "targets": 36942
       },
       "study": "hye"
     },
@@ -320,12 +320,12 @@
       "file": 1,
       "seed": 20260915,
       "selected": {
-        "denominator": 37153,
+        "denominator": 37151,
         "entrapments": 187,
-        "nominal_q": 0.009469699,
+        "nominal_q": 0.009463713,
         "numerator": 370,
-        "paired_fdp": 0.009958818937905418,
-        "targets": 36966
+        "paired_fdp": 0.009959355064466636,
+        "targets": 36964
       },
       "study": "hye"
     },
@@ -376,12 +376,12 @@
       "file": 1,
       "seed": 20260916,
       "selected": {
-        "denominator": 37094,
+        "denominator": 37083,
         "entrapments": 188,
-        "nominal_q": 0.009266024,
+        "nominal_q": 0.009245999,
         "numerator": 369,
-        "paired_fdp": 0.009947700436728312,
-        "targets": 36906
+        "paired_fdp": 0.009950651241808914,
+        "targets": 36895
       },
       "study": "hye"
     },
@@ -419,7 +419,7 @@
           "mean_fdp": 0.009922038146169085,
           "mean_targets": 10046.5,
           "q_max": 0.011721534,
-          "q_min": 0.008143713
+          "q_min": 0.008143765
         }
       },
       "max_paired_percent_change": 0.535577658760511,
@@ -432,23 +432,23 @@
         "plus": {
           "fdp_max": 0.009999469524163175,
           "fdp_min": 0.00995250546987566,
-          "mean_fdp": 0.009975965963401138,
-          "mean_targets": 37132.333333333336,
+          "mean_fdp": 0.009975921239251248,
+          "mean_targets": 37132.5,
           "q_max": 0.0106398985,
-          "q_min": 0.00846649
+          "q_min": 0.008465682
         },
         "upstream": {
           "fdp_max": 0.00998546589869193,
-          "fdp_min": 0.009947700436728312,
-          "mean_fdp": 0.00996517712780531,
-          "mean_targets": 37073.5,
+          "fdp_min": 0.009950651241808914,
+          "mean_fdp": 0.009966383562108959,
+          "mean_targets": 37069,
           "q_max": 0.011265551,
           "q_min": 0.009072834
         }
       },
-      "max_paired_percent_change": 0.5030153879438615,
-      "mean_paired_percent_change": 0.1589338792204261,
-      "min_paired_percent_change": -0.2948655521289867,
+      "max_paired_percent_change": 0.541081622162709,
+      "mean_paired_percent_change": 0.1716149543032397,
+      "min_paired_percent_change": -0.2894708364895582,
       "study": "hye"
     }
   ]

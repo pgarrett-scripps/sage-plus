@@ -89,7 +89,7 @@ identification results and quantitative accuracy. Compact storage can reduce
 memory, whereas preprocessing and predictive models can change candidate
 rankings and confidence scores. We therefore compared Sage #lit(
   "v0.15.0-beta.2",
-) and Sage Plus #lit("v0.1.0-beta.3") using resource measurements, accepted
+) and Sage Plus #lit("v0.1.0-beta.6") using resource measurements, accepted
 peptide-spectrum match (PSM) identities, independent peptide entrapment
 estimates, known mixture ratios, and a species-absent quantitative control.
 
@@ -98,9 +98,8 @@ estimates, known mixture ratios, and a species-absent quantitative control.
 == Relationship to upstream Sage and design goals
 
 Sage Plus retains Sage's indexed peptide search, target-decoy workflow, Git
-history, authorship, MIT license, and citation metadata. Its independent version
-sequence distinguishes it from upstream releases. Development focused on memory
-use, additional input formats, structured output, and modification-aware
+history, authorship, MIT license, and citation metadata. Development focused on
+memory use, additional input formats, structured output, and modification-aware
 analysis. @tbl:development connects the released changes to the measurements in
 this chapter. The source map is in @sec:si-development.
 
@@ -108,7 +107,7 @@ this chapter. The source map is in @sec:si-development.
   tbl("tbl.development"),
   caption: [Development areas in Sage Plus relative to Sage #lit(
       "v0.15.0-beta.2",
-    ). Changes describe the evaluated Sage Plus #lit("v0.1.0-beta.3") snapshot.
+    ). Changes describe the evaluated Sage Plus #lit("v0.1.0-beta.6") snapshot.
     Evaluation refers to the complete released workflows. Individual mechanisms
     were not isolated by ablation.],
 ) <tbl:development>
@@ -166,36 +165,76 @@ changes. Controlled ablations would be needed to attribute a result to an
 individual mechanism. Implementation details are recorded in
 @sec:si-development.
 
-== Quantification and modification functionality
+== Named modifications and explicit attachment sites
 
-Structured modifications add names, per-modification occurrence limits, total
-variant caps, and optional or required neutral-loss fragments. These controls
-make modification identity and search-space expansion explicit. A variant cap
-also changes which hypotheses are searched, so its effect belongs in the
-scientific interpretation of a configured workload.
+Sage Plus defines each named modification once, with a mass, eligible sites, and
+a shared occurrence limit. The site vocabulary distinguishes internal residues,
+first and last peptide residues, and peptide or protein terminal groups. Residue
+conditions may constrain a terminal group without changing its attachment
+identity. For a peptide beginning with lysine, `first_residue:K` selects the
+lysine residue, whereas `peptide_n_term:K` selects the terminal amino group.
+These placements can share a mass and protein coordinate while representing
+different chemical hypotheses (@fig:modification-model).
+
+The same site matcher governs fixed modifications, indexed variable
+modifications, search-time offsets, localization, and predictive features.
+Occurrence limits apply across all sites belonging to a named definition.
+Conflicting fixed definitions fail validation. Optional neutral-loss fragments
+and total variant caps provide further control over the configured search space.
+A cap changes which hypotheses are searched and therefore belongs in the
+interpretation of that workload.
+
+Attachment identity is retained in site reports and reusable PTM libraries.
+Residue evidence cannot authorize an adjacent terminal-group modification.
+Localization respects library-restricted sites and keeps other modifications
+fixed when testing placements. Indistinguishable attachments are excluded from
+reusable site evidence. Legacy symbol-keyed configurations remain readable,
+while migration and preview commands expose the explicit definitions and their
+eligible placements. Supporting methods describe the synthetic attachment tests
+and analytical schema compatibility (@sec:si-attachments).
+
+#figure(
+  fig("fig.modification-model", width: 100%),
+  caption: [Named modification placement and evidence reuse in Sage Plus. A: the
+    terminal amino group and the first lysine residue are distinct attachments,
+    despite sharing a peptide boundary. Numbers identify positions in the
+    example peptide. One named definition shares its occurrence limit across its
+    eligible sites. B: indexed and mass-offset search construct scored
+    peptidoforms through different paths, then use the shared confidence and
+    localization workflow. Indistinguishable attachments do not produce reusable
+    PTM-library evidence. This schematic describes implementation semantics and
+    does not measure localization accuracy.],
+) <fig:modification-model>
+
+== Search time mass offsets
+
+A variable modification can be searched as a precursor and fragment mass offset
+without expanding that modification into the fragment index. Candidate retrieval
+uses translated precursor windows and both shifted and unshifted fragments.
+Eligible placements become scored peptidoforms before confidence assessment,
+quantification, and localization. At most one search-time offset is placed on a
+peptide, and different offsets are never combined with each other. Configured
+indexed modifications may still be present. This restriction bounds the searched
+hypotheses but differs from unrestricted combinatorial expansion. @sec:offsets
+evaluates the resulting memory and search-time tradeoff.
+
+== Quantification and confidence assessment
 
 LFQ adds configurable match-between-runs tolerance and a switch for cross-run
-extraction. The quantitative experiment tests unlabeled LFQ ratios, coverage,
-and a species-absent control. Labeled channels and empirical library export are
-additional capabilities that were not evaluated here.
+extraction. Typed output records strict confirmation from tandem spectra and
+per-file signal diagnostics. These diagnostics include spectral agreement, trace
+agreement, and retention-time displacement. Their ranking score is not a
+calibrated probability that an individual transfer is correct. The quantitative
+experiment tests unlabeled LFQ ratios, coverage, and a species-absent control.
+Labeled channels and empirical spectral-library export remain unevaluated here.
 
-PTM functionality includes localization, ambiguity-aware sequences, site
-reports, and target-decoy localization q-values. The restricted synthetic
-phosphorylation experiment and its acceptance criteria are described in
-@sec:si-ptm.
-
-A modification may also be searched as a mass offset instead of being expanded
-into the fragment index. Each spectrum is then searched once per configured
-offset, against a precursor window translated by the offset mass. Fragment
-lookups use both the unshifted and the shifted mass, so a candidate can be
-retrieved from fragments that do and do not carry the modification. Every
-compatible placement is scored as its own candidate, exactly as the enumerated
-peptidoforms of an expanded database would be. A placement then becomes an
-ordinary peptidoform before confidence assessment, quantification, and
-localization. One offset is placed per peptide, and offsets are never combined
-with each other, so the searched hypothesis count stays linear in the number
-configured rather than combinatorial. @sec:offsets measures the cost this trades
-against index size.
+When peptide or protein confidence modeling is underdetermined or gives a
+nonfinite posterior, Sage Plus falls back to count-based target-decoy q-values.
+Equal scores remain one threshold group. Localization with equally scoring best
+target arrangements reports no confidence in an arbitrary winning site, while
+retaining those arrangements in the localization competition population. The
+synthetic phosphorylation experiment evaluates peptide acceptance and synthesis
+consistency under explicit confidence thresholds (@sec:si-ptm).
 
 = Evaluation design <sec:methods>
 
@@ -203,7 +242,7 @@ against index size.
 
 The comparison used the released Sage and Sage Plus versions named above.
 @sec:si-provenance records software versions, source commits, and the evidence
-archive location.
+record locations.
 
 Each matched pair used the same spectra, reference database, search settings,
 and worker count. Searches ran sequentially on an Intel Core i7-10700K system
@@ -268,19 +307,21 @@ discoveries were retained separately.
 
 One metadata-selected file from each public study entered the repeat timing
 experiment. Each engine received one warmup and three measured trials, with
-engine order alternating across trials. Timing began after acquisition,
-conversion, and the primary search matrices had finished. GNU Time recorded
-whole-process wall time and maximum resident set size. Reported medians exclude
-warmups. Observed minimum and maximum times describe repeat variability on this
-host, not confidence intervals across biological samples.
+engine order alternating across trials. Acquisition and conversion were complete
+before the searches began. GNU Time recorded whole-process wall time and maximum
+resident set size. Reported medians exclude warmups and failed attempts. All
+failed attempts are retained separately, and completion counts accompany the
+timing tables. Resource summaries are conditional on successful completion.
+Observed minimum and maximum times describe repeat variability on this host, not
+confidence intervals across biological samples.
 
 Wall time includes database construction, reading spectra, search, modeling, and
 writing output. It excludes the preceding acquisition and conversion. Peak
 resident memory differs from the address-space allocation limit. The two public
 studies use different input formats and workloads, so absolute timings should be
 compared within each study. A separate local HEK comparison is retained in the
-Supporting Information as a contextual observation because it could overlap
-acquisition activity.
+Supporting Information as a contextual observation because its biological input
+provenance was not independently verified.
 
 == Independent peptide error assessment
 
@@ -329,28 +370,27 @@ minus one. We computed that change separately for spectrum matches and
 peptidoforms. Curves summarize file-level changes within each study, with the
 observed file range retained.
 
-== Matched worker-scaling extension
+== Matched worker scaling
 
-The additional worker experiment used the previously selected first HEK input.
-Each released engine ran at #lit("1"), #lit("2"), #lit("4"), and #lit("8") Rayon
-workers. Every engine and worker-count combination had one warmup followed by
-three measured searches. Engine order alternated across trials within a worker
-count. The search configuration and memory guards matched the original
-comparison.
+The worker experiment used the first selected HEK input. Each released engine
+ran at #lit("1"), #lit("2"), #lit("4"), and #lit("8") Rayon workers. Every
+engine and worker-count combination had one warmup followed by three measured
+searches. Engine order alternated across trials within a worker count. The
+search configuration and memory guards matched the public comparison.
 
 Whole-process time and resident memory were collected with the same runner as
-the original pilot. Speedup was the median one-worker time divided by the median
-time at the specified worker count. It includes serial work and input/output, so
-it measures application scaling rather than the parallel efficiency of the
-fragment-matching kernel alone. The workstation was not isolated from its normal
-background services. These measurements are reported separately from the earlier
-timing experiment.
+the public searches. Speedup was the median one-worker time divided by the
+median time at the specified worker count. It includes serial work and
+input/output, so it measures application scaling rather than the parallel
+efficiency of the fragment-matching kernel alone. The workstation was not
+isolated from its normal background services. These measurements form a separate
+worker-count series.
 
 
 
 == Matched label-free quantification
 
-The quantification extension jointly searched the four mixture acquisitions and
+The quantification experiment jointly searched the four mixture acquisitions and
 the human-only control from PXD028735. Both releases used the same amended
 reference, search settings, batch size, and eight-worker setting. Shared LFQ
 settings specified hybrid peak scoring, summed integration, a spectral-angle
@@ -393,7 +433,47 @@ spectrometry (MS2) evidence required the same peptide in the same file at both
 spectrum and peptide q-values of at most #lit("1") percent. This common rule
 replaced release-specific confirmation flags.
 
+== Modification strategy and attachment evaluation
+
+The mass-offset experiment used the same Sage Plus executable as the engine
+comparison. A selected HEK file was searched with indexed oxidation or with one,
+two, and three configured offsets. Each configuration had two measured trials at
+eight workers. The retained configurations specify indexed acetylation,
+modification budgets, isotope-error windows, and the precursor and fragment
+tolerances. The focused runs used a #lit("22") GiB process-memory guard and
+required at least #lit("2") GiB available system memory. These limits differ
+from the principal comparison and are recorded with every command.
+
+Search-stage duration, whole-process wall time, resident memory, and index size
+were collected separately. Configurations with additional offsets test more
+modification hypotheses, so changes in accepted counts do not estimate a
+sensitivity gain at a fixed search space. Synthetic phosphopeptide searches
+compared indexed and offset placement, and a retained paired entrapment
+reference supplied an additional peptide-level error diagnostic. These focused
+experiments complement the full-reference engine comparison and do not add
+independent biological studies.
+
+Named-attachment fixtures tested discovery, guided PTM-library reuse, and
+iteration with first-residue, last-residue, and terminal-group modifications.
+The fixtures also tested ambiguity that must prevent reusable site evidence.
+They assess consistency of the implemented semantics across search paths.
+Empirical terminal-localization calibration requires separate data.
+
 = Computational performance <sec:results>
+
+== Execution completeness
+
+The comparison recorded #s("execution.upstream.attempts") Sage attempts and #s(
+  "execution.plus.attempts",
+) Sage Plus attempts, including warmups. Sage had #s(
+  "execution.upstream.failures",
+) unsuccessful attempts and Sage Plus had #s("execution.plus.failures").
+Completed-run summaries describe resource use conditional on completion. Every
+attempt remains in the evidence records, and @tbl:execution reports outcomes by
+workload. Failed searches do not contribute empty discovery sets or successful
+timing measurements. Observed failures included an out-of-range sequence access
+during Sage Plus database construction and abnormal process termination in Sage.
+Their causes were not isolated by this evaluation.
 
 == Public search time and memory
 
@@ -422,11 +502,11 @@ summaries and target PSM counts appear in @tbl:si-timing.
   fig("fig.endpoint-timing", width: 100%),
   caption: [Public wall time (A) and peak resident memory (B) for the specified
     Sage and Sage Plus releases. Large circles and open squares show medians of
-    three measured searches per engine and study. Small points show the
+    completed measured searches per engine and study. Small points show the
     individual trials, offset vertically for visibility. Horizontal whiskers
     span the observed minimum and maximum, not confidence intervals. Labels give
-    the medians. Warmups are excluded. Exact values and accepted PSM counts
-    appear in @tbl:si-timing.],
+    the medians and completed sample sizes. Warmups and failures are excluded.
+    Exact values and accepted PSM counts appear in @tbl:si-timing.],
 ) <fig:timing>
 
 The runtime advantage reversed with entrapment-expanded references, while Sage
@@ -469,10 +549,11 @@ not measured.
   fig("fig.report-scaling", width: 100%),
   caption: [Matched worker scaling for the frozen release pair on the first HEK
     input. Panels show wall time (A), peak resident memory (B), and speedup
-    relative to each engine's one-worker median (C). Lines join medians of three
-    measured searches after one warmup per engine and worker count. Small points
-    show individual measured searches. Worker counts are spaced by doubling.
-    Warmups are excluded. Engine order alternated within each worker count.],
+    relative to each engine's one-worker median (C). Lines join medians of
+    completed measured searches after one warmup per engine and worker count.
+    Small points show individual measured searches. Worker counts are spaced by
+    doubling. Warmups are excluded. Engine order alternated within each worker
+    count.],
 ) <fig:scaling>
 
 = Identification behavior and error assessment
@@ -688,12 +769,6 @@ numerators and denominators used for the control calculation.
     represent independent samples.],
 ) <fig:control>
 
-== Compatibility and incomplete workloads
-
-Neither engine completed the broad modification stress workload under the
-selected limits, so it provides no completed-search performance estimate.
-Failure modes and resource limits are recorded in @sec:si-resource.
-
 = Mass offset search <sec:offsets>
 
 Searching a modification as a mass offset moves work from the fragment index to
@@ -701,17 +776,20 @@ the search itself. Oxidation searched as an offset reduced the indexed peptides
 from #s("offset.peptides.indexed") to #s("offset.peptides.offset"), a reduction
 of #s("offset.peptides.reduction") percent. Median peak resident memory fell
 from #s("offset.indexed.rss") to #s("offset.offsets.1.rss") MiB, a reduction of
-#s("offset.rss.reduction") percent. The median search stage grew from
-#s("offset.indexed.search") to #s("offset.offsets.1.search") seconds, a factor
-of #s("offset.search.multiplier"). Offsets are never combined with each other,
-so adding more of them extends the searched hypothesis count linearly. Two
-offsets took #s("offset.offsets.2.search") seconds and three took
-#s("offset.offsets.3.search"), an average of #s("offset.search.per_offset")
-added seconds each, while the index stayed at its unmodified size and peak
-memory at #s("offset.offsets.3.rss") MiB (@fig:mass-offset). Accepted PSMs rose
-slightly across these configurations, from #s("offset.indexed.psms") to
-#s("offset.offsets.3.psms"), because an offset is tested against every indexed
-peptidoform. Exact values appear in @tbl:si-mass-offset.
+#s("offset.rss.reduction") percent. The median search stage grew from #s(
+  "offset.indexed.search",
+) to #s("offset.offsets.1.search") seconds, a factor of #s(
+  "offset.search.multiplier",
+). Offsets are never combined with each other, so adding more of them extends
+the searched hypothesis count linearly. Two offsets took #s(
+  "offset.offsets.2.search",
+) seconds and three took #s("offset.offsets.3.search"), an average of #s(
+  "offset.search.per_offset",
+) added seconds each, while the index retained the same indexed modifications
+and peak memory at #s("offset.offsets.3.rss") MiB (@fig:mass-offset). Accepted
+PSMs rose slightly across these configurations, from #s("offset.indexed.psms")
+to #s("offset.offsets.3.psms"), because an offset is tested against every
+indexed peptidoform. Exact values appear in @tbl:si-mass-offset.
 
 #figure(
   fig("fig.mass-offset", width: 100%),
@@ -720,34 +798,51 @@ peptidoform. Exact values appear in @tbl:si-mass-offset.
     combined with each other. B and C: indexed peptides and median peak resident
     memory, which follow the indexed modifications only. Bars are shaded by the
     number of offsets, with the indexed baseline in gray. D: inconsistent
-    localized site events on the synthetic phosphopeptide libraries, and
-    combined entrapment false-discovery proportion at one percent peptide
-    q-value on the paired oxidation search. The two measures in D come from
-    different experiments and share only their percent scale.],
+    localized site events after joint spectrum, peptide, and localization
+    filtering on the synthetic phosphopeptide libraries, and combined entrapment
+    false-discovery proportion at one percent peptide q-value on the paired
+    oxidation search. The two measures in D come from different experiments and
+    share only their percent scale.],
 ) <fig:mass-offset>
 
-The accepted identifications were nearly identical to the expanded search.
-Across #s("offset.agreement.spectra") synthetic phosphopeptide spectra shared by
-both modes, #s("offset.agreement.same") received the same accepted peptidoform
-and #s("offset.agreement.differing") differed, that one case being an exact
-score tie between isobaric candidates. Localization against the
-synthesis-defined sites was also equivalent: #s("offset.sites.indexed.correct")
-consistent site events for the expanded search and
-#s("offset.sites.offset.correct") for the offset search, with inconsistent
-fractions of #s("offset.sites.indexed.error") and #s("offset.sites.offset.error")
-percent. These site counts include identification error and are not
-arrangement-level false-localization rates.
+The synthetic phosphopeptide assignments were closely concordant between the
+search modes. Across #s("offset.agreement.spectra") synthetic phosphopeptide
+spectra shared by both modes, #s("offset.agreement.same") received the same
+rank-one peptidoform and #s("offset.agreement.differing") differed.
+Synthesis-consistency diagnostics counted #s("offset.sites.indexed.correct")
+consistent site events for the expanded search and #s(
+  "offset.sites.offset.correct",
+) for the offset search, with inconsistent fractions of #s(
+  "offset.sites.indexed.error",
+) and #s("offset.sites.offset.error") percent. These site counts require
+spectrum, peptide, and localization q-values at most one percent. They include
+identification error and are not arrangement-level false-localization rates.
 
 Peptide-level entrapment error was comparable between the two modes. At a
 nominal one percent peptide q-value, the combined false-discovery proportion was
-#s("offset.entrapment.indexed.fdp") for the expanded search over
-#s("offset.entrapment.indexed.peptides") accepted paired peptides, against
-#s("offset.entrapment.offset.fdp") for the offset search over
-#s("offset.entrapment.offset.peptides"). Both are percentages of accepted
-peptides. Their difference is a few entrapment peptides at this scale, so these
-searches show no degradation rather than equivalent error rates.
+#s("offset.entrapment.indexed.fdp") for the expanded search over #s(
+  "offset.entrapment.indexed.peptides",
+) accepted paired peptides, against #s("offset.entrapment.offset.fdp") for the
+offset search over #s("offset.entrapment.offset.peptides"). Both are percentages
+of accepted peptides. Their difference is a few entrapment peptides at this
+scale, so these searches do not establish equivalent error rates or general
+calibration.
 
 = Discussion <sec:discussion>
+
+Explicit attachment identity makes modification evidence interpretable across
+discovery, localization, and guided reuse. A protein coordinate and mass alone
+cannot distinguish a terminal group from its neighboring residue. Keeping these
+identities separate prevents one attachment from inheriting evidence for the
+other. Synthetic fixtures establish this software behavior, while empirical
+terminal-localization calibration remains a separate requirement.
+
+Mass-offset search offers a complementary way to control modification-dependent
+index growth. It moves work into candidate retrieval and placement scoring, so
+reduced index memory can be accompanied by longer searching. The restriction to
+one offset per candidate limits combinations of search-time modifications.
+Indexed modifications can coexist with that offset, but the configured search
+space remains part of the scientific interpretation.
 
 Sage Plus used less peak resident memory in every completed workload. Compact
 storage is a plausible contributor, but the complete-executable comparison
@@ -779,18 +874,21 @@ than a general transfer-error rate.
 
 The evaluation covers selected files from two public studies on one workstation.
 Compute repeats and many precursor measurements do not add independent
-biological studies, and the worker-scaling and LFQ extensions were post hoc.
+biological studies. The selected workloads limit generalization. These datasets
+also informed development and were not held out from implementation choices.
 Common converted inputs leave the native readers unevaluated, while labeled
 channels, library export, and automation interfaces require separate assessment.
-The released retention-time and final discriminant models reuse observations for
-fitting and scoring, so held-out evaluation and controlled ablations remain
-necessary. In the restricted synthetic phosphorylation experiment, no peptide
-passed the one-percent peptide q-value threshold in either engine, so site-level
-accuracy could not be evaluated (@sec:si-ptm).
+The retention-time and final discriminant models reuse observations for fitting
+and scoring, so held-out evaluation and controlled ablations remain necessary.
+Sage Plus retained identifications in the restricted synthetic phosphorylation
+search under the joint peptide and spectrum thresholds. Sparse decoy evidence
+and unaudited acquisition-to-library mapping still limit interpretation of the
+site diagnostic (@sec:si-ptm).
 
 Sage Plus reduced memory use while maintaining similar identification and LFQ
 results on the tested datasets. Runtime remains workload dependent, and
-quantitative transfer confidence and PTM acceptance require further validation.
+quantitative transfer confidence and PTM localization require further
+validation.
 
 // <<< BODY END
 

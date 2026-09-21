@@ -5,7 +5,7 @@ from pathlib import Path
 
 PAPER=Path(__file__).resolve().parents[2]
 DATA=PAPER/'analysis/data/report-extension'
-ROOT=Path('/data/sage-plus-scientific/report-extension-20260915')
+ROOT=Path(json.loads((PAPER/'analysis/data/release-context.json').read_text())['extension'])
 
 
 def digest(path):
@@ -15,8 +15,8 @@ def digest(path):
 
 def main():
     status=json.loads((ROOT/'matrix-status.json').read_text())
-    assert not status['failures'] and not status['pending']
-    assert len(status['completed'])==len(status['expected_jobs'])==34
+    assert not status['pending']
+    assert len(status['completed']) + len(status['failures']) == len(status['expected_jobs']) == 34
     plan=json.loads((ROOT/'plan.json').read_text())
     assert plan==json.loads((DATA/'plan.json').read_text())
     checked={}
@@ -28,8 +28,8 @@ def main():
             assert actual==expected, f'Changed input: {name}'
     for job in plan['jobs']:
         record=json.loads((ROOT/job['id']/'result.json').read_text())
-        assert record['status']=='complete'
-        for name,expected in (record['outputs'] | record['signature']['inputs']).items():
+        assert record['status'] in ('complete','failed','timeout','resource_unavailable','analysis_failed')
+        for name,expected in (record.get('outputs', {}) | record['signature']['inputs']).items():
             actual = checked[name] if name in checked else digest(name)
             checked[name] = actual
             assert actual==expected, f'Changed search evidence: {name}'

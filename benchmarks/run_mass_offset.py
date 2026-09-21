@@ -136,10 +136,10 @@ def entrapment_jobs(paired_fasta: Path, spectra: Path) -> list[dict]:
 
 
 def execute(job: dict, sage: Path, root: Path, threads: int) -> dict:
-    # Each job owns its directory: a rerun replaces it rather than refusing to
-    # write beside artifacts from an earlier attempt.
+    # Each job owns its directory, and earlier attempts remain intact.
     directory = root / job["suite"] / job["id"]
-    shutil.rmtree(directory, ignore_errors=True)
+    if directory.exists():
+        raise FileExistsError(f'Refusing to replace existing evidence: {directory}')
     directory.mkdir(parents=True)
     config = copy.deepcopy(job["config"])
     config["output_directory"] = str(directory)
@@ -148,7 +148,7 @@ def execute(job: dict, sage: Path, root: Path, threads: int) -> dict:
     inputs = [Path(p) for p in config["mzml_paths"]] + [Path(config["database"]["fasta"])]
     # `/usr/bin/time` reports this job's own peak, unlike a cumulative
     # getrusage high-water mark shared by every child of this process.
-    command = ["/usr/bin/time", "-v", str(sage), str(config_path)]
+    command = ["/usr/bin/time", "-v", str(sage), str(config_path), "--disable-telemetry-i-dont-want-to-improve-sage"]
     started = time.time()
     with (directory / "search.log").open("w") as log:
         completed = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=log,
@@ -159,7 +159,7 @@ def execute(job: dict, sage: Path, root: Path, threads: int) -> dict:
     stage = lambda pattern: (int(match.group(1)) if (match := re.search(pattern, text)) else None)
     summary_path = directory / "run-summary.json"
     summary = json.loads(summary_path.read_text()) if summary_path.exists() else None
-    outputs = sorted(p for p in directory.glob("results.sage.parquet"))
+    outputs = sorted(p for p in directory.iterdir() if p.is_file() and p.name != "job.json")
     record = {
         "suite": job["suite"], "id": job["id"], "exit_status": completed.returncode,
         "command": command, "threads": threads,

@@ -203,8 +203,8 @@ z
    </g>
    <g id="patch_12">
     <path d="M 52.953165 174.064378 
-L 257.841963 174.064378 
-L 257.841963 194.674128 
+L 257.830806 174.064378 
+L 257.830806 194.674128 
 L 52.953165 194.674128 
 z
 " clip-path="url(#p6dff3dac59)" style="fill: #cbd5dc"/>
@@ -250,10 +250,10 @@ z
 " clip-path="url(#p6dff3dac59)" style="fill: #d57632"/>
    </g>
    <g id="patch_18">
-    <path d="M 257.841963 174.064378 
+    <path d="M 257.830806 174.064378 
 L 261.390047 174.064378 
 L 261.390047 194.674128 
-L 257.841963 194.674128 
+L 257.830806 194.674128 
 z
 " clip-path="url(#p6dff3dac59)" style="fill: #d57632"/>
    </g>
@@ -288,7 +288,7 @@ L 261.390047 265.55918
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="155.590961" y="155.610503" transform="rotate(-0 155.590961 155.610503)">96.83% shared</text>
    </g>
    <g id="text_16">
-    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="155.590961" y="186.837398" transform="rotate(-0 155.590961 186.837398)">96.83% shared</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="155.590961" y="186.837398" transform="rotate(-0 155.590961 186.837398)">96.82% shared</text>
    </g>
    <g id="text_17">
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="155.590961" y="218.064293" transform="rotate(-0 155.590961 218.064293)">96.61% shared</text>
@@ -453,8 +453,8 @@ z
    </g>
    <g id="patch_32">
     <path d="M 299.601828 185.462194 
-L 452.529598 185.462194 
-L 452.529598 194.517994 
+L 453.010503 185.462194 
+L 453.010503 194.517994 
 L 299.601828 194.517994 
 z
 " clip-path="url(#p7900c767f6)" style="fill: #d57632"/>
@@ -508,7 +508,7 @@ L 511.2 265.55918
     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #273444" x="459.575329" y="161.10109" transform="rotate(-0 459.575329 161.10109)">973</text>
    </g>
    <g id="text_33">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #273444" x="456.529598" y="192.327985" transform="rotate(-0 456.529598 192.327985)">954</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #273444" x="457.010503" y="192.327985" transform="rotate(-0 457.010503 192.327985)">957</text>
    </g>
    <g id="text_34">
     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #273444" x="478.651225" y="223.55488" transform="rotate(-0 478.651225 223.55488)">1,092</text>

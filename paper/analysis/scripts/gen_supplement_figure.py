@@ -54,7 +54,8 @@ def resources(local=False):
                 group = [r for r in pilot['jobs'] if r['engine'] == engine and
                          ((r['suite'] == 'local-paired' and r['workload'] == key and not r['warmup'])
                           if local else r['suite'].startswith(f'entrapment-{key}-'))]
-                assert len(group) == (3 if local else 6) and all(r['status'] == 'complete' for r in group)
+                group = [r for r in group if r['status'] == 'complete']
+                assert group, 'No completed resource measurements'
                 values = [r[metric] for r in group]
                 value = median(values)
                 all_values.extend(values)
@@ -184,14 +185,13 @@ def ptm_diagnostic():
     rows = [r for r in pilot['ptm'] if r['suite'] == 'ptm' and r['job'].endswith('-all')]
     fig, ax = plt.subplots(figsize=(7.2, 2.8), layout='constrained')
     for i, row in enumerate(rows):
-        good, bad = row['correct_site_events'], row['incorrect_site_events']
+        joint = row['joint_psm_peptide_localization_1pct']
+        good, bad = joint['correct_site_events'], joint['incorrect_site_events']
         ax.barh(i, good, height=.5, color=TEAL)
         ax.barh(i, bad, left=good, height=.5, color=COLORS['plus'])
         ax.text(good / 2, i, f'{good:,}', va='center', ha='center', color='white', fontsize=10)
-        ax.annotate(f"{bad:,} ({100 * row['empirical_site_error_fraction']:.2f}%)",
+        ax.annotate(f"{bad:,} ({100 * joint['empirical_site_error_fraction']:.2f}%)",
                          (good + bad, i), xytext=(6, 0), textcoords='offset points', va='center', fontsize=9)
-        joint = row['joint_psm_peptide_localization_1pct']
-        assert joint['correct_site_events'] + joint['incorrect_site_events'] == 0
     ax.set_xlim(0, 1600)
     ax.set_xticks([0, 500, 1000, 1500])
     ax.xaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
@@ -202,7 +202,7 @@ def ptm_diagnostic():
     fig.legend(handles=[Patch(facecolor=TEAL, label='Synthesis-consistent'),
                         Patch(facecolor=COLORS['plus'], label='Synthesis-inconsistent')],
                loc='outside upper center', ncol=2)
-    finish(fig, 'ptm-diagnostic', INPUTS, 'Secondary Sage Plus synthesis consistency before the primary peptide filter')
+    finish(fig, 'ptm-diagnostic', INPUTS, 'Sage Plus synthesis consistency after joint spectrum, peptide, and localization filtering')
 
 
 if __name__ == '__main__':

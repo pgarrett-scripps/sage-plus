@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 PAPER = Path(__file__).resolve().parents[2]
-SUMMARY = '../benchmarks/scientific-results/mass-offset-20260919/summary.json'
+SUMMARY = '../benchmarks/scientific-results/mass-offset-20260920/summary.json'
 MASS_OFFSET_INPUTS = [SUMMARY]
 LABEL = {'indexed': 'Indexed', 'offsets-1': 'One offset',
          'offsets-2': 'Two offsets', 'offsets-3': 'Three offsets'}

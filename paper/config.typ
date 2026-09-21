@@ -50,16 +50,19 @@
 #import "stats.typ": lit, s
 
 #let paper-abstract = [
-  We developed Sage Plus as an independently versioned downstream distribution
+  We developed Sage Plus as an independently maintained downstream distribution
   of the Sage proteomics search engine. The extensions address input support,
   typed analytical output, memory use, execution controls, and
-  modification-aware analysis. This chapter documents those changes and
-  evaluates their consequences by comparing Sage #lit("v0.15.0-beta.2") with
-  Sage Plus #lit("v0.1.0-beta.3") using matched public spectra, references, and
-  search settings. The evaluation covered computational resources, worker
-  scaling, identification agreement, peptide entrapment, and label-free
-  quantification. Repeated searches of selected human and mixed-species files
-  used #s("pilot.PXD001468.rss_reduction") and #s(
+  modification-aware analysis. Named modifications retain distinct residue and
+  terminal-group attachments, while search-time mass offsets limit index growth.
+  This study documents those changes and evaluates their consequences by
+  comparing Sage #lit("v0.15.0-beta.2") with Sage Plus #lit("v0.1.0-beta.6")
+  using matched public spectra, references, and search settings. The evaluation
+  covered computational resources, worker scaling, identification agreement,
+  peptide entrapment, and label-free quantification. Among completed repeated
+  searches, selected human and mixed-species files used #s(
+    "pilot.PXD001468.rss_reduction",
+  ) and #s(
     "pilot.PXD028735.rss_reduction",
   ) percent less peak resident memory with Sage Plus. Runtime favored Sage Plus
   in the repeated public searches but favored Sage with entrapment-expanded

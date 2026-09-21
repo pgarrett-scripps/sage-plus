@@ -2,35 +2,97 @@
   "_about": "Numbers the manuscript states in prose, read as #s(\"<id>\"). Scripts own each entry's value; fmt, unit, desc and expect are the author's to edit here. Entries with origin.by = \"hand\" are entirely yours.",
   "sources": {
     "analysis/scripts/gen_stats.py": {
-      "analysis/scripts/gen_stats.py": "sha256:0f08b78fddb143aeed38ec247afef5b47e95c335f0f4056cdee1a6c00ba6deee",
-      "analysis/scripts/_scientific.py": "sha256:d1407460bb0b922ef6c1ae3fb3812073d71c6aa3236541ab3c8fa0e37f8a3463",
-      "analysis/scripts/_report.py": "sha256:951c67ee4b0b56bae2bcda75123057fe7959ee80ae7f2cd186af1a07de1fb2ea",
+      "analysis/scripts/gen_stats.py": "sha256:809b530efc89d18b971d37713655b29972bbd64f1f58d44a32ad7ac473760b5f",
+      "analysis/scripts/_scientific.py": "sha256:84967b5494c6956520690704c014ef20687b90966d4c99fd6e6c42a6ee2efc34",
+      "analysis/scripts/_report.py": "sha256:349c6d36dbb525c41cda946d30771b2d9d87372dce39d4ec7d68dbeb229988c7",
       "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
-      "analysis/scripts/_mass_offset.py": "sha256:f96d029d6f6ff5c56de05f8fb7cdc90e6ee6e158f651adeda7e2f76f56899340",
-      "../benchmarks/scientific-results/20260914/pilot-summary.json": "sha256:c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379",
-      "../benchmarks/scientific-results/20260914/archive-verification.json": "sha256:2933798c5456b2ce73ad4a42da680f0c014fab422be2b3de84c3930ecc133467",
-      "analysis/data/report-extension/public.json": "sha256:b66b1fd4d609e8177407f1e03e735b01c6c6e2e37620969e6eb9d71ff1ce06a0",
-      "analysis/data/report-extension/ptm.json": "sha256:9684429bacbac2e80ced18ecf18f39ccec0a32e4ed28f58b398faeffb4111368",
-      "analysis/data/report-extension/lfq.json": "sha256:b46c976824dd444aafce69db3417d27761314939e787de738ee46a65f5d56ee1",
-      "analysis/data/report-extension/scaling.json": "sha256:8c97e889fe459bec42211f58eb63b83e8a84b2855be6acb8ca0c51b7c81584a8",
-      "analysis/data/report-extension/verification.json": "sha256:9ddb0aecb71969e10c9813ebfd375ee16ba0e45c6b274ea09f6427cbc42a1bbc",
-      "analysis/data/matched-fdp.json": "sha256:3d43d1bd7b28f5dcf5215ce078a682d91e2a0976f139b1f57cd03ee69caf271c",
-      "../benchmarks/scientific-results/mass-offset-20260919/summary.json": "sha256:d31ae53c61f4cfd7de976cd78a7c79db993ac7072c1225fb2165e00353f25bae"
+      "analysis/scripts/_mass_offset.py": "sha256:95951ccbd942d6ecf5b2b500aeb20d73ff474dc70c11a8a7dcaabef9e0b19997",
+      "../benchmarks/scientific-results/20260920/pilot-summary.json": "sha256:b455c63bc1c165dea5b5ee57d441ae426187f09beea7a52b498d178333c98601",
+      "../benchmarks/scientific-results/20260920/evidence-verification.json": "sha256:90b7201f76435148c4bad6dd526f109f03adc9a1b7b732185b3a213649299838",
+      "analysis/data/report-extension/public.json": "sha256:ca3d6ff8c0d8dadbb3d1ee8274f91038268bd53bcfc469806ecad556aede3cd1",
+      "analysis/data/report-extension/ptm.json": "sha256:f34ab13df7f79561c758ad7653b78d3257d1b7e54db6efd18872c1ee09d64c6f",
+      "analysis/data/report-extension/lfq.json": "sha256:6876bac44fc6b064e0b68ad16242ce0b8f6ac8cdfaf56f79a19663511e69a657",
+      "analysis/data/report-extension/scaling.json": "sha256:14781e59641d7bb8e721ee68318fde3872f128ae6697a3c0c1b8fd26cab8a78d",
+      "analysis/data/report-extension/verification.json": "sha256:70d90eddb4beb2b9c7969ca203abe4b72ef2462449863dc0e196a3460d19ec88",
+      "analysis/data/matched-fdp.json": "sha256:366dcc75b3a6f6973f9cf9e49ce64c8a4e68211e92229221ec248f27f99f0daa",
+      "../benchmarks/scientific-results/mass-offset-20260920/summary.json": "sha256:f2c61d4dc4f340ba02f447cc554ce21236cc69e5e1fc457266b2b00e27746028",
+      "analysis/data/execution.json": "sha256:57b81bdbb7570be98469e1c53fb73d9a59384c97c4d3125d5caa05896421ef57",
+      "analysis/data/named-modifications.json": "sha256:8daf80ce678ba5a02147b1660087c3f52ea82fee5742115cb50e4c29e97251a1"
     }
   },
   "values": {
     "archive.members": {
-      "value": 3981,
+      "value": 718,
       "fmt": ",",
       "unit": "",
-      "desc": "Individually verified archive members",
+      "desc": "Individually verified search evidence files",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:11bec72dc466196d",
+      "checksum": "v2:6c0f3412848008d4",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "execution.plus.attempts": {
+      "value": 53,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus comparative attempts",
+      "expect": {
+        "min": 0,
+        "max": 10000
+      },
+      "checksum": "v2:2858dcd1057d3eae",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "execution.plus.failures": {
+      "value": 1,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus comparative failures",
+      "expect": {
+        "min": 0,
+        "max": 10000
+      },
+      "checksum": "v2:6b86b273ff34fce1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "execution.upstream.attempts": {
+      "value": 53,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream comparative attempts",
+      "expect": {
+        "min": 0,
+        "max": 10000
+      },
+      "checksum": "v2:2858dcd1057d3eae",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "execution.upstream.failures": {
+      "value": 1,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream comparative failures",
+      "expect": {
+        "min": 0,
+        "max": 10000
+      },
+      "checksum": "v2:6b86b273ff34fce1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "matched.fdp.max": {
@@ -79,7 +141,7 @@
       }
     },
     "matched.hye.change": {
-      "value": 0.1589338792204261,
+      "value": 0.1716149543032397,
       "fmt": "+.2f",
       "unit": "",
       "desc": "Mean paired target peptide yield change at the common estimated FDP ceiling in percent",
@@ -87,10 +149,25 @@
         "min": -100,
         "max": 100
       },
-      "checksum": "v2:8359b96a5f09718b",
+      "checksum": "v2:31f82672e221c58a",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-18T08:09:56Z"
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "named.checks": {
+      "value": 29,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Named attachment CLI checks passed",
+      "expect": {
+        "min": 0,
+        "max": 1000
+      },
+      "checksum": "v2:35135aaa6cc23891",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.agreement.differing": {
@@ -112,7 +189,7 @@
       "value": 5100,
       "fmt": ",",
       "unit": "",
-      "desc": "Spectra whose accepted peptidoform is identical in both modes",
+      "desc": "Spectra with identical rank-one peptidoforms in both modes",
       "expect": {
         "sign": "+"
       },
@@ -211,73 +288,73 @@
       }
     },
     "offset.indexed.rss": {
-      "value": 3026.71484375,
+      "value": 2999.298828125,
       "fmt": ",.0f",
       "unit": "",
       "desc": "Indexed median peak resident MiB",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:61d6a42b9ccda766",
+      "checksum": "v2:ff234b1d8c7139b7",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.indexed.search": {
-      "value": 6.1215,
+      "value": 6.206,
       "fmt": ".1f",
       "unit": "",
       "desc": "Indexed median search stage seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:df62246d93f83fb3",
+      "checksum": "v2:995b0659c877723b",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.offsets.1.rss": {
-      "value": 2578.849609375,
+      "value": 2619.0546875,
       "fmt": ",.0f",
       "unit": "",
       "desc": "One offset median peak resident MiB",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:67c28c1d0529d0cb",
+      "checksum": "v2:f83dcc0c3d181264",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.offsets.1.search": {
-      "value": 14.1545,
+      "value": 14.01,
       "fmt": ".1f",
       "unit": "",
       "desc": "One offset median search stage seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:56a5e6456f16199d",
+      "checksum": "v2:29f2e15e14552197",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.offsets.2.search": {
-      "value": 23.5275,
+      "value": 23.351,
       "fmt": ".1f",
       "unit": "",
       "desc": "Two offsets median search stage seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:46ea1ae808164dae",
+      "checksum": "v2:da99cd11a00c2c7c",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.offsets.3.psms": {
@@ -295,31 +372,31 @@
       }
     },
     "offset.offsets.3.rss": {
-      "value": 2603.40625,
+      "value": 2618.607421875,
       "fmt": ",.0f",
       "unit": "",
       "desc": "Three offsets median peak resident MiB",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:80c7ceaced7de3bc",
+      "checksum": "v2:f30134ff7e715313",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.offsets.3.search": {
-      "value": 33.2145,
+      "value": 32.736,
       "fmt": ".1f",
       "unit": "",
       "desc": "Three offsets median search stage seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:606bafa85b5a3774",
+      "checksum": "v2:438fe0494c67165d",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.peptides.indexed": {
@@ -367,7 +444,7 @@
       }
     },
     "offset.rss.reduction": {
-      "value": 14.7970739727866,
+      "value": 12.67776778556967,
       "fmt": ".1f",
       "unit": "",
       "desc": "Offset reduction in peak resident memory percent",
@@ -376,30 +453,30 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:40677259bc819856",
+      "checksum": "v2:584d6d46fc353120",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.search.multiplier": {
-      "value": 2.312260066977048,
+      "value": 2.257492748952626,
       "fmt": ".1f",
       "unit": "times",
       "desc": "Search stage multiplier for one offset",
       "expect": {
         "sign": "+",
-        "min": 0,
+        "min": 1,
         "max": 20
       },
-      "checksum": "v2:8926d5d5babea86b",
+      "checksum": "v2:1ea38900fc557ee7",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.search.per_offset": {
-      "value": 9.031,
+      "value": 8.843333333333332,
       "fmt": ".1f",
       "unit": "",
       "desc": "Mean added search seconds per configured offset",
@@ -408,10 +485,10 @@
         "min": 0,
         "max": 60
       },
-      "checksum": "v2:e5b33d0ab4b1d5cc",
+      "checksum": "v2:abb40294d833f8dd",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-19T23:07:58Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "offset.sites.indexed.correct": {
@@ -475,35 +552,35 @@
       }
     },
     "pilot.PXD001468.plus.rss": {
-      "value": 1491.828125,
+      "value": 1497.671875,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD001468 Sage Plus timing median rss",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:8a88e6cd8b0299ee",
+      "checksum": "v2:3875df4f82a21865",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD001468.plus.seconds": {
-      "value": 9.48,
+      "value": 10.635,
       "fmt": ".2f",
       "unit": "",
       "desc": "PXD001468 Sage Plus timing median seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:60beee36de2e85e6",
+      "checksum": "v2:50db600daebf09fe",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD001468.rss_reduction": {
-      "value": 30.096369443656368,
+      "value": 29.099439125827764,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD001468 Sage Plus reduction in rss relative to Sage",
@@ -512,14 +589,14 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:783dcca3610cfa96",
+      "checksum": "v2:d7217495acf4a3ac",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:24:10Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD001468.seconds_reduction": {
-      "value": 4.339051463168508,
+      "value": 3.537414965986385,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD001468 Sage Plus reduction in seconds relative to Sage",
@@ -528,70 +605,70 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:f0a089154eb25e9e",
+      "checksum": "v2:f85d215771df461e",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:24:10Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD001468.upstream.rss": {
-      "value": 2134.12109375,
+      "value": 2112.35546875,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD001468 Sage timing median rss",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:bdaf417c2c976bd5",
+      "checksum": "v2:140b04dba8c6e08c",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD001468.upstream.seconds": {
-      "value": 9.91,
+      "value": 11.024999999999999,
       "fmt": ".2f",
       "unit": "",
       "desc": "PXD001468 Sage timing median seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:8c845ceba709bc8c",
+      "checksum": "v2:b47c5e86f0bc3730",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.plus.rss": {
-      "value": 2419.93359375,
+      "value": 2418.19140625,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD028735 Sage Plus timing median rss",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:defde14099b0eee9",
+      "checksum": "v2:b2db557efb4b5d77",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.plus.seconds": {
-      "value": 25.03,
+      "value": 27.51,
       "fmt": ".2f",
       "unit": "",
       "desc": "PXD028735 Sage Plus timing median seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:b5128f034e8438c0",
+      "checksum": "v2:4f33a47656420cd1",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.rss_reduction": {
-      "value": 21.221712437117557,
+      "value": 20.969798944743957,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD028735 Sage Plus reduction in rss relative to Sage",
@@ -600,14 +677,14 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:a6e2bfd05516b60a",
+      "checksum": "v2:401fbc9b59761e09",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:24:10Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.seconds_reduction": {
-      "value": 3.9155470249520152,
+      "value": 8.81670533642691,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD028735 Sage Plus reduction in seconds relative to Sage",
@@ -616,38 +693,38 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:9d13b8d6d17babe3",
+      "checksum": "v2:cc8b2844904d4cef",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:24:10Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.upstream.rss": {
-      "value": 3071.828125,
+      "value": 3059.83203125,
       "fmt": ".1f",
       "unit": "",
       "desc": "PXD028735 Sage timing median rss",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:e3a140369c71e59f",
+      "checksum": "v2:d39fb7136c3dab45",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.PXD028735.upstream.seconds": {
-      "value": 26.05,
+      "value": 30.17,
       "fmt": ".2f",
       "unit": "",
       "desc": "PXD028735 Sage timing median seconds",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:f305a6ac94bdd8a2",
+      "checksum": "v2:f49854dd9349503e",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.bootstrap": {
@@ -686,7 +763,7 @@
       "desc": "Conditional difference interval in percentage points",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 0
       },
       "checksum": "v2:3dbbc8b8ea81071a",
       "origin": {
@@ -715,7 +792,7 @@
       "unit": "",
       "desc": "Conditional difference interval in percentage points",
       "expect": {
-        "min": -100,
+        "min": 0,
         "max": 100
       },
       "checksum": "v2:f01e992a139e9e8c",
@@ -740,7 +817,7 @@
       }
     },
     "pilot.hye.delta": {
-      "value": 0.027858470591649552,
+      "value": 0.028724423575397263,
       "fmt": "+.3f",
       "unit": "",
       "desc": "Sage Plus minus Sage FDP in percentage points",
@@ -748,25 +825,25 @@
         "min": -100,
         "max": 100
       },
-      "checksum": "v2:735c66455339c249",
+      "checksum": "v2:da5aee545d566428",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.hye.lower": {
-      "value": -0.03876123642490969,
+      "value": -0.035259388462134666,
       "fmt": "+.3f",
       "unit": "",
       "desc": "Conditional difference interval in percentage points",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 0
       },
-      "checksum": "v2:fe147a6392767312",
+      "checksum": "v2:fb1084f7bed5ac91",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.hye.plus.fdp": {
@@ -790,7 +867,7 @@
       "unit": "",
       "desc": "Conditional difference interval in percentage points",
       "expect": {
-        "min": -100,
+        "min": 0,
         "max": 100
       },
       "checksum": "v2:68b5fb9f1de6dd52",
@@ -800,7 +877,7 @@
       }
     },
     "pilot.hye.upstream.fdp": {
-      "value": 1.0291302361826424,
+      "value": 1.0282642831988946,
       "fmt": ".3f",
       "unit": "",
       "desc": "Mixture Sage mean paired FDP percent",
@@ -808,10 +885,10 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:c715e623c02fd461",
+      "checksum": "v2:e1a052e2a8f3fb5d",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T07:10:53Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "pilot.overlap.max": {
@@ -964,7 +1041,7 @@
       }
     },
     "report.PXD028735.target_psms.min": {
-      "value": 0.18591347872720654,
+      "value": 0.19128662602569957,
       "fmt": "+.2f",
       "unit": "",
       "desc": "PXD028735 min per-file change in target_psms percent",
@@ -972,10 +1049,10 @@
         "min": -100,
         "max": 100
       },
-      "checksum": "v2:95aefa5c79e3fc7c",
+      "checksum": "v2:1134789a33c68180",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.extension.completed_jobs": {
@@ -993,47 +1070,49 @@
       }
     },
     "report.extension.source_files_verified": {
-      "value": 314,
+      "value": 351,
       "fmt": ",",
       "unit": "",
       "desc": "Report extension source_files_verified",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:748064be03a08df8",
+      "checksum": "v2:04a8708c3a481ced",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:07:29Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.hek.entrapment.rss": {
-      "value": -18.561052084422556,
+      "value": -19.030182515303483,
       "fmt": "+.1f",
       "unit": "",
       "desc": "HEK entrapment relative change in rss percent",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "-"
       },
-      "checksum": "v2:6477780bb42f3ef3",
+      "checksum": "v2:e4369df2b7e63b6a",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.hek.entrapment.seconds": {
-      "value": 19.093264248704656,
+      "value": 16.819806023481366,
       "fmt": "+.1f",
       "unit": "",
       "desc": "HEK entrapment relative change in seconds percent",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "+"
       },
-      "checksum": "v2:1cc53b907be5f104",
+      "checksum": "v2:7e31b8f0e969745b",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.lfq.plus.control.foreign": {
@@ -1349,7 +1428,8 @@
       "desc": "Percent LFQ precursor yield change at 0.01",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "-"
       },
       "checksum": "v2:3f56ddec9a944bcf",
       "origin": {
@@ -1364,7 +1444,8 @@
       "desc": "Percent LFQ precursor yield change at 0.05",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "+"
       },
       "checksum": "v2:53c980e14e98ed0f",
       "origin": {
@@ -1373,37 +1454,39 @@
       }
     },
     "report.mixture.entrapment.rss": {
-      "value": -18.63056560567895,
+      "value": -20.04386669878928,
       "fmt": "+.1f",
       "unit": "",
       "desc": "Mixture entrapment relative change in rss percent",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "-"
       },
-      "checksum": "v2:b92927aba96cb234",
+      "checksum": "v2:b2f5be61d159eaaf",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.mixture.entrapment.seconds": {
-      "value": 18.5303123086344,
+      "value": 14.43321860774953,
       "fmt": "+.1f",
       "unit": "",
       "desc": "Mixture entrapment relative change in seconds percent",
       "expect": {
         "min": -100,
-        "max": 100
+        "max": 100,
+        "sign": "+"
       },
-      "checksum": "v2:9dd46d4c071e8f54",
+      "checksum": "v2:9d33f5aa0c906543",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.plus.threshold_disagreement": {
-      "value": 44.6286622757211,
+      "value": 44.66636404902406,
       "fmt": ".1f",
       "unit": "",
       "desc": "Percent of engine-only accepted PSMs with the identical assignment above threshold in the other engine",
@@ -1411,10 +1494,70 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:40a72414151f6bd1",
+      "checksum": "v2:93f339e22b3079b6",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.1.plus.inconsistent": {
+      "value": 15,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 joint confidence inconsistent",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:e629fa6598d73276",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.1.plus.joint_accepted": {
+      "value": 3141,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 plus joint_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:51c94a510b50e68f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.1.plus.sites": {
+      "value": 1143,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 joint confidence sites",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:a183251a8414fd81",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.1.plus.spectrum_accepted": {
+      "value": 3141,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 1 plus spectrum_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:51c94a510b50e68f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.ptm.1.upstream.joint_accepted": {
@@ -1424,7 +1567,7 @@
       "desc": "Synthetic HCD 1 upstream joint_accepted",
       "expect": {
         "min": 0,
-        "max": 1000000
+        "max": 0
       },
       "checksum": "v2:5feceb66ffc86f38",
       "origin": {
@@ -1447,6 +1590,81 @@
         "at": "2026-09-15T08:05:54Z"
       }
     },
+    "report.ptm.2.plus.inconsistent": {
+      "value": 1,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 joint confidence inconsistent",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:6b86b273ff34fce1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.2.plus.joint_accepted": {
+      "value": 1958,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 plus joint_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:522e6198a268c62c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.2.plus.sites": {
+      "value": 877,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 joint confidence sites",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:30e26cef13a6dbbf",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.2.plus.spectrum_accepted": {
+      "value": 1958,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 plus spectrum_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:522e6198a268c62c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "report.ptm.2.upstream.joint_accepted": {
+      "value": 0,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Synthetic HCD 2 upstream joint_accepted",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:5feceb66ffc86f38",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-20T23:25:57Z"
+      }
+    },
     "report.ptm.2.upstream.spectrum_accepted": {
       "value": 1958,
       "fmt": ",",
@@ -1463,59 +1681,59 @@
       }
     },
     "report.scaling.plus.eight_seconds": {
-      "value": 9.82,
+      "value": 10.59,
       "fmt": ".2f",
       "unit": "",
       "desc": "plus eight worker median seconds in the extension",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:598b92301628d7ae",
+      "checksum": "v2:4cb9cb13cfc0e690",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.scaling.plus.speedup": {
-      "value": 4.057026476578412,
+      "value": 3.9329556185080263,
       "fmt": ".2f",
       "unit": "",
       "desc": "plus wall time speedup from one to eight workers",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:9a9e1bf1ad67dbd3",
+      "checksum": "v2:7358c8951ba6d709",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.scaling.upstream.eight_seconds": {
-      "value": 10.42,
+      "value": 11.28,
       "fmt": ".2f",
       "unit": "",
       "desc": "upstream eight worker median seconds in the extension",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:fe8500cb61cd64af",
+      "checksum": "v2:794649ed82d7bff6",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.scaling.upstream.speedup": {
-      "value": 3.7591170825335896,
+      "value": 3.550531914893617,
       "fmt": ".2f",
       "unit": "",
       "desc": "upstream wall time speedup from one to eight workers",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:328e98a70b660609",
+      "checksum": "v2:d25d0d738b30f60f",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-20T23:25:57Z"
       }
     },
     "report.upstream.threshold_disagreement": {

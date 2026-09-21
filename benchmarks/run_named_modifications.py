@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from provenance import file_identities
 
 
 def run(binary, work):
@@ -97,7 +98,14 @@ if __name__ == "__main__":
     else:
         with tempfile.TemporaryDirectory(prefix="sage-named-mods-") as directory:
             results = run(binary, Path(directory))
-    text = json.dumps({"checks": len(results), "results": results}, indent=2) + "\n"
+    record = {"checks": len(results), "results": results,
+              "inputs_sha256": file_identities([
+                  binary, Path(__file__).resolve(),
+                  Path(__file__).resolve().parents[1] / "crates/sage/src/mass.rs"])}
+    if args.work:
+        record["artifacts_sha256"] = file_identities([
+            path for path in args.work.resolve().rglob("*") if path.is_file()])
+    text = json.dumps(record, indent=2) + "\n"
     if args.output:
         args.output.write_text(text)
     print(text)

@@ -1,10 +1,10 @@
 {
   "analysis_sources_sha256": {
-    "/home/ty/Repos/sage-plus/benchmarks/analyze_scientific.py": "d5a189cc421b18f60607906415f18dc6e5f7e7f4ea6c767767f8f00093015ea0",
-    "/home/ty/Repos/sage-plus/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
-    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_report.py": "6e8ed0b1d304396340d777dc09cea905d77584c5d1b0379afa1055ead824ee12"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/analyze_scientific.py": "d5bf59e7752f190c36f8a3803fe688860807ea4b1268d52d43aedc4383289009",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/paper/analysis/scripts/collect_report.py": "d4ed7b8cc95bf0216bd27d0ece3b0fbfd54569004fe8a15d564be9133b43a647"
   },
   "data": [
     {
@@ -97,12 +97,12 @@
         "jaccard": 0.983618108155716,
         "maximum_peptide_q_difference": 0.247708046,
         "maximum_score_difference": 8.3753712,
-        "pair": "public-comparison/PXD001468-0",
+        "pair": "public-comparison-v2/PXD001468-0",
         "q": 0.01,
         "shared_target_psms": 16752,
         "status": "complete"
       },
-      "pair": "public-comparison/PXD001468-0"
+      "pair": "public-comparison-v2/PXD001468-0"
     },
     {
       "disagreement": {
@@ -194,12 +194,12 @@
         "jaccard": 0.9849382211783927,
         "maximum_peptide_q_difference": 0.20395954100000002,
         "maximum_score_difference": 8.0027685,
-        "pair": "public-comparison/PXD001468-1",
+        "pair": "public-comparison-v2/PXD001468-1",
         "q": 0.01,
         "shared_target_psms": 19291,
         "status": "complete"
       },
-      "pair": "public-comparison/PXD001468-1"
+      "pair": "public-comparison-v2/PXD001468-1"
     },
     {
       "disagreement": {
@@ -303,7 +303,7 @@
         "plus": {
           "different_assignment": 504,
           "no_matching_rank_one_spectrum_charge": 37,
-          "same_assignment_above_threshold": 413
+          "same_assignment_above_threshold": 416
         },
         "upstream": {
           "different_assignment": 442,
@@ -347,50 +347,50 @@
         "upstream": {
           "0.001": {
             "decoy_psms": 45,
-            "target_peptidoforms": 31632,
-            "target_psms": 46025,
-            "target_sequences": 31632
+            "target_peptidoforms": 31633,
+            "target_psms": 46031,
+            "target_sequences": 31633
           },
           "0.005": {
             "decoy_psms": 265,
-            "target_peptidoforms": 36889,
-            "target_psms": 53336,
-            "target_sequences": 36889
+            "target_peptidoforms": 36890,
+            "target_psms": 53337,
+            "target_sequences": 36890
           },
           "0.01": {
             "decoy_psms": 558,
             "target_peptidoforms": 38925,
-            "target_psms": 55940,
+            "target_psms": 55937,
             "target_sequences": 38925
           },
           "0.02": {
             "decoy_psms": 1161,
-            "target_peptidoforms": 40607,
+            "target_peptidoforms": 40608,
             "target_psms": 58129,
-            "target_sequences": 40607
+            "target_sequences": 40608
           },
           "0.05": {
             "decoy_psms": 3071,
-            "target_peptidoforms": 43003,
-            "target_psms": 61452,
-            "target_sequences": 43003
+            "target_peptidoforms": 43002,
+            "target_psms": 61450,
+            "target_sequences": 43002
           }
         }
       },
       "overlap": {
         "all_psm_identities_equal": false,
         "baseline_only": 850,
-        "candidate_only": 954,
+        "candidate_only": 957,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9682919112735965,
-        "maximum_peptide_q_difference": 0.2098127178,
-        "maximum_score_difference": 7.595897000000001,
+        "jaccard": 0.9682391816360248,
+        "maximum_peptide_q_difference": 0.2097864078,
+        "maximum_score_difference": 7.5960217000000005,
         "pair": "public-comparison-v2/PXD028735-1",
         "q": 0.01,
-        "shared_target_psms": 55090,
+        "shared_target_psms": 55087,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD028735-1"
@@ -591,30 +591,30 @@
     }
   ],
   "inputs_sha256": {
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-plus/identification-metrics.json": "43ddcbd401ae6bb7a3261321f2315f8b9be21e966535bef95c1bda7d594699dc",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-plus/results.sage.parquet": "11ed3b26120e92d62be043c7191b7f422626db966765f437bb7af24451fac1c3",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-upstream/identification-metrics.json": "14dacb56401d621c30e5a1a401c5fa3bfa207c8769857d3c392162318ce9fd13",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-0-upstream/results.sage.tsv": "6c424771a48d66aaa300a0c2e46a98b41bfea5e6205dae742e38e6232aca4280",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-plus/identification-metrics.json": "da4c83552e2454e69cbcbd6698a161adb64bae23a8bcc49a27e69aeef04788af",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-plus/results.sage.parquet": "2446a597d80ef6e43d98f565ff0254c6d7bb095f97fbc09efe6fda7072a9f7a5",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-upstream/identification-metrics.json": "6391ed467d75b19474d0dec0f25c007e66f8b289a056b0ab64a7ff575cbe0b2b",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-1-upstream/results.sage.tsv": "35fd455d5c301a63ba5f0c4a04a4d9107a8ac9dab5306c5bc4d6bf2ef967d379",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-plus/identification-metrics.json": "17c1c8c7cfb62f639eb7486cf0d5a175174c7651f2ff5bee8bcd5e1850774a15",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-plus/results.sage.parquet": "4a5ead84799d43b2dbdca6693e20d0c8a86081b66ca5a1560b2a269acac5a721",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-upstream/identification-metrics.json": "b31d5410ccc14b1f231a22e6b207fc0af9149951efff7066b722570cea880e51",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-2-upstream/results.sage.tsv": "306ce12d6b340d4d2ef84d2a432a22dbfa68de888459d66ef0e5c9e0633a8691",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-plus/identification-metrics.json": "b3e583042b730ef23dcd67b4b6c0d3db7bed7b39439ff6d9f0be69edec728adc",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-plus/results.sage.parquet": "396d9eab796cda51823c96f08b543ca45d6ced4f75aa47d71d9c91f42af9e7d8",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-upstream/identification-metrics.json": "f95e6d13d882451ad355bd656e91cccc160e6049946641b905eed5bb6a757aa0",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison-v2/PXD028735-3-upstream/results.sage.tsv": "8ab777768a9204a2d0f4f50522853deb959a3b6879726d86ce5d17e439f35fd0",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-plus/identification-metrics.json": "ce620d324d8f74765190c720ffd8d5e88828ddb29e5cce93bb518445ce578773",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-plus/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-upstream/identification-metrics.json": "0623d58601e65e0028ebd1cea6f0822b652c0c66a66208b7abb1ff90499bbf32",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-0-upstream/results.sage.tsv": "a9612d938aab2a82214c31e6d57262b0a39184d11e8d69fe471f5dc996fcc13f",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-plus/identification-metrics.json": "ea6c5ed351f7624fbc37455a626738873e195eced8df8052276d03510a80884b",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-plus/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-upstream/identification-metrics.json": "66671adb054713336bb6ec8144ac0edc8c2f0b9d58d6eecba9be4b455cbd6d87",
-    "/data/sage-plus-scientific/20260914/runs/public-comparison/PXD001468-1-upstream/results.sage.tsv": "7701b162c9db710623d1e90961d48cbabf6d4ca12f457f88631618bdd66c1b5e",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific-results/20260914/pilot-summary.json": "c2028d0ebf86a1eb3dba0b208f144cd290ba443dc63bb25aa00e4d71fb717379"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/identification-metrics.json": "ce620d324d8f74765190c720ffd8d5e88828ddb29e5cce93bb518445ce578773",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/identification-metrics.json": "0623d58601e65e0028ebd1cea6f0822b652c0c66a66208b7abb1ff90499bbf32",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/results.sage.tsv": "8139b65647cc7db57fa26a563aaceaf343d0c0deeb83b6e342e71f39463a56f9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/identification-metrics.json": "ea6c5ed351f7624fbc37455a626738873e195eced8df8052276d03510a80884b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/identification-metrics.json": "66671adb054713336bb6ec8144ac0edc8c2f0b9d58d6eecba9be4b455cbd6d87",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/results.sage.tsv": "577ef164b65587e8256f3d12dbcbd1e0b833e3e82b7aa0664cb9272ed6ae1624",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/identification-metrics.json": "43ddcbd401ae6bb7a3261321f2315f8b9be21e966535bef95c1bda7d594699dc",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/results.sage.parquet": "11ed3b26120e92d62be043c7191b7f422626db966765f437bb7af24451fac1c3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/identification-metrics.json": "14dacb56401d621c30e5a1a401c5fa3bfa207c8769857d3c392162318ce9fd13",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/results.sage.tsv": "b240ec573dc3c6020bfdfeaa96a85d7ae949f975df550001860d03bb9a4f55bc",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/identification-metrics.json": "da4c83552e2454e69cbcbd6698a161adb64bae23a8bcc49a27e69aeef04788af",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/results.sage.parquet": "2446a597d80ef6e43d98f565ff0254c6d7bb095f97fbc09efe6fda7072a9f7a5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/identification-metrics.json": "1c2de4b5cabbb21c01dcbc3ef87493dacf79965e9d4ac6136e86afc0de590378",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/results.sage.tsv": "ddbd9117d1c571ec7f69c308b6fbeba0ee8c4cdd6a01cdc66d07ddb555974eca",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/identification-metrics.json": "17c1c8c7cfb62f639eb7486cf0d5a175174c7651f2ff5bee8bcd5e1850774a15",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/results.sage.parquet": "4a5ead84799d43b2dbdca6693e20d0c8a86081b66ca5a1560b2a269acac5a721",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/identification-metrics.json": "b31d5410ccc14b1f231a22e6b207fc0af9149951efff7066b722570cea880e51",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/results.sage.tsv": "e7c24e22cf641ed34cc53f7cdda2a757b7016f058dae128586da3b8e7d73d8fc",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/identification-metrics.json": "b3e583042b730ef23dcd67b4b6c0d3db7bed7b39439ff6d9f0be69edec728adc",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/results.sage.parquet": "4b9441b79047b8ad3c06d28f3254a1e313be4bcf9e2904dcb820fc97bf0452a3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/identification-metrics.json": "f95e6d13d882451ad355bd656e91cccc160e6049946641b905eed5bb6a757aa0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/results.sage.tsv": "155b9b9817c0b9794c9ae86b5ea4373b3ac325a2d0ce3274943f1ead63ef2887",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific-results/20260920/pilot-summary.json": "b455c63bc1c165dea5b5ee57d441ae426187f09beea7a52b498d178333c98601"
   }
 }

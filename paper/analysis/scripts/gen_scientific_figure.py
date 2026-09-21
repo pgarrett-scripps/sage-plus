@@ -1,5 +1,4 @@
 """Generate public timing and expanded entrapment release comparisons."""
-import shutil
 import numpy as np
 from matplotlib.lines import Line2D
 from _figure_style import (
@@ -21,14 +20,6 @@ def finish(fig, name, desc):
 
 
 def main():
-    source = PAPER.parent / "benchmarks/scientific-results/20260914/figures/public-timing-pilot.png"
-    target = PAPER / "figures/scientific-public-timing-pilot.png"
-    shutil.copyfile(source, target)
-    record("fig.scientific-public-timing-pilot", str(target.relative_to(PAPER)), kind="figure",
-           inputs=["../benchmarks/scientific-results/20260914/figures/public-timing-pilot.png",
-                   "../benchmarks/scientific-results/20260914/figures/figures.json"],
-           desc="Frozen public release timing comparison")
-
     pilot, _ = load()
     fig, axes = plt.subplots(2, 2, figsize=(7.2, 6.7), layout="constrained")
     for col, study in enumerate(("human", "hye")):

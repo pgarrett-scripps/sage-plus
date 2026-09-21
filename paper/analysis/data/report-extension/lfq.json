@@ -1,10 +1,10 @@
 {
   "analysis_sources_sha256": {
-    "/home/ty/Repos/sage-plus/benchmarks/analyze_scientific.py": "d5a189cc421b18f60607906415f18dc6e5f7e7f4ea6c767767f8f00093015ea0",
-    "/home/ty/Repos/sage-plus/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
-    "/home/ty/Repos/sage-plus/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
-    "/home/ty/Repos/sage-plus/paper/analysis/scripts/collect_report.py": "6e8ed0b1d304396340d777dc09cea905d77584c5d1b0379afa1055ead824ee12"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/analyze_scientific.py": "d5bf59e7752f190c36f8a3803fe688860807ea4b1268d52d43aedc4383289009",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/paper/analysis/scripts/collect_report.py": "d4ed7b8cc95bf0216bd27d0ece3b0fbfd54569004fe8a15d564be9133b43a647"
   },
   "data": {
     "engines": [
@@ -48448,8 +48448,8 @@
             "YYTFNGPNYNENETIR||Beta": -1.1337573018350784
           }
         },
-        "rss": 5587.328125,
-        "seconds": 134.53,
+        "rss": 5559.890625,
+        "seconds": 145.29,
         "species": {
           "ecoli": {
             "expected_log2_b_over_a": 2,
@@ -96004,8 +96004,8 @@
             "YYTFNGPNYNENETIR||Beta": -1.1412318290130559
           }
         },
-        "rss": 5359.18359375,
-        "seconds": 116.31,
+        "rss": 5377.93359375,
+        "seconds": 121.55,
         "species": {
           "ecoli": {
             "expected_log2_b_over_a": 2,
@@ -96078,15 +96078,15 @@
     }
   },
   "inputs_sha256": {
-    "/data/sage-plus-scientific/20260914/references/ecoli.fasta": "a8052a607a98d2444c9d5dd685bd1370150df8c5570c3116811544bbf3d093a2",
-    "/data/sage-plus-scientific/20260914/references/human.fasta": "dffdff3807ec6eb7e752035b5475aaefa26d1b36e513e3344198d521a2169c42",
-    "/data/sage-plus-scientific/20260914/references/hye-species.json": "cac5439c42f530b964c19a85dcbf305807f5db856f7f1ecda62c9019897b0013",
-    "/data/sage-plus-scientific/20260914/references/yeast.fasta": "1aaa81860c8bda68e81e4290703d871c7c8bd12a928038772fbc91b7e17b342a",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-plus/lfq.parquet": "fdd6b471f3e4b722b1e243912196de72deca6668548cbaf48e930355b192e3da",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-plus/result.json": "3d9cfc4a88b13711483ea98bb2818a72f45c61c70f7f86fe3be82aac5aa837ef",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-plus/results.sage.parquet": "e408305df8b6def35cad468bc4a80cb0800f98020a8f29d1ff942a96b9cb1afd",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-upstream/lfq.tsv": "f76024b6b61e17b32374ef54c6c1cb4a5049f8362db870640fecc9607a30bcad",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-upstream/result.json": "131bab831ceed1157b0b85dcb292448c3ceb49d3895a834739a1e4fff1af457c",
-    "/data/sage-plus-scientific/report-extension-20260915/lfq-upstream/results.sage.tsv": "241b1348c945e8e3e2a964bc74ba2edf11ef7ef501bf5942d0c2c5500607275c"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/references/ecoli.fasta": "a8052a607a98d2444c9d5dd685bd1370150df8c5570c3116811544bbf3d093a2",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/references/human.fasta": "dffdff3807ec6eb7e752035b5475aaefa26d1b36e513e3344198d521a2169c42",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/references/hye-species.json": "cac5439c42f530b964c19a85dcbf305807f5db856f7f1ecda62c9019897b0013",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/references/yeast.fasta": "1aaa81860c8bda68e81e4290703d871c7c8bd12a928038772fbc91b7e17b342a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-plus/lfq.parquet": "a062cce580885aa797da9d24407918bed422eeed4e81cab74090336c27f3219b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-plus/result.json": "3c44ea4855634b0200e658a82986381992925f175fc5435eefcbce0aed05e006",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-plus/results.sage.parquet": "601ea8b0337087fe1167806f0e27de2abae1b4961cb6be63357feaac61943c1f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-upstream/lfq.tsv": "b49abf6f0c2082f1d6f2d167e2c7c16f478f6c623f884dd8d77a652762711d0a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-upstream/result.json": "f908424ec580d671ab9b12a2f45e0f1aa0e12f2d2d666523c40d608521d7b502",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected/lfq-upstream/results.sage.tsv": "3548c7882173b81eaeb5128f68cc35f79783c8f3c934f6e04765e191ee4bad32"
   }
 }

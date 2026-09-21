@@ -3,10 +3,10 @@
 #table(columns: (0.7fr, 1.6fr, 1.8fr), inset: 4pt, align: left,
 table.header([#text(size: 8pt)[Area]], [#text(size: 8pt)[Sage Plus change]], [#text(size: 8pt)[Evaluation in this chapter]]),
 [#text(size: 8pt)[Input]], [#text(size: 8pt)[mzMLb, Thermo RAW, peptide and cleavage inputs]], [#text(size: 8pt)[Native readers not evaluated.]],
-[#text(size: 8pt)[Output]], [#text(size: 8pt)[Typed Parquet, coordinates, long LFQ with nulls]], [#text(size: 8pt)[Normalized PSM and LFQ results compared.]],
+[#text(size: 8pt)[Output]], [#text(size: 8pt)[Typed Parquet, protein coordinates, PTM attachments]], [#text(size: 8pt)[Normalized PSM and LFQ results compared.]],
 [#text(size: 8pt)[Storage]], [#text(size: 8pt)[Protein spans and compact search structures]], [#text(size: 8pt)[Memory, runtime, and worker scaling.]],
 [#text(size: 8pt)[Execution]], [#text(size: 8pt)[Memory guards, API, events, isolated jobs]], [#text(size: 8pt)[Resource failures. Automation not evaluated.]],
-[#text(size: 8pt)[Modeling]], [#text(size: 8pt)[Isotope scoring, mass alignment, richer models]], [#text(size: 8pt)[PSM agreement and entrapment. No ablations.]],
-[#text(size: 8pt)[PTM]], [#text(size: 8pt)[PTM names, caps, neutral losses, site reports]], [#text(size: 8pt)[Peptide acceptance only (supplement).]],
+[#text(size: 8pt)[Modeling]], [#text(size: 8pt)[Isotope scoring, mass alignment, confidence fallback]], [#text(size: 8pt)[PSM agreement and entrapment. No ablations.]],
+[#text(size: 8pt)[PTM]], [#text(size: 8pt)[Named sites, typed attachments, mass offsets, localization]], [#text(size: 8pt)[Peptide acceptance, synthesis consistency, attachment regressions.]],
 [#text(size: 8pt)[Quantification]], [#text(size: 8pt)[Label channels, tracing controls, library export]], [#text(size: 8pt)[LFQ ratios, coverage, and species-absent control.]],
 )

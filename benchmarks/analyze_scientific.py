@@ -78,7 +78,9 @@ def compare_public(root, suite=None):
         if suites:
             return [row for name in suites for row in compare_public(root, name)]
         suite = "public-comparison"
-    plan = root / f"{suite}-plan.json"
+    plan = root / "runs" / suite / "plan.json"
+    if not plan.exists():
+        plan = root / f"{suite}-plan.json"
     if not plan.exists():
         return []
     groups = defaultdict(dict)
@@ -327,10 +329,10 @@ def main():
     summary["failed_or_invalid_jobs"] = sum(j["status"] not in ("complete", "running") for j in jobs)
     summary["limitations"] = [
         "Pilot selection and finite precision do not establish production calibration.",
-        "Local HEK origin remains unverified and local timing may overlap acquisition or conversion work.",
+        "Local HEK biological provenance remains unverified. These searches ran sequentially after acquisition and conversion.",
         "Timing comes from one Linux workstation and does not establish performance across platforms or hardware.",
         "Seven E. coli proteins with undefined X residues are excluded from the repaired mixed-reference experiments.",
-        "PTM site-library controls use synthesis truth and are oracle sensitivity experiments.",
+        "Synthetic PTM references restrict the candidate database, and acquisition-to-library mapping remains unaudited.",
         "PTM synthesis consistency includes identification and localization error and is not automatically an arrangement-level FLR estimate.",
         "Preparation variability, technical injections and entrapment seeds are not biological replication.",
         "Contaminant coverage and pure-species sample purity need validation before a final FDR or false-transfer claim."]

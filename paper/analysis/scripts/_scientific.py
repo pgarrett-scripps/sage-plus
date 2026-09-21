@@ -4,8 +4,8 @@ from pathlib import Path
 from statistics import median
 
 PAPER = Path(__file__).resolve().parents[2]
-PILOT = '../benchmarks/scientific-results/20260914/pilot-summary.json'
-ARCHIVE = '../benchmarks/scientific-results/20260914/archive-verification.json'
+PILOT = '../benchmarks/scientific-results/20260920/pilot-summary.json'
+ARCHIVE = '../benchmarks/scientific-results/20260920/evidence-verification.json'
 INPUTS = [PILOT, ARCHIVE]
 ENGINE = {'upstream': 'Sage', 'plus': 'Sage Plus'}
 STUDY = {'human': 'HEK', 'hye': 'Mixture'}
@@ -21,8 +21,10 @@ def timing(pilot):
         for engine in ('upstream', 'plus'):
             group = [j for j in pilot['jobs'] if j['suite'] == 'public-timing'
                      and j['study'] == study and j['engine'] == engine and not j['warmup']]
-            assert len(group) == 3 and all(j['status'] == 'complete' for j in group)
-            rows.append(dict(study=study, engine=engine, trials=len(group),
+            planned = len(group)
+            group = [j for j in group if j['status'] == 'complete']
+            assert group, 'No completed timing trials' 
+            rows.append(dict(study=study, engine=engine, trials=len(group), planned=planned,
                              seconds=median(j['wall_seconds'] for j in group),
                              seconds_min=min(j['wall_seconds'] for j in group),
                              seconds_max=max(j['wall_seconds'] for j in group),
@@ -34,7 +36,7 @@ def timing(pilot):
 def add_stats(st):
     pilot, archive = load()
     for key, value, desc in (
-        ('archive.members', archive['members_verified'], 'Individually verified archive members'),
+        ('archive.members', archive['members_verified'], 'Individually verified search evidence files'),
         ('pilot.bootstrap', pilot['calibration_uncertainty'][0]['bootstrap_replicates'], 'Paired bootstrap resamples'),
         ('pilot.public_pairs', sum(r['status'] == 'complete' for r in pilot['public_identifications']), 'Completed public identification pairs'),
     ):

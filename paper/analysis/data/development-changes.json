@@ -47,7 +47,7 @@
       ]
     },
     "plus": {
-      "commit": "9bfc8acbc3002d83aa3f27af5f848376b5c5c9be",
+      "commit": "3e30135fb8786ec8a12c1f62e0ff9300e57f9567",
       "files": [
         {
           "path": "UPSTREAM.md",
@@ -55,11 +55,11 @@
         },
         {
           "path": "CHANGELOG.md",
-          "sha256": "b96b3d91f72ffe563332fb2ce1221f2c43e4b56f93fa7c5aa580ce975c905a5a"
+          "sha256": "ecafde1ba60fd68dcedb6569727ce75599e2d7e0585db1278fbda0b2a98c21a7"
         },
         {
           "path": "DOCS.md",
-          "sha256": "d4cbd3c4e1894907a78c486a2b238179dcc4b52ea9c818cc5d0fc9eca9556614"
+          "sha256": "629265430aa5ad1385a5d31a8eebacc2b4c2866827b621aac22980e30821d506"
         },
         {
           "path": "crates/sage-cloudpath/src/mzmlb.rs",
@@ -75,15 +75,15 @@
         },
         {
           "path": "crates/sage-cloudpath/src/parquet/lfq.rs",
-          "sha256": "0dcad1aeef74f784896289c326cb2c6c62f8539580b249396a9a845bd0350650"
+          "sha256": "ed1f383a986e392c6d109a2539138e6aeb3a920a0148bb3ce9bfe456a97de0f6"
         },
         {
           "path": "crates/sage-cloudpath/src/parquet/sites.rs",
-          "sha256": "fcd4a7f37045bc554845939354df679b508542ebb28cb46e1c752f9b45409203"
+          "sha256": "fa8a0af6798b205b244d654f94f82ee45b6da2332f73b39415181b24b89dfa17"
         },
         {
           "path": "crates/sage/src/peptide.rs",
-          "sha256": "0900e23b344b47fdf61dd0085f0876c2fa2df5f244f6074e7f9573e140958f3b"
+          "sha256": "96e94aca2adfee66e32b68f16b32bddc61df3b16c6940c1915f093bcb401aaef"
         },
         {
           "path": "crates/sage/src/sequence.rs",
@@ -91,7 +91,7 @@
         },
         {
           "path": "crates/sage/src/database.rs",
-          "sha256": "2172e889e3a65290ee4c24ef974f5c16daaebb65b8230ff8c682aea22d19a6a3"
+          "sha256": "62c0039e0298c9b5ef21cad65d2fd2cd9deabb0a6a51e58a6b025bc2ca4e32a1"
         },
         {
           "path": "crates/sage/src/cleavage.rs",
@@ -107,11 +107,11 @@
         },
         {
           "path": "crates/sage/src/scoring.rs",
-          "sha256": "664606a24cd9ff4f03082eb19fe104cfc84655ed2717cd147caf18b1205f31af"
+          "sha256": "a0ca0c866cde4ef2dac2e592de9848a5965ca1e83f083ee911693b0c8f7216d7"
         },
         {
           "path": "crates/sage/src/modification.rs",
-          "sha256": "842cdda5690e67b3b106563aa430e947152ba09f23c974d16610983f2b40e6ef"
+          "sha256": "8948a053740dcf22464b87a85450febe7d5d0655f73b90f76a69a469dcd65dfb"
         },
         {
           "path": "crates/sage/src/ion_series.rs",
@@ -119,11 +119,11 @@
         },
         {
           "path": "crates/sage/src/lfq.rs",
-          "sha256": "101b8a0215f4c724c563a045d4211a0d9be5efbf3afc08c77c94d045c3836ae2"
+          "sha256": "afbf9ece25103d4e91a9344023e9b7b380e8cd5ea2430a1a627adbd44ae8413e"
         },
         {
           "path": "crates/sage/src/ptm.rs",
-          "sha256": "56d9b639fa3d3477b11461f50157798e76398e966be3c234b4c875abcc86aa89"
+          "sha256": "4d6c8697be602e655330c923b1d619c01eb97f173e2c4e04048c9802ec626755"
         },
         {
           "path": "crates/sage/src/ambiguity.rs",
@@ -135,7 +135,7 @@
         },
         {
           "path": "crates/sage/src/ml/retention_model.rs",
-          "sha256": "7af6b9129a7fd18643275c309a4351d11661cde78ba250a0e99d3188a7ae1210"
+          "sha256": "5cc24e5ef20a229e6a168c00a6d86bbf95d014c90c42f851229d7552f1ae54bb"
         },
         {
           "path": "crates/sage/src/ml/mobility_model.rs",
@@ -159,11 +159,19 @@
         },
         {
           "path": "crates/sage-cli/src/runner/artifacts.rs",
-          "sha256": "54f213940818d189fdc450a4a159bd4126f0286dcf4c7e75832357df4d2c8f7d"
+          "sha256": "fafd22f3a8458f4c6eda1e94f568635d32f45eae9fa7d64e196ad8493bf3e0b4"
         },
         {
           "path": "crates/sage-mcp/src/lib.rs",
           "sha256": "75745b7ba175aa59c15a64cf3b48677bbf7b2194299afae8dfd48b31af19ec23"
+        },
+        {
+          "path": "crates/sage/src/ml/qvalue.rs",
+          "sha256": "f9384500ddb9ed48c75cde275b71f20a7106531dc581423d73decd1903909859"
+        },
+        {
+          "path": "crates/sage-cli/src/runner/execution.rs",
+          "sha256": "5866bfef3f13ac6b1e1fb71c6a06fa2e21ed719a193b9a6ca992ed5cf33c6a55"
         }
       ]
     }
@@ -180,7 +188,7 @@
     {
       "area": "Output",
       "upstream": "TSV and optional Parquet, wide LFQ tables",
-      "plus": "Typed Parquet, coordinates, long LFQ with nulls",
+      "plus": "Typed Parquet, protein coordinates, PTM attachments",
       "motivation": "Explicit identities and missing signals",
       "expected": "Typed joins, revised consuming scripts",
       "evaluation": "Normalized PSM and LFQ results compared."
@@ -204,7 +212,7 @@
     {
       "area": "Modeling",
       "upstream": "Isotope processing and linear prediction",
-      "plus": "Isotope scoring, mass alignment, richer models",
+      "plus": "Isotope scoring, mass alignment, confidence fallback",
       "motivation": "Represent candidate evidence more fully",
       "expected": "Changed scores and acceptance thresholds",
       "evaluation": "PSM agreement and entrapment. No ablations."
@@ -212,10 +220,10 @@
     {
       "area": "PTM",
       "upstream": "Mass-based static and variable modifications",
-      "plus": "PTM names, caps, neutral losses, site reports",
+      "plus": "Named sites, typed attachments, mass offsets, localization",
       "motivation": "Explicit hypotheses and site ambiguity",
       "expected": "Bounded variants, new confidence endpoints",
-      "evaluation": "Peptide acceptance only (supplement)."
+      "evaluation": "Peptide acceptance, synthesis consistency, attachment regressions."
     },
     {
       "area": "Quantification",

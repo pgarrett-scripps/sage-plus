@@ -34,14 +34,14 @@ def public_timing():
             engine = row["engine"]
             values = [r[raw] for r in pilot["jobs"] if r["suite"] == "public-timing"
                       and r["study"] == row["study"] and r["engine"] == engine
-                      and not r["warmup"]]
+                      and not r["warmup"] and r["status"] == "complete"]
             low, high = min(values), max(values)
             ax.hlines(y, low, high, color=COLORS[engine], linewidth=1.4)
             ax.vlines([low, high], y - .055, y + .055, color=COLORS[engine], linewidth=1)
-            ax.scatter(values, np.array([-.10, 0, .10]) + y, s=13,
+            ax.scatter(values, np.linspace(-.10, .10, len(values)) + y, s=13,
                        color=COLORS[engine], alpha=.5, zorder=3)
             ax.plot(row[metric], y, **{**engine_style(engine), "linestyle": "none"}, zorder=4)
-            label = f"{row[metric]:.2f}" if metric == "seconds" else f"{row[metric]:,.1f}"
+            label = (f"{row[metric]:.2f}" if metric == "seconds" else f"{row[metric]:,.1f}") + f" (n={row['trials']})"
             ax.annotate(label, (high, y), xytext=(9, 0), textcoords="offset points",
                         ha="left", va="center", fontsize=10, color=INK)
         ax.set_yticks(positions, ["HEK · Sage", "HEK · Sage Plus",

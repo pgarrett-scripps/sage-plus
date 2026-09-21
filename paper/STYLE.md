@@ -17,9 +17,8 @@ ranges are fine (`5–15 min`), as is the hyphen in a compound modifier.
 **Colons are fine.** Use them to introduce a list, an example, or a definition,
 which is what they are for.
 
-**Semicolons sparingly.** A semicolon joining two clauses is almost always two
-sentences that have not been split yet. The one place to keep it is separating
-items in a list whose items already contain commas.
+**No semicolons.** Split clauses into sentences or restructure lists with
+commas, colons, or parentheses.
 
 Applies to running prose only. Typst markup keeps its own punctuation
 (`#figure(caption: [...])`).

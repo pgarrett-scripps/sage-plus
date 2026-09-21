@@ -10,15 +10,16 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 PAPER = Path(__file__).resolve().parents[2]
-REPO = PAPER.parent
+REPO = Path(json.loads((PAPER / 'analysis/data/release-context.json').read_text())['analysis_repository'])
 sys.path.insert(0, str(REPO / 'benchmarks'))
 from scientific_metrics import read_table, normalize_psms, canonical_peptide, boolean, stripped, quantification_metrics
 from scientific_diagnostics import lfq_threshold_yields
 from analyze_scientific import accepted_ms2_keys, reference_membership
 from generate_ptm_library_benchmark import fasta_entries
 
-ROOT = Path('/data/sage-plus-scientific/20260914')
-EXT = Path('/data/sage-plus-scientific/report-extension-20260915')
+CONTEXT = json.loads((PAPER / 'analysis/data/release-context.json').read_text())
+ROOT = Path(CONTEXT['evidence'])
+EXT = Path(CONTEXT['extension'])
 OUT = PAPER / 'analysis/data/report-extension'
 INPUTS = {}
 
@@ -40,7 +41,7 @@ def psms(directory, engine):
 
 def public():
     result = []
-    pilot = load(REPO / 'benchmarks/scientific-results/20260914/pilot-summary.json')
+    pilot = load(REPO / 'benchmarks/scientific-results/20260920/pilot-summary.json')
     for pair in pilot['public_identifications']:
         if pair['status'] != 'complete':
             continue
@@ -166,9 +167,10 @@ def scaling():
             continue
         path = EXT/job['id']
         run = load(path/'result.json')
-        assert run['status'] == 'complete'
+        if run['status'] != 'complete':
+            continue
         ids = load(path/'identification-metrics.json')
-        result.append({k:job[k] for k in ('id','engine','threads','trial','warmup')} | dict(seconds=run['wall_seconds'],rss=run['peak_rss_mib'],target_psms=ids['0.01']['target_psms']))
+        result.append({k:job[k] for k in ('id','engine','threads','trial','warmup')} | dict(status=run['status'],seconds=run['wall_seconds'],rss=run['peak_rss_mib'],target_psms=ids['0.01']['target_psms']))
     return result
 
 

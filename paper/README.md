@@ -1,35 +1,25 @@
 # Development and Evaluation of Sage Plus
 
-This dissertation chapter documents Sage Plus development and evaluates Sage `v0.15.0-beta.2` and Sage Plus
-`v0.1.0-beta.3`. These are the newest published versions of the two independent
-projects as checked on September 15, 2026. The source is `paper.typ`, with the
-abstract in `config.typ` and supporting methods in `si-body.typ`.
+This chapter compares upstream Sage `v0.15.0-beta.2` with Sage Plus
+`v0.1.0-beta.6`, the latest published releases checked on September 20, 2026.
+The manuscript presents one comparison between the two engines. It does not
+compare successive Sage Plus releases.
 
-Computed prose statistics and comparison tables read
-`../benchmarks/scientific-results/20260914/pilot-summary.json` through
-`analysis/scripts/_scientific.py`. Figures import the matching frozen pilot
-outputs. Original evidence is unchanged. Earlier comparison assets and their
-source data remain available in the analysis directory but are not included in
-the manuscript. Their unused-asset notices are intentional.
+The source is `paper.typ`, with the abstract in `config.typ` and supporting
+methods in `si-body.typ`. All reported comparative outcomes are regenerated
+from the refreshed executable searches. The named-modification schematic and
+mass-offset experiment explain the current modification workflow.
 
-The chapter explains the released implementation before presenting public repeat
-timing, memory, PSM overlap, peptide entrapment, and matched LFQ behavior. Six main
-figures support these results. Threshold curves, the restricted synthetic PTM
-experiment, and additional numerical results are in the Supporting Information.
-Operational provenance, build instructions, and the proposed concurrency protocol
-are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md). A
-single Discussion combines interpretation, limitations, and the closing result. It separates observed findings from claims that require further
-matched evaluation. Unreleased development results and comparisons among Sage
-Plus releases do not enter this report.
-
-The development change table is generated from
-`analysis/data/development-changes.json`. Its source map records inspected
-release files, distinct from later working-tree changes.
+Search commands, input and executable hashes, successes, and failures are kept
+under `runs/paper-refresh-20260920/` in the working repository. Read
+`REPRODUCIBILITY.md` for the frozen analysis paths and build commands. Failed
+attempts remain part of the execution record and are excluded from successful
+resource summaries. Large source spectra remain at their verified acquisition
+paths.
 
 Run `just assets`, `just fmt`, `just docx`, `just paper`, `just verify`, and
-`just check-stats-deep` from this directory. Large biological inputs and search
-outputs remain under `/data/sage-plus-scientific/20260914`. Rebuilding the
-manuscript does not launch searches or imply public deposition of the evidence.
+`just check-stats-deep` from this directory. These commands regenerate the
+manuscript from the retained evidence. They do not launch biological searches.
 
 The directory was created from `pgarrett-scripps/paper-scaffold` version
 `3.13.0`. The scaffold tooling documentation follows.

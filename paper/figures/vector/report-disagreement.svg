@@ -410,8 +410,8 @@ z
    </g>
    <g id="patch_26">
     <path d="M 294.16933 120.58824 
-L 368.626913 120.58824 
-L 368.626913 137.189846 
+L 368.932662 120.58824 
+L 368.932662 137.189846 
 L 294.16933 137.189846 
 z
 " clip-path="url(#pbf65097b14)" style="fill: #75a7b2; stroke: #ffffff; stroke-width: 0.3; stroke-linejoin: miter"/>
@@ -457,10 +457,10 @@ z
 " clip-path="url(#pbf65097b14)" style="fill: #cfa34c; stroke: #ffffff; stroke-width: 0.3; stroke-linejoin: miter"/>
    </g>
    <g id="patch_32">
-    <path d="M 368.626913 120.58824 
-L 459.490403 120.58824 
-L 459.490403 137.189846 
-L 368.626913 137.189846 
+    <path d="M 368.932662 120.58824 
+L 459.511314 120.58824 
+L 459.511314 137.189846 
+L 368.932662 137.189846 
 z
 " clip-path="url(#pbf65097b14)" style="fill: #cfa34c; stroke: #ffffff; stroke-width: 0.3; stroke-linejoin: miter"/>
    </g>
@@ -505,10 +505,10 @@ z
 " clip-path="url(#pbf65097b14)" style="fill: #9b86ad; stroke: #ffffff; stroke-width: 0.3; stroke-linejoin: miter"/>
    </g>
    <g id="patch_38">
-    <path d="M 459.490403 120.58824 
+    <path d="M 459.511314 120.58824 
 L 466.160937 120.58824 
 L 466.160937 137.189846 
-L 459.490403 137.189846 
+L 459.511314 137.189846 
 z
 " clip-path="url(#pbf65097b14)" style="fill: #9b86ad; stroke: #ffffff; stroke-width: 0.3; stroke-linejoin: miter"/>
    </g>
@@ -543,7 +543,7 @@ L 466.160937 192.074258
     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596775" x="472.180643" y="106.448418" transform="rotate(-0 472.180643 106.448418)">n=973</text>
    </g>
    <g id="text_29">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596775" x="472.180643" y="131.226934" transform="rotate(-0 472.180643 131.226934)">n=954</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596775" x="472.180643" y="131.226934" transform="rotate(-0 472.180643 131.226934)">n=957</text>
    </g>
    <g id="text_30">
     <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #596775" x="472.180643" y="156.005449" transform="rotate(-0 472.180643 156.005449)">n=1,092</text>

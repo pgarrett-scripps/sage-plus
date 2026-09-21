@@ -1,13 +1,81 @@
 {
-  "purpose": "Post hoc report extension using the frozen latest released Sage and Sage Plus pair. Matched LFQ and thread scaling on previously selected pilot inputs. No reserved validation claim.",
-  "date": "2026-09-15",
-  "lfq_endpoint": "Precursors at 1% LFQ q, species log2 B/A ratio bias and preparation CV, strict accepted MS2 support and human-only control signal. Undefined endpoints retained. Shared LFQ defaults with no engine-specific transfer toggle.",
-  "timing_endpoint": "Median and range from three measured repeats following one warmup per engine and thread count. Whole process wall time and peak RSS. Engine order alternates within each thread count.",
+  "comparison": {
+    "plus": "v0.1.0-beta.6",
+    "upstream": "v0.15.0-beta.2"
+  },
   "jobs": [
     {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
+      "config": {
+        "batch_size": 1,
+        "chimera": false,
+        "database": {
+          "bucket_size": 16384,
+          "decoy_tag": "rev_",
+          "enzyme": {
+            "cleave_at": "KR",
+            "max_len": 50,
+            "min_len": 7,
+            "missed_cleavages": 1,
+            "restrict": "P"
+          },
+          "fasta": "/data/sage-plus-scientific/20260914/references/hye-irt-defined.fasta",
+          "generate_decoys": true,
+          "static_mods": {
+            "C": 57.021464
+          }
+        },
+        "deisotope": true,
+        "fragment_tol": {
+          "ppm": [
+            -20,
+            20
+          ]
+        },
+        "isotope_errors": [
+          -1,
+          3
+        ],
+        "max_fragment_charge": 2,
+        "min_matched_peaks": 6,
+        "mzml_paths": [
+          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML",
+          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML",
+          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML",
+          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML",
+          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Human_01.mzML"
+        ],
+        "output_filter": {
+          "psm_q_value": 1.0
+        },
+        "precursor_tol": {
+          "ppm": [
+            -10,
+            10
+          ]
+        },
+        "quant": {
+          "lfq": true,
+          "lfq_settings": {
+            "combine_charge_states": true,
+            "integration": "Sum",
+            "peak_scoring": "Hybrid",
+            "peptide_q_value": 0.01,
+            "ppm_tolerance": 5.0,
+            "spectral_angle": 0.7
+          }
+        },
+        "report_psms": 1,
+        "score_type": "SageHyperScore"
+      },
+      "engine": "upstream",
       "id": "lfq-upstream",
-      "engine": "upstream",
+      "suite": "report-lfq",
       "threads": 8,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -59,93 +127,81 @@
         "quant": {
           "lfq": true,
           "lfq_settings": {
-            "peak_scoring": "Hybrid",
-            "integration": "Sum",
-            "spectral_angle": 0.7,
-            "ppm_tolerance": 5.0,
             "combine_charge_states": true,
-            "peptide_q_value": 0.01
+            "integration": "Sum",
+            "peak_scoring": "Hybrid",
+            "peptide_q_value": 0.01,
+            "ppm_tolerance": 5.0,
+            "spectral_angle": 0.7
           }
         },
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-lfq",
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "lfq-plus",
-      "engine": "plus",
-      "threads": 8,
-      "config": {
-        "batch_size": 1,
-        "chimera": false,
-        "database": {
-          "bucket_size": 16384,
-          "decoy_tag": "rev_",
-          "enzyme": {
-            "cleave_at": "KR",
-            "max_len": 50,
-            "min_len": 7,
-            "missed_cleavages": 1,
-            "restrict": "P"
-          },
-          "fasta": "/data/sage-plus-scientific/20260914/references/hye-irt-defined.fasta",
-          "generate_decoys": true,
-          "static_mods": {
-            "C": 57.021464
-          }
-        },
-        "deisotope": true,
-        "fragment_tol": {
-          "ppm": [
-            -20,
-            20
-          ]
-        },
-        "isotope_errors": [
-          -1,
-          3
-        ],
-        "max_fragment_charge": 2,
-        "min_matched_peaks": 6,
-        "mzml_paths": [
-          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML",
-          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML",
-          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML",
-          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML",
-          "/data/sage-plus-scientific/20260914/converted/PXD028735/LFQ_Orbitrap_DDA_Human_01.mzML"
-        ],
-        "output_filter": {
-          "psm_q_value": 1.0
-        },
-        "precursor_tol": {
-          "ppm": [
-            -10,
-            10
-          ]
-        },
-        "quant": {
-          "lfq": true,
-          "lfq_settings": {
-            "peak_scoring": "Hybrid",
-            "integration": "Sum",
-            "spectral_angle": 0.7,
-            "ppm_tolerance": 5.0,
-            "combine_charge_states": true,
-            "peptide_q_value": 0.01
-          }
-        },
-        "report_psms": 1,
-        "score_type": "SageHyperScore"
-      },
       "suite": "report-lfq",
+      "threads": 8,
       "warmup": false
     },
     {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
+      "config": {
+        "batch_size": 1,
+        "chimera": false,
+        "database": {
+          "bucket_size": 16384,
+          "decoy_tag": "rev_",
+          "enzyme": {
+            "cleave_at": "KR",
+            "max_len": 50,
+            "min_len": 7,
+            "missed_cleavages": 1,
+            "restrict": "P"
+          },
+          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
+          "generate_decoys": true,
+          "static_mods": {
+            "C": 57.021464
+          }
+        },
+        "deisotope": true,
+        "fragment_tol": {
+          "ppm": [
+            -20,
+            20
+          ]
+        },
+        "isotope_errors": [
+          -1,
+          3
+        ],
+        "max_fragment_charge": 2,
+        "min_matched_peaks": 6,
+        "mzml_paths": [
+          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
+        ],
+        "output_filter": {
+          "psm_q_value": 1.0
+        },
+        "precursor_tol": {
+          "ppm": [
+            -10,
+            10
+          ]
+        },
+        "report_psms": 1,
+        "score_type": "SageHyperScore"
+      },
+      "engine": "upstream",
       "id": "threads-1-upstream-0",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -193,14 +249,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-1-plus-0",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -248,14 +305,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-1-plus-1",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -303,14 +361,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-1-upstream-1",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -358,14 +417,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-1-upstream-2",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -413,14 +473,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-1-plus-2",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -468,14 +529,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-1-plus-3",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -523,14 +585,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-1-upstream-3",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 1,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -578,14 +641,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-2-upstream-0",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -633,14 +697,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-2-plus-0",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -688,14 +753,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-2-plus-1",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -743,14 +809,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-2-upstream-1",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -798,14 +865,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-2-upstream-2",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -853,14 +921,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-2-plus-2",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -908,14 +977,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-2-plus-3",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -963,14 +1033,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-2-upstream-3",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 2,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1018,14 +1089,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-4-upstream-0",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1073,14 +1145,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-4-plus-0",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1128,14 +1201,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-4-plus-1",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1183,14 +1257,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-4-upstream-1",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1238,14 +1313,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-4-upstream-2",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1293,14 +1369,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-4-plus-2",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1348,14 +1425,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-4-plus-3",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1403,14 +1481,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-4-upstream-3",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 4,
+      "trial": 3,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1458,14 +1537,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 3,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-8-upstream-0",
-      "engine": "upstream",
+      "suite": "report-threads",
       "threads": 8,
+      "trial": 0,
+      "warmup": true
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1513,69 +1593,71 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 0,
-      "warmup": true
-    },
-    {
+      "engine": "plus",
       "id": "threads-8-plus-0",
-      "engine": "plus",
-      "threads": 8,
-      "config": {
-        "batch_size": 1,
-        "chimera": false,
-        "database": {
-          "bucket_size": 16384,
-          "decoy_tag": "rev_",
-          "enzyme": {
-            "cleave_at": "KR",
-            "max_len": 50,
-            "min_len": 7,
-            "missed_cleavages": 1,
-            "restrict": "P"
-          },
-          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
-          "generate_decoys": true,
-          "static_mods": {
-            "C": 57.021464
-          }
-        },
-        "deisotope": true,
-        "fragment_tol": {
-          "ppm": [
-            -20,
-            20
-          ]
-        },
-        "isotope_errors": [
-          -1,
-          3
-        ],
-        "max_fragment_charge": 2,
-        "min_matched_peaks": 6,
-        "mzml_paths": [
-          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
-        ],
-        "output_filter": {
-          "psm_q_value": 1.0
-        },
-        "precursor_tol": {
-          "ppm": [
-            -10,
-            10
-          ]
-        },
-        "report_psms": 1,
-        "score_type": "SageHyperScore"
-      },
       "suite": "report-threads",
+      "threads": 8,
       "trial": 0,
       "warmup": true
     },
     {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "config": {
+        "batch_size": 1,
+        "chimera": false,
+        "database": {
+          "bucket_size": 16384,
+          "decoy_tag": "rev_",
+          "enzyme": {
+            "cleave_at": "KR",
+            "max_len": 50,
+            "min_len": 7,
+            "missed_cleavages": 1,
+            "restrict": "P"
+          },
+          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
+          "generate_decoys": true,
+          "static_mods": {
+            "C": 57.021464
+          }
+        },
+        "deisotope": true,
+        "fragment_tol": {
+          "ppm": [
+            -20,
+            20
+          ]
+        },
+        "isotope_errors": [
+          -1,
+          3
+        ],
+        "max_fragment_charge": 2,
+        "min_matched_peaks": 6,
+        "mzml_paths": [
+          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
+        ],
+        "output_filter": {
+          "psm_q_value": 1.0
+        },
+        "precursor_tol": {
+          "ppm": [
+            -10,
+            10
+          ]
+        },
+        "report_psms": 1,
+        "score_type": "SageHyperScore"
+      },
+      "engine": "plus",
       "id": "threads-8-plus-1",
-      "engine": "plus",
+      "suite": "report-threads",
       "threads": 8,
+      "trial": 1,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1623,69 +1705,71 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 1,
-      "warmup": false
-    },
-    {
+      "engine": "upstream",
       "id": "threads-8-upstream-1",
-      "engine": "upstream",
-      "threads": 8,
-      "config": {
-        "batch_size": 1,
-        "chimera": false,
-        "database": {
-          "bucket_size": 16384,
-          "decoy_tag": "rev_",
-          "enzyme": {
-            "cleave_at": "KR",
-            "max_len": 50,
-            "min_len": 7,
-            "missed_cleavages": 1,
-            "restrict": "P"
-          },
-          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
-          "generate_decoys": true,
-          "static_mods": {
-            "C": 57.021464
-          }
-        },
-        "deisotope": true,
-        "fragment_tol": {
-          "ppm": [
-            -20,
-            20
-          ]
-        },
-        "isotope_errors": [
-          -1,
-          3
-        ],
-        "max_fragment_charge": 2,
-        "min_matched_peaks": 6,
-        "mzml_paths": [
-          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
-        ],
-        "output_filter": {
-          "psm_q_value": 1.0
-        },
-        "precursor_tol": {
-          "ppm": [
-            -10,
-            10
-          ]
-        },
-        "report_psms": 1,
-        "score_type": "SageHyperScore"
-      },
       "suite": "report-threads",
+      "threads": 8,
       "trial": 1,
       "warmup": false
     },
     {
-      "id": "threads-8-upstream-2",
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
+      "config": {
+        "batch_size": 1,
+        "chimera": false,
+        "database": {
+          "bucket_size": 16384,
+          "decoy_tag": "rev_",
+          "enzyme": {
+            "cleave_at": "KR",
+            "max_len": 50,
+            "min_len": 7,
+            "missed_cleavages": 1,
+            "restrict": "P"
+          },
+          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
+          "generate_decoys": true,
+          "static_mods": {
+            "C": 57.021464
+          }
+        },
+        "deisotope": true,
+        "fragment_tol": {
+          "ppm": [
+            -20,
+            20
+          ]
+        },
+        "isotope_errors": [
+          -1,
+          3
+        ],
+        "max_fragment_charge": 2,
+        "min_matched_peaks": 6,
+        "mzml_paths": [
+          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
+        ],
+        "output_filter": {
+          "psm_q_value": 1.0
+        },
+        "precursor_tol": {
+          "ppm": [
+            -10,
+            10
+          ]
+        },
+        "report_psms": 1,
+        "score_type": "SageHyperScore"
+      },
       "engine": "upstream",
+      "id": "threads-8-upstream-2",
+      "suite": "report-threads",
       "threads": 8,
+      "trial": 2,
+      "warmup": false
+    },
+    {
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1733,69 +1817,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
-      "suite": "report-threads",
-      "trial": 2,
-      "warmup": false
-    },
-    {
+      "engine": "plus",
       "id": "threads-8-plus-2",
-      "engine": "plus",
-      "threads": 8,
-      "config": {
-        "batch_size": 1,
-        "chimera": false,
-        "database": {
-          "bucket_size": 16384,
-          "decoy_tag": "rev_",
-          "enzyme": {
-            "cleave_at": "KR",
-            "max_len": 50,
-            "min_len": 7,
-            "missed_cleavages": 1,
-            "restrict": "P"
-          },
-          "fasta": "/data/sage-plus-scientific/20260914/references/human.fasta",
-          "generate_decoys": true,
-          "static_mods": {
-            "C": 57.021464
-          }
-        },
-        "deisotope": true,
-        "fragment_tol": {
-          "ppm": [
-            -20,
-            20
-          ]
-        },
-        "isotope_errors": [
-          -1,
-          3
-        ],
-        "max_fragment_charge": 2,
-        "min_matched_peaks": 6,
-        "mzml_paths": [
-          "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf"
-        ],
-        "output_filter": {
-          "psm_q_value": 1.0
-        },
-        "precursor_tol": {
-          "ppm": [
-            -10,
-            10
-          ]
-        },
-        "report_psms": 1,
-        "score_type": "SageHyperScore"
-      },
       "suite": "report-threads",
+      "threads": 8,
       "trial": 2,
       "warmup": false
     },
     {
-      "id": "threads-8-plus-3",
-      "engine": "plus",
-      "threads": 8,
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1843,14 +1873,15 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
+      "engine": "plus",
+      "id": "threads-8-plus-3",
       "suite": "report-threads",
+      "threads": 8,
       "trial": 3,
       "warmup": false
     },
     {
-      "id": "threads-8-upstream-3",
-      "engine": "upstream",
-      "threads": 8,
+      "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1898,7 +1929,10 @@
         "report_psms": 1,
         "score_type": "SageHyperScore"
       },
+      "engine": "upstream",
+      "id": "threads-8-upstream-3",
       "suite": "report-threads",
+      "threads": 8,
       "trial": 3,
       "warmup": false
     }

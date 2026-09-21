@@ -10,11 +10,11 @@ from pathlib import Path
 from statistics import mean
 
 PAPER = Path(__file__).resolve().parents[2]
-REPO = PAPER.parent
+REPO = Path(json.loads((PAPER / 'analysis/data/release-context.json').read_text())['analysis_repository'])
 sys.path.insert(0, str(REPO / "benchmarks"))
 from scientific_entrapment import threshold_fdp
 
-ROOT = Path("/data/sage-plus-scientific/20260914/runs")
+ROOT = Path(json.loads((PAPER / 'analysis/data/release-context.json').read_text())['evidence']) / 'runs'
 OUT = PAPER / "analysis/data/matched-fdp.json"
 CEILING = 0.01
 
@@ -85,7 +85,7 @@ def main():
             for file in (0, 1):
                 for engine in ("upstream", "plus"):
                     run = directory / f"file-{file}-{engine}"
-                    source = run / "fdrbench-input.tsv"
+                    source = (run / "fdrbench-input.tsv").resolve()
                     audit_path = run / "calibration.json"
                     audit = json.loads(audit_path.read_text())
                     inputs[str(source)] = digest(source)
@@ -98,7 +98,7 @@ def main():
                             for r in csv.DictReader(handle, delimiter="\t")]
                     audits[file, engine] = audit
             observed = {r["sequence"] for rows in extracted.values() for r in rows}
-            pairing = directory / "paired.txt"
+            pairing = (directory / "paired.txt").resolve()
             inputs[str(pairing)] = digest(pairing)
             assert all(a["inputs"][str(pairing)] == inputs[str(pairing)] for a in audits.values())
             labels, pair_ids = {}, {}
