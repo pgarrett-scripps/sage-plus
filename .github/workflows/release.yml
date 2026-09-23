@@ -21,8 +21,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  verify:
-    name: Verify release
+  version:
+    name: Validate release version
     runs-on: ubuntu-latest
     outputs:
       release_tag: ${{ steps.version.outputs.release_tag }}
@@ -44,6 +44,14 @@ jobs:
           fi
           echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
           echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Install Rust
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
@@ -62,7 +70,9 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: verify
+    # Platform builds start once the version is known and run alongside the
+    # test suite; nothing is published until both pass.
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -125,7 +135,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          archive="sage-plus-${{ needs.verify.outputs.release_tag }}-${{ matrix.target }}"
+          archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
@@ -139,7 +149,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          archive="sage-plus-${{ needs.verify.outputs.release_tag }}-${{ matrix.target }}"
+          archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
@@ -159,7 +169,7 @@ jobs:
 
   assemble:
     name: Assemble release assets
-    needs: [verify, build]
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download platform archives
@@ -181,7 +191,7 @@ jobs:
 
   docker:
     name: Build AMD64 container
-    needs: [verify, build]
+    needs: [version, verify, build]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -198,7 +208,7 @@ jobs:
           path: .release/input
       - name: Prepare minimal Docker context
         run: |
-          archive="sage-plus-${{ needs.verify.outputs.release_tag }}-x86_64-unknown-linux-musl"
+          archive="sage-plus-${{ needs.version.outputs.release_tag }}-x86_64-unknown-linux-musl"
           tar xzf ".release/input/$archive.tar.gz" -C .release/input
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
           cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
@@ -221,8 +231,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.verify.outputs.release_tag }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(needs.verify.outputs.release_tag, '-') }}
+            type=raw,value=${{ needs.version.outputs.release_tag }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(needs.version.outputs.release_tag, '-') }}
       - name: Build and optionally push container
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
@@ -235,14 +245,14 @@ jobs:
   publish:
     name: Publish GitHub release
     if: github.event_name == 'push'
-    needs: [verify, assemble, docker]
+    needs: [version, verify, assemble, docker]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ needs.verify.outputs.release_tag }}
+      RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
     steps:
       - name: Download release bundle
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

@@ -30,6 +30,11 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: quality
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check release version inheritance
         run: bash scripts/check-release-version.sh
       - name: Check formatting
@@ -55,13 +60,15 @@ jobs:
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: ${{ matrix.rust }}
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: test-${{ matrix.rust }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build
         run: cargo build --workspace --locked --verbose
       - name: Run tests
         run: cargo test --workspace --locked --verbose
-      - name: Test minimal features
-        if: matrix.rust == '1.97.1'
-        run: cargo test --workspace --no-default-features --locked
       - name: Test patched storage compatibility
         if: matrix.rust == '1.97.1'
         run: cargo test -p filemanager --locked
@@ -87,6 +94,25 @@ jobs:
             tests/config-cli.json \
             tests/*.mzML
 
+  minimal:
+    name: Test minimal features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Rust 1.97.1
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.97.1
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: minimal
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Test without default features
+        run: cargo test --workspace --no-default-features --locked
+
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
@@ -99,6 +125,11 @@ jobs:
         with:
           toolchain: 1.97.1
           components: llvm-tools-preview
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: coverage
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@562f912bf8a1174eb1007c4afe216a9187a8d722 # cargo-llvm-cov
       - name: Enforce workspace line coverage
@@ -129,6 +160,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: 1.97.1
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: smoke-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build and test minimal CLI and isolated MCP workers
         run: cargo test --locked --no-default-features -p sage-cli -p sage-mcp
 
