@@ -21,5 +21,6 @@ pub mod scoring;
 pub mod sequence;
 pub mod spectral_library;
 pub mod spectrum;
+pub mod spectrum_index;
 pub mod tmt;
 pub mod unimod;

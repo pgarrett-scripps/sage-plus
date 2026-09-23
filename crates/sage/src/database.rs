@@ -1404,7 +1404,21 @@ impl Parameters {
     pub fn build_from_peptides(self, target_decoys: Vec<Peptide>) -> IndexedDatabase {
         log::trace!("generating fragments");
         let (compressed_fragments, min_value) = FragmentIndex::build(&self, &target_decoys);
+        self.assemble_database(target_decoys, compressed_fragments, min_value)
+    }
 
+    /// Build the peptide table and metadata without a fragment index. Used by
+    /// the spectrum-indexed prefilter for decoy-pair closure.
+    pub fn build_peptide_table(self, target_decoys: Vec<Peptide>) -> IndexedDatabase {
+        self.assemble_database(target_decoys, FragmentIndex::default(), Vec::new())
+    }
+
+    fn assemble_database(
+        self,
+        target_decoys: Vec<Peptide>,
+        compressed_fragments: FragmentIndex,
+        min_value: Vec<f32>,
+    ) -> IndexedDatabase {
         // Preserve names for mass-only consumers. Localization also retains
         // full definitions so equal-mass modifications remain distinct.
         for entries in self.variable_mods.values() {
@@ -1871,7 +1885,7 @@ impl Iterator for FragmentIter<'_> {
     }
 }
 
-fn preliminary_fragment_masses<'a>(
+pub fn preliminary_fragment_masses<'a>(
     parameters: &'a Parameters,
     peptide: &'a Peptide,
 ) -> impl Iterator<Item = f32> + 'a {

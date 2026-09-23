@@ -110,14 +110,26 @@ impl LabelGroupIndex {
 }
 
 fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
-    for index in 0..keep.len() {
-        if !keep.contains(index) {
-            continue;
-        }
-        if let Some(pair) =
-            database.paired_peptide_index(sage_core::database::PeptideIx(index as u32))
-        {
-            keep.insert(pair.0 as usize);
+    // Pairs are resolved in parallel and repeated until no partner is added,
+    // so the closure does not depend on visit order.
+    let mut frontier = (0..keep.len())
+        .into_par_iter()
+        .filter(|&index| keep.contains(index))
+        .collect::<Vec<_>>();
+    while !frontier.is_empty() {
+        frontier = frontier
+            .into_par_iter()
+            .filter_map(|index| {
+                let pair = database
+                    .paired_peptide_index(sage_core::database::PeptideIx(index as u32))?
+                    .0 as usize;
+                (!keep.contains(pair)).then_some(pair)
+            })
+            .collect::<Vec<_>>();
+        frontier.sort_unstable();
+        frontier.dedup();
+        for &pair in &frontier {
+            keep.insert(pair);
         }
     }
 }
@@ -341,6 +353,10 @@ pub struct ModelRunStats {
     pub ion_mobility_model_enabled: bool,
     pub ion_mobility_model_fitted: bool,
     pub ion_mobility_features: String,
+    /// Scan-to-1/K0 scale of timsTOF inputs (`calibrated` or `linear`).
+    /// Absent when no Bruker input was searched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ion_mobility_scale: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -714,9 +730,11 @@ impl Runner {
                         full_estimate.unmodified_peak_bytes,
                     )?;
 
+                    // Prefilter chunks are streamed through the spectrum index
+                    // without a fragment index; the survivor index is checked
+                    // by the final database preflight.
                     if database_parameters.prefilter {
                         let mut modified_peak = 0u64;
-                        let mut fragment_peak = 0u64;
                         for chunk in fasta.iter_chunks(database_parameters.prefilter_chunk_size) {
                             let estimate = database_parameters
                                 .estimate_memory_with_custom_cleavages(
@@ -724,10 +742,8 @@ impl Runner {
                                     custom_cleavages.as_ref(),
                                 );
                             modified_peak = modified_peak.max(estimate.modified_peak_bytes);
-                            fragment_peak = fragment_peak.max(estimate.fragment_peak_bytes);
                         }
                         limits.check_estimate("modified-peptide", modified_peak)?;
-                        limits.check_estimate("fragment-index", fragment_peak)?;
                     }
                 }
             }

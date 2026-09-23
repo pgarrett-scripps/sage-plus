@@ -1,12 +1,13 @@
+use crate::tims_mobility::{BrukerMobilityScale, MobilityCalibration};
 use rayon::prelude::*;
 use sage_core::{
     mass::Tolerance,
     spectrum::{Precursor, RawSpectrum, Representation},
 };
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, path::Path};
+use std::{cmp::Ordering, collections::HashMap, path::Path};
 use timsrust::{
-    core::{Converter, Frame, Im, MSLevel, Precursor as TimsrustPrecursor, ScanIndex},
+    core::{Converter, Frame, MSLevel, Precursor as TimsrustPrecursor, ScanIndex},
     tdf::{
         FrameWindowSplittingConfiguration, QuadWindowExpansionStrategy, SpectrumProcessingParams,
         SpectrumReaderConfig,
@@ -122,8 +123,62 @@ impl Default for BrukerMS1CentoidingConfig {
 #[derive(Default, Deserialize, Serialize, Debug, Clone, Copy, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BrukerProcessingConfig {
+    #[serde(default)]
     pub ms2: BrukerSpectrumConfig,
+    #[serde(default)]
     pub ms1: BrukerMS1CentoidingConfig,
+    /// Scan-to-1/K0 scale for reported ion mobilities. `calibrated` applies the
+    /// acquisition's TimsCalibration model; `linear` uses timsrust's interpolation
+    /// between the acquisition range limits, as in Beta 6 and earlier.
+    #[serde(default)]
+    pub ion_mobility_scale: BrukerMobilityScale,
+}
+
+/// Scan-to-1/K0 conversion for one acquisition.
+enum MobilityScale {
+    Calibrated {
+        calibration: MobilityCalibration,
+        precursors: HashMap<usize, (usize, f64)>,
+    },
+    Linear,
+}
+
+impl MobilityScale {
+    fn new(
+        path: &Path,
+        scale: BrukerMobilityScale,
+    ) -> Result<Self, crate::tims_mobility::MobilityCalibrationError> {
+        Ok(match scale {
+            BrukerMobilityScale::Calibrated => Self::Calibrated {
+                calibration: MobilityCalibration::from_path(path)?,
+                precursors: MobilityCalibration::dda_precursor_scans(path)?,
+            },
+            BrukerMobilityScale::Linear => Self::Linear,
+        })
+    }
+
+    /// Precursor 1/K0. DDA precursors convert the fractional average scan with
+    /// their parent frame's model; DIA window centers use the run's dominant model.
+    fn precursor(&self, precursor: &TimsrustPrecursor) -> f32 {
+        match self {
+            Self::Linear => f64::from(precursor.im()) as f32,
+            Self::Calibrated {
+                calibration,
+                precursors,
+            } => {
+                let frame = usize::from(precursor.frame_index());
+                match precursors.get(&precursor.index()) {
+                    Some(&(parent, scan)) if parent == frame => {
+                        calibration.frame(parent).one_over_k0(scan) as f32
+                    }
+                    _ => calibration
+                        .dominant()
+                        .one_over_k0(usize::from(precursor.scan_index()) as f64)
+                        as f32,
+                }
+            }
+        }
+    }
 }
 
 impl TdfReader {
@@ -133,15 +188,19 @@ impl TdfReader {
         file_id: usize,
         config: BrukerProcessingConfig,
         requires_ms1: bool,
-    ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
-        let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())?;
+    ) -> Result<Vec<RawSpectrum>, crate::Error> {
+        let tims = |error: timsrust::TimsRustError| crate::Error::TDF(error);
+        let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())
+            .map_err(|error| tims(error.into()))?;
+        let scale = MobilityScale::new(path_name.as_ref(), config.ion_mobility_scale)?;
         let spectrum_reader = SpectrumReader::build()
             .with_path(&path)
             .with_config(config.ms2.into_timsrust())
-            .finalize()?;
-        let mut spectra = self.read_msn_spectra(file_id, &spectrum_reader)?;
+            .finalize()
+            .map_err(|error| tims(error.into()))?;
+        let mut spectra = self.read_msn_spectra(file_id, &spectrum_reader, &scale)?;
         if requires_ms1 {
-            let ms1s = self.read_ms1_spectra(&path_name, file_id, config.ms1)?;
+            let ms1s = self.read_ms1_spectra(&path_name, file_id, config.ms1, &scale)?;
             spectra.extend(ms1s);
         }
 
@@ -153,6 +212,7 @@ impl TdfReader {
         path_name: impl AsRef<Path>,
         file_id: usize,
         config: BrukerMS1CentoidingConfig,
+        scale: &MobilityScale,
     ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
         let start = std::time::Instant::now();
         let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())?;
@@ -178,7 +238,27 @@ impl TdfReader {
                 |buffer, frame| match frame {
                     Ok(frame) => {
                         buffer.clear();
-                        buffer.with_frame(&frame, &ims_converter, &mz_converter);
+                        // Convert every scan before centroiding so the reported
+                        // mobility is an average of calibrated values.
+                        match scale {
+                            MobilityScale::Calibrated { calibration, .. } => {
+                                let model = calibration.frame(frame.index());
+                                buffer.with_frame(
+                                    &frame,
+                                    |scan| model.one_over_k0(scan as f64) as f32,
+                                    &mz_converter,
+                                )
+                            }
+                            MobilityScale::Linear => buffer.with_frame(
+                                &frame,
+                                |scan| {
+                                    let scan = ScanIndex::try_from(scan)
+                                        .expect("scan index exceeds u32 range");
+                                    f64::from(ims_converter.convert(scan)) as f32
+                                },
+                                &mz_converter,
+                            ),
+                        }
 
                         // Squash the mobility dimension
                         let (mz, (intensity, mobility)): (Vec<f32>, (Vec<f32>, Vec<f32>)) =
@@ -226,6 +306,7 @@ impl TdfReader {
         &self,
         file_id: usize,
         spectrum_reader: &SpectrumReader,
+        scale: &MobilityScale,
     ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
         let spectra: Vec<RawSpectrum> = spectrum_reader
             .par_iter()
@@ -233,6 +314,7 @@ impl TdfReader {
                 Ok(dda_spectrum) => match dda_spectrum.precursor() {
                     Some(dda_precursor) => {
                         let mut precursor = Self::parse_precursor(dda_precursor);
+                        precursor.inverse_ion_mobility = Some(scale.precursor(dda_precursor));
                         let isolation_width = f64::from(dda_spectrum.isolation_window().width());
                         precursor.isolation_window = Option::from(Tolerance::Da(
                             -isolation_width as f32 / 2.0,
@@ -314,7 +396,7 @@ impl PeakBuffer {
     fn with_frame(
         &mut self,
         frame: &Frame,
-        ims_converter: &ImConverter,
+        scan_to_im: impl Fn(usize) -> f32,
         mz_converter: &MzConverter,
     ) {
         let expect_len = frame.ions().tof_indices().len();
@@ -330,7 +412,7 @@ impl PeakBuffer {
             .intensities()
             .iter()
             .map(|&value| u32::from(value) as f32);
-        let imss_iter = Self::expand_mobility_iter(frame.ions().scan_offsets(), ims_converter);
+        let imss_iter = Self::expand_mobility_iter(frame.ions().scan_offsets(), &scan_to_im);
 
         let peak_iter = mz_iter
             .zip(intensities_iter)
@@ -391,30 +473,18 @@ impl PeakBuffer {
     /// Then this index can be converted using the Scan2ImConverter.convert
     ///
     /// ... This should problably be implemented and exposed in timsrust.
-    fn expand_mobility_iter<'a, C>(
+    fn expand_mobility_iter<'a>(
         scan_offsets: &'a [usize],
-        ims_converter: &'a C,
-    ) -> impl Iterator<Item = f32> + 'a
-    where
-        C: Converter<ScanIndex, Im> + 'a,
-    {
-        let ims_iter = scan_offsets
+        scan_to_im: &'a impl Fn(usize) -> f32,
+    ) -> impl Iterator<Item = f32> + 'a {
+        scan_offsets
             .windows(2)
             .enumerate()
-            .filter_map(|(i, w)| {
-                let num = w[1] - w[0];
-                if num == 0 {
-                    return None;
-                }
-                let lo = w[0];
-                let hi = w[1];
-
-                let scan_index = ScanIndex::try_from(i).expect("scan index exceeds u32 range");
-                let im = f64::from(ims_converter.convert(scan_index)) as f32;
-                Some((im, lo, hi))
+            .filter_map(|(scan, w)| {
+                let (lo, hi) = (w[0], w[1]);
+                (hi > lo).then(|| (scan_to_im(scan), lo, hi))
             })
-            .flat_map(|(im, lo, hi)| (lo..hi).map(move |_| im));
-        ims_iter
+            .flat_map(|(im, lo, hi)| (lo..hi).map(move |_| im))
     }
 
     /// Centroiding of the IM-containing spectra

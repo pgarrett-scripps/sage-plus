@@ -694,11 +694,16 @@ alongside the library, because the location table does not embed chemical masses
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
-- **prefilter**: Boolean. Build the database in chunks and retain only peptides that can contribute
-  a preliminary fragment match. Targets, paired decoys, and label-channel partners are retained
-  together, so the final search uses the same FDR competition as a full database search.
-- **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per chunk. A value of
-  zero selects the chunk size from the configured memory limit.
+- **prefilter**: Boolean. Retain only peptides that can contribute a preliminary fragment match
+  before building the search index. The spectra are indexed once, and the database is generated
+  in chunks and streamed through the spectrum index, so no fragment index is built for discarded
+  peptides. Targets, paired decoys, and label-channel partners are retained together, so the final
+  search uses the same FDR competition and produces the same results as a full database search.
+  The spectrum index is limited to a quarter of `max_memory_gb`, or 8 GiB without a limit. Larger
+  inputs are indexed in file batches, and the database is streamed once per batch. Set the
+  `SAGE_PREFILTER_INDEX_GB` environment variable to override the budget.
+- **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
+  A value of zero selects the chunk size from the estimated number of modified peptides.
 - **prefilter_low_memory**: Deprecated and ignored. Exact prefiltering always uses compact survivor
   tracking.
 
@@ -927,6 +932,7 @@ Notes:
 
 - **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is included in standard builds and release binaries. Minimal source builds created with `--no-default-features` omit it. Files ending in ".gz" or ".gzip" are inferred to be compressed.
   - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
+  - Bruker TDF ion mobility (1/K0) uses each frame's `TimsCalibration` model from `analysis.tdf`, matching the Bruker SDK. Every scan is converted before MS1 centroiding, and DDA precursors convert their fractional average scan. DIA window centers use the calibration row shared by most frames. Only ModelType 2 is supported; other models stop the search. Set `"bruker_config": {"ion_mobility_scale": "linear"}` to reproduce the uncalibrated scale of Beta 6 and earlier, which interpolates between the acquisition limits. `run-summary.json` records the scale as `models.ion_mobility_scale`. Mobility tolerances are relative and apply unchanged.
   - Example:
     ```json
     "mzml_paths": [

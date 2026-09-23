@@ -164,11 +164,7 @@ pub fn read_tdf(
     }
 
     let path = url.to_file_path().map_err(|_| Error::InvalidUri)?;
-    let res = crate::tdf::TdfReader.parse(&path, file_id, bruker_spectrum_processor, requires_ms1);
-    match res {
-        Ok(t) => Ok(t),
-        Err(e) => Err(Error::TDF(e)),
-    }
+    crate::tdf::TdfReader.parse(&path, file_id, bruker_spectrum_processor, requires_ms1)
 }
 
 pub fn read_mgf(url: &Url, file_id: usize) -> Result<Vec<RawSpectrum>, Error> {

@@ -60,20 +60,53 @@
       ],
       "type": "object"
     },
+    "BrukerMobilityScale": {
+      "description": "Which scan-to-1/K0 scale timsTOF mobilities are reported on.",
+      "oneOf": [
+        {
+          "const": "calibrated",
+          "description": "Per-frame `TimsCalibration` model, as used by Bruker software.",
+          "type": "string"
+        },
+        {
+          "const": "linear",
+          "description": "timsrust interpolation between the acquisition range limits, as\nreported by Sage Plus Beta 6 and earlier.",
+          "type": "string"
+        }
+      ]
+    },
     "BrukerProcessingConfig": {
       "additionalProperties": false,
       "properties": {
+        "ion_mobility_scale": {
+          "$ref": "#/$defs/BrukerMobilityScale",
+          "default": "calibrated",
+          "description": "Scan-to-1/K0 scale for reported ion mobilities. `calibrated` applies the\nacquisition's TimsCalibration model; `linear` uses timsrust's interpolation\nbetween the acquisition range limits, as in Beta 6 and earlier."
+        },
         "ms1": {
-          "$ref": "#/$defs/BrukerMS1CentoidingConfig"
+          "$ref": "#/$defs/BrukerMS1CentoidingConfig",
+          "default": {
+            "ims_pct": 3.0,
+            "mz_ppm": 5.0
+          }
         },
         "ms2": {
-          "$ref": "#/$defs/BrukerSpectrumConfig"
+          "$ref": "#/$defs/BrukerSpectrumConfig",
+          "default": {
+            "frame_splitting_params": {
+              "Quadrupole": {
+                "Even": 1
+              }
+            },
+            "spectrum_processing_params": {
+              "calibrate": false,
+              "calibration_tolerance": 0.1,
+              "centroiding_window": 1,
+              "smoothing_window": 1
+            }
+          }
         }
       },
-      "required": [
-        "ms2",
-        "ms1"
-      ],
       "type": "object"
     },
     "BrukerQuadWindowExpansionStrategy": {

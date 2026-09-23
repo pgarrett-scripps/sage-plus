@@ -1,0 +1,85 @@
+{
+  "batch_size": 1,
+  "chimera": false,
+  "database": {
+    "bucket_size": 16384,
+    "decoy_tag": "rev_",
+    "enzyme": {
+      "cleave_at": "$",
+      "max_len": 50,
+      "min_len": 7,
+      "missed_cleavages": 0,
+      "restrict": ""
+    },
+    "fasta": "/data/sage-plus-scientific/20260914/ptm-truth/synthetic.fasta",
+    "generate_decoys": true,
+    "max_combinations": 128,
+    "max_total_variable_mods": 1,
+    "max_variable_mods": 1,
+    "static_mods": {
+      "C": 57.021464
+    },
+    "variable_mods": {
+      "S": [
+        {
+          "mass": 79.966331,
+          "max_count": 1,
+          "name": "Phospho",
+          "search_mode": "mass_offset"
+        }
+      ],
+      "T": [
+        {
+          "mass": 79.966331,
+          "max_count": 1,
+          "name": "Phospho",
+          "search_mode": "mass_offset"
+        }
+      ],
+      "Y": [
+        {
+          "mass": 79.966331,
+          "max_count": 1,
+          "name": "Phospho",
+          "search_mode": "mass_offset"
+        }
+      ]
+    },
+    "prefilter": true,
+    "prefilter_chunk_size": 200
+  },
+  "deisotope": true,
+  "fragment_tol": {
+    "ppm": [
+      -20.0,
+      20.0
+    ]
+  },
+  "isotope_errors": [
+    -1,
+    3
+  ],
+  "max_fragment_charge": 2,
+  "max_memory_gb": 22.0,
+  "min_free_memory_gb": 2.0,
+  "min_matched_peaks": 6,
+  "mzml_paths": [
+    "/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_1.raw.-1.mgf"
+  ],
+  "output_filter": {
+    "psm_q_value": 1.0
+  },
+  "precursor_tol": {
+    "ppm": [
+      -10.0,
+      10.0
+    ]
+  },
+  "ptm_localization": {
+    "enabled": true,
+    "localization_q_value": 1.0,
+    "psm_q_value": 1.0
+  },
+  "report_psms": 1,
+  "score_type": "SageHyperScore"
+}

@@ -9,6 +9,33 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.7] - 2026-09-23
+
+### Fixed
+- Bruker timsTOF ion mobility now applies each frame's `TimsCalibration` model and matches
+  the Bruker SDK. timsrust interpolated between the acquisition limits, which differed from
+  the calibrated scale by up to 0.054 1/K0 on a PXD070049 run and 0.12 1/K0 on example runs. MS1 peaks are converted before
+  centroiding, and DDA precursors use their fractional average scan instead of a truncated one.
+  Unsupported calibration models stop the search.
+
+### Added
+- `bruker_config.ion_mobility_scale` selects `calibrated` (default) or `linear`, which reproduces
+  earlier releases byte for byte. `bruker_config.ms1` and `ms2` may now be omitted. `run-summary.json` reports the scale as `models.ion_mobility_scale` for
+  Bruker inputs. The field is optional and the run-summary schema stays at version 9.
+
+### Changed
+- Database prefiltering indexes the spectra and streams generated peptides through the
+  spectrum index. It no longer builds a fragment index for every database chunk or searches
+  every spectrum against each one, and spectra are read once instead of once per chunk.
+  Retained peptides, and therefore search results, are unchanged.
+- The spectrum index stores each peak once and computes tolerance and mass-offset windows at
+  lookup. Wide precursor windows switch to a global peak index by estimated lookup cost.
+- When the spectrum index would exceed a quarter of `max_memory_gb` (8 GiB when no limit is
+  set), spectra are indexed in batches and the database is streamed once per batch.
+  `SAGE_PREFILTER_INDEX_GB` overrides the budget.
+- Decoy-pair closure and survivor collection after prefiltering run in parallel.
+- The memory preflight no longer budgets a fragment index per prefilter chunk.
+
 ## [v0.1.0-beta.6] - 2026-09-20
 
 ### Added
