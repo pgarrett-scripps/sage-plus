@@ -23,11 +23,12 @@ agent-facing capabilities.
 
 The tables compare Sage Plus with upstream Sage
 [`v0.15.0-beta.2`](https://github.com/lazear/sage/releases/tag/v0.15.0-beta.2), the latest
-published Sage release. Each row gives the Sage Plus release that first shipped the feature in
-its current form. Upstream capabilities such as protein grouping, cloud storage, HTML reports,
-and Percolator output are not repeated here. Most additions are opt-in, and upstream defaults are
-retained where practical. Features that were added and later removed, such as the DDA
-spectral-library search mode, are recorded only in the [changelog](CHANGELOG.md).
+published Sage release. Each row lists a feature present in the current release and the
+published Sage Plus release that first shipped it in its current form. Upstream capabilities
+such as protein grouping, cloud storage, HTML reports, and Percolator output are not repeated
+here. Most additions are opt-in, and upstream defaults are retained where practical. Features
+that were later removed or replaced, such as the DDA spectral-library search mode and Beta 5
+positional keys, are recorded only in the [changelog](CHANGELOG.md).
 
 Measured benefits come from the linked benchmarks. They are workload and machine specific.
 Other benefits describe the intended effect and have not all been validated independently.
@@ -47,9 +48,9 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
-| Named modifications with explicit sites | beta.6 | Residue keys could not separate a terminal group from the residue at that terminus | One definition and one occurrence limit across all attachment rules; `--migrate-modifications` converts older configurations |
+| Named modifications with explicit sites | beta.6 | Residue keys could not separate a terminal group from the residue at that terminus, or exclude terminal residues | One definition and one occurrence limit across attachment rules such as `first_residue:K`, `internal_residue:K`, and `peptide_n_term`; `--migrate-modifications` converts older configurations |
+| Modification preview (`--preview-modifications`) | beta.6 | Placement rules could only be checked by running a search | Eligible sites and generated variants for a peptide, optionally in protein context, without loading spectra |
 | Typed terminal-group localization and version 2 PTM libraries | beta.6 | Libraries recorded residues only | Terminal and residue attachments stay distinct through search, localization, and reuse |
-| Internal-residue sites (`~K`) and `--preview-modifications` | beta.5 | Rules could not exclude peptide-terminal residues | Precise placement rules, checked before a search starts |
 | Mass-offset modifications | beta.4 | Every variable modification multiplies the fragment index | The index keeps its unmodified size; phosphorylation search used 0.16 GB instead of 0.45 GB with the same PSMs ([evaluation](benchmarks/MASS_OFFSET.md)) |
 | Per-modification limits, variant caps, and neutral-loss fragments | beta.1 | Combinatorial expansion was only bounded globally | Bounded search spaces and neutral-loss fragment matching |
 | Separate PEFF modification budget (`max_peff_variable_mods`) | beta.1 | PEFF and global modifications shared one budget | Independent limits for annotated and global modifications |
