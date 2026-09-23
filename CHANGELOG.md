@@ -35,6 +35,8 @@ entries are retained below for provenance.
   `SAGE_PREFILTER_INDEX_GB` overrides the budget.
 - Decoy-pair closure and survivor collection after prefiltering run in parallel.
 - The memory preflight no longer budgets a fragment index per prefilter chunk.
+- Update DashMap from 5.5.3 to 6.2.1. Searches, LFQ, and cross-run retention alignment produced
+  identical results with both versions.
 
 ## [v0.1.0-beta.6] - 2026-09-20
 

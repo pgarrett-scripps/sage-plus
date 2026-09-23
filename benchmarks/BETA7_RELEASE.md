@@ -20,8 +20,9 @@ Target: `v0.1.0-beta.7`, based on main after the published Beta 6 release.
   changes reported mobility, mobility features, and quantification for timsTOF inputs only.
 - The README replaces per-release sections with a feature comparison against upstream Sage.
 
-`sage-cloudpath` now depends directly on `rusqlite` 0.35, which timsrust already used. No
-dependency versions change. The configuration gains one optional key, and run summaries gain
+`sage-cloudpath` now depends directly on `rusqlite` 0.35, which timsrust already used. DashMap
+moves from 5.5.3 to 6.2.1 (superseding PR #8); the closed HEK, timsTOF LFQ, and five-file LFQ
+searches gave the same results with both versions. No other dependency versions change. The configuration gains one optional key, and run summaries gain
 one optional field while keeping schema version 9.
 
 ## Reproducible evidence
