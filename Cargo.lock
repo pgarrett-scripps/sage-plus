@@ -913,11 +913,12 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "5.5.3"
+version = "6.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+checksum = "e6361d5c062261c78a176addb82d4c821ae42bed6089de0e12603cd25de2059c"
 dependencies = [
  "cfg-if",
+ "crossbeam-utils",
  "hashbrown 0.14.5",
  "lock_api",
  "once_cell",
@@ -3308,7 +3309,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "sage-cli"
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -3335,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "sage-cloudpath"
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 dependencies = [
  "async-compression",
  "base64 0.13.1",
@@ -3350,6 +3351,7 @@ dependencies = [
  "rayon",
  "regex",
  "reqwest",
+ "rusqlite",
  "sage-core",
  "schemars 1.2.2",
  "serde",
@@ -3364,7 +3366,7 @@ dependencies = [
 
 [[package]]
 name = "sage-core"
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 dependencies = [
  "csv",
  "dashmap",
@@ -3383,7 +3385,7 @@ dependencies = [
 
 [[package]]
 name = "sage-mcp"
-version = "0.1.0-beta.6"
+version = "0.1.0-beta.7"
 dependencies = [
  "anyhow",
  "rmcp",

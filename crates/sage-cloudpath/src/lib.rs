@@ -14,6 +14,7 @@ pub mod mzml;
 pub mod mzmlb;
 pub mod tdf;
 pub mod thermoraw;
+pub mod tims_mobility;
 pub mod util;
 pub use util::FileFormat;
 
@@ -209,6 +210,8 @@ pub enum Error {
     MzML(#[from] mzml::MzMLError),
     #[error("TDF error: {0}")]
     TDF(#[from] timsrust::TimsRustError),
+    #[error(transparent)]
+    MobilityCalibration(#[from] tims_mobility::MobilityCalibrationError),
     #[error("Thermo RAW error: {0}")]
     ThermoRaw(#[from] opentfraw::Error),
     #[error("MGF error: {0}")]

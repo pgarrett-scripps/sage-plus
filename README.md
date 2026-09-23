@@ -19,129 +19,104 @@ Sage Plus is a downstream distribution of the
 workflow while integrating experimental PTM, modeling, performance, automation, and
 agent-facing capabilities.
 
-## Sage Plus additions
+## Differences from upstream Sage
 
-- Lower-memory searching with protein-backed target peptide sequences, compact spectrum storage,
-  and a lossless six-byte theoretical-fragment index.
-- Search-space memory estimation, runtime memory limits, minimum-free-memory protection, and configurable file batching.
-- Per-modification limits, total variant caps, named modifications, and optional or required neutral-loss fragments.
-- Search-time mass offset modifications: one offset placed per peptide without expanding the fragment index, competing with ordinary candidates and localized like any other modification.
-- Modification-defined SILAC, dimethyl, and custom precursor channels on required static or optional variable modifications.
-- Channel-aware LFQ with exact-mass partner extraction, reference ratios, and label-aware FDR.
-- Robust per-file precursor and fragment mass-error alignment before final FDR rescoring.
-- Configurable LFQ match-between-runs retention-time tolerance.
-- Optional LFQ match-between-runs and independent ion-mobility model controls.
-- Local mzMLb input in standard Sage builds.
-- Typed protein occurrence coordinates in the canonical PSM Parquet output.
-- A machine-readable JSON configuration schema, available with `sage --write-config-schema`.
-- PTM localization, ambiguity-aware sequences, site reports, and target/decoy false-localization-rate q-values.
-- Enriched linear retention-time features with regularized, cross-validated variable-PTM offsets.
-- Optional robust nonlinear cross-run retention-time alignment shared by prediction and LFQ.
-- PTM-aware, peptide-grouped ion-mobility prediction with cross-validated enriched features.
-- Direct reading of local Thermo Fisher RAW files.
-- Empirical spectral-library export in canonical Parquet and PSI mzSpecLib formats, using either a deterministic best PSM or robust consensus spectra.
-- A structured runner API with JSONL events, validation-only mode, cancellation, and an automatic `run-summary.json` artifact.
-- A root-bounded MCP server with persistent jobs and isolated search workers for configuration, estimation, safe execution, cancellation, monitoring, analysis, and result queries.
+The tables compare Sage Plus with upstream Sage
+[`v0.15.0-beta.2`](https://github.com/lazear/sage/releases/tag/v0.15.0-beta.2), the latest
+published Sage release. Each row lists a feature present in the current release and the
+published Sage Plus release that first shipped it in its current form. Upstream capabilities
+such as protein grouping, cloud storage, HTML reports, and Percolator output are not repeated
+here. Most additions are opt-in, and upstream defaults are retained where practical. Features
+that were later removed or replaced, such as the DDA spectral-library search mode and Beta 5
+positional keys, are recorded only in the [changelog](CHANGELOG.md).
 
-Most additions are opt-in, and upstream Sage defaults are retained where practical.
+Measured benefits come from the linked benchmarks. They are workload and machine specific.
+Other benefits describe the intended effect and have not all been validated independently.
 
-## Beta.6 named modifications and explicit sites
+### Search performance and memory
 
-Define a modification once and list its complete attachment rules:
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| Spectrum-indexed exact prefilter | beta.7 | The chunked prefilter rebuilt a fragment index and reread spectra for every database chunk | Same retained peptides and results; 1.2 to 41 times faster than Beta 6 prefiltering ([results](benchmarks/PREFILTER.md)) |
+| Protein-backed peptide sequences and compact modification records | beta.2 | Every generated peptide allocated its own sequence and a dense modification vector | 29.5% less peak memory on a conventional search and 38.9% less with variable modifications ([results](benchmarks/RESULTS.md)) |
+| Lossless six-byte fragment index | beta.2 | Fragment records dominate index memory in large searches | Smaller index with exact masses and bounded search buckets |
+| Compact spectrum storage | beta.2 | Loaded spectra repeat fragment and charge data | Lower resident memory for large file batches |
+| Memory estimation, `max_memory_gb`, and `min_free_memory_gb` | beta.1 | Large searches could exhaust workstation memory | Oversized searches are rejected before they start, and running searches stop before the limit |
+| Configurable `batch_size` | beta.1 | Only a command-line option controlled file batching | Batching can be set per configuration |
 
-```json
-"variable_mods": {
-  "Acetyl": {
-    "mass": 42.010565,
-    "sites": ["first_residue:K", "internal_residue:K", "protein_last:K"],
-    "max_count": 2
-  },
-  "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "max_count": 3}
-}
-```
+### Modifications and PTMs
 
-`peptide_n_term:K` modifies the terminal group when the peptide starts with K.
-`first_residue:K` modifies the K residue itself. Typed site libraries preserve this
-distinction through search, localization, and reuse. Ambiguous attachments are not
-promoted into the reusable library. Static definitions use the same site vocabulary.
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| Named modifications with explicit sites | beta.6 | Residue keys could not separate a terminal group from the residue at that terminus, or exclude terminal residues | One definition and one occurrence limit across attachment rules such as `first_residue:K`, `internal_residue:K`, and `peptide_n_term`; `--migrate-modifications` converts older configurations |
+| Modification preview (`--preview-modifications`) | beta.6 | Placement rules could only be checked by running a search | Eligible sites and generated variants for a peptide, optionally in protein context, without loading spectra |
+| Typed terminal-group localization and version 2 PTM libraries | beta.6 | Libraries recorded residues only | Terminal and residue attachments stay distinct through search, localization, and reuse |
+| Mass-offset modifications | beta.4 | Every variable modification multiplies the fragment index | The index keeps its unmodified size; phosphorylation search used 0.16 GB instead of 0.45 GB with the same PSMs ([evaluation](benchmarks/MASS_OFFSET.md)) |
+| Per-modification limits, variant caps, and neutral-loss fragments | beta.1 | Combinatorial expansion was only bounded globally | Bounded search spaces and neutral-loss fragment matching |
+| Separate PEFF modification budget (`max_peff_variable_mods`) | beta.1 | PEFF and global modifications shared one budget | Independent limits for annotated and global modifications |
+| PTM localization with false-localization-rate q-values | beta.1 | Search reports a peptidoform without site confidence | Site probabilities, site reports, and target/decoy localization confidence |
+| Ambiguity-aware sequences and residual mass shifts | beta.1 | Unsupported residue orders were reported as certain | Sequence regions without fragment evidence are marked in the output |
 
-Convert older configurations with `sage old.json --migrate-modifications > new.json`.
-Library-aware previews accept `--preview-protein` and `--preview-start`.
-See [the modification guide](DOCS.md#modifications) and
-[Beta 6 validation](benchmarks/BETA6_RELEASE.md). PTM libraries and site reports now
-carry an attachment column, which requires updates in consumers expecting four columns.
+### Scoring and modeling
 
-## Beta.5 positional modifications
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| Count-based confidence fallback | beta.4 | The density model can fail on small or unusual score distributions | Peptide and protein q-values remain defined |
+| Averagine-scored isotope envelopes and charge-aware fragment matching | beta.2 | Deisotoping could assign peaks to several envelopes | Each peak belongs to one envelope, and fragment charges constrain matching |
+| Per-file precursor and fragment mass-error alignment | beta.1 | Systematic mass error differs between files | Mass errors are corrected before final rescoring |
+| Enriched retention-time model and nonlinear cross-run alignment | beta.1 | A linear model misses modification effects and nonlinear drift | Better retention-time features for rescoring and LFQ |
+| PTM-aware ion-mobility prediction | beta.1 | Mobility features ignored modifications | Cross-validated mobility features for rescoring |
 
-Use `~K` to restrict a modification to internal peptide residues. Combine `^K`
-and `~K` to include the first residue, or `~K` and `$K` to include the last.
-The same syntax works for static, indexed variable, and mass-offset modifications.
-Entries sharing a name retain one occurrence limit across their combined sites.
+### Quantification and libraries
 
-Preview compatible sites and generated variants before searching:
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| LFQ confirmation and per-file signal diagnostics | beta.4 | Integrated signals had no quality evidence | MS2 confirmation, spectral angle, trace cosine, and retention shift per file |
+| Match-between-runs and ion-mobility model switches | beta.2 | Neither could be disabled independently | Controlled quantification and modeling experiments |
+| Modification-defined SILAC, dimethyl, and custom label channels | beta.1 | Labels were not tied to modifications | Coherent precursor channels with channel-aware LFQ, reference ratios, and label-aware FDR |
+| Configurable match-between-runs retention tolerance | beta.1 | The transfer window was fixed | Tolerance can match the chromatography |
+| Empirical spectral-library export | beta.1 | Search results could not be reused as libraries | Parquet and PSI mzSpecLib libraries from best or consensus spectra |
 
-```shell
-sage config.json --preview-modifications KSTGGKAPR
-```
+### Inputs and outputs
 
-Localization now preserves positional restrictions and distinguishes named
-modifications with equal masses. Malformed modification keys fail configuration
-loading. See [the positional modification guide](DOCS.md#positional-residue-modifications)
-and [release validation](benchmarks/BETA5_RELEASE.md). Beta 5 was tagged but not published.
-Its changes are included in Beta 6.
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| Calibrated timsTOF ion mobility | beta.7 | timsrust interpolates 1/K0 between the acquisition limits instead of applying the instrument calibration | Reported 1/K0 equals the Bruker SDK value; the old scale was off by up to 0.054 1/K0 on a PXD070049 run, with nearly unchanged identifications ([validation](benchmarks/BETA7_RELEASE.md)). `bruker_config.ion_mobility_scale: "linear"` restores the old scale |
+| mzMLb input | beta.2 | Compressed HDF5 spectra required conversion | Read directly in standard builds |
+| Typed protein occurrences in Parquet output | beta.2 | Protein positions required re-mapping | One-based coordinates and flanking residues for each protein |
+| JSON configuration schema | beta.2 | Configuration errors surfaced only at run time | Editor completion and static validation (`sage --write-config-schema`) |
+| Thermo RAW input | beta.1 | RAW files required conversion | Local RAW files are read directly |
+| Pre-digested peptide and custom cleavage-site inputs | beta.1 | Only FASTA digestion was supported | Peptide lists and protein-specific cleavage sites extend the database |
+| Parquet as the canonical analytical output | beta.1 | TSV and Parquet outputs diverged | One typed output with nulls for missing signals |
 
-## Beta.4 mass offset search
+### Automation and safety
 
-A variable modification can set `"search_mode": "mass_offset"` to be searched as a
-precursor and fragment offset instead of being expanded into the fragment index:
+| Feature | Since | Why it was added | Benefit |
+|---|---|---|---|
+| Overwrite protection for existing outputs | beta.3 | Reruns could silently replace results | Replacing Sage outputs requires `--overwrite` |
+| Runner API, JSONL events, and `run-summary.json` | beta.1 | Runs could only be followed through logs | Validation-only runs, progress events, cancellation, and a machine-readable summary |
+| MCP server with isolated search workers | beta.1 | Agents needed safe, persistent search jobs | A failed or cancelled search affects only its own worker |
 
-```jsonc
-"variable_mods": {
-  "S": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-  "T": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-  "Y": [{"mass": 79.966331, "name": "Phospho", "search_mode": "mass_offset"}],
-  "M": [{"mass": 15.994915, "name": "Oxidation"}]
-}
-```
+## Prefilter performance
 
-Each spectrum is searched once per offset against a translated precursor window, with
-fragment lookups at both the unshifted and shifted masses, and every compatible placement
-competes as its own candidate. At most one offset is placed on a peptide and offsets are
-never combined with each other, so search cost grows linearly with the number configured
-while the index stays at its unmodified size. Placements become ordinary peptidoforms
-before FDR, quantification, localization, and site libraries, so an offset is never
-reported as precursor mass error. See [DOCS.md](DOCS.md#mass-offset-modifications) for
-behavior and limits and [the evaluation](benchmarks/MASS_OFFSET.md) for measured cost and
-agreement with database expansion.
+Database prefiltering keeps every peptide that can match a fragment in any spectrum, then builds
+the search index from those peptides only. It gives the same results as a full search. Beta 7
+indexes the spectra once and streams the generated peptides through that index.
 
-## Beta.3 hardening
+| Workload | Beta 6 prefilter | Beta 7 prefilter | No prefilter | Peptides kept |
+|---|---:|---:|---:|---:|
+| HEK, oxidation and acetylation | 15.6 s | 11.6 s | 11.5 s | 37% |
+| HEK, seven variable modifications | 33.0 s | 24.1 s | 27.1 s | 36% |
+| HEK, seven modifications, two per peptide | 105.0 s | 67.4 s | exceeds memory | 30% |
+| HEK, open search | 65.8 s | 54.6 s | 47.7 s | 99.8% |
+| Five LFQ files, 567,401 spectra | 613.4 s | 135.2 s | 102.9 s | 90% |
+| Phosphorylation mass offset, HCD_1 | 35.7 s | 0.9 s | 0.8 s | 8% |
 
-Beta.3 fixes batching, gzip completion, event ordering, validation, and worker persistence.
-Existing local Sage outputs now require explicit `--overwrite`, and run summaries use schema 9.
-The release also adds verified benchmark provenance and resolves the audited dependency findings.
-See the [release checklist and validation scope](benchmarks/BETA3_RELEASE.md) and
-[changelog](CHANGELOG.md) for compatibility details and publication status.
-
-## Memory and performance
-
-Sage Plus `v0.1.0-beta.2` reduces the largest in-memory search structures without lossy mass
-rounding:
-
-- Target peptides reference immutable source-protein sequences by coordinates where possible,
-  avoiding a separate sequence allocation for every generated peptide.
-- The theoretical-fragment index uses lossless six-byte records while retaining bounded search
-  buckets.
-- Spectrum storage uses compact representations for fragment data and optional charge arrays.
-- Exact database prefiltering can trade additional preparation time for a substantially smaller
-  peptide and fragment search index.
-- Memory estimation, configurable batching, and runtime memory guards help keep searches within
-  available system memory.
-
-On the local beta.2 release benchmark, conventional search used 29.5% less peak memory than
-beta.1 and was 8.9% faster. A variable-modification search used 38.9% less peak memory and was
-18.0% faster. Exact prefiltering reduced peak memory by 59.1% with byte-identical output, at an
-81.5% wall-time cost for that workload. These measurements are machine and workload specific.
-See the [benchmark methodology and complete results](benchmarks/RESULTS.md).
+Median of three runs on a 16-thread workstation. Prefiltering pays off when it removes much of
+the database: the first two searches used 60 to 66% less memory than unfiltered searches, and the
+two-modification search only fits with it. Open searches and multi-file runs that keep most
+peptides are faster without it. See the [prefilter benchmark](benchmarks/PREFILTER.md) for
+memory, output agreement, and repeats.
 
 ## Build and run
 
@@ -174,6 +149,7 @@ upstream Sage releases.
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
 - [Developer benchmark pipeline and results](benchmarks/RESULTS.md)
+- [Release validation records](benchmarks/BETA7_RELEASE.md) and the [changelog](CHANGELOG.md)
 - [Upstream Sage documentation](https://sage-docs.vercel.app/docs)
 
 ## Attribution and citation

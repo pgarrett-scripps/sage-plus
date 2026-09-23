@@ -51,8 +51,8 @@ as a workaround for an inactive maintainer account.
 The beta.3 security dependency gate passes, as recorded in
 [`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
 validation and publication gates for the current release in
-[`benchmarks/BETA6_RELEASE.md`](benchmarks/BETA6_RELEASE.md), and the previous release's in
-[`benchmarks/BETA4_RELEASE.md`](benchmarks/BETA4_RELEASE.md).
+[`benchmarks/BETA7_RELEASE.md`](benchmarks/BETA7_RELEASE.md), and the previous release's in
+[`benchmarks/BETA6_RELEASE.md`](benchmarks/BETA6_RELEASE.md).
 The workflow audits the complete lockfile and runs the storage patch compatibility tests before
 packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 
@@ -84,8 +84,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0-beta.6 -m "Sage Plus v0.1.0-beta.6"
-git push origin v0.1.0-beta.6
+git tag -a v0.1.0-beta.7 -m "Sage Plus v0.1.0-beta.7"
+git push origin v0.1.0-beta.7
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark

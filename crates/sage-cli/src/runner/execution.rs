@@ -492,6 +492,18 @@ impl Runner {
                 ion_mobility_model_fitted,
                 ion_mobility_features: format!("{:?}", self.parameters.ion_mobility_model.features)
                     .to_lowercase(),
+                ion_mobility_scale: self
+                    .parameters
+                    .mzml_paths
+                    .iter()
+                    .any(|path| matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
+                    .then(|| {
+                        self.parameters
+                            .bruker_config
+                            .ion_mobility_scale
+                            .as_str()
+                            .to_string()
+                    }),
             },
             quantification: QuantificationRunStats {
                 lfq_enabled: self.parameters.quant.lfq,

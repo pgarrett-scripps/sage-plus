@@ -104,19 +104,19 @@ struct PreScore {
 }
 
 #[derive(Copy, Clone)]
-struct FragmentMatchPeak {
-    neutral_mass: f32,
+pub(crate) struct FragmentMatchPeak {
+    pub(crate) neutral_mass: f32,
     query_index: usize,
     charge: u8,
     charge_is_known: bool,
 }
 
-struct FragmentMatchIndex {
-    peaks: Vec<FragmentMatchPeak>,
+pub(crate) struct FragmentMatchIndex {
+    pub(crate) peaks: Vec<FragmentMatchPeak>,
 }
 
 impl FragmentMatchIndex {
-    fn new(query: &ProcessedSpectrum, max_charge: u8) -> Self {
+    pub(crate) fn new(query: &ProcessedSpectrum, max_charge: u8) -> Self {
         let capacity = query.masses.len() * usize::from(max_charge.saturating_sub(1));
         let mut peaks = Vec::with_capacity(capacity);
         for (query_index, &mass) in query.masses.iter().enumerate() {
@@ -437,7 +437,7 @@ pub struct Scorer<'db> {
 /// searching fragment ions (1..N)
 /// If user has configured max_fragment_charge, potentially override precursor
 /// charge
-fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) -> u8 {
+pub(crate) fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) -> u8 {
     precursor_charge
         .min(
             max_fragment_charge
@@ -445,6 +445,14 @@ fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) ->
                 .unwrap_or(precursor_charge),
         )
         .max(2)
+}
+
+/// Translate an observed precursor query by a mass offset `delta`. The
+/// tolerance is evaluated at the observed (modified) precursor mass and then
+/// shifted, so the searched base-peptide window keeps the configured width.
+pub(crate) fn offset_query(mass: f32, tolerance: Tolerance, delta: f32) -> (f32, Tolerance) {
+    let (lo, hi) = tolerance.bounds(mass);
+    (mass - delta, Tolerance::Da(lo - mass, hi - mass))
 }
 
 impl<'db> Scorer<'db> {
@@ -522,9 +530,11 @@ impl<'db> Scorer<'db> {
         if offset == 0 {
             return (mass, tolerance);
         }
-        let delta = self.db.mass_offsets[offset as usize - 1].mass();
-        let (lo, hi) = tolerance.bounds(mass);
-        (mass - delta, Tolerance::Da(lo - mass, hi - mass))
+        offset_query(
+            mass,
+            tolerance,
+            self.db.mass_offsets[offset as usize - 1].mass(),
+        )
     }
 
     fn fragment_shift(&self, offset: u8) -> Option<f32> {

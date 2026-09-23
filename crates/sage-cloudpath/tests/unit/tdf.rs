@@ -1,4 +1,5 @@
 use super::*;
+use crate::tims_mobility::{BrukerMobilityScale, MobilityCalibration};
 
 fn buffer(peaks: Vec<ImsPeak>) -> PeakBuffer {
     let mut order = (0..peaks.len()).collect::<Vec<_>>();
@@ -66,18 +67,77 @@ fn parses_real_bruker_directory() {
 
 #[test]
 fn mobility_offsets_expand_run_lengths_and_skip_empty_scans() {
-    struct LinearImConverter;
-
-    impl Converter<ScanIndex, Im> for LinearImConverter {
-        fn convert(&self, scan_index: ScanIndex) -> Im {
-            Im::from(2.0 - f64::from(scan_index) * 0.25)
-        }
-    }
-
-    let converter = LinearImConverter;
-    let mobility = PeakBuffer::expand_mobility_iter(&[0, 2, 2, 5], &converter).collect::<Vec<_>>();
+    let scan_to_im = |scan: usize| 2.0 - scan as f32 * 0.25;
+    let mobility = PeakBuffer::expand_mobility_iter(&[0, 2, 2, 5], &scan_to_im).collect::<Vec<_>>();
 
     assert_eq!(mobility, vec![2.0, 2.0, 1.5, 1.5, 1.5]);
+}
+
+#[test]
+fn mobility_scale_can_be_set_alone() {
+    let config: BrukerProcessingConfig =
+        serde_json::from_str(r#"{"ion_mobility_scale": "linear"}"#).unwrap();
+    assert_eq!(config.ion_mobility_scale, BrukerMobilityScale::Linear);
+    let config: BrukerProcessingConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(config.ion_mobility_scale, BrukerMobilityScale::Calibrated);
+}
+
+#[test]
+fn calibrated_mobility_differs_from_linear_scale() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let url = crate::Url::from_file_path(&path).unwrap();
+    let read = |scale| {
+        let config = BrukerProcessingConfig {
+            ion_mobility_scale: scale,
+            ..BrukerProcessingConfig::default()
+        };
+        crate::util::read_spectra(&url, 0, None, config, true).unwrap()
+    };
+    let calibrated = read(BrukerMobilityScale::Calibrated);
+    let linear = read(BrukerMobilityScale::Linear);
+    assert_eq!(calibrated.len(), linear.len());
+
+    let model = *MobilityCalibration::from_path(&path).unwrap().dominant();
+    // Acquisition range limits used by the linear scale.
+    let (lower, upper) = (0.6f32, 1.6f32);
+    // Spectrum order is not stable between reads, so pair by level and id.
+    let linear = linear
+        .iter()
+        .map(|spectrum| ((spectrum.ms_level, spectrum.id.clone()), spectrum))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut largest_shift = 0.0f32;
+    for calibrated in &calibrated {
+        let linear = linear[&(calibrated.ms_level, calibrated.id.clone())];
+        if calibrated.ms_level == 1 {
+            // MS1 centroiding merges peaks within a mobility tolerance, so the
+            // peak lists can differ. Compare mean mobility instead.
+            let mean = |values: &Vec<f32>| values.iter().sum::<f32>() / values.len().max(1) as f32;
+            let (a, b) = (
+                calibrated.mobility.as_ref().unwrap(),
+                linear.mobility.as_ref().unwrap(),
+            );
+            largest_shift = largest_shift.max((mean(a) - mean(b)).abs());
+            continue;
+        }
+        // MS2 spectra do not depend on the mobility scale.
+        assert_eq!(calibrated.mz, linear.mz);
+        assert_eq!(calibrated.intensity, linear.intensity);
+        for (a, b) in calibrated.precursors.iter().zip(&linear.precursors) {
+            let (a, b) = (
+                a.inverse_ion_mobility.unwrap(),
+                b.inverse_ion_mobility.unwrap(),
+            );
+            assert!((lower..=upper).contains(&b));
+            // Invert timsrust's scale, linear in sqrt(1/K0) over 918 scans, to
+            // recover the window-center scan. DIA centers use the dominant row.
+            let slope = (lower.sqrt() - upper.sqrt()) / 918.0;
+            let scan = ((b.sqrt() - upper.sqrt()) / slope).round() as f64;
+            assert!((a - model.one_over_k0(scan) as f32).abs() < 1e-4);
+        }
+    }
+    // On this run the scales differ by up to 0.087 1/K0 per scan (at scan 395).
+    assert!(largest_shift > 1e-3, "largest shift {largest_shift}");
+    assert!(largest_shift < 0.15, "largest shift {largest_shift}");
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub struct Digest {
     pub position: Position,
 }
 
+#[derive(Clone)]
 pub struct DigestGroup {
     pub reference: Digest,
     pub origins: Vec<ProteinOccurrence>,
