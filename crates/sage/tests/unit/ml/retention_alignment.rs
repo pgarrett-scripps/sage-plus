@@ -77,8 +77,50 @@ fn robust_fit_handles_large_shift_and_bad_landmarks() {
 }
 
 #[test]
-fn alignment_method_is_explicit_and_defaults_to_linear() {
-    assert_eq!(AlignmentMethod::default(), AlignmentMethod::Linear);
+fn alignment_method_defaults_to_nonlinear() {
+    assert_eq!(AlignmentMethod::default(), AlignmentMethod::Nonlinear);
+}
+
+fn landmark(file_id: usize, peptide: u32, rt: f32) -> Feature {
+    Feature {
+        file_id,
+        peptide_idx: PeptideIx(peptide),
+        rt,
+        label: 1,
+        spectrum_q: 0.001,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn single_run_nonlinear_alignment_matches_linear() {
+    let mut linear: Vec<_> = (0..200)
+        .map(|i| landmark(0, i, 1.0 + i as f32 * 0.5))
+        .collect();
+    let mut nonlinear = linear.clone();
+    global_alignment_with_method(&mut linear, 1, AlignmentMethod::Linear);
+    let alignments = global_alignment_with_method(&mut nonlinear, 1, AlignmentMethod::Nonlinear);
+    assert!(alignments[0].knots.is_empty());
+    for (linear, nonlinear) in linear.iter().zip(&nonlinear) {
+        assert!((linear.aligned_rt - nonlinear.aligned_rt).abs() < 1e-4);
+    }
+}
+
+#[test]
+fn few_shared_landmarks_fall_back_to_affine() {
+    let mut features: Vec<_> = (0..10)
+        .flat_map(|i| {
+            let rt = 5.0 + i as f32 * 9.0;
+            [landmark(0, i, rt), landmark(1, i, rt * 0.9 + 3.0)]
+        })
+        .collect();
+    let alignments = global_alignment_with_method(&mut features, 2, AlignmentMethod::Nonlinear);
+    assert!(alignments
+        .iter()
+        .all(|alignment| alignment.knots.is_empty()));
+    for pair in features.chunks(2) {
+        assert!((pair[0].aligned_rt - pair[1].aligned_rt).abs() < 0.02);
+    }
 }
 
 #[test]

@@ -354,7 +354,7 @@ For additional information about configuration options and output file formats, 
   "ion_mobility_model": {
     "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
   },
-  "retention_time_alignment": "nonlinear", // Optional["linear" | "nonlinear"]: explicitly enable observed-RT alignment
+  "retention_time_alignment": "nonlinear", // Optional["linear" | "nonlinear"] {default="nonlinear"}: cross-run observed-RT alignment method
   "min_peaks": 15,          // Optional[int] {default=15}: only process MS2 spectra with at least N peaks
   "max_peaks": 150,         // Optional[int] {default=150}: take the top N most intense MS2 peaks to search,
   "min_matched_peaks": 6,   // Optional[int] {default=4}: minimum # of matched b+y ions to use for reporting PSMs
@@ -856,7 +856,7 @@ Example:
 
 Note on the settings below:
 
-Retention-time alignment and prediction are separate features. `retention_time_alignment` aligns observed times even when `predict_rt` is false. Prediction uses aligned times and therefore runs linear alignment when no method is specified. LFQ also requires alignment, but does not require retention-time prediction.
+Retention-time alignment and prediction are separate features. Alignment runs when `retention_time_alignment` is set, when `predict_rt` is true (the default), or when LFQ is enabled; setting `retention_time_alignment` aligns observed times even when `predict_rt` is false. When no method is specified, nonlinear alignment is used.
 
 - **deisotope**: Boolean or object. Perform scored averagine deisotoping and charge state deconvolution on MS2 spectra (default: true). Use `false` to disable deconvolution or an object to tune the bounded isotope-envelope scoring. Sage excludes the reporter-ion region from MS2 deisotoping when TMT or iTRAQ quantification is configured.
 
@@ -883,7 +883,7 @@ Retention-time alignment and prediction are separate features. `retention_time_a
       "enabled": false
     }
     ```
-- **retention_time_alignment**: Explicitly align observed retention times across experiments. `"linear"` uses Sage's existing ordinary least-squares alignment. `"nonlinear"` enables robust outlier filtering followed by a monotone piecewise-linear warp. This operates independently of `predict_rt`.
+- **retention_time_alignment**: Method used to align observed retention times across experiments (default: `"nonlinear"`). `"nonlinear"` rejects outlier landmarks with a robust affine fit, then fits a monotone piecewise-linear warp; runs with fewer than 16 shared landmarks, or landmarks spanning less than a quarter of the gradient, use the robust affine fit alone, and single-file searches are left unwarped. `"linear"` restores the ordinary least-squares alignment that was the default before Beta 9. Setting this field enables alignment even when `predict_rt` is false. `run-summary.json` records the method used under `models.retention_time_alignment`.
 - **min_peaks**: Integer. Only process MS2 spectra with at least N peaks (default: 15).
 - **max_peaks**: Integer. Take the top N most intense MS2 peaks to search (default: 150).
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).

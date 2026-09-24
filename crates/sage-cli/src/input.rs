@@ -129,6 +129,9 @@ pub struct Input {
     pub quant: Option<QuantOptions>,
     pub predict_rt: Option<bool>,
     pub retention_time_model: Option<RetentionTimeSettings>,
+    /// Cross-run retention-time alignment method (default: `nonlinear`). Alignment runs when
+    /// this is set, `predict_rt` is true, or LFQ is enabled; `linear` restores the
+    /// ordinary least-squares alignment used before Beta 9.
     pub retention_time_alignment: Option<AlignmentMethod>,
     pub ion_mobility_model: Option<IonMobilitySettings>,
     pub output_directory: Option<String>,

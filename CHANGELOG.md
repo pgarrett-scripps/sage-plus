@@ -10,6 +10,17 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Changed
+- Nonlinear retention-time alignment is the default. When `retention_time_alignment` is not
+  set, RT prediction and LFQ align runs with a robust affine fit followed by a monotone
+  piecewise-linear warp; runs with fewer than 16 shared landmarks fall back to the robust
+  affine fit, and single-file searches are unchanged. Set `"retention_time_alignment":
+  "linear"` for the previous ordinary least-squares alignment, which reproduces earlier
+  results byte for byte. On five PXD028735 LFQ files, LFQ precursors at 1% q-value rose from
+  24,038 to 31,418 and those quantified in all five files from 23,055 to 30,828; the spread of
+  human log2(A/B) ratios (MAD) fell from 0.213 to 0.191, and the median cross-run aligned-RT
+  residual fell from 0.128 to 0.077 min. PSMs, peptides, and proteins at 1% FDR changed by
+  less than 0.1% (312,533 to 312,487 PSMs), and runtime was unchanged within noise.
+  `run-summary.json` already records the method; its schema stays at version 9.
 - The retention-time and ion-mobility models are fit on standardized features with a fixed,
   tiny ridge penalty and a Cholesky solve, replacing Gaussian elimination that retried with a
   growing perturbation. The default feature sets contain exactly redundant columns; fitted
