@@ -1,5 +1,4 @@
 use crate::fasta::Fasta;
-use crate::mass::VALID_AA;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -275,7 +274,7 @@ fn validate_context(context: &str, location: &str) -> Result<String, CustomCleav
     if left
         .bytes()
         .chain(right.bytes())
-        .any(|residue| !VALID_AA.contains(&residue))
+        .any(|residue| !residue.is_ascii_uppercase())
     {
         return Err(CustomCleavageError::new(format!(
             "{location} has invalid amino acids in context `{context}`"

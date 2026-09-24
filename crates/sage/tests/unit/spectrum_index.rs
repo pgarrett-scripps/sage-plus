@@ -166,10 +166,20 @@ fn scorer<'db>(database: &'db IndexedDatabase, s: &SpectrumIndexSettings) -> Sco
 }
 
 fn assert_same_survivors(offset: bool, s: SpectrumIndexSettings, open: bool) {
+    assert_same_survivors_with(offset, s, open, |_| {});
+}
+
+fn assert_same_survivors_with(
+    offset: bool,
+    s: SpectrumIndexSettings,
+    open: bool,
+    corrupt: impl Fn(&mut [ProcessedSpectrum]),
+) {
     let parameters = parameters(offset);
     let fasta = Fasta::parse(FASTA.into(), "rev_", true).unwrap();
     let database = parameters.clone().build(fasta);
-    let queries = spectra(&database, 400, 0x5eed ^ offset as u64);
+    let mut queries = spectra(&database, 400, 0x5eed ^ offset as u64);
+    corrupt(&mut queries);
 
     let expected = AtomicBitSet::new(database.peptides.len());
     let classic = scorer(&database, &s);
@@ -267,6 +277,47 @@ fn open_search_matches_classic_prefilter() {
         true,
         settings(Tolerance::Da(-50.0, 150.0), false, false),
         true,
+    );
+}
+
+/// Non-finite peaks never match in the exact prefilter; the spectrum index
+/// must ignore them too instead of failing its monotonicity check.
+fn corrupt_with_non_finite_masses(queries: &mut [ProcessedSpectrum]) {
+    for (index, query) in queries.iter_mut().enumerate().step_by(7) {
+        // Keep masses sorted under `total_cmp`, which places these last.
+        for mass in [f32::INFINITY, f32::NAN] {
+            query.masses.push(mass);
+            query.intensities.push(1.0);
+            query.charges.push(1);
+            query.charge_is_known.push(index % 2 == 0);
+        }
+        if index % 3 == 0 {
+            query.precursors[0].mz = if index % 2 == 0 {
+                f32::NAN
+            } else {
+                f32::INFINITY
+            };
+        }
+    }
+}
+
+#[test]
+fn non_finite_masses_match_classic_prefilter() {
+    for tolerance in [Tolerance::Ppm(-10.0, 10.0), Tolerance::Da(-0.02, 0.02)] {
+        for offset in [false, true] {
+            assert_same_survivors_with(
+                offset,
+                settings(tolerance, false, false),
+                false,
+                corrupt_with_non_finite_masses,
+            );
+        }
+    }
+    assert_same_survivors_with(
+        false,
+        settings(Tolerance::Ppm(-10.0, 10.0), true, false),
+        false,
+        corrupt_with_non_finite_masses,
     );
 }
 

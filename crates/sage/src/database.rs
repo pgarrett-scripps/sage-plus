@@ -1605,11 +1605,19 @@ impl MassOffset {
 
     /// Mass difference of the first generated fragment form containing the
     /// modification. This mirrors the preliminary fragment index, which keeps
-    /// the first variant of every ion group.
+    /// the first variant of every ion group; ion series sort losses ascending,
+    /// so a required loss contributes its smallest configured mass.
     pub fn fragment_shift(&self) -> f32 {
         match self.definition.neutral_loss_mode {
             crate::modification::NeutralLossMode::Required => {
-                self.definition.mass - self.definition.neutral_losses[0]
+                let smallest = self
+                    .definition
+                    .neutral_losses
+                    .iter()
+                    .copied()
+                    .min_by(f32::total_cmp)
+                    .unwrap_or_default();
+                self.definition.mass - smallest
             }
             crate::modification::NeutralLossMode::Optional => self.definition.mass,
         }

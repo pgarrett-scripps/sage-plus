@@ -428,6 +428,65 @@ fn process_ms2_without_deisotoping_defaults_charges_to_one() {
 }
 
 #[test]
+fn process_drops_non_finite_peaks_before_selecting_top_n() {
+    for deisotope in [false, true] {
+        let processor = SpectrumProcessor::new(2, deisotope, 0.0);
+        let spectrum = RawSpectrum {
+            ms_level: 2,
+            representation: Representation::Centroid,
+            mz: vec![300.0, f32::NAN, 100.0, f32::INFINITY, 200.0],
+            intensity: vec![30.0, 99.0, 10.0, 98.0, 20.0],
+            fragment_charges: Some(vec![1, 2, 1, 2, 1]),
+            ..RawSpectrum::default()
+        };
+
+        let processed = processor.process(spectrum);
+
+        assert_eq!(
+            processed.masses,
+            vec![200.0 - PROTON, 300.0 - PROTON],
+            "deisotope: {deisotope}"
+        );
+        assert_eq!(processed.intensities, vec![20.0, 30.0]);
+        assert_eq!(processed.charges, vec![1, 1]);
+        assert_eq!(processed.total_ion_current, 50.0);
+    }
+
+    let processor = SpectrumProcessor::new(10, false, 0.0);
+    let processed = processor.process(RawSpectrum {
+        ms_level: 1,
+        mz: vec![101.0, f32::NAN, 100.0],
+        intensity: vec![20.0, 5.0, 10.0],
+        mobility: Some(vec![2.0, 9.0, 1.0]),
+        ..RawSpectrum::default()
+    });
+    assert_eq!(processed.masses, vec![100.0 - PROTON, 101.0 - PROTON]);
+    assert_eq!(processed.mobilities, vec![1.0, 2.0]);
+}
+
+#[test]
+fn process_empties_msn_scans_with_non_finite_precursor() {
+    let processor = SpectrumProcessor::new(10, false, 0.0);
+    for mz in [f32::NAN, f32::INFINITY] {
+        let processed = processor.process(RawSpectrum {
+            ms_level: 2,
+            representation: Representation::Centroid,
+            precursors: vec![Precursor {
+                mz,
+                charge: Some(2),
+                ..Precursor::default()
+            }],
+            mz: vec![100.0, 200.0],
+            intensity: vec![10.0, 20.0],
+            ..RawSpectrum::default()
+        });
+        assert!(processed.masses.is_empty());
+        assert!(processed.intensities.is_empty());
+        assert_eq!(processed.total_ion_current, 0.0);
+    }
+}
+
+#[test]
 fn sorted_ms2_without_deisotoping_reuses_raw_peak_allocations() {
     let processor = SpectrumProcessor::new(10, false, 0.0);
     let spectrum = RawSpectrum {
