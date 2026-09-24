@@ -233,9 +233,62 @@ impl Runner {
         chunk_idx: usize,
         batch_size: usize,
     ) -> anyhow::Result<SageResults> {
-        let spectra = self.read_processed_spectra(chunk, chunk_idx, batch_size)?;
+        let spectra = match self.take_retained_spectra(chunk_idx, batch_size) {
+            Some(spectra) => {
+                self.emit_retained_batch_events(chunk, chunk_idx, batch_size, &spectra);
+                spectra
+            }
+            None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
+        };
         let (features, repeated_spectrum_psms) = self.search_processed_spectra(scorer, &spectra.1);
         Ok(self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms))
+    }
+
+    /// Take the prefilter's spectra for this file batch. Spectra retained
+    /// for a different batch size are released unused.
+    fn take_retained_spectra(&self, chunk_idx: usize, batch_size: usize) -> Option<SpectrumBatch> {
+        let mut retained = self.retained_spectra.lock().expect("retained spectra lock");
+        if retained.batch_size != batch_size {
+            retained.batches = Vec::new();
+            return None;
+        }
+        retained.batches.get_mut(chunk_idx).and_then(Option::take)
+    }
+
+    /// Emit the progress events that reading this file batch would emit.
+    fn emit_retained_batch_events(
+        &self,
+        chunk: &[Url],
+        chunk_idx: usize,
+        batch_size: usize,
+        spectra: &SpectrumBatch,
+    ) {
+        info!(
+            "processing files {} .. {} (read during prefiltering)",
+            batch_size * chunk_idx,
+            batch_size * chunk_idx + chunk.len()
+        );
+        for (idx, path) in chunk.iter().enumerate() {
+            let file_id = chunk_idx * batch_size + idx;
+            self.events.emit(EventKind::FileStarted {
+                file_id,
+                path: path.to_string(),
+            });
+            self.events.emit(EventKind::FileCompleted {
+                file_id,
+                path: path.to_string(),
+                spectra: spectra
+                    .0
+                    .iter()
+                    .chain(&spectra.1)
+                    .filter(|spectrum| spectrum.file_id == file_id)
+                    .count(),
+            });
+        }
+        self.events.emit(EventKind::SpectraProcessed {
+            ms1_spectra: spectra.0.len(),
+            msn_spectra: spectra.1.len(),
+        });
     }
 
     pub(super) fn read_processed_spectra(

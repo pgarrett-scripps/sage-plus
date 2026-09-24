@@ -643,49 +643,63 @@ impl Parameters {
 
         let enzyme: EnzymeParameters = self.enzyme.clone().into();
         let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
-        let mut estimate = DatabaseMemoryEstimate::default();
-        let mut digest_bytes = 0u64;
-        let mut peptide_bytes = 0u64;
+        let rules = self.variable_modifications();
 
-        for (protein, sequence) in &fasta.targets {
-            let boundaries = custom_cleavages
-                .map(|library| library.boundaries_for(protein))
-                .unwrap_or_default();
-            for digest in enzyme.digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
-            {
-                let sequence_len = digest.sequence.len() as u64;
-                let origin = ProteinOccurrence::of_protein_digest(&digest);
-                let variants = self
-                    .variable_variant_count(&digest, std::slice::from_ref(&origin))
-                    .saturating_mul(decoy_multiplier);
-                let fragments_per_variant = sequence_len
-                    .saturating_sub(1)
-                    .saturating_sub(self.min_ion_index as u64)
-                    .saturating_mul(self.ion_kinds.len() as u64);
+        // Proteins are estimated in parallel. Integer sums do not depend on
+        // the reduction order.
+        let totals = fasta
+            .targets
+            .par_iter()
+            .map(|(protein, sequence)| {
+                let boundaries = custom_cleavages
+                    .map(|library| library.boundaries_for(protein))
+                    .unwrap_or_default();
+                let mut totals = EstimateTotals::default();
+                for digest in
+                    enzyme.digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
+                {
+                    let sequence_len = digest.sequence.len() as u64;
+                    let origin = ProteinOccurrence::of_protein_digest(&digest);
+                    let variants = self
+                        .variable_variant_count_with(&rules, &digest, std::slice::from_ref(&origin))
+                        .saturating_mul(decoy_multiplier);
+                    let fragments_per_variant = sequence_len
+                        .saturating_sub(1)
+                        .saturating_sub(self.min_ion_index as u64)
+                        .saturating_mul(self.ion_kinds.len() as u64);
 
-                estimate.unmodified_peptides = estimate.unmodified_peptides.saturating_add(1);
-                estimate.modified_peptides = estimate.modified_peptides.saturating_add(variants);
-                estimate.fragments = estimate
-                    .fragments
-                    .saturating_add(variants.saturating_mul(fragments_per_variant));
-
-                digest_bytes = digest_bytes.saturating_add(
-                    (std::mem::size_of::<Digest>() as u64)
+                    // Peptide clones share some Arc allocations, but charging sequence and
+                    // protein-reference storage to every variant keeps the estimate safely high.
+                    let bytes_per_variant = (std::mem::size_of::<Peptide>() as u64)
                         .saturating_add(sequence_len)
-                        .saturating_add(ALLOCATION_OVERHEAD),
-                );
+                        .saturating_add(
+                            sequence_len.saturating_mul(std::mem::size_of::<f32>() as u64),
+                        )
+                        .saturating_add(std::mem::size_of::<Arc<str>>() as u64)
+                        .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3));
 
-                // Peptide clones share some Arc allocations, but charging sequence and
-                // protein-reference storage to every variant keeps the estimate safely high.
-                let bytes_per_variant = (std::mem::size_of::<Peptide>() as u64)
-                    .saturating_add(sequence_len)
-                    .saturating_add(sequence_len.saturating_mul(std::mem::size_of::<f32>() as u64))
-                    .saturating_add(std::mem::size_of::<Arc<str>>() as u64)
-                    .saturating_add(ALLOCATION_OVERHEAD.saturating_mul(3));
-                peptide_bytes =
-                    peptide_bytes.saturating_add(variants.saturating_mul(bytes_per_variant));
-            }
-        }
+                    totals = totals.add(EstimateTotals {
+                        unmodified_peptides: 1,
+                        modified_peptides: variants,
+                        fragments: variants.saturating_mul(fragments_per_variant),
+                        digest_bytes: (std::mem::size_of::<Digest>() as u64)
+                            .saturating_add(sequence_len)
+                            .saturating_add(ALLOCATION_OVERHEAD),
+                        peptide_bytes: variants.saturating_mul(bytes_per_variant),
+                    });
+                }
+                totals
+            })
+            .reduce(EstimateTotals::default, EstimateTotals::add);
+
+        let mut estimate = DatabaseMemoryEstimate {
+            unmodified_peptides: totals.unmodified_peptides,
+            modified_peptides: totals.modified_peptides,
+            fragments: totals.fragments,
+            ..DatabaseMemoryEstimate::default()
+        };
+        let digest_bytes = totals.digest_bytes;
+        let peptide_bytes = totals.peptide_bytes;
 
         let fragment_bytes = estimate
             .fragments
@@ -827,8 +841,16 @@ impl Parameters {
     }
 
     fn variable_variant_count(&self, digest: &Digest, origins: &[ProteinOccurrence]) -> u64 {
+        self.variable_variant_count_with(&self.variable_modifications(), digest, origins)
+    }
+
+    fn variable_variant_count_with(
+        &self,
+        rules: &[VariableRule],
+        digest: &Digest,
+        origins: &[ProteinOccurrence],
+    ) -> u64 {
         let sequence = digest.sequence.as_bytes();
-        let rules = self.variable_modifications();
         let library_sites = self
             .loaded_ptm_library
             .as_deref()
@@ -854,7 +876,7 @@ impl Parameters {
         let nterm = sequence.len();
         let cterm = sequence.len().saturating_add(1);
 
-        for rule in &rules {
+        for rule in rules {
             let mut add_site = |site: usize| {
                 let library_site = if site == nterm {
                     Site::Nterm
@@ -1547,6 +1569,32 @@ impl Parameters {
             label_channels,
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
+        }
+    }
+}
+
+/// Per-protein sums for [`Parameters::estimate_memory_with_custom_cleavages`].
+#[derive(Clone, Copy, Default)]
+struct EstimateTotals {
+    unmodified_peptides: u64,
+    modified_peptides: u64,
+    fragments: u64,
+    digest_bytes: u64,
+    peptide_bytes: u64,
+}
+
+impl EstimateTotals {
+    fn add(self, other: Self) -> Self {
+        Self {
+            unmodified_peptides: self
+                .unmodified_peptides
+                .saturating_add(other.unmodified_peptides),
+            modified_peptides: self
+                .modified_peptides
+                .saturating_add(other.modified_peptides),
+            fragments: self.fragments.saturating_add(other.fragments),
+            digest_bytes: self.digest_bytes.saturating_add(other.digest_bytes),
+            peptide_bytes: self.peptide_bytes.saturating_add(other.peptide_bytes),
         }
     }
 }

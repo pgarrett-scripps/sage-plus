@@ -746,6 +746,60 @@ fn estimates_variable_modification_expansion_before_allocation() {
     assert_eq!(parameters.modify_digests(digests).len(), 1_161);
 }
 
+/// Proteins are estimated in parallel; the totals equal the sum over any
+/// split of the FASTA, as the per-chunk prefilter estimates rely on.
+#[test]
+fn memory_estimate_totals_are_additive_over_protein_chunks() {
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            min_len: Some(4),
+            max_len: Some(30),
+            missed_cleavages: Some(1),
+            ..Default::default()
+        }),
+        variable_mods: Some(
+            [
+                ("M".to_string(), vec![VarModEntry::Mass(15.9949)]),
+                ("S".to_string(), vec![VarModEntry::Mass(79.9663)]),
+            ]
+            .into_iter()
+            .collect(),
+        ),
+        max_variable_mods: Some(2),
+        ..Default::default()
+    };
+    let parameters = builder.make_parameters();
+    let fasta = (0..64)
+        .map(|idx| {
+            let residues = "MSKPEPTIDESRAGMSLKWVTFISLLFLFSSAYSR";
+            let rotation = idx % residues.len();
+            format!(
+                ">sp|P{idx:05}|TEST\n{}{}\n",
+                &residues[rotation..],
+                &residues[..rotation]
+            )
+        })
+        .collect::<String>();
+    let fasta = Fasta::parse(fasta, "rev_", true).unwrap();
+
+    let full = parameters.estimate_memory(&fasta);
+    assert!(full.unmodified_peptides > 64);
+    assert!(full.modified_peptides > full.unmodified_peptides);
+    assert_eq!(
+        format!("{:?}", parameters.estimate_memory(&fasta)),
+        format!("{full:?}")
+    );
+
+    let chunks = fasta
+        .iter_chunks(7)
+        .map(|chunk| parameters.estimate_memory(&chunk))
+        .collect::<Vec<_>>();
+    let sum = |field: fn(&DatabaseMemoryEstimate) -> u64| chunks.iter().map(field).sum::<u64>();
+    assert_eq!(sum(|e| e.unmodified_peptides), full.unmodified_peptides);
+    assert_eq!(sum(|e| e.modified_peptides), full.modified_peptides);
+    assert_eq!(sum(|e| e.fragments), full.fragments);
+}
+
 #[test]
 fn protein_site_library_adds_targeted_combinations() {
     use crate::modification::{NeutralLossMode, SiteMode, VariableModification};
