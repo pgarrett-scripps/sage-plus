@@ -228,3 +228,54 @@ fn decoy_protein_groups_compete_with_their_target_group() {
         assert_eq!(features[1].protein_group_q, features[4].protein_group_q);
     }
 }
+
+#[test]
+fn decoys_pair_with_the_best_supported_group_of_their_target() {
+    let db = IndexedDatabase {
+        peptides: vec![
+            protein_peptide("PEPTIDEK", false, "P1"),
+            protein_peptide("LLLLLK", false, "P1"),
+            protein_peptide("KEDITPEP", true, "P1"),
+            protein_peptide("GGGGGK", false, "P5"),
+        ],
+        decoy_tag: "rev_".into(),
+        generate_decoys: true,
+        ..Default::default()
+    };
+    // A low-confidence peptide can leave P1 with a fallback group of its own;
+    // the decoy still competes against the group with P1's real evidence.
+    // P5 is not a member of any reported group string, so it is not paired.
+    let features = [
+        grouped(0, "P1/P2", 10.0),
+        grouped(1, "P1", 0.5),
+        grouped(2, "rev_P1", 4.0),
+        grouped(3, "P1/P2", 9.0),
+    ];
+    let target_groups = target_protein_groups(&db, &features);
+    assert_eq!(target_groups.get("P1"), Some(&"P1/P2"));
+    assert_eq!(target_groups.get("P2"), Some(&"P1/P2"));
+    assert_eq!(target_groups.get("P5"), None);
+    assert_eq!(
+        decoy_competition_group(&db, &features[2], &target_groups).as_deref(),
+        Some("P1/P2")
+    );
+}
+
+#[test]
+fn fasta_decoy_tags_outside_the_prefix_still_pair() {
+    let db = IndexedDatabase {
+        peptides: vec![
+            protein_peptide("PEPTIDEK", false, "sp|P1|X"),
+            protein_peptide("KEDITPEP", true, "sp|rev_P1|X"),
+        ],
+        decoy_tag: "rev_".into(),
+        generate_decoys: false,
+        ..Default::default()
+    };
+    let features = [grouped(0, "sp|P1|X", 10.0), grouped(1, "sp|rev_P1|X", 4.0)];
+    let target_groups = target_protein_groups(&db, &features);
+    assert_eq!(
+        decoy_competition_group(&db, &features[1], &target_groups).as_deref(),
+        Some("sp|P1|X")
+    );
+}

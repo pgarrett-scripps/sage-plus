@@ -346,29 +346,45 @@ pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> u
 }
 
 /// Target protein accession to the single protein group reported for it.
-/// When an accession appears in several groups, the smallest group string is
-/// used so the mapping does not depend on feature order.
+/// Only groups that list the accession as a member are considered. When an
+/// accession belongs to several reported groups, the group with the best
+/// target score wins (ties go to the smallest group string), so a fallback
+/// group from a low-confidence peptide does not take the pairing away from
+/// the group that carries the protein's real evidence.
 fn target_protein_groups<'a>(
     db: &'a IndexedDatabase,
     features: &'a [Feature],
 ) -> FnvHashMap<&'a str, &'a str> {
-    let mut groups: FnvHashMap<&str, &str> = FnvHashMap::default();
+    let mut best: FnvHashMap<&str, f32> = FnvHashMap::default();
     for feat in features.iter().filter(|x| x.num_protein_groups == 1) {
-        let peptide = &db[feat.peptide_idx];
         let Some(group) = feat.protein_groups.as_deref() else {
             continue;
         };
-        if peptide.decoy {
+        if db[feat.peptide_idx].decoy {
             continue;
         }
-        for protein in peptide.proteins.iter() {
+        let score = best.entry(group).or_insert(f32::NEG_INFINITY);
+        *score = score.max(feat.discriminant_score);
+    }
+
+    let mut groups: FnvHashMap<&str, (&str, f32)> = FnvHashMap::default();
+    for (&group, &score) in &best {
+        for protein in group.split('/') {
             groups
-                .entry(protein.as_ref())
-                .and_modify(|current| *current = (*current).min(group))
-                .or_insert(group);
+                .entry(protein)
+                .and_modify(|current| {
+                    let (current_group, current_score) = *current;
+                    if score > current_score || (score == current_score && group < current_group) {
+                        *current = (group, score);
+                    }
+                })
+                .or_insert((group, score));
         }
     }
     groups
+        .into_iter()
+        .map(|(protein, (group, _))| (protein, group))
+        .collect()
 }
 
 /// Decoy features are not grouped, so a decoy competes under the group of the
@@ -381,12 +397,14 @@ fn decoy_competition_group(
 ) -> Option<String> {
     let peptide = &db[feat.peptide_idx];
     let target = match peptide.proteins.as_slice() {
-        [protein] if db.generate_decoys => Some(protein.as_ref()),
-        [protein] => protein.strip_prefix(db.decoy_tag.as_str()),
+        [protein] if db.generate_decoys => Some(protein.to_string()),
+        [protein] => protein
+            .find(db.decoy_tag.as_str())
+            .map(|at| format!("{}{}", &protein[..at], &protein[at + db.decoy_tag.len()..])),
         _ => None,
     };
     target
-        .and_then(|protein| target_groups.get(protein))
+        .and_then(|protein| target_groups.get(protein.as_str()))
         .map(|group| group.to_string())
         .or_else(|| feat.protein_groups.clone())
 }
