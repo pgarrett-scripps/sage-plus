@@ -34,3 +34,49 @@ fn empty_filter_returns_none() {
     let lr = LinearRegression::fit::<_, 1>(&items, |_| false, |_| [1.0], |&y| y);
     assert!(lr.is_none());
 }
+
+#[test]
+fn fit_is_bitwise_deterministic_across_parallel_runs() {
+    // Ill-conditioned, large-magnitude rows make floating-point summation
+    // order visible in the fitted coefficients.
+    let items: Vec<[f64; 4]> = (0..200_000)
+        .map(|i| {
+            let x = i as f64;
+            [
+                (x * 0.37).sin() * 1e3,
+                (x * 0.011).cos() * 1e-2 + x * 1e-5,
+                ((x * 0.7).sin() * 1e4).fract(),
+                x.sqrt() * 1e2 + (x * 1.3).sin(),
+            ]
+        })
+        .collect();
+    let fit = || {
+        LinearRegression::fit::<_, 4>(
+            &items,
+            |row| row[2] > -0.9,
+            |row| [row[0], row[1], row[2], 1.0],
+            |row| row[3],
+        )
+        .unwrap()
+    };
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap();
+    let bits = |lr: &LinearRegression| {
+        (
+            lr.beta.iter().map(|b| b.to_bits()).collect::<Vec<_>>(),
+            lr.r2.to_bits(),
+        )
+    };
+    let expected = bits(&pool.install(fit));
+    for _ in 0..20 {
+        assert_eq!(bits(&pool.install(fit)), expected);
+    }
+    // Independent of the number of worker threads, too.
+    let serial = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    assert_eq!(bits(&serial.install(fit)), expected);
+}

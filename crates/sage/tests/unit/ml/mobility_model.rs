@@ -184,6 +184,41 @@ fn mobility_hydrophobicity_handles_scale_extremes_and_unknowns() {
 }
 
 #[test]
+fn residue_class_features_count_the_intended_residues() {
+    let map = amino_acid_map();
+    // 4 bulky (LVIW), 2 polar (ST), 3 positive (RKH), 1 negative (D),
+    // 3 tiny (GAS), 3 branched (LVI); C, M and P belong to no class
+    let peptide = Peptide {
+        sequence: b"LVWIRKHDGACMSTP".to_vec().into(),
+        modifications: crate::peptide::CompactModifications::default(),
+        monoisotopic: 1_000.0,
+        ..Peptide::default()
+    };
+    let expected = [4.0, 2.0, 3.0, 1.0, 3.0, 3.0];
+
+    let row = basic_embed(&peptide, 2, &map);
+    assert_eq!(
+        [
+            row[BASIC_NUM_BULKY],
+            row[BASIC_NUM_UC_POLAR],
+            row[BASIC_NUM_POSITIVE],
+            row[BASIC_NUM_NEGATIVE],
+            row[BASIC_NUM_TINY],
+            row[BASIC_NUM_BRANCHED],
+        ],
+        expected
+    );
+
+    let row = enriched_embed(&peptide, 2, &map);
+    let start = ENRICHED_FEATURES - ENRICHED_GLOBAL_FEATURES - ENRICHED_PROPERTY_FEATURES;
+    let length = peptide.sequence.len() as f64;
+    assert_eq!(
+        row[start..start + ENRICHED_PROPERTY_FEATURES],
+        expected.map(|count| count / length)
+    );
+}
+
+#[test]
 fn basic_mobility_prediction_runs_cross_fitted_end_to_end() {
     let (db, mut features) = synthetic_mobility_data(420);
     let settings = IonMobilitySettings {

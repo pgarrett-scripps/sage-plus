@@ -356,7 +356,13 @@ impl FeatureMap {
         spectra: &[ProcessedSpectrum],
         alignments: &[Alignment],
     ) -> HashMap<(PrecursorId, bool), QuantifiedPeak, fnv::FnvBuildHasher> {
-        let scores: DashMap<(PrecursorId, bool), Grid, fnv::FnvBuildHasher> = DashMap::default();
+        // Grids are keyed by the anchor file as well. With MBR every precursor
+        // has a single cross-run anchor (`usize::MAX`); without MBR each
+        // identified file has its own anchor RT, so it is traced on a private
+        // single-file grid centered on that anchor.
+        let scores: DashMap<(PrecursorId, bool, usize), Grid, fnv::FnvBuildHasher> =
+            DashMap::default();
+        let n_files = alignments.len();
 
         log::info!("tracing MS1 features");
 
@@ -377,7 +383,12 @@ impl FeatureMap {
                         false => PrecursorId::Charged((entry.peptide, entry.charge)),
                     };
 
-                    let mut grid = scores.entry((id, entry.decoy)).or_insert_with(|| {
+                    let (anchor, row) = match self.settings.mbr {
+                        true => (usize::MAX, spectrum.file_id),
+                        false => (entry.file_id, 0),
+                    };
+
+                    let mut grid = scores.entry((id, entry.decoy, anchor)).or_insert_with(|| {
                         let p = &db[entry.peptide];
                         let composition = p
                             .sequence
@@ -388,10 +399,17 @@ impl FeatureMap {
                             composition.carbon,
                             composition.sulfur,
                         );
-                        Grid::new(entry, rt_tol, dist, alignments.len(), GRID_SIZE)
+                        match self.settings.mbr {
+                            true => Grid::new(entry, rt_tol, dist, n_files, GRID_SIZE),
+                            false => {
+                                let mut grid = Grid::new(entry, rt_tol, dist, 1, GRID_SIZE);
+                                grid.reference_file_id = 0;
+                                grid
+                            }
+                        }
                     });
 
-                    grid.add_entry(rt, entry.isotope, spectrum.file_id, intensity);
+                    grid.add_entry(rt, entry.isotope, row, intensity);
                 };
 
                 if spectrum.mobilities.is_empty() {
@@ -419,30 +437,41 @@ impl FeatureMap {
 
         log::info!("integrating MS1 features");
 
-        scores
+        let mut quantified = scores
             .into_par_iter()
-            .filter_map(|(key, mut grid)| {
+            .filter_map(|((id, decoy, anchor), mut grid)| {
                 // MS1 ions have been added to any relevant grids, so we now
                 // attempt to trace the peaks, find the best peak, and integrate
                 // it across all of the files
                 let mut traces = grid.summarize_traces();
-                let (peak, intensities, mut file_evidence) =
-                    traces.integrate_with_evidence(&self.settings)?;
+                let (peak, areas, evidence) = traces.integrate_with_evidence(&self.settings)?;
+                // Expand a single-file (MBR disabled) grid back to all files
+                let (intensities, mut file_evidence) = match anchor {
+                    usize::MAX => (areas, evidence),
+                    anchor => {
+                        let mut intensities = vec![None; n_files];
+                        let mut file_evidence = vec![None; n_files];
+                        intensities[anchor] = areas[0];
+                        file_evidence[anchor] = evidence.into_iter().next().flatten();
+                        (intensities, file_evidence)
+                    }
+                };
                 for (file_id, evidence) in file_evidence.iter_mut().enumerate() {
                     if let Some(evidence) = evidence {
                         evidence.transfer_candidate = self.settings.mbr
-                            && !self.ms2_confirmed_strict.contains(&(key.0, file_id));
+                            && !self.ms2_confirmed_strict.contains(&(id, file_id));
                     }
                 }
-                let ms2_confirmed = (0..alignments.len())
-                    .map(|file_id| !key.1 && self.ms2_confirmed.contains(&(key.0, file_id)))
+                let ms2_confirmed = (0..n_files)
+                    .map(|file_id| !decoy && self.ms2_confirmed.contains(&(id, file_id)))
                     .collect();
-                let ms2_confirmed_strict = (0..alignments.len())
-                    .map(|file_id| !key.1 && self.ms2_confirmed_strict.contains(&(key.0, file_id)))
+                let ms2_confirmed_strict = (0..n_files)
+                    .map(|file_id| !decoy && self.ms2_confirmed_strict.contains(&(id, file_id)))
                     .collect();
 
                 Some((
-                    key,
+                    (id, decoy),
+                    anchor,
                     QuantifiedPeak {
                         peak,
                         intensities,
@@ -452,7 +481,45 @@ impl FeatureMap {
                     },
                 ))
             })
-            .collect::<HashMap<_, _, _>>()
+            .collect::<Vec<_>>();
+
+        // Merge per-file peaks in a fixed (precursor, anchor file) order so the
+        // reported peak does not depend on thread scheduling.
+        quantified.par_sort_unstable_by_key(|(key, anchor, _)| (*key, *anchor));
+        let mut peaks: HashMap<_, QuantifiedPeak, fnv::FnvBuildHasher> = HashMap::default();
+        for (key, _, quantified) in quantified {
+            match peaks.entry(key) {
+                std::collections::hash_map::Entry::Occupied(mut merged) => {
+                    merged.get_mut().merge(quantified)
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(quantified);
+                }
+            }
+        }
+        peaks
+    }
+}
+
+impl QuantifiedPeak {
+    /// Combine the peak of another anchor file into this one: per-file signals
+    /// are taken from whichever anchor observed them, and the highest-scoring
+    /// peak (earliest anchor on ties) represents the precursor.
+    fn merge(&mut self, other: QuantifiedPeak) {
+        for (file, (area, evidence)) in other
+            .intensities
+            .into_iter()
+            .zip(other.file_evidence)
+            .enumerate()
+        {
+            if area.is_some() {
+                self.intensities[file] = area;
+                self.file_evidence[file] = evidence;
+            }
+        }
+        if other.peak.score > self.peak.score {
+            self.peak = other.peak;
+        }
     }
 }
 

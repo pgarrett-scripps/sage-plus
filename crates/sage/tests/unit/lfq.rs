@@ -390,3 +390,170 @@ fn strict_ms2_evidence_requires_both_psm_and_peptide_acceptance() {
     assert!(!map.ms2_confirmed_strict.contains(&(id, 1)));
     assert!(!map.ms2_confirmed_strict.contains(&(id, 2)));
 }
+
+fn identity_alignment(file_id: usize) -> Alignment {
+    Alignment {
+        file_id,
+        max_rt: 1.0,
+        slope: 1.0,
+        intercept: 0.0,
+        knots: Vec::new(),
+    }
+}
+
+/// Synthesize MS1 spectra with an identical isotope envelope eluting at the
+/// given `(file_id, rt)` apexes.
+fn eluting_ms1_spectra(
+    map: &FeatureMap,
+    db: &IndexedDatabase,
+    apexes: &[(usize, f32)],
+) -> Vec<ProcessedSpectrum> {
+    let composition = db.peptides[0]
+        .sequence
+        .iter()
+        .map(|r| composition(*r))
+        .sum::<Composition>();
+    let dist = crate::isotopes::peptide_isotopes(composition.carbon, composition.sulfur);
+    let mut masses = (0..N_ISOTOPES)
+        .map(|isotope| {
+            let range = map
+                .ranges
+                .iter()
+                .find(|range| !range.decoy && range.isotope == isotope)
+                .unwrap();
+            (isotope, (range.mass_lo + range.mass_hi) / 2.0)
+        })
+        .collect::<Vec<_>>();
+    masses.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+    let rt_tol = map.settings.rt_tolerance();
+    apexes
+        .iter()
+        .flat_map(|&(file_id, anchor)| {
+            let masses = masses.clone();
+            (-40..=40).map(move |step| {
+                let rt = anchor + step as f32 * rt_tol / 50.0;
+                let apex = (-0.5 * (step as f32 / 10.0).powi(2)).exp() * 1000.0;
+                ProcessedSpectrum {
+                    level: 1,
+                    file_id,
+                    scan_start_time: rt,
+                    masses: masses.iter().map(|(_, mass)| *mass).collect(),
+                    intensities: masses
+                        .iter()
+                        // Slightly off the theoretical envelope: a perfect
+                        // match rounds the spectral similarity above 1.0
+                        .map(|(isotope, _)| dist[*isotope] * apex * (1.0 - 0.05 * *isotope as f32))
+                        .collect(),
+                    ..Default::default()
+                }
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn disabling_mbr_quantifies_each_file_against_its_own_anchor() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let features = [(0, 0.2), (1, 0.6)].map(|(file_id, aligned_rt)| Feature {
+        peptide_idx: PeptideIx(0),
+        peptide_q: 0.0,
+        spectrum_q: 0.0,
+        label: 1,
+        file_id,
+        aligned_rt,
+        charge: 2,
+        ..Feature::default()
+    });
+    let settings = LfqSettings {
+        mbr: false,
+        ..LfqSettings::default()
+    };
+    let map = build_feature_map(settings, (2, 2), &features, &db);
+    let spectra = eluting_ms1_spectra(&map, &db, &[(0, 0.2), (1, 0.6)]);
+    let alignments = [identity_alignment(0), identity_alignment(1)];
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let key = (PrecursorId::Combined(PeptideIx(0)), false);
+    let first = pool.install(|| map.quantify(&db, &spectra, &alignments));
+    let peak = &first[&key];
+    let areas = peak
+        .intensities
+        .iter()
+        .map(|area| area.expect("each identified file has a quantified peak"))
+        .collect::<Vec<_>>();
+    assert!(
+        (areas[0] - areas[1]).abs() <= areas[0] * 1e-4,
+        "identical files quantified differently: {areas:?}"
+    );
+    assert_eq!(peak.ms2_confirmed, vec![true, true]);
+    for evidence in &peak.file_evidence {
+        let evidence = evidence.as_ref().unwrap();
+        assert!(!evidence.transfer_candidate);
+        assert_eq!(evidence.rt_shift_bins, 0);
+    }
+
+    for _ in 0..20 {
+        let repeat = pool.install(|| map.quantify(&db, &spectra, &alignments));
+        let repeat = &repeat[&key];
+        assert_eq!(repeat.intensities, peak.intensities);
+        assert_eq!(repeat.peak.score.to_bits(), peak.peak.score.to_bits());
+        assert_eq!(repeat.peak.rt, peak.peak.rt);
+    }
+}
+
+#[test]
+fn mbr_traces_one_anchor_across_files_deterministically() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        peptide_q: 0.0,
+        spectrum_q: 0.0,
+        label: 1,
+        file_id: 0,
+        aligned_rt: 0.4,
+        charge: 2,
+        ..Feature::default()
+    };
+    let map = build_feature_map(LfqSettings::default(), (2, 2), &[feature], &db);
+    let spectra = eluting_ms1_spectra(&map, &db, &[(0, 0.4), (1, 0.4), (2, 0.4)]);
+    let alignments = [0, 1, 2].map(identity_alignment);
+
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build()
+        .unwrap();
+    let key = (PrecursorId::Combined(PeptideIx(0)), false);
+    let first = pool.install(|| map.quantify(&db, &spectra, &alignments));
+    let peak = &first[&key];
+    let reference = peak.intensities[0].unwrap();
+    assert!(peak
+        .intensities
+        .iter()
+        .all(|area| (area.unwrap() - reference).abs() <= reference * 1e-4));
+    assert_eq!(peak.ms2_confirmed, vec![true, false, false]);
+    let transfers = peak
+        .file_evidence
+        .iter()
+        .map(|evidence| evidence.as_ref().unwrap().transfer_candidate)
+        .collect::<Vec<_>>();
+    assert_eq!(transfers, vec![false, true, true]);
+
+    for _ in 0..20 {
+        let repeat = pool.install(|| map.quantify(&db, &spectra, &alignments));
+        let repeat = &repeat[&key];
+        assert_eq!(repeat.intensities, peak.intensities);
+        assert_eq!(repeat.peak.score.to_bits(), peak.peak.score.to_bits());
+    }
+}
