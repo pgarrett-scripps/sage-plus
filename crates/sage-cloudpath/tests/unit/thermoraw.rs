@@ -119,24 +119,27 @@ fn trailer_levels_follow_master_scans() {
 }
 
 #[test]
-fn misaligned_events_defer_to_trailers() {
-    // Events shifted by one scan, as decoded from some Orbitrap Fusion files.
-    let masters = (0..1000)
-        .map(|idx| Some(if idx % 4 == 0 { 0 } else { idx / 4 * 4 + 1 }))
-        .collect::<Vec<_>>();
-    let levels = trailer_levels(1, &masters);
-    let shifted = (1..=1000)
-        .map(|scan| record(scan, if scan % 4 == 2 { 1 } else { 2 }))
-        .collect::<Vec<_>>();
-    let disagreements = event_level_disagreements(1, &shifted, &levels);
-    assert_eq!(disagreements, 500);
-    assert!(events_misaligned(disagreements, shifted.len()));
+fn dependent_scans_follow_their_master_scan() {
+    // Events decoded out of step on an Orbitrap Fusion file.
+    assert_eq!(corrected_level(1, Some(2), false), Some(2));
+    assert_eq!(corrected_level(1, Some(3), false), Some(3));
+    assert_eq!(corrected_level(4, Some(2), true), Some(2));
+    assert_eq!(corrected_level(2, Some(2), true), None);
+    assert_eq!(corrected_level(3, Some(3), false), None);
+}
 
-    let aligned = (1..=1000)
-        .map(|scan| record(scan, levels[scan as usize - 1].unwrap()))
-        .collect::<Vec<_>>();
-    assert_eq!(event_level_disagreements(1, &aligned, &levels), 0);
-    assert!(!events_misaligned(10, 1000));
+#[test]
+fn scans_without_a_master_keep_plausible_msn_events() {
+    // DIA and targeted MS2 scans have no master scan.
+    assert_eq!(corrected_level(2, Some(1), true), None);
+    // A garbled event on an MS1 scan.
+    assert_eq!(corrected_level(4, Some(1), false), Some(1));
+    assert_eq!(corrected_level(1, Some(1), false), None);
+    // No trailer master scan number at all.
+    assert_eq!(corrected_level(2, None, false), None);
+    assert!(plausible_precursor_mz(806.96));
+    assert!(!plausible_precursor_mz(7.7e-304));
+    assert!(!plausible_precursor_mz(f64::NAN));
 }
 
 #[test]
