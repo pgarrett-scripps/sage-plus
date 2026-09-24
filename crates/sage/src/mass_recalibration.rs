@@ -872,6 +872,42 @@ pub fn select_group_models(
         .collect()
 }
 
+/// Rank-1 discovery PSMs, each with its spectrum's stratum (acquisition
+/// group) and sample index, reduced to the targets at `max_q` Poisson
+/// spectrum q-value computed within each stratum. Returned in sample order.
+///
+/// Pooled q-values let a low-accuracy group searched with a wide fragment
+/// window flood the decoy counts, leaving almost no confident PSMs in an
+/// accurate group of the same file.
+pub fn confident_per_group<K: Ord>(
+    psms: Vec<(K, usize, crate::scoring::Feature)>,
+    max_q: f32,
+) -> Vec<(usize, crate::scoring::Feature)> {
+    let mut strata: std::collections::BTreeMap<K, Vec<_>> = Default::default();
+    for (key, index, feature) in psms {
+        strata.entry(key).or_default().push((index, feature));
+    }
+    let mut confident = Vec::new();
+    for mut members in strata.into_values() {
+        members.sort_unstable_by(|left, right| {
+            left.1
+                .poisson
+                .total_cmp(&right.1.poisson)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        let (indices, mut features): (Vec<_>, Vec<_>) = members.into_iter().unzip();
+        crate::ml::qvalue::spectrum_q_value_by(&mut features, |feature| feature.poisson);
+        confident.extend(
+            indices
+                .into_iter()
+                .zip(features)
+                .filter(|(_, feature)| feature.label == 1 && feature.spectrum_q <= max_q),
+        );
+    }
+    confident.sort_unstable_by_key(|(index, _)| *index);
+    confident
+}
+
 /// Indices, in ascending order, of a sample of at most about `cap` items,
 /// stratified by `keys` (one per item, in acquisition order).
 ///
