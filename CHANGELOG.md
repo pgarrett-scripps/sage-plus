@@ -11,9 +11,10 @@ entries are retained below for provenance.
 
 ### Added
 - `mass_recalibration` (`"off"` by default; `"static"`, `"linear"`, or `"auto"`) corrects
-  precursor and fragment m/z during the search. A sampled discovery search of each file
-  selects rank-1 target PSMs at 1% q-value, fits per-file precursor and fragment models on
-  a deterministic fit split, and accepts a static offset, a linear RT and/or m/z term, or a
+  precursor and fragment m/z during the search. A sampled discovery search of each file (up to
+  25,000 MS2 spectra, stratified by acquisition group so interleaved scan cycles do not alias
+  with the sampling stride) selects rank-1 target PSMs at 1% q-value, fits per-file precursor
+  and fragment models on a deterministic fit split, and accepts a static offset, a linear RT and/or m/z term, or a
   smooth additive curve (`auto` only, at most five intervals) only when it improves held-out
   residuals without worsening any RT or m/z tercile. The file is then searched again with
   corrected masses for targets and decoys alike. `precursor_ppm`, `fragment_ppm`, and
