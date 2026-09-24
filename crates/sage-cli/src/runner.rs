@@ -17,9 +17,9 @@ use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::mass_recalibration::{
-    select_group_models, select_model, stable_hash, stratified_sample, FileMassCorrection,
-    GroupMassCorrection, MassErrorPoint, MassModelKind, MassRecalibration, MassRecalibrationMode,
-    ModelSelection, RecalibrationOptions,
+    confident_per_group, select_group_models, select_model, stable_hash, stratified_sample,
+    FileMassCorrection, GroupMassCorrection, MassErrorPoint, MassModelKind, MassRecalibration,
+    MassRecalibrationMode, ModelSelection, RecalibrationOptions,
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
@@ -357,7 +357,8 @@ pub struct MassRecalibrationFileStats {
     pub file_id: usize,
     /// MS2 spectra searched in the discovery pass.
     pub discovery_spectra: usize,
-    /// Rank-1 target PSMs at 1% Poisson spectrum q-value in the discovery pass.
+    /// Rank-1 target PSMs at 1% Poisson spectrum q-value in the discovery
+    /// pass, with q-values computed within each acquisition group.
     pub discovery_psms: usize,
     pub discovery_ms: u64,
     pub precursor: sage_core::mass_recalibration::ModelSelection,
