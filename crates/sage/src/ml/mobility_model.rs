@@ -267,36 +267,14 @@ fn amino_acid_map() -> [usize; 26] {
     map
 }
 
-const BULKY_AA_IDXS: [usize; 6] = [
-    b'L' as usize - b'A' as usize,
-    b'V' as usize - b'A' as usize,
-    b'I' as usize - b'A' as usize,
-    b'F' as usize - b'A' as usize,
-    b'W' as usize - b'A' as usize,
-    b'Y' as usize - b'A' as usize,
-];
-const UNCHARGED_POLAR_AA_IDXS: [usize; 4] = [
-    b'S' as usize - b'A' as usize,
-    b'T' as usize - b'A' as usize,
-    b'N' as usize - b'A' as usize,
-    b'Q' as usize - b'A' as usize,
-];
-const POSITIVE_AA_IDXS: [usize; 3] = [
-    b'R' as usize - b'A' as usize,
-    b'K' as usize - b'A' as usize,
-    b'H' as usize - b'A' as usize,
-];
-const NEGATIVE_AA_IDXS: [usize; 2] = [b'D' as usize - b'A' as usize, b'E' as usize - b'A' as usize];
-const TINY_AA_IDXS: [usize; 3] = [
-    b'G' as usize - b'A' as usize,
-    0,
-    b'S' as usize - b'A' as usize,
-];
-const BRANCHED_AA_IDXS: [usize; 3] = [
-    b'L' as usize - b'A' as usize,
-    b'I' as usize - b'A' as usize,
-    b'V' as usize - b'A' as usize,
-];
+// Residue classes are matched on the one-letter code itself; they are not
+// positions in `VALID_AA`.
+const BULKY_AA: &[u8] = b"LVIFWY";
+const UNCHARGED_POLAR_AA: &[u8] = b"STNQ";
+const POSITIVE_AA: &[u8] = b"RKH";
+const NEGATIVE_AA: &[u8] = b"DE";
+const TINY_AA: &[u8] = b"GAS";
+const BRANCHED_AA: &[u8] = b"LIV";
 
 const BASIC_FEATURES: usize = VALID_AA.len() * 4 + 12;
 const BASIC_PCT_START: usize = VALID_AA.len();
@@ -327,12 +305,12 @@ fn basic_embed(peptide: &Peptide, charge: u8, map: &[usize; 26]) -> [f64; BASIC_
             x if x > cterm => embedding[BASIC_C_TERMINAL + idx] += 1.0,
             _ => {}
         }
-        embedding[BASIC_NUM_BULKY] += usize::from(BULKY_AA_IDXS.contains(&idx)) as f64;
-        embedding[BASIC_NUM_UC_POLAR] += usize::from(UNCHARGED_POLAR_AA_IDXS.contains(&idx)) as f64;
-        embedding[BASIC_NUM_POSITIVE] += usize::from(POSITIVE_AA_IDXS.contains(&idx)) as f64;
-        embedding[BASIC_NUM_NEGATIVE] += usize::from(NEGATIVE_AA_IDXS.contains(&idx)) as f64;
-        embedding[BASIC_NUM_TINY] += usize::from(TINY_AA_IDXS.contains(&idx)) as f64;
-        embedding[BASIC_NUM_BRANCHED] += usize::from(BRANCHED_AA_IDXS.contains(&idx)) as f64;
+        embedding[BASIC_NUM_BULKY] += usize::from(BULKY_AA.contains(residue)) as f64;
+        embedding[BASIC_NUM_UC_POLAR] += usize::from(UNCHARGED_POLAR_AA.contains(residue)) as f64;
+        embedding[BASIC_NUM_POSITIVE] += usize::from(POSITIVE_AA.contains(residue)) as f64;
+        embedding[BASIC_NUM_NEGATIVE] += usize::from(NEGATIVE_AA.contains(residue)) as f64;
+        embedding[BASIC_NUM_TINY] += usize::from(TINY_AA.contains(residue)) as f64;
+        embedding[BASIC_NUM_BRANCHED] += usize::from(BRANCHED_AA.contains(residue)) as f64;
     }
     for idx in 0..VALID_AA.len() {
         embedding[BASIC_PCT_START + idx] = embedding[idx] / length;
@@ -395,12 +373,12 @@ fn enriched_embed(peptide: &Peptide, charge: u8, map: &[usize; 26]) -> [f64; ENR
         if aa < ENRICHED_AA_FEATURES {
             counts[aa] += 1.0;
         }
-        properties[0] += usize::from(BULKY_AA_IDXS.contains(&aa)) as f64;
-        properties[1] += usize::from(UNCHARGED_POLAR_AA_IDXS.contains(&aa)) as f64;
-        properties[2] += usize::from(POSITIVE_AA_IDXS.contains(&aa)) as f64;
-        properties[3] += usize::from(NEGATIVE_AA_IDXS.contains(&aa)) as f64;
-        properties[4] += usize::from(TINY_AA_IDXS.contains(&aa)) as f64;
-        properties[5] += usize::from(BRANCHED_AA_IDXS.contains(&aa)) as f64;
+        properties[0] += usize::from(BULKY_AA.contains(&residue)) as f64;
+        properties[1] += usize::from(UNCHARGED_POLAR_AA.contains(&residue)) as f64;
+        properties[2] += usize::from(POSITIVE_AA.contains(&residue)) as f64;
+        properties[3] += usize::from(NEGATIVE_AA.contains(&residue)) as f64;
+        properties[4] += usize::from(TINY_AA.contains(&residue)) as f64;
+        properties[5] += usize::from(BRANCHED_AA.contains(&residue)) as f64;
         let bin =
             (idx * ENRICHED_HYDROPHOBIC_FEATURES / length).min(ENRICHED_HYDROPHOBIC_FEATURES - 1);
         hydro_bins[bin] += hydrophobicity(residue);
