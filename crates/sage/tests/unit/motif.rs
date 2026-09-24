@@ -199,7 +199,7 @@ mod database {
             .any(|rule| rule.specificity == motif() && rule.sites == vec![Site::Sequence(3)]));
         // Retention and mobility features count the placed motif modification.
         assert_eq!(
-            crate::ml::retention_model::variable_mod_count(modified, motif(), 203.079373),
+            crate::ml::retention_model::variable_mod_count(modified, motif(), 203.07937),
             1.0
         );
         // Each occurrence alone decides differently.

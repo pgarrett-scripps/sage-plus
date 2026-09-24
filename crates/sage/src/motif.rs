@@ -202,7 +202,7 @@ impl SiteMotif {
                 spelled.push('*');
             }
             canonical.push(spelled);
-            elements.extend(std::iter::repeat(set).take(repeat));
+            elements.extend(std::iter::repeat_n(set, repeat));
             if elements.len() > MAX_MOTIF_WIDTH {
                 return Err(format!(
                     "motif `{pattern}` is wider than {MAX_MOTIF_WIDTH} residues"
