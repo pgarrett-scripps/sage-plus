@@ -158,3 +158,23 @@ fn scale_names_round_trip() {
         BrukerMobilityScale::Calibrated
     );
 }
+
+#[test]
+fn analysis_tdf_is_resolved_like_timsrust() {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let tdf = directory.join("analysis.tdf");
+    assert_eq!(analysis_tdf(&directory), Some(tdf.clone()));
+    assert_eq!(analysis_tdf(&tdf), Some(tdf.clone()));
+    assert_eq!(analysis_tdf(directory.join("analysis.tdf_bin")), Some(tdf));
+    // Only analysis.tdf, no analysis.tdf_bin: timsrust does not read it as TDF.
+    let partial = write_tdf(&[], &[]);
+    assert_eq!(analysis_tdf(partial.path()), None);
+
+    let from_bin = MobilityCalibration::from_path(directory.join("analysis.tdf_bin")).unwrap();
+    let from_directory = MobilityCalibration::from_path(&directory).unwrap();
+    assert_eq!(from_bin.dominant(), from_directory.dominant());
+    assert_eq!(
+        MobilityCalibration::dda_precursor_scans(directory.join("analysis.tdf_bin")).unwrap(),
+        MobilityCalibration::dda_precursor_scans(&directory).unwrap()
+    );
+}

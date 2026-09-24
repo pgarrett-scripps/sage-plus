@@ -148,12 +148,20 @@ impl MobilityScale {
         path: &Path,
         scale: BrukerMobilityScale,
     ) -> Result<Self, crate::tims_mobility::MobilityCalibrationError> {
-        Ok(match scale {
+        Ok(match scale.effective_for(path) {
             BrukerMobilityScale::Calibrated => Self::Calibrated {
                 calibration: MobilityCalibration::from_path(path)?,
                 precursors: MobilityCalibration::dda_precursor_scans(path)?,
             },
-            BrukerMobilityScale::Linear => Self::Linear,
+            BrukerMobilityScale::Linear => {
+                if scale == BrukerMobilityScale::Calibrated {
+                    log::warn!(
+                        "{}: no analysis.tdf calibration table, reporting ion mobility on the linear scale",
+                        path.display()
+                    );
+                }
+                Self::Linear
+            }
         })
     }
 
