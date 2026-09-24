@@ -147,6 +147,10 @@ fn main() -> anyhow::Result<()> {
             .help("Print eligible modification sites and bounded peptide variants as JSON"))
         .arg(Arg::new("preview-protein").long("preview-protein").value_name("ACCESSION").requires_all(["preview-modifications", "preview-start"]))
         .arg(Arg::new("preview-start").long("preview-start").value_name("POSITION").value_parser(value_parser!(u32).range(1..)).requires_all(["preview-modifications", "preview-protein"]))
+        .arg(Arg::new("preview-before").long("preview-before").value_name("RESIDUES").requires("preview-modifications")
+            .help("Protein residues immediately before the preview peptide, for motif sites"))
+        .arg(Arg::new("preview-after").long("preview-after").value_name("RESIDUES").requires("preview-modifications")
+            .help("Protein residues immediately after the preview peptide, for motif sites"))
         .arg(Arg::new("peptide-position").long("peptide-position")
             .requires("preview-modifications").default_value("internal")
             .value_parser(["internal", "nterm", "cterm", "full"])
@@ -201,8 +205,14 @@ fn main() -> anyhow::Result<()> {
                 *matches.get_one::<u32>("preview-start").unwrap(),
             )
         });
-        let preview = sage_cli::modification_preview::preview_with_context(
-            &config, sequence, position, limit, context,
+        let flank = |name: &str| matches.get_one::<String>(name).map_or("", String::as_str);
+        let preview = sage_cli::modification_preview::preview_with_flanks(
+            &config,
+            sequence,
+            position,
+            limit,
+            context,
+            (flank("preview-before"), flank("preview-after")),
         )?;
         println!("{}", serde_json::to_string_pretty(&preview)?);
         return Ok(());

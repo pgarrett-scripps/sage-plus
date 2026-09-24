@@ -749,23 +749,7 @@ impl State {
         let q_column = args.dataset.q_column();
         let (rows, scanned_rows, truncated) =
             sage_cloudpath::parquet::scan_json_rows(&path, scan_limit, limit, |row| {
-                let text = |name: &str| row.get(name).and_then(serde_json::Value::as_str);
-                !args.max_q_value.is_some_and(|max| {
-                    row.get(q_column)
-                        .and_then(serde_json::Value::as_f64)
-                        .is_none_or(|q| q > max)
-                }) && !args.protein.as_deref().is_some_and(|needle| {
-                    !text("proteins").is_some_and(|value| value.contains(needle))
-                        && !text("protein").is_some_and(|value| value.contains(needle))
-                }) && !args.peptide.as_deref().is_some_and(|needle| {
-                    !text("peptide").is_some_and(|value| value.contains(needle))
-                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
-                        && !text("stripped_peptide").is_some_and(|value| value.contains(needle))
-                }) && !args.modification.as_deref().is_some_and(|needle| {
-                    !text("modification").is_some_and(|value| value.contains(needle))
-                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
-                        && !text("proforma").is_some_and(|value| value.contains(needle))
-                })
+                result_row_matches(&args, q_column, row)
             })?;
         Ok(ResultQuery {
             job_id: args.job_id,
@@ -792,6 +776,59 @@ impl State {
             _ => anyhow::bail!("unknown job resource `{kind}`"),
         }
     }
+}
+
+/// Row predicate for `query_results`. Datasets with a `modification` column
+/// (PTM and protein sites) match on it; PSM rows carry their modifications
+/// only as bracketed tags in `peptide` (`S[Phospho]`, `C[+57.0216]`), and
+/// spectral-library rows in `modified_peptide`/`proforma`.
+fn result_row_matches(
+    args: &QueryResultsArgs,
+    q_column: &str,
+    row: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let text = |name: &str| row.get(name).and_then(serde_json::Value::as_str);
+    !args.max_q_value.is_some_and(|max| {
+        row.get(q_column)
+            .and_then(serde_json::Value::as_f64)
+            .is_none_or(|q| q > max)
+    }) && !args.protein.as_deref().is_some_and(|needle| {
+        !text("proteins").is_some_and(|value| value.contains(needle))
+            && !text("protein").is_some_and(|value| value.contains(needle))
+    }) && !args.peptide.as_deref().is_some_and(|needle| {
+        !text("peptide").is_some_and(|value| value.contains(needle))
+            && !text("modified_peptide").is_some_and(|value| value.contains(needle))
+            && !text("stripped_peptide").is_some_and(|value| value.contains(needle))
+    }) && !args.modification.as_deref().is_some_and(|needle| {
+        if let Some(modification) = text("modification") {
+            return !modification.contains(needle);
+        }
+        !["peptide", "modified_peptide", "proforma"]
+            .iter()
+            .any(|name| text(name).is_some_and(|value| carries_modification(value, needle)))
+    })
+}
+
+/// Residue letters outside the tags are not modifications, so a plain needle
+/// (`Phospho`, `+15.99`) only matches inside bracketed tags. A needle that
+/// includes a tag (`S[Phospho]`) is matched against the whole sequence.
+fn carries_modification(sequence: &str, needle: &str) -> bool {
+    match needle.contains('[') {
+        true => sequence.contains(needle),
+        false => modification_tags(sequence).any(|modification| modification.contains(needle)),
+    }
+}
+
+/// Bracketed modification tags, brackets included, in a Sage peptide string.
+fn modification_tags(peptide: &str) -> impl Iterator<Item = &str> {
+    let mut rest = peptide;
+    std::iter::from_fn(move || {
+        let start = rest.find('[')?;
+        let end = start + rest[start..].find(']')?;
+        let tag = &rest[start..=end];
+        rest = &rest[end + 1..];
+        Some(tag)
+    })
 }
 
 fn resolve_existing_under(root: &Path, value: &str) -> anyhow::Result<PathBuf> {
@@ -982,7 +1019,13 @@ fn supervise_worker(
         match status {
             Ok(status) => {
                 entry.record.worker_exit_code = status.code();
-                if cancellation_requested {
+                // A worker that already finished successfully wins over a
+                // cancel request that arrived too late to stop it.
+                let completed = status.success()
+                    && outcome
+                        .as_ref()
+                        .is_some_and(|outcome| outcome.summary.is_some());
+                if cancellation_requested && !completed {
                     entry.record.status = JobStatus::Cancelled;
                     entry.record.error = outcome
                         .as_ref()
@@ -1195,7 +1238,8 @@ pub struct QueryResultsArgs {
     pub protein: Option<String>,
     /// Optional case-sensitive peptide substring.
     pub peptide: Option<String>,
-    /// Optional case-sensitive modification substring.
+    /// Optional case-sensitive modification substring, matched inside bracketed
+    /// tags (`Phospho`, `+15.99`); include the residue (`S[Phospho]`) to match a site.
     pub modification: Option<String>,
     /// Maximum matching rows to return (default 50, maximum 200).
     pub limit: Option<usize>,
@@ -1379,7 +1423,7 @@ impl SageMcp {
     }
 
     #[tool(
-        description = "Query a bounded number of TSV PSM, PTM-site, or protein-site results with optional q-value and text filters"
+        description = "Query a bounded number of Parquet PSM, PTM-site, protein-site, or spectral-library results with optional q-value, protein, peptide, and modification filters"
     )]
     async fn query_results(
         &self,

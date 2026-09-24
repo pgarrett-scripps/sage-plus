@@ -173,7 +173,9 @@ pub fn read_mgf(url: &Url, file_id: usize) -> Result<Vec<RawSpectrum>, Error> {
         bf.read_to_string(&mut contents)
             .await
             .map_err(crate::Error::IO)?;
-        let res = crate::mgf::MgfReader::with_file_id(file_id).parse(contents);
+        let res = crate::mgf::MgfReader::with_file_id(file_id)
+            .with_source(url.as_str())
+            .parse(contents);
         match res {
             Ok(m) => Ok(m),
             Err(e) => Err(Error::MGF(e)),

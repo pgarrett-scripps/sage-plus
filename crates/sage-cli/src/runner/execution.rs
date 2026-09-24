@@ -20,6 +20,29 @@ impl Runner {
         Ok(results.into_iter().collect())
     }
 
+    /// The 1/K0 scale applied to the Bruker inputs, or `mixed` when some
+    /// inputs have no calibration table and fall back to the linear scale.
+    fn bruker_mobility_scale(&self) -> Option<String> {
+        let configured = self.parameters.bruker_config.ion_mobility_scale;
+        let mut scales = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .filter(|path| matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
+            .map(|path| match path.to_file_path() {
+                Ok(path) => configured.effective_for(path).as_str(),
+                Err(()) => configured.as_str(),
+            })
+            .collect::<Vec<_>>();
+        scales.sort_unstable();
+        scales.dedup();
+        match scales.as_slice() {
+            [] => None,
+            [scale] => Some(scale.to_string()),
+            _ => Some("mixed".to_string()),
+        }
+    }
+
     fn scorer(&self) -> Scorer<'_> {
         Scorer {
             db: &self.database,
@@ -84,6 +107,23 @@ impl Runner {
                 .total_cmp(&right.poisson)
                 .then_with(|| feature_identity_cmp(left, right))
         });
+        // Carry repeated-spectrum occurrences over from search-time to final
+        // PSM ids so the post-FDR pass can tell same-ID spectra apart.
+        let spectrum_occurrences = if outputs.repeated_spectrum_psms.is_empty() {
+            HashMap::new()
+        } else {
+            outputs
+                .features
+                .iter()
+                .enumerate()
+                .filter_map(|(index, feature)| {
+                    outputs
+                        .repeated_spectrum_psms
+                        .get(&feature.psm_id)
+                        .map(|&occurrence| (index + 1, occurrence))
+                })
+                .collect::<HashMap<_, _>>()
+        };
         assign_psm_ids(&mut outputs.features);
         sage_core::ml::qvalue::spectrum_q_value_by(&mut outputs.features, |feature| {
             feature.poisson
@@ -195,7 +235,12 @@ impl Runner {
         });
         self.cancellation.check()?;
 
-        let postprocess = self.postprocess_features(&scorer, &mut outputs.features, parallel)?;
+        let postprocess = self.postprocess_features(
+            &scorer,
+            &mut outputs.features,
+            &spectrum_occurrences,
+            parallel,
+        )?;
         self.cancellation.check()?;
         self.events.check()?;
         if self.parameters.annotate_matches {
@@ -303,6 +348,7 @@ impl Runner {
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
             &outputs.quant,
+            &spectrum_occurrences,
             &filenames,
             &self.database,
             output_psm_q_value,
@@ -492,18 +538,7 @@ impl Runner {
                 ion_mobility_model_fitted,
                 ion_mobility_features: format!("{:?}", self.parameters.ion_mobility_model.features)
                     .to_lowercase(),
-                ion_mobility_scale: self
-                    .parameters
-                    .mzml_paths
-                    .iter()
-                    .any(|path| matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
-                    .then(|| {
-                        self.parameters
-                            .bruker_config
-                            .ion_mobility_scale
-                            .as_str()
-                            .to_string()
-                    }),
+                ion_mobility_scale: self.bruker_mobility_scale(),
             },
             quantification: QuantificationRunStats {
                 lfq_enabled: self.parameters.quant.lfq,

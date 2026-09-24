@@ -26,10 +26,10 @@ object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"] }
 tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 quick-xml = { version = "0.41.0", features = ["async-tokio"] }
-timsrust = { version = "0.6.5" }
+timsrust = { version = "0.6.6" }
 # Same version and features as timsrust; reads TimsCalibration from analysis.tdf.
 rusqlite = { version = "0.35", features = ["bundled"] }
-opentfraw = "1.4.0"
+opentfraw = "1.4.1"
 rayon = "1.5"
 reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 regex = "1.6"

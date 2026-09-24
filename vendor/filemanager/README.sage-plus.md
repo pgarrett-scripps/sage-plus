@@ -1,7 +1,7 @@
 # Sage Plus dependency patch
 
-This directory contains the published `filemanager` 0.6.5 source from
-MannLabs/timsrust commit `5e09572fa3f1aace86e6ba64244a01fd0850fbf3`, subdirectory
+This directory contains the published `filemanager` 0.6.6 source from
+MannLabs/timsrust commit `80e235a331057e0ef922eb3c784b7a631c9b9666`, subdirectory
 `crates/filemanager`. The crate metadata declares Apache-2.0, while the pinned
 repository root contains an MIT license. The upstream copyright and MIT text are
 retained unchanged in `LICENSE`. `LICENSE-APACHE` contains the standard Apache 2.0

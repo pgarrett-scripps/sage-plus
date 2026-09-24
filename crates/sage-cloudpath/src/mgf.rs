@@ -18,7 +18,7 @@ impl Default for DefaultParams {
         Self {
             is_query_start: false,
             file_id: 0,
-            regex_for_charge: Regex::new(r"(\d)\+?").unwrap(),
+            regex_for_charge: Regex::new(r"(\d+)\+?").unwrap(),
             tol: None,
             tol_unit: None,
             charge_array: None,
@@ -50,15 +50,34 @@ pub struct QueryData {
     inverse_ion_mobility: Option<f32>,
     ion_mz_array: Vec<f32>,
     ion_intensity_array: Vec<f32>,
+
+    /// 1-based number of the line being parsed.
+    line: usize,
+    /// 1-based line of the current spectrum's BEGIN IONS.
+    begin_line: usize,
+    skipped: Option<SkippedSpectra>,
+}
+
+/// Spectra dropped from one MGF file because they cannot be searched.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkippedSpectra {
+    pub count: usize,
+    /// 1-based BEGIN IONS line of the first skipped spectrum.
+    pub first_line: usize,
+    pub first_reason: &'static str,
 }
 
 impl QueryData {
+    /// Query state for the spectrum opened by the header's `BEGIN IONS`.
     pub fn default_with_params(default_params: DefaultParams) -> Self {
-        Self {
+        let mut query_data = Self {
             default_params,
-            in_spectrum: true,
             ..Default::default()
-        }
+        };
+        // Apply the header's CHARGE, TOL, and TOLU to the first spectrum too.
+        query_data.init();
+        query_data.in_spectrum = true;
+        query_data
     }
     pub fn init(&mut self) {
         self.in_spectrum = false;
@@ -117,35 +136,26 @@ impl QueryData {
         }
     }
 
-    pub fn check_spectrum(&self, spectrum: &RawSpectrum) -> Result<bool, MgfError> {
+    /// Why `spectrum` cannot be searched, if it cannot.
+    pub fn check_spectrum(&self, spectrum: &RawSpectrum) -> Result<(), &'static str> {
         if spectrum.id.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum is missing TITLE",
-            });
+            return Err("spectrum is missing TITLE");
         }
         if spectrum.precursors.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum is missing PEPMASS",
-            });
+            return Err("spectrum is missing PEPMASS");
         }
         if spectrum
             .precursors
             .iter()
             .any(|precursor| !precursor.mz.is_finite() || precursor.mz <= 0.0)
         {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains an invalid precursor mass",
-            });
+            return Err("spectrum contains an invalid precursor mass");
         }
         if spectrum.mz.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains no peaks",
-            });
+            return Err("spectrum contains no peaks");
         }
         if spectrum.mz.len() != spectrum.intensity.len() {
-            return Err(MgfError::Malformed {
-                message: "peak mass and intensity arrays have different lengths",
-            });
+            return Err("peak mass and intensity arrays have different lengths");
         }
         if spectrum
             .mz
@@ -153,11 +163,22 @@ impl QueryData {
             .chain(&spectrum.intensity)
             .any(|value| !value.is_finite())
         {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains a nonfinite peak value",
-            });
+            return Err("spectrum contains a nonfinite peak value");
         }
-        Ok(true)
+        Ok(())
+    }
+
+    fn skip(&mut self, reason: &'static str) {
+        match &mut self.skipped {
+            Some(skipped) => skipped.count += 1,
+            None => {
+                self.skipped = Some(SkippedSpectra {
+                    count: 1,
+                    first_line: self.begin_line,
+                    first_reason: reason,
+                })
+            }
+        }
     }
 }
 
@@ -204,13 +225,7 @@ impl DefaultParser {
         let regex_for_charge = &default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            let mut charge_array: Vec<u8> = Vec::new();
-            for cap in regex_for_charge.captures_iter(charge_str) {
-                if let Some(charge) = cap[0].chars().next().unwrap().to_digit(10) {
-                    charge_array.push(charge as u8);
-                }
-            }
-            default_params.charge_array = Some(charge_array);
+            default_params.charge_array = parse_charges(regex_for_charge, charge_str);
             return Ok(true);
         }
         Ok(false)
@@ -244,6 +259,7 @@ impl QueryParser {
                 });
             }
             query_data.in_spectrum = true;
+            query_data.begin_line = query_data.line;
             return Ok(true);
         }
         Ok(false)
@@ -279,13 +295,7 @@ impl QueryParser {
         let regex_for_charge = &query_data.default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            let mut charge_array = Vec::new();
-            for cap in regex_for_charge.captures_iter(charge_str) {
-                if let Some(charge) = cap[0].chars().next().unwrap().to_digit(10) {
-                    charge_array.push(charge as u8);
-                }
-            }
-            query_data.precursor_charge_array = Some(charge_array);
+            query_data.precursor_charge_array = parse_charges(regex_for_charge, charge_str);
             return Ok(true);
         }
         Ok(false)
@@ -380,14 +390,28 @@ impl QueryParser {
             spectrum.mz = std::mem::take(&mut query_data.ion_mz_array);
             spectrum.intensity = std::mem::take(&mut query_data.ion_intensity_array);
 
-            query_data.check_spectrum(&spectrum)?;
-            query_data.spectra.push(spectrum);
+            // Like upstream Sage, drop spectra that cannot be searched instead
+            // of failing the file. Unparseable values above remain errors.
+            match query_data.check_spectrum(&spectrum) {
+                Ok(()) => query_data.spectra.push(spectrum),
+                Err(reason) => query_data.skip(reason),
+            }
             query_data.init();
 
             return Ok(true);
         }
         Ok(false)
     }
+}
+
+/// Charges listed in a `CHARGE=` value such as `2+ and 3+` or `10+`. A value
+/// without any charge means the charge is unknown.
+fn parse_charges(regex_for_charge: &Regex, value: &str) -> Option<Vec<u8>> {
+    let charges = regex_for_charge
+        .captures_iter(value)
+        .filter_map(|cap| cap[1].parse().ok())
+        .collect::<Vec<_>>();
+    (!charges.is_empty()).then_some(charges)
 }
 
 fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {
@@ -401,14 +425,44 @@ fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {
 
 pub struct MgfReader {
     file_id: usize,
+    source: Option<String>,
 }
 
 impl MgfReader {
     pub fn with_file_id(file_id: usize) -> Self {
-        Self { file_id }
+        Self {
+            file_id,
+            source: None,
+        }
     }
 
+    /// Name the file in the warning about skipped spectra.
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// Parse an MGF file. Spectra without a TITLE, PEPMASS, or peaks are
+    /// skipped with one warning for the file.
     pub fn parse(&self, contents: String) -> Result<Vec<RawSpectrum>, MgfError> {
+        let (spectra, skipped) = self.parse_counting_skipped(contents)?;
+        if let Some(skipped) = skipped {
+            log::warn!(
+                "{}: skipped {} MGF spectra that cannot be searched; first at line {}: {}",
+                self.source.as_deref().unwrap_or("MGF"),
+                skipped.count,
+                skipped.first_line,
+                skipped.first_reason
+            );
+        }
+        Ok(spectra)
+    }
+
+    /// [`MgfReader::parse`], returning the skipped spectra instead of logging them.
+    pub fn parse_counting_skipped(
+        &self,
+        contents: String,
+    ) -> Result<(Vec<RawSpectrum>, Option<SkippedSpectra>), MgfError> {
         let default_parsers = DefaultParser.get_parsers();
         let query_parsers = QueryParser.get_parsers();
 
@@ -416,9 +470,11 @@ impl MgfReader {
         let mut lines = contents.as_str().lines().enumerate();
 
         // embedded parameters
+        let mut begin_line = 0;
         while !default_params.is_query_start {
             let (line_index, line) = lines.next().ok_or(MgfError::MissingBeginIons)?;
             let line = line.trim();
+            begin_line = line_index + 1;
             for parser in &default_parsers {
                 match parser(line, &mut default_params) {
                     Ok(true) => break,
@@ -429,6 +485,7 @@ impl MgfReader {
         }
 
         let mut query_data = QueryData::default_with_params(default_params);
+        query_data.begin_line = begin_line;
 
         // query
         for (line_index, line) in lines {
@@ -436,6 +493,7 @@ impl MgfReader {
                 continue;
             }
             let line = line.trim();
+            query_data.line = line_index + 1;
             if !query_data.in_spectrum && !line.starts_with("BEGIN IONS") {
                 continue;
             }
@@ -450,7 +508,7 @@ impl MgfReader {
         if query_data.in_spectrum {
             return Err(MgfError::UnterminatedSpectrum);
         }
-        Ok(query_data.spectra)
+        Ok((query_data.spectra, query_data.skipped))
     }
 }
 

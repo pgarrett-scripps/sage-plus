@@ -166,7 +166,7 @@ Every PSM row carries two additional columns, `ambiguity_sequence` and `mass_shi
   - `...T[+79.96633]...` — localized to a single residue,
   - `(...)[+mass]` — confined to a region but not a single residue,
   - a leading `{+mass}` — labile / cannot be localized (forward and reverse coverage overlap).
-- **mass_shift**: the residual `expmass - calcmass` (in Da) that was placed, or `0.0` when the precursor matches within `mass_shift_ppm`.
+- **mass_shift**: the residual `expmass - calcmass` (in Da) after removing the matched isotope error, or `0.0` when the precursor matches within `mass_shift_ppm`.
 
 These are computed for every search; mods are rendered in the same `[+mass]`/`[Name]` notation as the `peptide` column. The threshold used to decide whether a precursor delta mass is a real shift is configurable via the top-level **`mass_shift_ppm`** parameter (default: 50.0). It is deliberately independent of `precursor_tol`, so wide/open searches still surface and place real shifts.
 
@@ -379,8 +379,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.7
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.7 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.8
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.8 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -501,6 +501,7 @@ Use distinct names when those policies need to differ.
 | `peptide_c_term:K` | Peptide C-terminal group only when the last residue is K |
 | `protein_n_term:K` | Protein N-terminal group only when the first residue is K |
 | `protein_c_term:K` | Protein C-terminal group only when the last residue is K |
+| `motif:N*-{P}-[ST]` | Residue marked `*`, where the protein sequence matches the motif |
 
 Substitute any supported uppercase one-letter residue for K. Each string encodes
 one complete rule. Entries are alternatives. Overlapping entries count the same
@@ -543,6 +544,72 @@ from the digest context, independently of which enzyme generated the peptide.
 
 Length-one and length-two peptides have no internal residues. On a length-one
 peptide, first and last refer to the same residue and do not double-apply a mod.
+
+#### Motif sites
+
+A `motif:` site restricts a residue modification to a sequence motif, written in
+PROSITE pattern syntax. Elements are separated by `-`. Exactly one single-residue
+element carries a trailing `*`, which marks the modified residue.
+
+| Element | Matches |
+| --- | --- |
+| `N` | That residue |
+| `x` | Any residue |
+| `[ST]` | Any listed residue |
+| `{P}` | Any residue except those listed |
+| `x(2)` | The element repeated exactly that many times |
+| `<` before the first element | The motif starts at the protein N-terminus |
+| `>` after the last element | The motif ends at the protein C-terminus |
+
+```json
+{
+  "variable_mods": {
+    "HexNAc": {"mass": 203.079373, "sites": ["motif:N*-{P}-[ST]"], "max_count": 2},
+    "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "max_count": 3},
+    "Phospho-basophilic": {"mass": 79.966331, "sites": ["motif:R-x(2)-[ST]*"], "max_count": 1},
+    "Farnesyl": {"mass": 204.187801, "sites": ["motif:C*-x(3)>"], "max_count": 1}
+  }
+}
+```
+
+The first rule is the N-glycosylation sequon, N followed by any residue except P and
+then S or T. The second is a basophilic kinase motif, and the last is a CaaX box: a
+cysteine four residues from the protein C-terminus.
+
+A site must be written in canonical form, which the error message prints. Classes
+list residues in the order `ACDEFGHIKLMNPQRSTVWYUO` (alphabetical for the standard
+residues, then U and O), and exclusions such as `{P}` are used where they are shorter. The canonical string is the site key in preview output.
+Motifs are allowed only in named definitions. A legacy residue-keyed section rejects
+them.
+
+Motifs are evaluated against each peptide's source protein, so a motif may extend
+past either end of the peptide. `AANK` from `…AANKST…` carries a sequon although S
+is not part of the peptide. A peptide shared by several proteins is eligible at a
+position if any occurrence matches. Protein coordinates, library records, and site
+reports keep each occurrence separately. The `<` and `>` anchors follow each
+occurrence's protein coordinates, so a peptide shared between a protein terminus and
+a protein interior keeps its terminal sites. When no protein is known, as for peptide
+TSV input, only the peptide sequence is matched. Letters such as `X` in the FASTA
+match `x` and exclusions but no listed residue.
+
+Generated decoys carry the sites of their target, mirrored as the decoy sequence is
+reversed. The target and decoy search spaces are therefore the same size, and
+localization of a decoy considers the mirrored target sites. With
+`generate_decoys: false`, decoy proteins from the FASTA are matched literally, like
+any other protein. Decoy rows in a peptide TSV have no protein, and at search time
+they cannot be told apart from decoys generated from peptide TSV targets. They are
+therefore treated as reversed targets as well: the motif is matched on the reversed
+decoy sequence and the sites are mirrored. A decoy row `GTGNAK` carries HexNAc at its
+N because its reversal `GANGTK` holds a sequon; a decoy row `GANGTK` carries none.
+
+Motif sites follow the same rules as other explicit sites. They share `max_count` and
+the variable modification limits, work for static, indexed variable, and
+mass-offset definitions, and combine with PTM site libraries and channels. A motif and
+a residue rule for the same residue in one definition describe one attachment, which
+is counted once. Localization only moves a modification between positions that
+satisfy one of its rules. Residues that fail the motif are not used as decoy
+localization sites, because they are the same residue as the target sites.
+Only residues are motif attachments. Terminal groups use the terminal site names.
 
 #### Mass offset modifications
 
@@ -588,7 +655,10 @@ sage library-config.json --preview-modifications KSTGGKAPR --preview-protein P68
 
 Preview prints explicit rules, eligible physical sites, limits, and bounded generated
 variants without reading spectra. `--peptide-position` supplies protein boundary
-context and defaults to `internal`. Library preview loads the configured TSV or
+context and defaults to `internal`. Preview does not read the FASTA. For motif sites,
+pass the neighbouring protein residues with `--preview-before` and `--preview-after`,
+for example `--preview-modifications AANK --preview-after ST`. Residues that are not
+supplied are unknown and never satisfy a motif. Library preview loads the configured TSV or
 Parquet library and requires an accession and one-based peptide start coordinate.
 It trusts the supplied sequence and boundary context rather than loading a FASTA.
 The limit ranges from 1 to 10000. `truncated` reports when returned variants were
@@ -802,7 +872,7 @@ Retention-time alignment and prediction are separate features. `retention_time_a
   `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above. When mzML or mzMLb provides the fragment charge binary array `MS:1000516`, positive values constrain isotope-envelope assignment and are used directly for charge-aware fragment matching. Zero values remain unknown and use scored inference.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
-- **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: false).
+- **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: true).
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
     ```json
@@ -930,9 +1000,9 @@ Notes:
 
 ## Spectrum Paths
 
-- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is included in standard builds and release binaries. Minimal source builds created with `--no-default-features` omit it. Files ending in ".gz" or ".gzip" are inferred to be compressed.
+- **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is included in standard builds and release binaries. Minimal source builds created with `--no-default-features` omit it. Files ending in ".gz" or ".gzip" are inferred to be compressed. MGF spectra that cannot be searched (no TITLE, no PEPMASS, an invalid precursor mass, no peaks, mismatched peak arrays, or non-finite peak values) are skipped with one warning per file; unparseable values and missing BEGIN IONS/END IONS markers stop the search.
   - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
-  - Bruker TDF ion mobility (1/K0) uses each frame's `TimsCalibration` model from `analysis.tdf`, matching the Bruker SDK. Every scan is converted before MS1 centroiding, and DDA precursors convert their fractional average scan. DIA window centers use the calibration row shared by most frames. Only ModelType 2 is supported; other models stop the search. Set `"bruker_config": {"ion_mobility_scale": "linear"}` to reproduce the uncalibrated scale of Beta 6 and earlier, which interpolates between the acquisition limits. `run-summary.json` records the scale as `models.ion_mobility_scale`. Mobility tolerances are relative and apply unchanged.
+  - Bruker TDF ion mobility (1/K0) uses each frame's `TimsCalibration` model from `analysis.tdf`, matching the Bruker SDK. Every scan is converted before MS1 centroiding, and DDA precursors convert their fractional average scan. DIA window centers use the calibration row shared by most frames. Inputs that point at a file inside the `.d` directory, such as `analysis.tdf_bin`, read the same `analysis.tdf`. Inputs without an `analysis.tdf`, such as miniTDF `.ms2` directories, have no calibration table and fall back to the linear scale with a warning. Only ModelType 2 is supported; other models stop the search. Set `"bruker_config": {"ion_mobility_scale": "linear"}` to reproduce the uncalibrated scale of Beta 6 and earlier, which interpolates between the acquisition limits. `run-summary.json` records the scale applied as `models.ion_mobility_scale`, or `mixed` when only some inputs fell back to the linear scale. Mobility tolerances are relative and apply unchanged.
   - Example:
     ```json
     "mzml_paths": [

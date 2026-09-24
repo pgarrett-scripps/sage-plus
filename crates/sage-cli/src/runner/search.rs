@@ -139,18 +139,24 @@ impl Runner {
             .expect("valid path segment")
     }
 
+    /// Score MS2 spectra. Also returns search-time `psm_id` -> occurrence for
+    /// PSMs from spectra whose ID repeats within a file, so the post-FDR pass
+    /// can match each PSM to the spectrum it was scored against.
     pub(super) fn search_processed_spectra(
         &self,
         scorer: &Scorer,
         msn_spectra: &[ProcessedSpectrum],
-    ) -> Vec<Feature> {
+    ) -> (Vec<Feature>, HashMap<usize, usize>) {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let counter = AtomicUsize::new(0);
         let start = Instant::now();
+        let occurrences = spectrum_id_occurrences(msn_spectra);
+        let repeated = std::sync::Mutex::new(HashMap::new());
 
         let features: Vec<_> = msn_spectra
             .par_iter()
-            .filter(|spec| {
+            .zip(occurrences.par_iter())
+            .filter(|(spec, _)| {
                 !self.cancellation.is_cancelled()
                     && spec.masses.len() >= self.parameters.min_peaks
                     && spec.level == 2
@@ -165,14 +171,26 @@ impl Runner {
                 }
                 x
             })
-            .flat_map(|spec| scorer.score(spec))
+            .flat_map(|(spec, &occurrence)| {
+                let features = scorer.score(spec);
+                if occurrence > 0 {
+                    repeated
+                        .lock()
+                        .expect("repeated spectrum map")
+                        .extend(features.iter().map(|feature| (feature.psm_id, occurrence)));
+                }
+                features
+            })
             .collect();
 
         let duration = Instant::now().duration_since(start).as_millis() as usize;
         let prev = counter.load(Ordering::Relaxed);
         let rate = prev * 1000 / (duration + 1);
         log::info!("- search:  {:8} ms ({} spectra/s)", duration, rate);
-        features
+        (
+            features,
+            repeated.into_inner().expect("repeated spectrum map"),
+        )
     }
 
     pub(super) fn complete_features(
@@ -180,6 +198,7 @@ impl Runner {
         msn_spectra: Vec<ProcessedSpectrum>,
         ms1_spectra: Vec<ProcessedSpectrum>,
         features: Vec<Feature>,
+        repeated_spectrum_psms: HashMap<usize, usize>,
     ) -> SageResults {
         let quant = self
             .parameters
@@ -199,6 +218,7 @@ impl Runner {
             features,
             quant,
             ms1: ms1_spectra,
+            repeated_spectrum_psms,
         }
     }
 
@@ -214,8 +234,8 @@ impl Runner {
         batch_size: usize,
     ) -> anyhow::Result<SageResults> {
         let spectra = self.read_processed_spectra(chunk, chunk_idx, batch_size)?;
-        let features = self.search_processed_spectra(scorer, &spectra.1);
-        Ok(self.complete_features(spectra.1, spectra.0, features))
+        let (features, repeated_spectrum_psms) = self.search_processed_spectra(scorer, &spectra.1);
+        Ok(self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms))
     }
 
     pub(super) fn read_processed_spectra(
@@ -224,15 +244,26 @@ impl Runner {
         chunk_idx: usize,
         batch_size: usize,
     ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
-        self.read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, self.requires_ms1())
+        self.read_processed_spectra_with_ms1(
+            chunk,
+            chunk_idx,
+            batch_size,
+            self.requires_ms1(),
+            true,
+        )
     }
 
+    /// `search_events` controls the per-file progress events
+    /// (`file_started`, `file_completed`, `spectra_processed`). Rereads after
+    /// the search has reported completion pass `false`; read failures are
+    /// always reported.
     pub(super) fn read_processed_spectra_with_ms1(
         &self,
         chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
         requires_ms1: bool,
+        search_events: bool,
     ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
         // Read all of the spectra at once - this can help prevent memory over-consumption issues
         info!(
@@ -272,10 +303,12 @@ impl Runner {
         log::trace!("file serial read: {}", file_serial_read);
         let inner_closure = |(idx, path): (usize, &Url)| {
             let file_id = chunk_idx * batch_size + idx;
-            self.events.emit(EventKind::FileStarted {
-                file_id,
-                path: path.to_string(),
-            });
+            if search_events {
+                self.events.emit(EventKind::FileStarted {
+                    file_id,
+                    path: path.to_string(),
+                });
+            }
             let res = sage_cloudpath::util::read_spectra(
                 path,
                 file_id,
@@ -300,11 +333,13 @@ impl Runner {
                         .into_par_iter()
                         .map(|spectrum| sp.process(spectrum))
                         .collect::<SpectrumAccumulator>();
-                    self.events.emit(EventKind::FileCompleted {
-                        file_id,
-                        path: path.to_string(),
-                        spectra: spectra.ms1.len() + spectra.msn.len(),
-                    });
+                    if search_events {
+                        self.events.emit(EventKind::FileCompleted {
+                            file_id,
+                            path: path.to_string(),
+                            spectra: spectra.ms1.len() + spectra.msn.len(),
+                        });
+                    }
                     Ok(spectra)
                 }
                 Err(e) => {
@@ -348,10 +383,12 @@ impl Runner {
             }
         }
 
-        self.events.emit(EventKind::SpectraProcessed {
-            ms1_spectra: spectra.ms1.len(),
-            msn_spectra: spectra.msn.len(),
-        });
+        if search_events {
+            self.events.emit(EventKind::SpectraProcessed {
+                ms1_spectra: spectra.ms1.len(),
+                msn_spectra: spectra.msn.len(),
+            });
+        }
 
         let io_time = Instant::now() - start;
         info!("- file IO: {:8} ms", io_time.as_millis());

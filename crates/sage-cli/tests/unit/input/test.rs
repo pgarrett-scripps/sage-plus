@@ -393,3 +393,36 @@ fn validation_returns_range_errors_instead_of_exiting() {
     let error = input.validate().unwrap_err().to_string();
     assert!(error.contains("isotope errors"));
 }
+
+#[test]
+fn predict_rt_default_matches_documentation() {
+    let output = std::env::temp_dir().join(format!(
+        "sage-cli-predict-rt-default-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut input = base_search_space(serde_json::json!({ "fasta": "test.fasta" }));
+    input.output_directory = Some(output.to_string_lossy().into_owned());
+    input.mzml_paths = Some(vec![concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../tests/LQSRPAAPPAPGPGQLTLR.mzML"
+    )
+    .into()]);
+    let search = input.build().unwrap();
+    std::fs::remove_dir_all(output).unwrap();
+    assert!(search.predict_rt);
+
+    let docs = include_str!("../../../../../DOCS.md");
+    let documented = docs
+        .lines()
+        .filter(|line| line.contains("predict_rt"))
+        .collect::<Vec<_>>();
+    assert!(!documented.is_empty());
+    for line in documented {
+        assert!(!line.contains("default: false"), "{line}");
+        assert!(!line.contains("default=false"), "{line}");
+    }
+}

@@ -1,7 +1,8 @@
 use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
     missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
-    sort_features_by_discriminant, LabelGroupIndex, OutputTarget, RunSummary, SpectrumAccumulator,
+    sort_features_by_discriminant, spectrum_id_occurrences, LabelGroupIndex, OutputTarget,
+    RunSummary, SpectrumAccumulator,
 };
 
 #[test]
@@ -219,6 +220,23 @@ fn remote_output_target_flushes_through_cloud_writer() {
 }
 
 #[test]
+fn repeated_spectrum_ids_are_numbered_per_file() {
+    let spectrum = |file_id, id: &str| ProcessedSpectrum {
+        file_id,
+        id: id.into(),
+        ..ProcessedSpectrum::default()
+    };
+    let spectra = vec![
+        spectrum(0, "a"),
+        spectrum(0, "b"),
+        spectrum(0, "a"),
+        spectrum(1, "a"),
+        spectrum(0, "a"),
+    ];
+    assert_eq!(spectrum_id_occurrences(&spectra), vec![0, 0, 1, 0, 2]);
+}
+
+#[test]
 fn spectrum_accumulator_separates_ms1_from_fragment_spectra() {
     let spectra = vec![
         ProcessedSpectrum {
@@ -292,4 +310,50 @@ fn report_score_series_filters_invalid_values_and_labels() {
     ];
     let values = labeled_finite_values(&features, |feature| feature.discriminant_score as f64);
     assert_eq!(values, (vec![2.0], vec![1]));
+}
+
+#[test]
+fn report_keeps_same_basename_files_separate() {
+    let (directory, _) = temporary_output("report");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    let feature = |file_id, charge| Feature {
+        file_id,
+        charge,
+        label: 1,
+        peptide_idx: PeptideIx(0),
+        peptide_len: 10,
+        ..Feature::default()
+    };
+    // a/run.mzML and b/run.mzML share a basename but are different files.
+    let features = vec![feature(0, 2), feature(0, 2), feature(1, 3)];
+    let filenames = vec!["run.mzML".to_string(), "run.mzML".to_string()];
+    let path = runner.write_report(&features, None, &filenames).unwrap();
+    let html = std::fs::read_to_string(path.to_file_path().unwrap()).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+
+    let body = html.split("<tbody>").nth(1).unwrap();
+    let body = body.split("</tbody>").next().unwrap();
+    let rows = body
+        .split("<tr>")
+        .skip(1)
+        .map(|row| {
+            row.split("<td>")
+                .skip(1)
+                .map(|cell| cell.split("</td>").next().unwrap())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2);
+    // PSM targets and average precursor charge are per input file.
+    assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
+    assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
 }

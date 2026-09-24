@@ -1,6 +1,6 @@
 {
-  ".cargo_vcs_info.json": "1abc2247be8c828055d2c5cca541b23e8f06137cc96926a49f5ffeae2acf5b2e",
-  "Cargo.toml": "ec1c897f8c4c161895cef2009cac9b2df4c9e32f52918bada7bc3636448fd014",
+  ".cargo_vcs_info.json": "cb938cd430acc93844452c4c61a59a9c344d12eb594308d9c596e5f9593cb3bd",
+  "Cargo.toml": "5f787a70af50211dbe1a0f3961eee1d9f2ff663401e028ccb153df97b101c34a",
   "Cargo.toml.orig": "8e5d880eb0e4c73e6e2b6c13d8117909387458c34f155eed058845fdd50148de",
   "src/cache.rs": "83a2373a2ececfcffb899341aa0203ee81f54822948048f0ced1714b73083d6f",
   "src/cloud_store/cloud/authenticate.rs": "cb9801f816947adfeb81659c725eafc60dcd10260bdf276f48b9fb04ed37ee82",

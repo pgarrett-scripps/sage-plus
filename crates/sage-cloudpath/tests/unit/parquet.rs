@@ -206,12 +206,14 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 start: Some(4),
                 prev_aa: Some(b'K'),
                 next_aa: Some(b'R'),
+                source: None,
             },
             ProteinOccurrence {
                 protein: Arc::from("P67890"),
                 start: Some(9),
                 prev_aa: None,
                 next_aa: None,
+                source: None,
             },
         ]),
         ..Peptide::default()
@@ -221,7 +223,14 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         ..Feature::default()
     };
 
-    let bytes = serialize_features(&[&feature], &[], &["run-a".into()], &database, 1.0)?;
+    let bytes = serialize_features(
+        &[&feature],
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -270,7 +279,14 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         label: 1,
         ..Feature::default()
     };
-    let bytes = serialize_features(&[&feature], &[], &["run-a".into()], &database, 1.0)?;
+    let bytes = serialize_features(
+        &[&feature],
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -579,4 +595,79 @@ fn typed_ptm_library_round_trip_preserves_all_attachments() {
     for site in sites {
         assert!(restored.iter().any(|record| record == &site));
     }
+}
+
+#[test]
+fn scan_json_rows_reports_truncation_only_for_unscanned_rows() -> parquet::errors::Result<()> {
+    let schema =
+        parquet::schema::parser::parse_message_type("message schema { required int64 value; }")
+            .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rows.parquet");
+    let mut writer = SerializedFileWriter::new(
+        File::create(&path).unwrap(),
+        schema.into(),
+        WriterProperties::default().into(),
+    )?;
+    let mut row_group = writer.next_row_group()?;
+    write_required_column!(row_group, [1_i64, 2, 3], Int64Type);
+    row_group.close()?;
+    writer.close()?;
+
+    let scan = |scan_limit, limit| {
+        let (rows, scanned, truncated) = scan_json_rows(&path, scan_limit, limit, |_| true)?;
+        Ok::<_, ParquetError>((rows.len(), scanned, truncated))
+    };
+    // Scanning exactly every row is not truncation.
+    assert_eq!(scan(3, 10)?, (3, 3, false));
+    assert_eq!(scan(10, 10)?, (3, 3, false));
+    assert_eq!(scan(2, 10)?, (2, 2, true));
+    assert_eq!(scan(3, 2)?, (2, 3, true));
+    assert_eq!(scan(3, 3)?, (3, 3, false));
+    Ok(())
+}
+
+#[test]
+fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Result<()> {
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: (&b"PEPTIDE"[..]).into(),
+        ..Peptide::default()
+    });
+    let feature = |psm_id: usize| Feature {
+        psm_id,
+        spec_id: "scan=1".into(),
+        peptide_idx: PeptideIx(0),
+        ..Feature::default()
+    };
+    let (first, second) = (feature(1), feature(2));
+    let quant = |occurrence: usize, intensity: f32| TmtQuant {
+        spec_id: "scan=1".into(),
+        file_id: 0,
+        occurrence,
+        ion_injection_time: 0.0,
+        peaks: vec![intensity, intensity],
+    };
+    let bytes = serialize_features(
+        &[&first, &second],
+        &[quant(0, 10.0), quant(1, 20.0)],
+        &HashMap::from([(2, 1)]),
+        &["run-a".into()],
+        &database,
+        1.0,
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let reporters = reader
+        .get_row_iter(None)?
+        .map(|row| {
+            row.map(|row| {
+                row.get_column_iter()
+                    .find(|(name, _)| name.as_str() == "reporter_ion_intensity")
+                    .map(|(_, field)| field.to_string())
+                    .unwrap()
+            })
+        })
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    assert_eq!(reporters, ["[10.0, 10.0]", "[20.0, 20.0]"]);
+    Ok(())
 }

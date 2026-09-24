@@ -50,11 +50,14 @@ fn write_reporter_ions(
     mut column: SerializedColumnWriter,
     features: &[&Feature],
     reporter_ions: &[TmtQuant],
+    spectrum_occurrences: &HashMap<usize, usize>,
 ) -> parquet::errors::Result<()> {
     let mut scan_map = HashMap::new();
 
     for r in reporter_ions {
-        scan_map.entry((r.file_id, &r.spec_id)).or_insert(r);
+        scan_map
+            .entry((r.file_id, r.spec_id.as_str(), r.occurrence))
+            .or_insert(r);
     }
 
     // Caller guarantees `reporter_ions` is not empty
@@ -68,7 +71,15 @@ fn write_reporter_ions(
 
     let col = column.typed::<FloatType>();
     for feature in features {
-        if let Some(rs) = scan_map.get(&(feature.file_id, &feature.spec_id)) {
+        let occurrence = spectrum_occurrences
+            .get(&feature.psm_id)
+            .copied()
+            .unwrap_or_default();
+        let rs = scan_map
+            .get(&(feature.file_id, feature.spec_id.as_str(), occurrence))
+            // MS3 reporter spectra are keyed to their MS2 scan's first occurrence.
+            .or_else(|| scan_map.get(&(feature.file_id, feature.spec_id.as_str(), 0)));
+        if let Some(rs) = rs {
             col.write_batch(&rs.peaks, Some(&def_levels), Some(&rep_levels))?;
         } else {
             col.write_batch(&[], Some(&[0]), Some(&[0]))?;
@@ -90,9 +101,12 @@ fn write_null_column(
     column.close().map(|_| wrote)
 }
 
+/// `spectrum_occurrences` maps `psm_id` to the zero-based occurrence of a
+/// repeated spectrum ID; PSMs that are absent are the first occurrence.
 pub fn serialize_features(
     features: &[&Feature],
     reporter_ions: &[TmtQuant],
+    spectrum_occurrences: &HashMap<usize, usize>,
     filenames: &[String],
     database: &IndexedDatabase,
     output_psm_q_value: f32,
@@ -316,7 +330,7 @@ pub fn serialize_features(
             if reporter_ions.is_empty() {
                 write_null_column(col, features.len())?;
             } else {
-                write_reporter_ions(col, features, reporter_ions)?;
+                write_reporter_ions(col, features, reporter_ions, spectrum_occurrences)?;
             }
         }
 

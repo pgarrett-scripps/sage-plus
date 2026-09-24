@@ -9,6 +9,84 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.8] - 2026-09-24
+
+### Fixed
+- Labeled searches no longer panic when a channel has a non-zero base mass and a non-zero
+  offset, such as dimethyl labels. The base definition is recovered by identity instead of by
+  recomputing its mass in single precision.
+- FASTA files containing `X`, `B`, `Z`, or `J` load again, as in upstream Sage. Peptides that
+  contain residues without a defined mass are skipped, and one warning reports how many
+  proteins contain them. Lowercase letters, digits, and symbols are still rejected.
+- LFQ with `mbr: false` quantifies each file against its own identification. Files previously
+  shared one retention-time grid whose centre and reference file depended on thread timing, so
+  intensities were wrong and changed between runs.
+- Protein-group FDR pairs each decoy with the group of the target protein it was reversed
+  from. Decoys were never grouped, so no decoy group key matched a target group and picked
+  competition reduced to plain target-decoy counting. On five PXD028735 LFQ files, protein
+  groups at 1% FDR rose from 7,046 to 7,177; PSM, peptide, and protein results are unchanged.
+- Linear regression for the retention-time and mobility models and the kernel density estimate
+  for PEP and q-values sum in a fixed order. Repeated runs, including multi-file searches, now
+  produce byte-identical results.
+- Required neutral losses on mass offsets shift preliminary fragments by the smallest loss,
+  matching the fragment index, regardless of the order losses are listed in.
+- `mass_shift` and `ambiguity_sequence` exclude the matched isotope error. PSMs at a non-zero
+  isotope error previously reported a spurious shift of about 1.003 Da per isotope.
+- Ion-mobility residue-class features count the intended residues.
+- Thermo RAW MS levels and precursors come from the scan trailers wherever OpenTFRaw's scan
+  event contradicts them, as on some Orbitrap Fusion files where events are decoded out of step
+  with the scans. Once any scan is contradicted, every scan with a trailer master takes its level
+  and precursor from the trailer. Otherwise dependent scans follow their master scan chain, and
+  scans without a master keep an MSn event only when it has a plausible precursor, as DIA and
+  targeted scans do. The trailer chain uses only "Master Scan Number"; "Master Index", a 0/1 flag
+  on QE and LTQ Orbitrap files, is ignored. An SPS-MS3 TMT file
+  previously read as 104,433 MS1 scans and 1 MS2 scan; it now matches msconvert (14,239 MS1,
+  45,139 MS2, 45,056 MS3), and MS3 scans keep their MS2 parent for reporter ions. MS2 scans
+  without a plausible precursor m/z (50-20,000) are reported with a warning and are not
+  searched.
+- Non-finite peak and precursor m/z values are dropped during spectrum processing, so they no
+  longer abort prefiltered searches.
+- Calibrated 1/K0 finds `analysis.tdf` for Bruker inputs given as a path inside the `.d`
+  directory, such as `analysis.tdf_bin`. Inputs without `analysis.tdf`, such as miniTDF `.ms2`
+  directories, fall back to the linear scale with a warning, and `run-summary.json` records the
+  scale applied (`mixed` when only some inputs fell back).
+- mzML array type, compression, precursor, isolation-window, and noise state are reset for
+  every array, precursor, and spectrum, so values no longer leak between them.
+- MGF spectra without a title, a valid precursor mass, or finite peaks are skipped with one warning per file
+  instead of failing the file. File-level `CHARGE`, `TOL`, and `TOLU` apply to the first
+  spectrum, multi-digit charges parse correctly, and an empty `CHARGE=` means unknown charge.
+- Spectra that share an ID within a file are annotated and localized against their own peaks
+  after FDR, and MS2 TMT reporter ions stay with their own spectrum, instead of failing or
+  borrowing another spectrum's features. `TmtQuant` gains an `occurrence` field and
+  `serialize_features` takes the repeated-spectrum occurrence map.
+- File progress events are emitted once per file; the prefilter and post-FDR rereads no longer
+  repeat them.
+- The HTML report keeps inputs with the same file name in different directories separate.
+- The MCP `query_results` modification filter matches inside bracketed tags of PSM and
+  spectral-library sequences (plain residue letters no longer match), and a job that finished
+  before a cancellation request is reported as completed.
+- `DOCS.md` states the correct `predict_rt` default (true).
+
+### Added
+- Motif modification sites. A `motif:` site in a named definition restricts a residue
+  modification to a PROSITE-style pattern, with `*` marking the modified residue, for example
+  `motif:N*-{P}-[ST]` for N-glycosylation sequons or `motif:R-x(2)-[ST]*`. Motifs are matched
+  against each peptide's source protein, so they can extend past the peptide. Shared peptides
+  are eligible if any occurrence matches, generated decoys mirror their target's sites, and
+  localization only considers matching positions. Motifs work with static, variable,
+  mass-offset, and library-restricted definitions. `--preview-before` and `--preview-after`
+  supply protein context to `--preview-modifications`. Configurations without motifs produce
+  identical results.
+
+### Changed
+- Update timsrust from 0.6.5 to 0.6.6, with the vendored `filemanager` patch rebased on 0.6.6.
+  timsrust 0.6.6 changed its uncalibrated scan-to-1/K0 conversion from linear in sqrt(1/K0)
+  to linear in 1/K0. The default calibrated scale does not use it. `ion_mobility_scale:
+  "linear"` now computes the earlier conversion in Sage Plus and still reproduces Beta 6.
+  Spans of the opt-in `UniformMobility` DIA window splitting follow timsrust's new scale.
+- Update OpenTFRaw from 1.4.0 to 1.4.1. The fix affects profile spectra only, and Thermo RAW
+  search output is unchanged.
+
 ## [v0.1.0-beta.7] - 2026-09-23
 
 ### Fixed

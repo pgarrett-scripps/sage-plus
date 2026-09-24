@@ -121,6 +121,43 @@ fn rejects_empty_identifier() {
 }
 
 #[test]
+fn keeps_proteins_with_ambiguous_uppercase_residues() {
+    let fasta = Fasta::parse(
+        ">P1\nPEPTIDEKXAAB\nZJR\n>P2\nACDEFGHIK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+
+    assert_eq!(
+        fasta
+            .targets
+            .iter()
+            .map(|(accession, sequence)| (accession.as_ref(), sequence.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("P1", "PEPTIDEKXAABZJR"), ("P2", "ACDEFGHIK")]
+    );
+}
+
+#[test]
+fn rejects_digits_and_symbols_in_sequences() {
+    assert_eq!(
+        Fasta::parse(">P1\nPEP1IDE\n".into(), "rev_", true).unwrap_err(),
+        FastaError::InvalidResidue {
+            line: 2,
+            residue: '1'
+        }
+    );
+    assert_eq!(
+        Fasta::parse(">P1\nPEPTIDE*\n".into(), "rev_", true).unwrap_err(),
+        FastaError::InvalidResidue {
+            line: 2,
+            residue: '*'
+        }
+    );
+}
+
+#[test]
 fn rejects_invalid_residue_with_line_number() {
     assert_eq!(
         Fasta::parse(">P1\nPEPtIDE\n".into(), "rev_", true).unwrap_err(),

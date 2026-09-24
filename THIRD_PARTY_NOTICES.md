@@ -1,6 +1,6 @@
 # Third-party notices
 
-Sage Plus includes a patched copy of MannLabs `filemanager` 0.6.5. Its crate
+Sage Plus includes a patched copy of MannLabs `filemanager` 0.6.6. Its crate
 metadata declares Apache-2.0, while the pinned repository root contains an MIT
 license. The source distribution retains that upstream copyright and MIT text
 unchanged in `vendor/filemanager/LICENSE` and includes the standard Apache 2.0

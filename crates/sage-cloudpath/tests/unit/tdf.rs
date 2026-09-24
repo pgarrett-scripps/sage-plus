@@ -204,3 +204,75 @@ fn clear_resets_all_reusable_storage() {
     assert!(buffer.order.is_empty());
     assert!(buffer.agg_buff.is_empty());
 }
+
+#[test]
+fn calibrated_mobility_reads_inputs_that_point_inside_the_directory() {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let read = |path: &Path| {
+        let url = crate::Url::from_file_path(path).unwrap();
+        let mut spectra =
+            crate::util::read_spectra(&url, 0, None, BrukerProcessingConfig::default(), false)
+                .unwrap();
+        spectra.sort_by(|a, b| (a.ms_level, &a.id).cmp(&(b.ms_level, &b.id)));
+        spectra
+    };
+    let expected = read(&directory);
+    for file in ["analysis.tdf_bin", "analysis.tdf"] {
+        let spectra = read(&directory.join(file));
+        assert_eq!(spectra.len(), expected.len(), "{file}");
+        for (actual, expected) in spectra.iter().zip(&expected) {
+            assert_eq!(actual.id, expected.id, "{file}");
+            let mobility = |spectrum: &RawSpectrum| {
+                spectrum
+                    .precursors
+                    .iter()
+                    .map(|precursor| precursor.inverse_ion_mobility)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(mobility(actual), mobility(expected), "{file}");
+        }
+    }
+}
+
+#[test]
+fn calibrated_mobility_falls_back_to_linear_without_analysis_tdf() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("run.ms2");
+    std::fs::create_dir(&path).unwrap();
+    assert!(matches!(
+        MobilityScale::new(&path, BrukerMobilityScale::Calibrated).unwrap(),
+        MobilityScale::Linear(None)
+    ));
+    assert_eq!(
+        BrukerMobilityScale::Calibrated.effective_for(&path),
+        BrukerMobilityScale::Linear
+    );
+    let tdf = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/bruker/example_dia.d/analysis.tdf_bin");
+    assert_eq!(
+        BrukerMobilityScale::Calibrated.effective_for(&tdf),
+        BrukerMobilityScale::Calibrated
+    );
+    assert_eq!(
+        BrukerMobilityScale::Linear.effective_for(&tdf),
+        BrukerMobilityScale::Linear
+    );
+}
+
+#[test]
+fn linear_scale_keeps_the_beta6_conversion() {
+    // timsrust 0.6.6 changed its uncalibrated conversion; the linear scale
+    // keeps the sqrt(1/K0) interpolation of timsrust 0.6.5 and Beta 6.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let linear = LinearMobilityScale::from_path(&path).unwrap();
+    assert_eq!(linear, LinearMobilityScale::new(0.6, 1.6, 918));
+    let (lower, upper) = (0.6f64, 1.6f64);
+    for scan in [0u32, 1, 395, 917, 918] {
+        let expected = upper.sqrt() + (lower.sqrt() - upper.sqrt()) / 918.0 * f64::from(scan);
+        assert_eq!(linear.one_over_k0(scan), expected * expected);
+    }
+    assert!(matches!(
+        MobilityScale::new(&path, BrukerMobilityScale::Linear).unwrap(),
+        MobilityScale::Linear(Some(scale)) if scale == linear
+    ));
+}

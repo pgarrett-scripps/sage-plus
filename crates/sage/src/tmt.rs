@@ -194,6 +194,10 @@ const TMT18PLEX: [f32; 18] = [
 pub struct TmtQuant {
     pub spec_id: String,
     pub file_id: usize,
+    /// Zero-based occurrence of `(file_id, spec_id)` among the MSn spectra, so
+    /// repeated spectrum IDs (e.g. duplicate MGF titles) keep their own
+    /// reporter ions. MS3 reporter spectra refer to their MS2 scan and use 0.
+    pub occurrence: usize,
     pub ion_injection_time: f32,
     pub peaks: Vec<f32>,
 }
@@ -211,18 +215,33 @@ pub fn quantify(
     isobaric_tolerance: Tolerance,
     level: u8,
 ) -> Vec<TmtQuant> {
+    let mut seen = std::collections::HashMap::with_capacity(spectra.len());
+    let occurrences = spectra
+        .iter()
+        .map(|spectrum| {
+            let count = seen
+                .entry((spectrum.file_id, spectrum.id.as_str()))
+                .or_insert(0usize);
+            *count += 1;
+            *count - 1
+        })
+        .collect::<Vec<_>>();
     spectra
         .par_iter()
-        .filter(|spectrum| spectrum.level == level)
-        .filter_map(|spectrum| {
-            let spec_id = match level {
+        .zip(occurrences.par_iter())
+        .filter(|(spectrum, _)| spectrum.level == level)
+        .filter_map(|(spectrum, &occurrence)| {
+            let (spec_id, occurrence) = match level {
                 1 => return None,
-                2 => spectrum.id.clone(),
-                _ => spectrum
-                    .precursors
-                    .first()
-                    .and_then(|precursor| precursor.spectrum_ref.clone())
-                    .unwrap_or_default(),
+                2 => (spectrum.id.clone(), occurrence),
+                _ => (
+                    spectrum
+                        .precursors
+                        .first()
+                        .and_then(|precursor| precursor.spectrum_ref.clone())
+                        .unwrap_or_default(),
+                    0,
+                ),
             };
 
             let peaks = find_reporter_ions(
@@ -238,6 +257,7 @@ pub fn quantify(
             Some(TmtQuant {
                 spec_id,
                 file_id: spectrum.file_id,
+                occurrence,
                 ion_injection_time: spectrum.ion_injection_time,
                 peaks,
             })

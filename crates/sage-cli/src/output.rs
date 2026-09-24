@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use sage_core::spectrum::ProcessedSpectrum;
 use sage_core::{scoring::Feature, tmt::TmtQuant};
+use std::collections::HashMap;
 
 pub(crate) fn prepare_local_directory(
     url: &sage_cloudpath::Url,
@@ -41,6 +42,10 @@ pub struct SageResults {
     pub ms1: Vec<ProcessedSpectrum>,
     pub features: Vec<Feature>,
     pub quant: Vec<TmtQuant>,
+    /// Search-time `psm_id` -> zero-based occurrence of the PSM's spectrum ID
+    /// within its file, recorded only for repeated IDs (e.g. MGF files with
+    /// repeated `TITLE=` lines). Empty when every spectrum ID is unique.
+    pub repeated_spectrum_psms: HashMap<usize, usize>,
 }
 
 impl SageResults {
@@ -48,6 +53,8 @@ impl SageResults {
         self.ms1.extend(other.ms1);
         self.features.extend(other.features);
         self.quant.extend(other.quant);
+        self.repeated_spectrum_psms
+            .extend(other.repeated_spectrum_psms);
         self
     }
 }

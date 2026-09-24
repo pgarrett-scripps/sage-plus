@@ -51,6 +51,42 @@ fn converts_open_tf_raw_record() {
 }
 
 #[test]
+fn implausible_precursor_mz_is_not_searched() {
+    let record = |selected_mz: f64, target_mz: Option<f64>| SpectrumRecord {
+        index: 0,
+        scan_number: 217,
+        ms_level: 2,
+        is_ms1: false,
+        is_dia: false,
+        is_wideband: false,
+        polarity: None,
+        scan_mode: None,
+        filter: None,
+        retention_time_min: 1.0,
+        total_ion_current: 1.0,
+        base_peak_mz: 200.0,
+        base_peak_intensity: 1.0,
+        low_mz: 100.0,
+        high_mz: 1000.0,
+        ion_injection_time_ms: None,
+        faims_cv: None,
+        precursor: Some(PrecursorInfo {
+            selected_mz: Some(selected_mz),
+            target_mz,
+            ..Default::default()
+        }),
+        mz: vec![200.0],
+        intensity: vec![1.0],
+    };
+    let reader = ThermoRawReader::with_file_id(0);
+    // Misdecoded events can carry denormal precursor m/z values.
+    assert!(reader.convert(record(2.1e-314, None)).precursors.is_empty());
+    // A plausible isolation target is used when the selected m/z is not.
+    let spectrum = reader.convert(record(0.0, Some(810.16)));
+    assert_eq!(spectrum.precursors[0].mz, 810.16);
+}
+
+#[test]
 fn parses_real_raw_file() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/thermo/Angiotensin_325-CID.raw");
@@ -80,4 +116,146 @@ fn parses_real_raw_file() {
     assert_eq!(first.precursors.len(), 1);
     assert_eq!(first.precursors[0].mz, 325.0);
     assert_eq!(first.precursors[0].charge, Some(1));
+}
+
+fn record(scan_number: u32, ms_level: u32) -> SpectrumRecord {
+    SpectrumRecord {
+        index: scan_number as usize - 1,
+        scan_number,
+        ms_level,
+        is_ms1: ms_level == 1,
+        is_dia: false,
+        is_wideband: false,
+        polarity: None,
+        scan_mode: None,
+        filter: None,
+        retention_time_min: 0.0,
+        total_ion_current: 0.0,
+        base_peak_mz: 0.0,
+        base_peak_intensity: 0.0,
+        low_mz: 0.0,
+        high_mz: 0.0,
+        ion_injection_time_ms: None,
+        faims_cv: None,
+        precursor: None,
+        mz: Vec::new(),
+        intensity: Vec::new(),
+    }
+}
+
+#[test]
+fn trailer_levels_follow_master_scans() {
+    // MS1, MS2 of scan 1, MS3 of scan 2, MS2 of scan 1, missing trailer,
+    // and a master that is not an earlier scan.
+    let masters = [Some(0), Some(1), Some(2), Some(1), None, Some(9)];
+    assert_eq!(
+        trailer_levels(1, &masters),
+        vec![Some(1), Some(2), Some(3), Some(2), None, None]
+    );
+}
+
+#[test]
+fn dependent_scans_follow_their_master_scan() {
+    // Events decoded out of step on an Orbitrap Fusion file.
+    assert_eq!(corrected_level(1, Some(2), false), Some(2));
+    assert_eq!(corrected_level(1, Some(3), false), Some(3));
+    assert_eq!(corrected_level(4, Some(2), true), Some(2));
+    assert_eq!(corrected_level(2, Some(2), true), None);
+    assert_eq!(corrected_level(3, Some(3), false), None);
+}
+
+#[test]
+fn scans_without_a_master_keep_plausible_msn_events() {
+    // DIA and targeted MS2 scans have no master scan.
+    assert_eq!(corrected_level(2, Some(1), true), None);
+    // A garbled event on an MS1 scan.
+    assert_eq!(corrected_level(4, Some(1), false), Some(1));
+    assert_eq!(corrected_level(1, Some(1), false), None);
+    // No trailer master scan number at all.
+    assert_eq!(corrected_level(2, None, false), None);
+    assert!(plausible_precursor_mz(806.96));
+    assert!(!plausible_precursor_mz(7.7e-304));
+    assert!(!plausible_precursor_mz(f64::NAN));
+}
+
+#[test]
+fn ms3_without_precursor_mz_keeps_its_parent_scan() {
+    let mut ms3 = record(9, 3);
+    ms3.precursor = Some(PrecursorInfo {
+        master_scan_number: Some(8),
+        ..Default::default()
+    });
+    let spectrum = ThermoRawReader::with_file_id(0).convert(ms3);
+    assert_eq!(
+        spectrum.precursors[0].spectrum_ref.as_deref(),
+        Some("controllerType=0 controllerNumber=1 scan=8")
+    );
+
+    let mut ms2 = record(8, 2);
+    ms2.precursor = Some(PrecursorInfo {
+        master_scan_number: Some(7),
+        ..Default::default()
+    });
+    assert!(ThermoRawReader::with_file_id(0)
+        .convert(ms2)
+        .precursors
+        .is_empty());
+}
+
+#[test]
+fn trailer_level_replaces_event_precursor() {
+    let mut ms1 = record(5, 2);
+    ms1.precursor = Some(PrecursorInfo {
+        selected_mz: Some(600.0),
+        ..Default::default()
+    });
+    apply_trailer_level(&mut ms1, 1, None);
+    assert_eq!(ms1.ms_level, 1);
+    assert!(ms1.is_ms1);
+    assert!(ms1.precursor.is_none());
+}
+
+/// Checks MS level counts on local files that are too large for the
+/// repository. `SAGE_THERMO_LEVEL_CHECK` holds `path=ms1,ms2,ms3` entries
+/// separated by `;`, with counts taken from a vendor mzML conversion.
+#[test]
+#[ignore]
+fn raw_ms_levels_match_vendor_conversion() {
+    let spec = std::env::var("SAGE_THERMO_LEVEL_CHECK").expect("SAGE_THERMO_LEVEL_CHECK");
+    for entry in spec.split(';').filter(|entry| !entry.is_empty()) {
+        let (path, counts) = entry.split_once('=').unwrap();
+        let expected = counts
+            .split(',')
+            .map(|count| count.parse::<usize>().unwrap())
+            .collect::<Vec<_>>();
+        let spectra = ThermoRawReader::with_file_id(0).parse(path).unwrap();
+        let observed = (1..=expected.len())
+            .map(|level| {
+                spectra
+                    .iter()
+                    .filter(|spectrum| spectrum.ms_level as usize == level)
+                    .count()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(observed, expected, "{path}");
+        let missing = spectra
+            .iter()
+            .filter(|spectrum| spectrum.ms_level == 2 && spectrum.precursors.is_empty())
+            .count();
+        let unlinked = spectra
+            .iter()
+            .filter(|spectrum| {
+                spectrum.ms_level > 2
+                    && spectrum
+                        .precursors
+                        .first()
+                        .and_then(|precursor| precursor.spectrum_ref.as_ref())
+                        .is_none()
+            })
+            .count();
+        println!(
+            "{path}: levels {observed:?}, {missing} MS2 scans without a precursor, \
+             {unlinked} MSn scans above MS2 without a parent scan"
+        );
+    }
 }

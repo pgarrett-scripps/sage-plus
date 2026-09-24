@@ -284,6 +284,9 @@ fn equal_nonzero_isotope_bounds_are_honored() {
     let features = scorer.score(&query);
     assert_eq!(features.len(), 1);
     assert_eq!(features[0].isotope_error, NEUTRON);
+    // The matched isotope error is not a residual modification mass.
+    assert_eq!(features[0].mass_shift, 0.0);
+    assert_eq!(features[0].ambiguity_sequence, "PEPTIDER");
 }
 
 #[test]

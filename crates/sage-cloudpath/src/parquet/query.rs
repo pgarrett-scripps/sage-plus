@@ -65,7 +65,9 @@ where
         }
         rows.push(serde_json::Value::Object(object));
     }
-    if scanned_rows == scan_limit {
+    // Reaching the scan limit only truncates when rows remain unscanned.
+    let total_rows = usize::try_from(reader.metadata().file_metadata().num_rows()).unwrap_or(0);
+    if scanned_rows == scan_limit && total_rows > scan_limit {
         truncated = true;
     }
     Ok((rows, scanned_rows, truncated))

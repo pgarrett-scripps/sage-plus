@@ -355,6 +355,13 @@ impl MzMLReader {
                             let id = std::str::from_utf8(&id)?;
                             spectrum.id = id.to_string();
                         }
+                        b"binaryDataArray" => {
+                            // Each array declares its own kind, compression, and
+                            // dtype. Unknown or empty arrays must not inherit them.
+                            binary_array = None;
+                            compression = false;
+                            binary_dtype = Dtype::F64;
+                        }
                         b"precursor" => {
                             // Not all precursor fields have a spectrumRef
                             if let Some(scan) = ev.try_get_attribute(b"spectrumRef")? {
@@ -452,8 +459,12 @@ impl MzMLReader {
                                     _ => None,
                                 };
                                 spectrum.precursors.push(precursor);
-                                precursor = Precursor::default();
                             }
+                            // Precursors without an m/z are dropped whole, so their
+                            // charge, spectrumRef, and mobility cannot leak onward.
+                            precursor = Precursor::default();
+                            iso_window_lo = None;
+                            iso_window_hi = None;
                             Some(State::Spectrum)
                         }
                         (Some(State::Scan), b"scan") => Some(State::Spectrum),
@@ -489,7 +500,6 @@ impl MzMLReader {
                                         .iter_mut()
                                         .zip(noise_array.iter())
                                         .for_each(|(int, noise)| *int /= noise);
-                                    noise_array.clear();
                                     spectra.push(spectrum);
                                 }
                                 (true, _) => {
@@ -498,6 +508,12 @@ impl MzMLReader {
                                 (false, _) => {}
                             }
                             spectrum = RawSpectrum::default_with_file_id(self.file_id);
+                            noise_array.clear();
+                            // Scan-level mobility of a spectrum without precursors
+                            // belongs to that spectrum only.
+                            precursor = Precursor::default();
+                            iso_window_lo = None;
+                            iso_window_hi = None;
                             None
                         }
                         _ => state,

@@ -1,8 +1,7 @@
 //! Bruker timsTOF scan-to-1/K0 conversion.
 //!
-//! timsrust interpolates scan numbers between the acquisition range limits
-//! `OneOverK0AcqRangeLower` and `OneOverK0AcqRangeUpper`, linearly in
-//! `sqrt(1/K0)`. Bruker
+//! Uncalibrated conversions interpolate scan numbers between the acquisition
+//! range limits `OneOverK0AcqRangeLower` and `OneOverK0AcqRangeUpper`. Bruker
 //! software instead applies the per-frame calibration stored in the
 //! `TimsCalibration` table of `analysis.tdf`. The two scales differ by up to
 //! about 2%, so the calibrated scale is the default.
@@ -44,6 +43,41 @@ impl BrukerMobilityScale {
             Self::Linear => "linear",
         }
     }
+
+    /// The scale actually reported for the Bruker input at `path`. Inputs
+    /// without an `analysis.tdf`, such as miniTDF `.ms2` directories, have no
+    /// calibration table and always use the linear scale.
+    pub fn effective_for(self, path: impl AsRef<Path>) -> Self {
+        match self {
+            Self::Calibrated if analysis_tdf(path).is_none() => Self::Linear,
+            scale => scale,
+        }
+    }
+}
+
+/// The `analysis.tdf` timsrust reads for a Bruker input.
+///
+/// timsrust accepts the `.d` directory or any path inside it, such as
+/// `analysis.tdf_bin`, and walks up to the first directory containing both
+/// `analysis.tdf` and `analysis.tdf_bin`. Returns `None` for inputs that are
+/// not TDF acquisitions, such as miniTDF `.ms2` directories.
+pub fn analysis_tdf(path: impl AsRef<Path>) -> Option<PathBuf> {
+    path.as_ref()
+        .ancestors()
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .map(|directory| directory.join("analysis.tdf"))
+        .find(|tdf| tdf.is_file() && tdf.with_file_name("analysis.tdf_bin").is_file())
+}
+
+/// [`analysis_tdf`], or the path it was expected at for error messages.
+fn analysis_tdf_or_guess(path: &Path) -> PathBuf {
+    analysis_tdf(path).unwrap_or_else(|| {
+        if path.is_dir() {
+            path.join("analysis.tdf")
+        } else {
+            path.to_path_buf()
+        }
+    })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -63,6 +97,73 @@ pub enum MobilityCalibrationError {
     MissingCalibration { path: PathBuf, frame: i64, id: i64 },
     #[error("{path}: no TimsCalibration rows")]
     Empty { path: PathBuf },
+    #[error("{path}: GlobalMetadata {key} is not a number: {value:?}")]
+    InvalidMetadata {
+        path: PathBuf,
+        key: String,
+        value: String,
+    },
+}
+
+/// The uncalibrated scale reported by Sage Plus Beta 6 and earlier.
+///
+/// Scan numbers are interpolated between `OneOverK0AcqRangeUpper` (scan 0) and
+/// `OneOverK0AcqRangeLower` (the largest `Frames.NumScans`), linearly in
+/// `sqrt(1/K0)`. This is the conversion of timsrust 0.6.5, kept here with the
+/// same floating-point operations so the scale does not change with timsrust.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinearMobilityScale {
+    intercept: f64,
+    slope: f64,
+}
+
+impl LinearMobilityScale {
+    pub fn new(lower: f64, upper: f64, scans: u64) -> Self {
+        let intercept = upper.sqrt();
+        Self {
+            intercept,
+            slope: (lower.sqrt() - intercept) / scans as u32 as f64,
+        }
+    }
+
+    /// Read the acquisition range of a `.d` directory or a file inside it.
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, MobilityCalibrationError> {
+        let tdf = analysis_tdf_or_guess(path.as_ref());
+        let sql = |source| MobilityCalibrationError::Sql {
+            path: tdf.clone(),
+            source,
+        };
+        let connection =
+            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(sql)?;
+        let metadata = |key: &str| -> Result<f64, MobilityCalibrationError> {
+            let value: String = connection
+                .query_row(
+                    "SELECT Value FROM GlobalMetadata WHERE Key = ?1",
+                    [key],
+                    |row| row.get(0),
+                )
+                .map_err(sql)?;
+            value
+                .parse()
+                .map_err(|_| MobilityCalibrationError::InvalidMetadata {
+                    path: tdf.clone(),
+                    key: key.to_string(),
+                    value,
+                })
+        };
+        let lower = metadata("OneOverK0AcqRangeLower")?;
+        let upper = metadata("OneOverK0AcqRangeUpper")?;
+        let scans: i64 = connection
+            .query_row("SELECT max(NumScans) FROM Frames", [], |row| row.get(0))
+            .map_err(sql)?;
+        Ok(Self::new(lower, upper, scans as u64))
+    }
+
+    pub fn one_over_k0(&self, scan: u32) -> f64 {
+        let value = self.intercept + self.slope * f64::from(scan);
+        value * value
+    }
 }
 
 /// One ModelType 2 `TimsCalibration` row, coefficients `C0` to `C9`.
@@ -102,14 +203,9 @@ pub struct MobilityCalibration {
 }
 
 impl MobilityCalibration {
-    /// Read the calibration of a `.d` directory or an `analysis.tdf` file.
+    /// Read the calibration of a `.d` directory or a file inside it.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, MobilityCalibrationError> {
-        let path = path.as_ref();
-        let tdf = if path.is_dir() {
-            path.join("analysis.tdf")
-        } else {
-            path.to_path_buf()
-        };
+        let tdf = analysis_tdf_or_guess(path.as_ref());
         let sql = |source| MobilityCalibrationError::Sql {
             path: tdf.clone(),
             source,
@@ -201,12 +297,7 @@ impl MobilityCalibration {
     pub fn dda_precursor_scans(
         path: impl AsRef<Path>,
     ) -> Result<HashMap<usize, (usize, f64)>, MobilityCalibrationError> {
-        let path = path.as_ref();
-        let tdf = if path.is_dir() {
-            path.join("analysis.tdf")
-        } else {
-            path.to_path_buf()
-        };
+        let tdf = analysis_tdf_or_guess(path.as_ref());
         let sql = |source| MobilityCalibrationError::Sql {
             path: tdf.clone(),
             source,

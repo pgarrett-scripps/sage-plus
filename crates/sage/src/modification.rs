@@ -569,6 +569,8 @@ pub enum ModificationSpecificity {
     PeptideCTerm(u8),
     ProteinNTerm(u8),
     ProteinCTerm(u8),
+    /// Residue selected by a sequence motif evaluated with protein context.
+    Motif(&'static crate::motif::SiteMotif),
 }
 
 impl ModificationSpecificity {
@@ -589,7 +591,113 @@ impl ModificationSpecificity {
             Self::PeptideCTerm(r) => format!("peptide_c_term:{}", r as char),
             Self::ProteinNTerm(r) => format!("protein_n_term:{}", r as char),
             Self::ProteinCTerm(r) => format!("protein_c_term:{}", r as char),
+            Self::Motif(motif) => motif.canonical().to_string(),
         }
+    }
+
+    pub fn is_motif(self) -> bool {
+        matches!(self, Self::Motif(_))
+    }
+
+    /// Select sites with known protein context. Only motifs use the context;
+    /// every other rule is decided by the peptide and its position.
+    pub fn sites_in_context(
+        self,
+        sequence: &[u8],
+        position: crate::enzyme::Position,
+        context: crate::motif::MotifContext<'_>,
+    ) -> Vec<crate::peptide::Site> {
+        match self {
+            Self::Motif(motif) => motif
+                .sites(sequence, context)
+                .into_iter()
+                .map(crate::peptide::Site::Sequence)
+                .collect(),
+            _ => self.sites(sequence, position),
+        }
+    }
+
+    /// Select sites for a peptide found at `occurrences`. A motif site is
+    /// eligible if any occurrence's source protein satisfies the motif.
+    ///
+    /// A decoy whose occurrences hold its literal sequence (a FASTA decoy) is
+    /// matched literally. A generated decoy carries its target's occurrences:
+    /// the motif is evaluated on the target sequence and positions are
+    /// mirrored, matching decoys built by reversing modified targets. A decoy
+    /// without occurrences (peptide TSV input) is treated the same way,
+    /// because a decoy row and a decoy generated from a TSV target look alike.
+    ///
+    /// Protein-terminal anchors come from each occurrence's coordinates when
+    /// its source protein is known, not from `position`: a shared peptide
+    /// keeps only one position although its occurrences may differ.
+    pub fn sites_for_occurrences(
+        self,
+        sequence: &[u8],
+        position: crate::enzyme::Position,
+        decoy: bool,
+        occurrences: &[crate::enzyme::ProteinOccurrence],
+    ) -> Vec<crate::peptide::Site> {
+        use crate::motif::MotifContext;
+        use crate::peptide::Site;
+        if !self.is_motif() {
+            return self.sites(sequence, position);
+        }
+        let len = sequence.len();
+        let last = len.saturating_sub(1);
+        let reversed = (decoy && last > 1).then(|| {
+            let mut target = sequence.to_vec();
+            target[1..last].reverse();
+            target
+        });
+        let mut sites = Vec::new();
+        let mut collect = |target: &[u8], context: MotifContext<'_>, mirror: bool| {
+            for site in self.sites_in_context(target, position, context) {
+                sites.push(match site {
+                    Site::Sequence(index) if mirror && (1..last as u32).contains(&index) => {
+                        Site::Sequence(last as u32 - index)
+                    }
+                    site => site,
+                });
+            }
+        };
+        if occurrences.is_empty() {
+            match &reversed {
+                Some(target) => collect(target, MotifContext::peptide_only(position), true),
+                None => collect(sequence, MotifContext::peptide_only(position), false),
+            }
+        }
+        for occurrence in occurrences {
+            let protein =
+                occurrence
+                    .source
+                    .as_ref()
+                    .zip(occurrence.start)
+                    .and_then(|(protein, start)| {
+                        let start = start as usize;
+                        let span = protein.as_bytes().get(start..start + len)?;
+                        Some((protein.as_bytes(), start, span))
+                    });
+            match (protein, &reversed) {
+                (Some((protein, start, span)), _) if span == sequence => collect(
+                    sequence,
+                    MotifContext::in_protein(protein, start, len),
+                    false,
+                ),
+                (Some((protein, start, span)), Some(target)) if span == target.as_slice() => {
+                    collect(target, MotifContext::in_protein(protein, start, len), true)
+                }
+                // Inconsistent coordinates cannot vouch for a motif.
+                (Some(_), _) => {}
+                (None, target) => collect(
+                    target.as_deref().unwrap_or(sequence),
+                    MotifContext::neighbors(&occurrence.prev_aa, &occurrence.next_aa, position),
+                    target.is_some(),
+                ),
+            }
+        }
+        sites.sort_unstable();
+        sites.dedup();
+        sites
     }
 
     /// Select physical attachment sites using one matcher for every consumer.
@@ -630,12 +738,36 @@ impl ModificationSpecificity {
             Self::PeptideCTerm(r) if sequence[last] == r => vec![Site::Cterm],
             Self::ProteinNTerm(r) if protein_n && sequence[0] == r => vec![Site::Nterm],
             Self::ProteinCTerm(r) if protein_c && sequence[last] == r => vec![Site::Cterm],
+            Self::Motif(_) => self.sites_in_context(
+                sequence,
+                position,
+                crate::motif::MotifContext::peptide_only(position),
+            ),
             _ => Vec::new(),
         }
     }
 
     pub fn overlaps(self, other: Self) -> bool {
         use crate::enzyme::Position;
+        if let Some(motif) = [self, other].into_iter().find_map(|rule| match rule {
+            Self::Motif(motif) => Some(motif),
+            _ => None,
+        }) {
+            // Conservative: motif rules overlap any residue rule sharing a residue.
+            let residues = |rule| match rule {
+                Self::Motif(m) => m.site_residues(),
+                Self::Residue(r)
+                | Self::Internal(r)
+                | Self::PeptideN(Some(r))
+                | Self::PeptideC(Some(r))
+                | Self::ProteinN(Some(r))
+                | Self::ProteinC(Some(r)) => vec![r],
+                _ => Vec::new(),
+            };
+            let other = if self.is_motif() { other } else { self };
+            let mine = motif.site_residues();
+            return residues(other).iter().any(|r| mine.contains(r));
+        }
         let residue = |rule| match rule {
             Self::Residue(r)
             | Self::Internal(r)
@@ -644,6 +776,7 @@ impl ModificationSpecificity {
             | Self::ProteinNTerm(r)
             | Self::ProteinCTerm(r) => Some(r),
             Self::PeptideN(r) | Self::PeptideC(r) | Self::ProteinN(r) | Self::ProteinC(r) => r,
+            Self::Motif(_) => unreachable!(),
         };
         let mut alphabet = vec![b'A'];
         alphabet.extend(residue(self));
@@ -684,6 +817,7 @@ impl Display for ModificationSpecificity {
                 | Self::PeptideCTerm(_)
                 | Self::ProteinNTerm(_)
                 | Self::ProteinCTerm(_)
+                | Self::Motif(_)
         ) {
             return f.write_str(&self.explicit_name());
         }
@@ -734,12 +868,18 @@ pub enum InvalidModification {
     Empty,
     InvalidResidue(char),
     TooLong(String),
+    Motif(String),
 }
 
 impl FromStr for ModificationSpecificity {
     type Err = InvalidModification;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(pattern) = s.strip_prefix("motif:") {
+            return crate::motif::SiteMotif::intern(pattern)
+                .map(Self::Motif)
+                .map_err(InvalidModification::Motif);
+        }
         let (kind, residue) = s.split_once(':').map_or((s, None), |(k, r)| (k, Some(r)));
         let aa = match residue {
             Some(r) if r.len() == 1 && VALID_AA.contains(&r.as_bytes()[0]) => Some(r.as_bytes()[0]),
@@ -873,6 +1013,11 @@ where
     let mut result: HashMap<String, T> = HashMap::new();
     for (id, mut value) in input {
         if !named {
+            if id.starts_with("motif:") {
+                return Err(de::Error::custom(format!(
+                    "motif site `{id}` requires a named definition, e.g. {{\"HexNAc\": {{\"mass\": 203.079373, \"sites\": [\"{id}\"]}}}}"
+                )));
+            }
             let specificity = id.parse::<ModificationSpecificity>().map_err(|_| de::Error::custom(format!("invalid modification key `{id}`. Named definitions require a nonempty `sites` array")))?;
             let entry: T = serde_json::from_value(value).map_err(de::Error::custom)?;
             let key = specificity.to_string();
@@ -914,8 +1059,14 @@ where
         }
         let mut seen = std::collections::HashSet::new();
         for site in sites {
-            let specificity = site.parse::<ModificationSpecificity>().map_err(|_| {
-                de::Error::custom(format!("invalid site `{site}` for modification `{id}`"))
+            let specificity = site.parse::<ModificationSpecificity>().map_err(|error| {
+                let detail = match error {
+                    InvalidModification::Motif(detail) => format!(": {detail}"),
+                    _ => String::new(),
+                };
+                de::Error::custom(format!(
+                    "invalid site `{site}` for modification `{id}`{detail}"
+                ))
             })?;
             if specificity.explicit_name() != site {
                 return Err(de::Error::custom(format!(

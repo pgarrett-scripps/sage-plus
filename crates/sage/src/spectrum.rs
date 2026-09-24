@@ -517,6 +517,47 @@ fn select_columns(
 
 type SortedColumns = (Vec<f32>, Vec<f32>, Vec<u8>, Vec<bool>, Vec<f32>);
 
+fn retain_by_mask<T>(values: &mut Vec<T>, keep: &[bool]) {
+    let mut index = 0;
+    values.retain(|_| {
+        index += 1;
+        keep[index - 1]
+    });
+}
+
+/// Drop peaks that can never match a fragment: non-finite m/z values, and
+/// every peak of an MSn scan whose precursor m/z is non-finite. Search paths
+/// then see the same peaks instead of each handling NaN and infinity
+/// differently. Finite spectra are returned untouched.
+fn retain_finite_peaks(spectrum: &mut RawSpectrum) {
+    let peaks = spectrum.mz.len();
+    let unusable_precursor = spectrum.ms_level > 1
+        && spectrum
+            .precursors
+            .first()
+            .is_some_and(|precursor| !precursor.mz.is_finite());
+    let keep = if unusable_precursor {
+        vec![false; peaks]
+    } else if spectrum.mz.iter().all(|mz| mz.is_finite()) {
+        return;
+    } else {
+        spectrum.mz.iter().map(|mz| mz.is_finite()).collect()
+    };
+
+    if spectrum.intensity.len() == peaks {
+        retain_by_mask(&mut spectrum.intensity, &keep);
+    }
+    if let Some(mobilities) = spectrum.mobility.as_mut().filter(|m| m.len() == peaks) {
+        retain_by_mask(mobilities, &keep);
+    }
+    // Charge arrays of the wrong length are ignored; keep ignoring them.
+    match spectrum.fragment_charges.as_mut() {
+        Some(charges) if charges.len() == peaks => retain_by_mask(charges, &keep),
+        _ => spectrum.fragment_charges = None,
+    }
+    retain_by_mask(&mut spectrum.mz, &keep);
+}
+
 fn sort_columns_by_mass(
     masses: Vec<f32>,
     intensities: Vec<f32>,
@@ -724,6 +765,7 @@ impl SpectrumProcessor {
         if let Some(mobilities) = spectrum.mobility.as_ref() {
             debug_assert_eq!(spectrum.mz.len(), mobilities.len());
         }
+        retain_finite_peaks(&mut spectrum);
 
         let (masses, intensities, charges, charge_is_known, mobilities) = if spectrum.ms_level == 1
             && spectrum.mobility.is_some()

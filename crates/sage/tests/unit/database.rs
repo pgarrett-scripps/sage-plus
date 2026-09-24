@@ -1,3 +1,4 @@
+use crate::enzyme::group_digests;
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
@@ -163,6 +164,7 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
             start: reference.protein_start,
             prev_aa: reference.prev_aa,
             next_aa: reference.next_aa,
+            source: None,
         }],
         reference,
     }
@@ -414,6 +416,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
             start: digest.protein_start,
             prev_aa: None,
             next_aa: None,
+            source: None,
         }],
     }]);
     let heavy = peptides
@@ -642,6 +645,68 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
 }
 
 #[test]
+fn peptides_with_massless_residues_are_skipped_at_digestion() {
+    let fasta = Fasta::parse(
+        ">P1\nPEPTIDEKAAXAWWWWWKGGBGGRSSZSSKTTJTTRLLLLLK\n>P2\nMSSWWHHK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    assert_eq!(fasta.targets.len(), 2);
+    let library = CustomCleavageLibrary::from_tsv("protein\tposition\tcontext\nP1\t11\tAAXA|WW\n")
+        .unwrap()
+        .validate(&fasta)
+        .unwrap();
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(1),
+            min_len: Some(2),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let parameters = builder.make_parameters();
+
+    let custom = parameters.digest_with_custom_cleavages(&fasta, Some(&library));
+    assert!(custom
+        .iter()
+        .any(|peptide| &peptide.sequence[..] == b"WWWWWK"));
+    for peptides in [parameters.digest(&fasta), custom] {
+        let sequences = peptides
+            .iter()
+            .map(|peptide| {
+                (
+                    std::str::from_utf8(&peptide.sequence).unwrap(),
+                    peptide.decoy,
+                )
+            })
+            .collect::<HashSet<_>>();
+        assert!(sequences.contains(&("PEPTIDEK", false)));
+        assert!(sequences.contains(&("LLLLLK", false)));
+        assert!(sequences.contains(&("MSSWWHHK", false)));
+        assert!(sequences.iter().any(|(_, decoy)| *decoy));
+        for peptide in &peptides {
+            assert!(
+                peptide
+                    .sequence
+                    .iter()
+                    .all(|residue| crate::mass::VALID_AA.contains(residue)),
+                "{peptide:?}"
+            );
+            assert!(peptide.monoisotopic > 0.0);
+        }
+    }
+
+    let database = parameters.build(fasta);
+    assert!(!database.peptides.is_empty());
+    assert!(database.peptides.iter().all(|peptide| peptide
+        .sequence
+        .iter()
+        .all(|residue| crate::mass::VALID_AA.contains(residue))));
+}
+
+#[test]
 fn estimates_variable_modification_expansion_before_allocation() {
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
@@ -783,7 +848,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
             modification: Arc::from("Phospho"),
         },
     ])));
-    let fasta = Fasta::parse(">P1\nMSSK\n>P2\nMSSK\n".into(), "rev_", false).unwrap();
+    let fasta = Fasta::parse(">P1\nMSSK\n>P2\nMSSWWHHK\n".into(), "rev_", false).unwrap();
 
     let peptides = parameters.digest(&fasta);
     assert!(!peptides
@@ -917,7 +982,8 @@ fn internal_placement_static_variable_and_model_counts() {
         for static_mod in [false, true] {
             let parameters = positional_parameters(&["~K"], "database", static_mod);
             let digest = positional_digest(sequence, Position::Internal);
-            let estimate = parameters.variable_variant_count(&digest);
+            let estimate = parameters
+                .variable_variant_count(&digest, &[crate::enzyme::ProteinOccurrence::of(&digest)]);
             let variants = parameters.modify_digests(group_digests(vec![digest]));
             assert_eq!(
                 variants.len(),
@@ -1181,4 +1247,111 @@ fn named_static_modifications_apply_terminal_and_residue_sites_separately() {
     assert_eq!(peptides[0].modification_at(0), 42.0);
     assert_eq!(peptides[0].modification_at(2), 42.0);
     assert_eq!(peptides[0].applied_modifications().count(), 3);
+}
+
+#[test]
+fn label_group_recovers_base_definitions_with_nonzero_masses() {
+    // `(mass + offset) - offset` is not exact in f32, so recovering the base
+    // label by recomputing its mass used to panic for these definitions.
+    for (residue, sequence, mass, heavy) in [
+        ("K", "PEPKR", 28.0313_f32, 4.025107_f32),
+        ("K", "PEPKR", 28.0313, 8.014199),
+        ("^", "PEPKR", 28.0313, 4.025107),
+        ("C", "PEPCR", 57.021464, 10.008269),
+        ("M", "PEPMR", 15.9949, 6.020129),
+    ] {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "static_mods": {
+                residue: {
+                    "mass": mass,
+                    "channel_offsets": {"light": 0.0, "heavy": heavy}
+                }
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_channels().unwrap();
+        let peptides = parameters.peptides_from_tsv(&format!("sequence\n{sequence}\n"));
+        let db = parameters.build_from_peptides(peptides);
+        let groups = db
+            .peptides
+            .iter()
+            .map(|peptide| {
+                (
+                    peptide.label_channel.as_deref().unwrap().to_string(),
+                    peptide.label_group(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(groups.len(), 2, "{residue} {mass} {heavy}");
+        assert_eq!(groups["light"], groups["heavy"], "{residue} {mass} {heavy}");
+    }
+
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "generate_decoys": false,
+        "variable_mods": {
+            "M": [{
+                "mass": 15.9949,
+                "channel_offsets": {"light": 0.0, "heavy": 4.025107}
+            }]
+        }
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    parameters.validate_channels().unwrap();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPMR\n");
+    let db = parameters.build_from_peptides(peptides);
+    let modified = db
+        .peptides
+        .iter()
+        .map(|peptide| peptide.label_group())
+        .filter(|group| group.contains('['))
+        .collect::<HashSet<_>>();
+    assert_eq!(modified.len(), 1, "{modified:?}");
+}
+
+#[test]
+fn required_neutral_loss_fragment_shift_matches_preliminary_index() {
+    // Loss order in the configuration must not matter: the preliminary index
+    // keeps the smallest total loss, so the offset shift must use it too.
+    for losses in [[97.9769_f32, 18.0106], [18.0106, 97.9769]] {
+        let definition = Arc::new(ModificationDefinition {
+            mass: 79.96633,
+            name: Some("Phospho".into()),
+            neutral_losses: Arc::from(losses.as_slice()),
+            neutral_loss_mode: crate::modification::NeutralLossMode::Required,
+            channel_offsets: Arc::default(),
+        });
+        let offset = MassOffset {
+            definition: definition.clone(),
+            specificities: vec![ModificationSpecificity::Residue(b'S')],
+            site_mode: SiteMode::Exhaustive,
+        };
+        assert!((offset.fragment_shift() - (79.96633 - 18.0106)).abs() < 1e-4);
+
+        let parameters = Builder {
+            generate_decoys: Some(false),
+            ..Default::default()
+        }
+        .make_parameters();
+        let peptide = parameters
+            .peptides_from_tsv("sequence\nPEPSTIDEK\n")
+            .pop()
+            .unwrap();
+        let modified = peptide.with_mass_offset(Site::Sequence(3), &definition);
+        let base = preliminary_fragment_masses(&parameters, &peptide).collect::<Vec<_>>();
+        let shifted = preliminary_fragment_masses(&parameters, &modified).collect::<Vec<_>>();
+        assert_eq!(base.len(), shifted.len());
+        let observed = base
+            .iter()
+            .zip(&shifted)
+            .map(|(base, shifted)| shifted - base)
+            .filter(|delta| delta.abs() > 1e-3)
+            .collect::<Vec<_>>();
+        assert!(!observed.is_empty());
+        for delta in observed {
+            assert!((delta - offset.fragment_shift()).abs() < 1e-3, "{delta}");
+        }
+    }
 }

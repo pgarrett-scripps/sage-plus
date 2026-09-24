@@ -295,36 +295,118 @@ pub fn picked_protein_group(db: &IndexedDatabase, features: &mut [Feature]) -> u
     // Critical: All non-proteotypic, non-unique, or shared peptides are discarded
     // else the assumptions of picked group FDR are invalid. Shared peptides are
     // still reported, albeit with protein group FDR = 1.0
-    let mut map: FnvHashMap<_, Competition<String>> = FnvHashMap::default();
+    let target_groups = target_protein_groups(db, features);
+    let competition_group = |feat: &Feature| match db[feat.peptide_idx].decoy {
+        true => decoy_competition_group(db, feat, &target_groups),
+        false => feat.protein_groups.clone(),
+    };
+    // Several decoy accessions can compete under one target group, so q-values
+    // are keyed by the competition group and side rather than by each
+    // feature's reported group string.
+    let mut map: FnvHashMap<_, Competition<(String, bool)>> = FnvHashMap::default();
     for feat in features
         .iter()
         .filter(|x| x.num_protein_groups == 1 && x.protein_groups.is_some())
     {
         let decoy = db[feat.peptide_idx].decoy;
-        let entry = map.entry(feat.protein_groups.clone()).or_default();
+        let key = competition_group(feat).unwrap_or_default();
+        let entry = map.entry(key.clone()).or_default();
         match decoy {
             true => {
                 entry.reverse = entry.reverse.max(feat.discriminant_score);
-                entry.reverse_ix = feat.protein_groups.clone();
+                entry.reverse_ix = Some((key, true));
             }
             false => {
                 entry.forward = entry.forward.max(feat.discriminant_score);
-                entry.foward_ix = feat.protein_groups.clone();
+                entry.foward_ix = Some((key, false));
             }
         }
     }
 
     let (scores, passing) = Competition::assign_q_value(map, 0.01);
 
+    let groups = features
+        .iter()
+        .map(|feat| {
+            (feat.num_protein_groups == 1 && feat.protein_groups.is_some())
+                .then(|| competition_group(feat).unwrap_or_default())
+        })
+        .collect::<Vec<_>>();
     features
         .par_iter_mut()
-        .filter(|x| x.num_protein_groups == 1 && x.protein_groups.is_some())
-        .for_each(|feat| {
-            let protein_groups = feat.protein_groups.as_deref().unwrap().to_string();
-            feat.protein_group_q = scores[&protein_groups];
+        .zip(groups)
+        .for_each(|(feat, group)| {
+            if let Some(group) = group {
+                let decoy = db[feat.peptide_idx].decoy;
+                feat.protein_group_q = scores[&(group, decoy)];
+            }
         });
 
     passing
+}
+
+/// Target protein accession to the single protein group reported for it.
+/// Only groups that list the accession as a member are considered. When an
+/// accession belongs to several reported groups, the group with the best
+/// target score wins (ties go to the smallest group string), so a fallback
+/// group from a low-confidence peptide does not take the pairing away from
+/// the group that carries the protein's real evidence.
+fn target_protein_groups<'a>(
+    db: &'a IndexedDatabase,
+    features: &'a [Feature],
+) -> FnvHashMap<&'a str, &'a str> {
+    let mut best: FnvHashMap<&str, f32> = FnvHashMap::default();
+    for feat in features.iter().filter(|x| x.num_protein_groups == 1) {
+        let Some(group) = feat.protein_groups.as_deref() else {
+            continue;
+        };
+        if db[feat.peptide_idx].decoy {
+            continue;
+        }
+        let score = best.entry(group).or_insert(f32::NEG_INFINITY);
+        *score = score.max(feat.discriminant_score);
+    }
+
+    let mut groups: FnvHashMap<&str, (&str, f32)> = FnvHashMap::default();
+    for (&group, &score) in &best {
+        for protein in group.split('/') {
+            groups
+                .entry(protein)
+                .and_modify(|current| {
+                    let (current_group, current_score) = *current;
+                    if score > current_score || (score == current_score && group < current_group) {
+                        *current = (group, score);
+                    }
+                })
+                .or_insert((group, score));
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(protein, (group, _))| (protein, group))
+        .collect()
+}
+
+/// Decoy features are not grouped, so a decoy competes under the group of the
+/// target protein it was reversed from. Decoys without a reported target group
+/// compete under their own accession and remain unpaired.
+fn decoy_competition_group(
+    db: &IndexedDatabase,
+    feat: &Feature,
+    target_groups: &FnvHashMap<&str, &str>,
+) -> Option<String> {
+    let peptide = &db[feat.peptide_idx];
+    let target = match peptide.proteins.as_slice() {
+        [protein] if db.generate_decoys => Some(protein.to_string()),
+        [protein] => protein
+            .find(db.decoy_tag.as_str())
+            .map(|at| format!("{}{}", &protein[..at], &protein[at + db.decoy_tag.len()..])),
+        _ => None,
+    };
+    target
+        .and_then(|protein| target_groups.get(protein.as_str()))
+        .map(|group| group.to_string())
+        .or_else(|| feat.protein_groups.clone())
 }
 
 pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {
