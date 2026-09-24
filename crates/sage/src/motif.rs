@@ -267,6 +267,9 @@ impl SiteMotif {
         };
         (0..sequence.len())
             .filter(|&index| {
+                if !self.elements[self.site].contains(sequence[index]) {
+                    return false;
+                }
                 let center = context.left.len() + index;
                 let Some(start) = center.checked_sub(before) else {
                     return false;

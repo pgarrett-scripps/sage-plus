@@ -56,6 +56,17 @@ entries are retained below for provenance.
   before a cancellation request is reported as completed.
 - `DOCS.md` states the correct `predict_rt` default (true).
 
+### Added
+- Motif modification sites. A `motif:` site in a named definition restricts a residue
+  modification to a PROSITE-style pattern, with `*` marking the modified residue, for example
+  `motif:N*-{P}-[ST]` for N-glycosylation sequons or `motif:R-x(2)-[ST]*`. Motifs are matched
+  against each peptide's source protein, so they can extend past the peptide. Shared peptides
+  are eligible if any occurrence matches, generated decoys mirror their target's sites, and
+  localization only considers matching positions. Motifs work with static, variable,
+  mass-offset, and library-restricted definitions. `--preview-before` and `--preview-after`
+  supply protein context to `--preview-modifications`. Configurations without motifs produce
+  identical results.
+
 ### Changed
 - Update OpenTFRaw from 1.4.0 to 1.4.1. The fix affects profile spectra only, and Thermo RAW
   search output is unchanged.

@@ -311,6 +311,44 @@ mod database {
     }
 
     #[test]
+    fn library_sites_never_override_the_motif() {
+        use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+        use std::sync::Arc;
+        let mut parameters = parameters(serde_json::json!({
+            "variable_mods": {
+                "HexNAc": {
+                    "mass": 203.079373, "sites": [HEXNAC], "max_count": 1, "site_mode": "library"
+                }
+            }
+        }));
+        let record = |protein: &str| PtmLibrarySite {
+            attachment: Default::default(),
+            protein: Arc::from(protein),
+            position: 5,
+            residue: b'N',
+            modification: Arc::from("HexNAc"),
+        };
+        parameters.loaded_ptm_library =
+            Some(Arc::new(PtmLibrary::new(vec![record("P1"), record("P2")])));
+        let peptides = expand(&parameters, ">P1\nMRGAANKSLLR\n>P2\nMRGAANKPLLR\n", true);
+        let modified = peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.to_string() == "GAAN[HexNAc]K")
+            .collect::<Vec<_>>();
+        assert!(!modified.is_empty());
+        for peptide in &modified {
+            assert!(peptide
+                .proteins
+                .iter()
+                .all(|protein| protein.as_ref() == "P1"));
+            let rules = parameters.localization_rules(peptide);
+            assert!(rules
+                .iter()
+                .any(|rule| rule.sites == vec![Site::Sequence(3)]));
+        }
+    }
+
+    #[test]
     fn motif_sites_require_named_definitions() {
         let legacy = serde_json::from_value::<Builder>(serde_json::json!({
             "variable_mods": {"motif:N*-{P}-[ST]": [203.079373]}
