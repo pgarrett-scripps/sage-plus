@@ -609,15 +609,14 @@ impl Runner {
             });
 
             // Number of targets identified at global q-value filter at spectrum level per file
-            let num_psm_targets_per_file: Vec<usize> = filenames
-                .iter()
-                .map(|filename| {
+            let num_psm_targets_per_file: Vec<usize> = (0..filenames.len())
+                .map(|file_id| {
                     features
                         .iter()
                         .filter(|f| {
                             f.label == 1
                                 && f.spectrum_q <= global_q_value_filter
-                                && filenames[f.file_id] == *filename
+                                && f.file_id == file_id
                         })
                         .count()
                 })
@@ -625,12 +624,10 @@ impl Runner {
 
             // Number of peptides identified at global q-value filter at peptide level per file
             let mut num_peptide_targets_per_file: Vec<usize> = Vec::new();
-            for filename in filenames {
+            for file_id in 0..filenames.len() {
                 let mut peptides = HashSet::new();
                 for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.peptide_q <= global_q_value_filter
-                        && filenames[f.file_id] == *filename
+                    f.label == 1 && f.peptide_q <= global_q_value_filter && f.file_id == file_id
                 }) {
                     peptides.insert(self.database[feature.peptide_idx].to_string());
                 }
@@ -639,12 +636,10 @@ impl Runner {
 
             // Number of proteins identified at global q-value filter at protein level per file
             let mut num_protein_targets_per_file: Vec<usize> = Vec::new();
-            for filename in filenames {
+            for file_id in 0..filenames.len() {
                 let mut proteins = HashSet::new();
                 for feature in features.iter().filter(|f| {
-                    f.label == 1
-                        && f.protein_q <= global_q_value_filter
-                        && filenames[f.file_id] == *filename
+                    f.label == 1 && f.protein_q <= global_q_value_filter && f.file_id == file_id
                 }) {
                     proteins.insert(
                         self.database[feature.peptide_idx]
@@ -655,9 +650,8 @@ impl Runner {
             }
 
             // Total MS2 intensity at global q-value filter at each level per file
-            let total_ms2_intensity_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let total_ms2_intensity_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     features
                         .iter()
                         .filter(|f| {
@@ -665,7 +659,7 @@ impl Runner {
                                 && f.spectrum_q <= global_q_value_filter
                                 && f.peptide_q <= global_q_value_filter
                                 && f.protein_q <= global_q_value_filter
-                                && filenames[f.file_id] == *filename
+                                && f.file_id == file_id
                         })
                         .map(|f| f.ms2_intensity)
                         .sum()
@@ -692,11 +686,10 @@ impl Runner {
             };
 
             // Mmedian MS1 mass accuracy for each file, using feature.delta_mass
-            let median_ms1_mass_accuracy_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let median_ms1_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.delta_mass)
@@ -706,11 +699,10 @@ impl Runner {
                 .collect();
 
             // Median MS2 mass accuracy for each file, using feature.average_ppm
-            let median_ms2_mass_accuracy_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let median_ms2_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.average_ppm)
@@ -720,11 +712,10 @@ impl Runner {
                 .collect();
 
             // Median RT deviation for each file, using feature.delta_rt_model
-            let median_rt_deviation_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let median_rt_deviation_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.delta_rt_model)
@@ -734,11 +725,10 @@ impl Runner {
                 .collect();
 
             // Median IM deviation for each file, using feature.delta_ims_model
-            let median_im_deviation_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let median_im_deviation_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.delta_ims_model)
@@ -748,11 +738,10 @@ impl Runner {
                 .collect();
 
             // Average peptide length for each file
-            let avg_peptide_length_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let avg_peptide_length_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     average_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.peptide_len as f32)
@@ -762,11 +751,10 @@ impl Runner {
                 .collect();
 
             // Average peptide charge for each file
-            let avg_peptide_charge_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let avg_peptide_charge_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     average_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.charge as f32)
@@ -776,11 +764,10 @@ impl Runner {
                 .collect();
 
             // Average number of matched peaks for each file
-            let avg_matched_peaks_per_file: Vec<f32> = filenames
-                .iter()
-                .map(|filename| {
+            let avg_matched_peaks_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
                     average_finite(features.iter().filter_map(|feature| {
-                        (filenames[feature.file_id] == *filename
+                        (feature.file_id == file_id
                             && feature.label == 1
                             && feature.spectrum_q <= global_q_value_filter)
                             .then_some(feature.matched_peaks as f32)
@@ -947,7 +934,7 @@ impl Runner {
                     .filter(|feature| {
                         feature.label == 1
                             && feature.spectrum_q <= predict_section_q_value_filter
-                            && filenames[feature.file_id] == filenames[i]
+                            && feature.file_id == i
                             && feature.rt.is_finite()
                             && feature.predicted_rt.is_finite()
                     })
@@ -980,7 +967,7 @@ impl Runner {
                     .filter(|feature| {
                         feature.label == 1
                             && feature.spectrum_q <= predict_section_q_value_filter
-                            && filenames[feature.file_id] == filenames[i]
+                            && feature.file_id == i
                             && feature.ims.is_finite()
                             && feature.predicted_ims.is_finite()
                     })

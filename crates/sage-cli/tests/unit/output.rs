@@ -16,6 +16,7 @@ fn result(index: usize) -> SageResults {
             ion_injection_time: index as f32,
             peaks: vec![index as f32],
         }],
+        repeated_spectrum_psms: HashMap::from([(index, index + 1)]),
     }
 }
 
@@ -46,6 +47,10 @@ fn sequential_collection_combines_every_result_vector() {
             .map(|quant| quant.file_id)
             .collect::<Vec<_>>(),
         vec![0, 1, 2]
+    );
+    assert_eq!(
+        combined.repeated_spectrum_psms,
+        HashMap::from([(0, 1), (1, 2), (2, 3)])
     );
 }
 
