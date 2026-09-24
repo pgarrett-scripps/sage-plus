@@ -11,6 +11,9 @@ use std::convert::identity;
 use super::*;
 use rayon::prelude::*;
 
+/// Samples per sequentially-summed chunk in [`Kde::pdf`]
+const CHUNK_SIZE: usize = 4096;
+
 pub struct Kde<'a> {
     sample: &'a [f64],
     pub bandwidth: f64,
@@ -38,10 +41,18 @@ impl<'a> Kde<'a> {
     pub fn pdf(&self, x: f64) -> f64 {
         let h = self.bandwidth;
 
+        // Sum fixed-size chunks sequentially, then combine them in order, so
+        // the result is bitwise reproducible regardless of thread scheduling
         let sum = self
             .sample
-            .par_iter()
-            .fold(|| 0.0, |acc, xi| acc + self.kernel((x - xi) / h))
+            .par_chunks(CHUNK_SIZE)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold(0.0, |acc, xi| acc + self.kernel((x - xi) / h))
+            })
+            .collect::<Vec<f64>>()
+            .into_iter()
             .sum::<f64>();
 
         sum / self.constant

@@ -51,3 +51,38 @@ fn posterior_interpolates_and_clamps_to_the_fitted_range() {
     assert_eq!(estimator.posterior_error(-100.0), 1.0);
     assert_eq!(estimator.posterior_error(100.0), 0.0);
 }
+
+#[test]
+fn pdf_and_estimator_are_bitwise_deterministic_across_parallel_runs() {
+    let scores = (0..200_000)
+        .map(|i| {
+            let x = i as f64;
+            (x * 0.37).sin() * 3.0 + (x * 0.013).cos() * 1e-3 + (x % 7.0)
+        })
+        .collect::<Vec<_>>();
+    let decoys = (0..scores.len()).map(|i| i % 3 == 0).collect::<Vec<_>>();
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(8)
+        .build()
+        .unwrap();
+    let evaluate = || {
+        let kde = Kde::new(&scores, std::convert::identity);
+        let pdf = [-2.5, 0.0, 1.25, 4.0, 9.0].map(|x| kde.pdf(x).to_bits());
+        let estimator = Builder::default().bins(64).build(&scores, &decoys);
+        let pep = estimator
+            .bins
+            .iter()
+            .map(|x| x.to_bits())
+            .collect::<Vec<_>>();
+        (pdf, pep)
+    };
+    let expected = pool.install(evaluate);
+    for _ in 0..20 {
+        assert_eq!(pool.install(evaluate), expected);
+    }
+    let serial = rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .build()
+        .unwrap();
+    assert_eq!(serial.install(evaluate), expected);
+}
