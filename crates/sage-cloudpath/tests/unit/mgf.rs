@@ -165,14 +165,16 @@ async fn parse_mgf_matrixscience_example_1() -> Result<(), MgfError> {
         1675.30 79
         END IONS
         "#;
-    let mut spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
     assert_eq!(spectra.len(), 2);
 
-    let s = spectra.pop().unwrap();
-    assert_eq!(s.precursors.len(), 2);
-    assert_eq!(s.precursors[0].charge, Some(2));
-    assert_eq!(s.precursors[1].charge, Some(3));
-    assert_eq!(s.precursors[0].isolation_window, None);
+    // The file-level CHARGE applies to every spectrum, including the first.
+    for s in &spectra {
+        assert_eq!(s.precursors.len(), 2, "{}", s.id);
+        assert_eq!(s.precursors[0].charge, Some(2));
+        assert_eq!(s.precursors[1].charge, Some(3));
+        assert_eq!(s.precursors[0].isolation_window, None);
+    }
     Ok(())
 }
 
@@ -220,5 +222,80 @@ async fn parse_mgf_matrixscience_example_2() -> Result<(), MgfError> {
         s.precursors[0].isolation_window,
         Some(Tolerance::Da(-3.0, 3.0))
     );
+    Ok(())
+}
+
+#[test]
+fn header_tolerance_applies_to_the_first_spectrum() -> Result<(), MgfError> {
+    let s = "TOL=5\nTOLU=Da\nCHARGE=2+\n\
+             BEGIN IONS\nTITLE=first\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=second\nPEPMASS=600\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    assert_eq!(spectra.len(), 2);
+    for s in &spectra {
+        assert_eq!(s.precursors.len(), 1, "{}", s.id);
+        assert_eq!(s.precursors[0].charge, Some(2), "{}", s.id);
+        assert_eq!(
+            s.precursors[0].isolation_window,
+            Some(Tolerance::Da(-5.0, 5.0)),
+            "{}",
+            s.id
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn multi_digit_charges_are_parsed() -> Result<(), MgfError> {
+    let s = "CHARGE=2+ and 12+\n\
+             BEGIN IONS\nTITLE=header\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=local\nPEPMASS=500\nCHARGE=10+\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    let charges = |s: &RawSpectrum| {
+        s.precursors
+            .iter()
+            .map(|precursor| precursor.charge)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(charges(&spectra[0]), [Some(2), Some(12)]);
+    assert_eq!(charges(&spectra[1]), [Some(10)]);
+    Ok(())
+}
+
+#[test]
+fn invalid_spectra_are_skipped_and_counted() -> Result<(), MgfError> {
+    let s = "BEGIN IONS\nTITLE=good 1\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=no peaks\nPEPMASS=500\nEND IONS\n\
+             BEGIN IONS\nTITLE=no pepmass\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=good 2\nPEPMASS=600\n100 20\nEND IONS\n";
+    assert_eq!(MgfReader::with_file_id(0).parse(s.to_string())?.len(), 2);
+    let (spectra, skipped) = MgfReader::with_file_id(0).parse_counting_skipped(s.to_string())?;
+    let ids = spectra.iter().map(|s| s.id.as_str()).collect::<Vec<_>>();
+    assert_eq!(ids, ["good 1", "good 2"]);
+    let skipped = skipped.unwrap();
+    assert_eq!(skipped.count, 3);
+    assert_eq!(skipped.first_line, 6);
+    assert_eq!(skipped.first_reason, "spectrum is missing TITLE");
+
+    let (_, skipped) = MgfReader::with_file_id(0)
+        .parse_counting_skipped("BEGIN IONS\nTITLE=a\nPEPMASS=1\n1 1\nEND IONS\n".into())?;
+    assert!(skipped.is_none());
+
+    // Unparseable structure is still an error.
+    assert!(MgfReader::with_file_id(0)
+        .parse("BEGIN IONS\nTITLE=a\nPEPMASS=1\n1 x\nEND IONS\n".into())
+        .is_err());
+    Ok(())
+}
+
+#[test]
+fn empty_charge_is_unknown_charge() -> Result<(), MgfError> {
+    let s = "CHARGE=2+\n\
+             BEGIN IONS\nTITLE=a\nPEPMASS=500\nCHARGE=\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    assert_eq!(spectra.len(), 1);
+    assert_eq!(spectra[0].precursors.len(), 1);
+    assert_eq!(spectra[0].precursors[0].charge, None);
     Ok(())
 }

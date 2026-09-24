@@ -44,6 +44,41 @@ impl BrukerMobilityScale {
             Self::Linear => "linear",
         }
     }
+
+    /// The scale actually reported for the Bruker input at `path`. Inputs
+    /// without an `analysis.tdf`, such as miniTDF `.ms2` directories, have no
+    /// calibration table and always use the linear scale.
+    pub fn effective_for(self, path: impl AsRef<Path>) -> Self {
+        match self {
+            Self::Calibrated if analysis_tdf(path).is_none() => Self::Linear,
+            scale => scale,
+        }
+    }
+}
+
+/// The `analysis.tdf` timsrust reads for a Bruker input.
+///
+/// timsrust accepts the `.d` directory or any path inside it, such as
+/// `analysis.tdf_bin`, and walks up to the first directory containing both
+/// `analysis.tdf` and `analysis.tdf_bin`. Returns `None` for inputs that are
+/// not TDF acquisitions, such as miniTDF `.ms2` directories.
+pub fn analysis_tdf(path: impl AsRef<Path>) -> Option<PathBuf> {
+    path.as_ref()
+        .ancestors()
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .map(|directory| directory.join("analysis.tdf"))
+        .find(|tdf| tdf.is_file() && tdf.with_file_name("analysis.tdf_bin").is_file())
+}
+
+/// [`analysis_tdf`], or the path it was expected at for error messages.
+fn analysis_tdf_or_guess(path: &Path) -> PathBuf {
+    analysis_tdf(path).unwrap_or_else(|| {
+        if path.is_dir() {
+            path.join("analysis.tdf")
+        } else {
+            path.to_path_buf()
+        }
+    })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,14 +137,9 @@ pub struct MobilityCalibration {
 }
 
 impl MobilityCalibration {
-    /// Read the calibration of a `.d` directory or an `analysis.tdf` file.
+    /// Read the calibration of a `.d` directory or a file inside it.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, MobilityCalibrationError> {
-        let path = path.as_ref();
-        let tdf = if path.is_dir() {
-            path.join("analysis.tdf")
-        } else {
-            path.to_path_buf()
-        };
+        let tdf = analysis_tdf_or_guess(path.as_ref());
         let sql = |source| MobilityCalibrationError::Sql {
             path: tdf.clone(),
             source,
@@ -201,12 +231,7 @@ impl MobilityCalibration {
     pub fn dda_precursor_scans(
         path: impl AsRef<Path>,
     ) -> Result<HashMap<usize, (usize, f64)>, MobilityCalibrationError> {
-        let path = path.as_ref();
-        let tdf = if path.is_dir() {
-            path.join("analysis.tdf")
-        } else {
-            path.to_path_buf()
-        };
+        let tdf = analysis_tdf_or_guess(path.as_ref());
         let sql = |source| MobilityCalibrationError::Sql {
             path: tdf.clone(),
             source,

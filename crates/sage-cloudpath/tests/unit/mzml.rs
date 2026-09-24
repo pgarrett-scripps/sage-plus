@@ -396,3 +396,181 @@ async fn parse_spectrum_issue_210() -> Result<(), MzMLError> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn unknown_array_after_empty_array_is_not_decoded_as_the_previous_kind(
+) -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="1">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="3">
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary></binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1002893"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>zcxMP2ZmZj8AAIA/</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 1);
+    assert_eq!(spectra[0].intensity, [10.0, 20.0, 30.0]);
+    assert!(spectra[0].mz.is_empty(), "m/z = {:?}", spectra[0].mz);
+    Ok(())
+}
+
+#[tokio::test]
+async fn precursor_state_does_not_carry_into_the_next_precursor() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="4">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor spectrumRef="scan=0">
+            <isolationWindow>
+              <cvParam accession="MS:1000827" value="400.0"/>
+              <cvParam accession="MS:1000828" value="1.0"/>
+              <cvParam accession="MS:1000829" value="1.5"/>
+            </isolationWindow>
+          </precursor>
+        </precursorList>
+      </spectrum>
+      <spectrum id="scan=2">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor spectrumRef="scan=0">
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000041" value="3"/>
+                <cvParam accession="MS:1002815" value="1.1"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+      </spectrum>
+      <spectrum id="ms1">
+        <cvParam accession="MS:1000511" value="1"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <scanList count="1">
+          <scan>
+            <cvParam accession="MS:1002815" value="0.7"/>
+          </scan>
+        </scanList>
+      </spectrum>
+      <spectrum id="scan=3">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor>
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000744" value="600.0"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 4);
+    assert_eq!(spectra[0].precursors.len(), 1);
+    assert_eq!(
+        spectra[0].precursors[0].isolation_window,
+        Some(Tolerance::Da(-1.0, 1.5))
+    );
+    // A precursor without an m/z is dropped along with its charge,
+    // spectrumRef, and mobility.
+    assert!(spectra[1].precursors.is_empty());
+    // Scan-level mobility of an MS1 spectrum stays with it.
+    assert!(spectra[2].precursors.is_empty());
+    let precursor = &spectra[3].precursors[0];
+    assert_eq!(precursor.mz, 600.0);
+    assert_eq!(precursor.isolation_window, None);
+    assert_eq!(precursor.charge, None);
+    assert_eq!(precursor.spectrum_ref, None);
+    assert_eq!(precursor.inverse_ion_mobility, None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn noise_array_does_not_carry_into_the_next_spectrum() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="2">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="1"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="3">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUAAAAAAAEB/QAAAAAAAwIJA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1002744"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAQAAAgEAAAKBA</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+      <spectrum id="scan=2">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="2">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUAAAAAAAEB/QAAAAAAAwIJA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let mut reader = MzMLReader::with_file_id(0);
+    reader.set_signal_to_noise(Some(2));
+    let spectra = reader.parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 2);
+    // S/N only applies to MS2, which has no noise array of its own.
+    assert_eq!(spectra[0].intensity, [10.0, 20.0, 30.0]);
+    assert_eq!(spectra[1].intensity, [10.0, 20.0, 30.0]);
+    Ok(())
+}
