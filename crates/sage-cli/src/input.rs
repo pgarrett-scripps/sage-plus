@@ -167,10 +167,11 @@ pub struct Input {
     /// Search tolerance mode: `fixed` (default) or `auto`. `auto` runs the
     /// discovery pass (also when `mass_recalibration` is off) and narrows ppm
     /// precursor tolerances per file and ppm fragment tolerances per file and
-    /// acquisition group to 1.2x the 99th percentile of absolute residuals
-    /// after correction, if that covers 98% of held-out residuals. Tolerances
-    /// are never widened; Da and percent tolerances are unchanged. Ignored for
-    /// wide-window searches.
+    /// acquisition group to the window holding 99% of the true-match signal,
+    /// from a signal plus uniform background fit of residuals after
+    /// correction, if that holds 98% of the estimated held-out signal.
+    /// Tolerances are never widened; Da and percent tolerances are unchanged.
+    /// Ignored for wide-window searches.
     pub tolerance_mode: Option<ToleranceMode>,
 
     pub annotate_matches: Option<bool>,

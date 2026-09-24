@@ -176,15 +176,16 @@ candidate windows are already wide enough, so IDs do not change.
 ## Search tolerances from discovery residuals
 
 `tolerance_mode: auto` reuses the discovery pass to narrow ppm windows: the
-precursor per file, and fragments per file and acquisition group. The half-width
-is `max(1.2 * q99, floor)` around the fit-set residual median. `q99` is the 99th
-percentile of absolute fit-set residuals after the fit-set model. The floor is
-3 ppm for precursors and 5 ppm for fragments. The window is clipped to the
-configured one and applied only if it covers 98% of held-out residuals.
-Precursor PSMs at non-zero isotope errors are added to the precursor residuals,
-because every isotope hypothesis is searched with the same window. Da and
-percent windows, mass-offset searches, and windows beyond +/-100 ppm keep the
-configured window.
+precursor per file, and fragments per file and acquisition group. Residuals
+after the fit-set model are fitted as `pi * signal + (1 - pi) * Uniform(window)`
+by EM, and the half-width is `max(h99, floor)` around the signal center, where
+`h99` holds 99% of the signal. The floor is 3 ppm for precursors and 5 ppm for
+fragments. The window is clipped to the configured one and applied only if it
+holds 98% of the estimated held-out signal. Da and percent windows, mass-offset
+searches, and windows beyond +/-100 ppm keep the configured window.
+
+Two rules came first; both are kept below as the record of why the mixture is
+needed.
 
 The first rule tried was `4 * 1.4826 * MAD`, and it failed. Mass errors of
 confident PSMs are heavy-tailed. For SILAC monoisotopic PSMs, the 50/90/99%
@@ -195,7 +196,9 @@ the fragment window to about +/-13 ppm, losing 9% of PSMs (3,266 -> 2,981). It
 cost 1.6% of PXD PSMs (279,321). It also raised entrapment FDP from 1.09% to
 1.23%: the windows cut true matches, not random ones.
 
-With the percentile rule:
+The second rule was `max(1.2 * q99, floor)` around the fit-set residual
+median, with `q99` the 99th percentile of absolute fit-set residuals. With
+that percentile rule:
 
 | Run | Fixed PSMs / peptides / proteins | Auto PSMs / peptides / proteins | Wall fixed -> auto |
 |---|---|---|---|
@@ -218,7 +221,81 @@ and a percentile of them cannot shrink it. Fragment q99 also tracks the window
 PSMs, +1.0% peptides and slightly lower entrapment FDP. Fit-set and held-out
 q99 agreed within 0.3 ppm everywhere.
 
-Recommendation: keep `tolerance_mode` fixed by default. A useful auto window
-needs a model of the error distribution that separates correct matches from
-the uniform background (for example a Gaussian-plus-uniform mixture fitted on
-residuals), not a percentile of all confident matches.
+### Signal plus background mixture
+
+The current rule fits the residuals as a signal plus a uniform background
+over the searched window. EM starts from the median and 1.4826 * MAD, keeps
+the scale in [0.02 ppm, half the window] and `pi` in (0, 1), and stops after
+500 iterations or a relative log-likelihood change below 1e-8. Inputs are
+thinned to 40,000 points. Three signal forms are fitted on the fit set:
+
+- a Gaussian;
+- a Student-t with 4 degrees of freedom (EM with weights `5 / (4 + d^2)`);
+- two Gaussians with a shared center.
+
+A heavier form replaces a lighter one only if it converged and its held-out
+log-likelihood is at least 0.005 nats per point higher. On PXD the t4 beat
+the Gaussian by 0.001-0.04 nats per point, and two Gaussians beat the t4 by
+0.002-0.016, so precursors mostly chose t4 or two Gaussians and fragments
+always chose two Gaussians. Mass errors really are heavier-tailed than a
+Gaussian.
+
+A fit is not trusted, and the configured window is kept with the reason in
+`skipped`, when EM did not converge, the scale is at a bound, `pi < 0.2`, or
+`h99` exceeds 90% of the configured half-width (signal and background cannot
+be told apart). No benchmark fit was rejected.
+
+Isotope-error PSMs are fitted as their own subgroup, not pooled and not
+dropped. They differ from monoisotopic PSMs: on PXD from +/-10 ppm their
+signal fraction is about 0.5 (0.93-0.96 for monoisotopic), their center is usually
+lower (by up to 0.8 ppm), and their Gaussian sigma is 2.1-3.0 ppm against 1.2-1.3
+ppm for the narrow monoisotopic component. Pooling would force one scale on
+both. Dropping them would size the window from monoisotopic PSMs alone,
+though every isotope hypothesis is searched with the same window. So each
+subgroup gets its own fit, and the window is the union of the two 99%
+windows. With fewer than 200 isotope-error points they are left out, and an
+untrusted isotope fit keeps the configured window (`isotope_error_*`).
+
+Results (one run each; wall times vary by about 20% between runs):
+
+| Run | PSMs / peptides / proteins at 1% FDR | Wall | Precursor window (ppm) | Fragment window (ppm) |
+|---|---|---|---|---|
+| PXD +/-10/20 fixed | 283,901 / 59,004 / 7,082 | 162 s | +/-10 | +/-20 |
+| PXD +/-10/20 auto | 273,266 / 58,001 / 6,982 | 91 s | about -7 to +8 | about -14 to +12.5 |
+| PXD +/-50 fixed | 291,319 / 56,241 / 6,892 | 136 s | +/-50 | +/-50 |
+| PXD +/-50 auto | 281,418 / 58,867 / 7,052 | 97 s | about -8.5 to +9.5 | about -18 to +16.5 |
+| SILAC +/-10/20 fixed | 3,266 / 1,524 / 663 | 19 s | +/-10 | +/-20 |
+| SILAC +/-10/20 auto | 3,111 / 1,470 / 649 | 14 s | -6.10 to 6.26 | -12.56 to 11.82 |
+| SILAC +/-50 fixed | 3,539 / 1,571 / 687 | 18 s | +/-50 | +/-50 |
+| SILAC +/-50 auto | 3,272 / 1,527 / 667 | 15 s | -10.75 to 10.89 | -15.96 to 15.29 |
+
+Entrapment (one PXD file, combined FDP at 1% / 5% peptide q-value): +/-10/20
+fixed 1.09% / 5.28%, auto 1.20% / 5.30%. At +/-50, fixed 1.10% / 5.47%, auto
+1.11% / 5.28%.
+
+SILAC ablations from +/-10/20: narrowing only the precursor to the auto
+window gives 3,136 PSMs, and only the fragment gives 3,244. Fixing both at
+the windows auto chose from +/-50 gives 3,271, the same as auto (3,272).
+
+What this shows:
+
+- From +/-50 ppm, auto converges to roughly +/-9 ppm (PXD) or +/-11 ppm
+  (SILAC) for precursors and +/-15-18 ppm for fragments. That is close to the
+  well-chosen fixed +/-10/20. IDs match it within 1%: PXD peptides -0.2% and
+  proteins -0.4%, SILAC PSMs +0.2%. Entrapment FDP is unchanged. Against
+  +/-50 fixed it gains 4.7% PXD peptides but loses 3.4% PSMs (PXD) and 7.5%
+  (SILAC).
+- From +/-10/20 ppm, auto loses 3.7% PSMs and 1.7% peptides on PXD and 4.7%
+  PSMs on SILAC, and entrapment FDP rises from 1.09% to 1.20%. Most of the
+  SILAC loss is the precursor window. A 99% signal window drops more than 1%
+  of matches: the searched window is only about 1.3-1.5 times the signal
+  width, so the uniform term absorbs part of the true tail, and `h99` shrinks
+  with the searched window (about 7.5 ppm from +/-10 against 9 ppm from +/-50).
+- The fitted window is used faithfully. Fixed at auto's windows gives the
+  same IDs as auto.
+
+Recommendation: keep `tolerance_mode` fixed by default. The mixture fixes the
+percentile rule's failure (it now narrows, and from a too-wide window it
+lands near a sensible fixed window). But it does not beat a well-chosen fixed
+tolerance, and from a sensible window it costs IDs. It is useful only as a
+guard against a window set much too wide.

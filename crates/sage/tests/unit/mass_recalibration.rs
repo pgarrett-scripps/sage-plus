@@ -264,115 +264,144 @@ fn thermo_filters_map_to_acquisition_groups() {
     assert_eq!(group.label(), "astral/hcd");
 }
 
-#[test]
-fn auto_tolerance_narrows_to_corrected_spread() {
-    // A 3 ppm offset with +/-5 ppm uniform noise.
-    let data = points(3000, |_, _| 3.0, 5.0);
-    let selection = select_model(&data, RecalibrationOptions::default());
-    assert_eq!(selection.kind(), MassModelKind::Static);
-    let spread = selection.spread.as_ref().expect("residual spread");
-    // After the fit-set offset, residuals are centered.
-    assert!(
-        spread.fit_center_ppm.abs() < 0.3,
-        "{}",
-        spread.fit_center_ppm
-    );
-    assert_eq!(spread.fit_residuals.len(), spread.fit_points);
+/// `n` points whose errors are `center + sigma * N(0, 1)` (approximated by a
+/// sum of three uniforms), except every `1 / background` of them, which are
+/// uniform over `+/-window`.
+fn signal_with_background(
+    n: u64,
+    center: f32,
+    sigma: f32,
+    background: u64,
+    window: f32,
+    group_offset: u64,
+) -> Vec<MassErrorPoint> {
+    points(n, |_, _| 0.0, 0.0)
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let i = i as u64 + group_offset;
+            let error_ppm = if i.is_multiple_of(background) {
+                window * noise(i + 11_000_000)
+            } else {
+                center
+                    + sigma * (noise(i + 1_000_000) + noise(i + 2_000_000) + noise(i + 3_000_000))
+            };
+            MassErrorPoint {
+                error_ppm,
+                group: i,
+                ..p
+            }
+        })
+        .collect()
+}
 
+fn no_model() -> RecalibrationOptions {
+    RecalibrationOptions {
+        max_kind: MassModelKind::None,
+        ..RecalibrationOptions::default()
+    }
+}
+
+#[test]
+fn auto_tolerance_narrows_to_the_signal() {
+    // 80% signal at 3 +/- 2 ppm, 20% uniform background over +/-20 ppm.
+    let data = signal_with_background(4000, 3.0, 2.0, 5, 20.0, 0);
+    let selection = select_model(&data, no_model());
     let configured = Tolerance::Ppm(-20.0, 20.0);
     let estimate = auto_tolerance(&selection, configured, AutoToleranceOptions::precursor());
-    assert!(estimate.narrowed);
+    assert!(estimate.narrowed, "{estimate:?}");
     assert!(estimate.skipped.is_none());
+    let signal = estimate.signal.as_ref().expect("signal fit");
+    assert!((signal.signal_fraction - 0.8).abs() < 0.05, "{signal:?}");
+    assert!((signal.center_ppm - 3.0).abs() < 0.3);
+    assert!((signal.scale_ppm - 2.0).abs() < 0.4);
+    assert_eq!(signal.candidates.len(), 3);
     let Tolerance::Ppm(lo, hi) = estimate.tolerance else {
         panic!("ppm tolerance expected");
     };
-    // 1.2 x the 99th percentile of |residual| (~4.95 ppm).
-    assert!((estimate.fit_quantile_ppm - 4.95).abs() < 0.2);
-    assert!((estimate.validation_quantile_ppm - estimate.fit_quantile_ppm).abs() < 0.3);
-    assert!((estimate.half_width_ppm - 1.2 * estimate.fit_quantile_ppm).abs() < 1e-4);
     assert!((hi - lo - 2.0 * estimate.half_width_ppm).abs() < 1e-3);
-    assert!(hi > 5.5 && hi < 6.5 && lo < -5.5 && lo > -6.5, "{lo} {hi}");
-    assert_eq!(estimate.validation_coverage, 1.0);
+    // 99% of a 2 ppm Gaussian is ~5.2 ppm either side.
+    assert!(
+        estimate.half_width_ppm > 4.5 && estimate.half_width_ppm < 6.5,
+        "{}",
+        estimate.half_width_ppm
+    );
+    assert!(estimate.validation_coverage >= 0.98);
     assert_eq!(estimate.configured, configured);
 
-    // A configured side inside the estimate is kept.
+    // A configured side inside the signal keeps too little of it.
     let estimate = auto_tolerance(
         &selection,
-        Tolerance::Ppm(-5.5, 20.0),
-        AutoToleranceOptions::precursor(),
-    );
-    let Tolerance::Ppm(lo, hi) = estimate.tolerance else {
-        panic!("ppm tolerance expected");
-    };
-    assert_eq!(lo, -5.5);
-    assert!(hi < 6.5);
-
-    // A window that would drop held-out residuals is not applied.
-    let estimate = auto_tolerance(
-        &selection,
-        Tolerance::Ppm(-4.0, 20.0),
+        Tolerance::Ppm(0.0, 20.0),
         AutoToleranceOptions::precursor(),
     );
     assert!(!estimate.narrowed);
     assert_eq!(estimate.skipped.as_deref(), Some("low_coverage"));
     assert!(estimate.validation_coverage < 0.98);
-    assert_eq!(estimate.tolerance, Tolerance::Ppm(-4.0, 20.0));
+    assert_eq!(estimate.tolerance, Tolerance::Ppm(0.0, 20.0));
 }
 
 #[test]
-fn auto_tolerance_follows_heavy_tails() {
-    // A +/-1 ppm core with 5% of PSMs spread over +/-8 ppm: four robust
-    // sigmas (~3 ppm) would cut the tail, the 99th percentile does not.
-    let mut data = points(3000, |_, _| 0.0, 1.0);
-    for (i, point) in data.iter_mut().enumerate() {
-        if i % 20 == 0 {
-            point.error_ppm = 8.0 * noise(i as u64 + 99);
-        }
-    }
-    let selection = select_model(&data, RecalibrationOptions::default());
-    let estimate = auto_tolerance(
-        &selection,
-        Tolerance::Ppm(-20.0, 20.0),
-        AutoToleranceOptions::precursor(),
-    );
-    assert!(estimate.narrowed);
-    assert!(4.0 * estimate.fit_sigma_ppm < 4.0);
-    assert!(estimate.half_width_ppm > 6.0, "{}", estimate.half_width_ppm);
-    assert!(estimate.validation_coverage >= 0.98);
-
-    // Isotope-error matches are searched with the same window, so their
-    // (wider) residuals widen it, without changing the model.
+fn isotope_error_matches_are_fitted_as_a_subgroup() {
     let mut selection = select_model(
-        &points(3000, |_, _| 0.0, 1.0),
-        RecalibrationOptions::default(),
+        &signal_with_background(4000, 0.0, 1.0, 10, 20.0, 0),
+        no_model(),
     );
     let before = auto_tolerance(
         &selection,
         Tolerance::Ppm(-20.0, 20.0),
         AutoToleranceOptions::precursor(),
     );
-    assert_eq!(before.half_width_ppm, 3.0);
-    let isotope = points(1000, |_, _| 0.0, 6.0)
-        .into_iter()
-        .map(|p| MassErrorPoint {
-            group: p.group + 1_000_000,
-            ..p
-        })
-        .collect::<Vec<_>>();
+    assert!(before.narrowed);
+    // The 1 ppm signal hits the 3 ppm floor.
+    let floor_width = |t: Tolerance| match t {
+        Tolerance::Ppm(lo, hi) => (hi - lo - 6.0).abs() < 1e-3,
+        _ => false,
+    };
+    assert!(floor_width(before.tolerance), "{:?}", before.tolerance);
+    assert!(before.isotope_error_signal.is_none());
+
+    // Isotope-error matches: a wider signal and half background. They are
+    // searched with the same window, so it widens to cover them, and the
+    // model is unchanged.
+    let isotope = signal_with_background(2000, 0.5, 3.0, 2, 20.0, 1_000_000);
     let model = selection.model.clone();
     let spread = selection.spread.as_mut().expect("residual spread");
-    let validation_psms = spread.validation_psms;
+    let fit_points = spread.fit_points;
     spread.add_isotope_error_points(model.as_ref(), &isotope, 3);
-    assert_eq!(spread.isotope_error_points, 1000);
-    assert!(spread.validation_psms > validation_psms + 200);
+    assert_eq!(spread.isotope_error_points, 2000);
+    assert_eq!(spread.fit_points, fit_points);
     let after = auto_tolerance(
         &selection,
         Tolerance::Ppm(-20.0, 20.0),
         AutoToleranceOptions::precursor(),
     );
-    assert_eq!(after.isotope_error_points, 1000);
-    assert!(after.half_width_ppm > 6.0, "{}", after.half_width_ppm);
+    assert!(after.narrowed, "{after:?}");
+    let isotope_fit = after.isotope_error_signal.as_ref().expect("isotope fit");
+    assert!(
+        (isotope_fit.signal_fraction - 0.5).abs() < 0.08,
+        "{isotope_fit:?}"
+    );
+    let Tolerance::Ppm(lo, hi) = after.tolerance else {
+        panic!("ppm tolerance expected");
+    };
+    assert!(hi > 7.0 && lo < -6.0, "{lo} {hi}");
     assert!(after.validation_coverage >= 0.98);
+
+    // A handful of isotope-error matches is left out.
+    let mut selection = select_model(
+        &signal_with_background(4000, 0.0, 1.0, 10, 20.0, 0),
+        no_model(),
+    );
+    let spread = selection.spread.as_mut().expect("residual spread");
+    spread.add_isotope_error_points(None, &isotope[..50], 3);
+    let few = auto_tolerance(
+        &selection,
+        Tolerance::Ppm(-20.0, 20.0),
+        AutoToleranceOptions::precursor(),
+    );
+    assert!(few.isotope_error_signal.is_none());
+    assert!(floor_width(few.tolerance), "{:?}", few.tolerance);
 }
 
 #[test]
