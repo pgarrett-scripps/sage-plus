@@ -46,6 +46,13 @@ entries are retained below for provenance.
   change by rounding only (a few rare-terminus peptides with physicochemical mobility features
   by up to 0.017), and identification counts are unchanged or within 5 PSMs.
 
+### Fixed
+- MS2 spectra without a precursor are skipped by the search, the discovery pass, and the
+  prefilter spectrum index. Thermo RAW files whose scan events are out of step with their
+  trailers can contain MS2 scans without a plausible precursor m/z; the reader already
+  reported that they would not be searched, but they were searched and the run aborted with
+  `missing MS1 precursor` (also in Beta 8).
+
 ## [v0.1.0-beta.8] - 2026-09-24
 
 ### Fixed

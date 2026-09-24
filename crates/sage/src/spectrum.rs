@@ -726,6 +726,14 @@ fn sort_columns_by_mass(
 }
 
 impl ProcessedSpectrum {
+    /// Whether the spectrum can be scored: an MS2 scan with a precursor and
+    /// at least `min_peaks` peaks. Readers keep MS2 scans whose precursor
+    /// m/z is unknown (for example Thermo RAW scans without a plausible
+    /// trailer precursor), and every search path skips them.
+    pub fn is_searchable(&self, min_peaks: usize) -> bool {
+        self.level == 2 && !self.precursors.is_empty() && self.masses.len() >= min_peaks
+    }
+
     pub fn len(&self) -> usize {
         self.masses.len()
     }

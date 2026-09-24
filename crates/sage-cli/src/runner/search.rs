@@ -85,9 +85,7 @@ impl Runner {
             let candidates = spectra
                 .iter()
                 .filter(|spectrum| {
-                    spectrum.file_id == file_id
-                        && spectrum.level == 2
-                        && spectrum.masses.len() >= self.parameters.min_peaks
+                    spectrum.file_id == file_id && spectrum.is_searchable(self.parameters.min_peaks)
                 })
                 .collect::<Vec<_>>();
             let stride = candidates.len().div_ceil(MAX_DISCOVERY_SPECTRA).max(1);
@@ -431,9 +429,7 @@ impl Runner {
             .par_iter()
             .zip(occurrences.par_iter())
             .filter(|(spec, _)| {
-                !self.cancellation.is_cancelled()
-                    && spec.masses.len() >= self.parameters.min_peaks
-                    && spec.level == 2
+                !self.cancellation.is_cancelled() && spec.is_searchable(self.parameters.min_peaks)
             })
             .map(|x| {
                 let prev = counter.fetch_add(1, Ordering::Relaxed);
