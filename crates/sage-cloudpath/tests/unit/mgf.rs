@@ -165,14 +165,16 @@ async fn parse_mgf_matrixscience_example_1() -> Result<(), MgfError> {
         1675.30 79
         END IONS
         "#;
-    let mut spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
     assert_eq!(spectra.len(), 2);
 
-    let s = spectra.pop().unwrap();
-    assert_eq!(s.precursors.len(), 2);
-    assert_eq!(s.precursors[0].charge, Some(2));
-    assert_eq!(s.precursors[1].charge, Some(3));
-    assert_eq!(s.precursors[0].isolation_window, None);
+    // The file-level CHARGE applies to every spectrum, including the first.
+    for s in &spectra {
+        assert_eq!(s.precursors.len(), 2, "{}", s.id);
+        assert_eq!(s.precursors[0].charge, Some(2));
+        assert_eq!(s.precursors[1].charge, Some(3));
+        assert_eq!(s.precursors[0].isolation_window, None);
+    }
     Ok(())
 }
 
@@ -220,5 +222,25 @@ async fn parse_mgf_matrixscience_example_2() -> Result<(), MgfError> {
         s.precursors[0].isolation_window,
         Some(Tolerance::Da(-3.0, 3.0))
     );
+    Ok(())
+}
+
+#[test]
+fn header_tolerance_applies_to_the_first_spectrum() -> Result<(), MgfError> {
+    let s = "TOL=5\nTOLU=Da\nCHARGE=2+\n\
+             BEGIN IONS\nTITLE=first\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=second\nPEPMASS=600\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    assert_eq!(spectra.len(), 2);
+    for s in &spectra {
+        assert_eq!(s.precursors.len(), 1, "{}", s.id);
+        assert_eq!(s.precursors[0].charge, Some(2), "{}", s.id);
+        assert_eq!(
+            s.precursors[0].isolation_window,
+            Some(Tolerance::Da(-5.0, 5.0)),
+            "{}",
+            s.id
+        );
+    }
     Ok(())
 }

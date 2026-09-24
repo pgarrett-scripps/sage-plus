@@ -53,12 +53,16 @@ pub struct QueryData {
 }
 
 impl QueryData {
+    /// Query state for the spectrum opened by the header's `BEGIN IONS`.
     pub fn default_with_params(default_params: DefaultParams) -> Self {
-        Self {
+        let mut query_data = Self {
             default_params,
-            in_spectrum: true,
             ..Default::default()
-        }
+        };
+        // Apply the header's CHARGE, TOL, and TOLU to the first spectrum too.
+        query_data.init();
+        query_data.in_spectrum = true;
+        query_data
     }
     pub fn init(&mut self) {
         self.in_spectrum = false;
