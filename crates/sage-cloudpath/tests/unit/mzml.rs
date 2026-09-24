@@ -436,3 +436,81 @@ async fn unknown_array_after_empty_array_is_not_decoded_as_the_previous_kind(
     assert!(spectra[0].mz.is_empty(), "m/z = {:?}", spectra[0].mz);
     Ok(())
 }
+
+#[tokio::test]
+async fn precursor_state_does_not_carry_into_the_next_precursor() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="4">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor spectrumRef="scan=0">
+            <isolationWindow>
+              <cvParam accession="MS:1000827" value="400.0"/>
+              <cvParam accession="MS:1000828" value="1.0"/>
+              <cvParam accession="MS:1000829" value="1.5"/>
+            </isolationWindow>
+          </precursor>
+        </precursorList>
+      </spectrum>
+      <spectrum id="scan=2">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor spectrumRef="scan=0">
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000041" value="3"/>
+                <cvParam accession="MS:1002815" value="1.1"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+      </spectrum>
+      <spectrum id="ms1">
+        <cvParam accession="MS:1000511" value="1"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <scanList count="1">
+          <scan>
+            <cvParam accession="MS:1002815" value="0.7"/>
+          </scan>
+        </scanList>
+      </spectrum>
+      <spectrum id="scan=3">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <precursorList count="1">
+          <precursor>
+            <selectedIonList count="1">
+              <selectedIon>
+                <cvParam accession="MS:1000744" value="600.0"/>
+              </selectedIon>
+            </selectedIonList>
+          </precursor>
+        </precursorList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 4);
+    assert_eq!(spectra[0].precursors.len(), 1);
+    assert_eq!(
+        spectra[0].precursors[0].isolation_window,
+        Some(Tolerance::Da(-1.0, 1.5))
+    );
+    // A precursor without an m/z is dropped along with its charge,
+    // spectrumRef, and mobility.
+    assert!(spectra[1].precursors.is_empty());
+    // Scan-level mobility of an MS1 spectrum stays with it.
+    assert!(spectra[2].precursors.is_empty());
+    let precursor = &spectra[3].precursors[0];
+    assert_eq!(precursor.mz, 600.0);
+    assert_eq!(precursor.isolation_window, None);
+    assert_eq!(precursor.charge, None);
+    assert_eq!(precursor.spectrum_ref, None);
+    assert_eq!(precursor.inverse_ion_mobility, None);
+    Ok(())
+}

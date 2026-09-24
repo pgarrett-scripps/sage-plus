@@ -459,8 +459,12 @@ impl MzMLReader {
                                     _ => None,
                                 };
                                 spectrum.precursors.push(precursor);
-                                precursor = Precursor::default();
                             }
+                            // Precursors without an m/z are dropped whole, so their
+                            // charge, spectrumRef, and mobility cannot leak onward.
+                            precursor = Precursor::default();
+                            iso_window_lo = None;
+                            iso_window_hi = None;
                             Some(State::Spectrum)
                         }
                         (Some(State::Scan), b"scan") => Some(State::Spectrum),
@@ -505,6 +509,11 @@ impl MzMLReader {
                                 (false, _) => {}
                             }
                             spectrum = RawSpectrum::default_with_file_id(self.file_id);
+                            // Scan-level mobility of a spectrum without precursors
+                            // belongs to that spectrum only.
+                            precursor = Precursor::default();
+                            iso_window_lo = None;
+                            iso_window_hi = None;
                             None
                         }
                         _ => state,
