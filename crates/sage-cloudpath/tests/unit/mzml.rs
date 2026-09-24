@@ -658,3 +658,60 @@ async fn reads_analyzer_and_activation_per_spectrum() -> Result<(), MzMLError> {
     );
     Ok(())
 }
+
+/// Orbitrap Astral mzML from msconvert or ThermoRawFileParser describes the
+/// Astral analyzer as MS:1003379 after a quadrupole. Without a filter string
+/// the configuration must give the same group as the RAW `ASTMS` filter.
+#[tokio::test]
+async fn astral_analyzer_term_matches_the_thermo_filter() -> Result<(), MzMLError> {
+    use sage_core::spectrum::{AcquisitionGroup, MassAnalyzer};
+    let spectrum = |id: &str, filter: &str| {
+        format!(
+            r#"<spectrum id="{id}">
+              <cvParam accession="MS:1000511" value="2"/>
+              <cvParam accession="MS:1000127"/>
+              <scanList count="1"><scan instrumentConfigurationRef="IC2">{filter}
+                <cvParam accession="MS:1000016" value="1.0" unitAccession="UO:0000031"/>
+              </scan></scanList>
+              <precursorList count="1"><precursor>
+                <selectedIonList count="1"><selectedIon>
+                  <cvParam accession="MS:1000744" value="500.0"/>
+                </selectedIon></selectedIonList>
+                <activation><cvParam accession="MS:1000422"/></activation>
+              </precursor></precursorList>
+            </spectrum>"#
+        )
+    };
+    let filter = "ASTMS + c NSI d Full ms2 500.00@hcd25.00 [150.00-2000.00]";
+    let input = format!(
+        r#"<mzML>
+          <instrumentConfigurationList count="2">
+            <instrumentConfiguration id="IC1"><componentList count="2">
+              <analyzer order="2"><cvParam accession="MS:1000081"/></analyzer>
+              <analyzer order="3"><cvParam accession="MS:1000484"/></analyzer>
+            </componentList></instrumentConfiguration>
+            <instrumentConfiguration id="IC2"><componentList count="2">
+              <analyzer order="2"><cvParam accession="MS:1000081"/></analyzer>
+              <analyzer order="3"><cvParam accession="MS:1003379"/></analyzer>
+            </componentList></instrumentConfiguration>
+          </instrumentConfigurationList>
+          <run defaultInstrumentConfigurationRef="IC1"><spectrumList count="2">
+          {}
+          {}
+          </spectrumList></run></mzML>"#,
+        spectrum("scan=1", ""),
+        spectrum(
+            "scan=2",
+            &format!(r#"<cvParam accession="MS:1000512" value="{filter}"/>"#)
+        ),
+    );
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+    assert_eq!(spectra[0].acquisition.analyzer, MassAnalyzer::Astral);
+    assert_eq!(spectra[0].acquisition.label(), "astral/hcd");
+    assert_eq!(spectra[1].acquisition, spectra[0].acquisition);
+    assert_eq!(
+        spectra[1].acquisition,
+        AcquisitionGroup::from_thermo_filter(filter)
+    );
+    Ok(())
+}
