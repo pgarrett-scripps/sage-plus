@@ -9,6 +9,15 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- The retention-time and ion-mobility models are fit on standardized features with a fixed,
+  tiny ridge penalty and a Cholesky solve, replacing Gaussian elimination that retried with a
+  growing perturbation. The default feature sets contain exactly redundant columns; fitted
+  values no longer depend on how those columns are laid out. Additive PTM offsets keep their
+  `ptm_regularization` penalty and use the same Cholesky solve. On benchmark data, predictions
+  change by rounding only (a few rare-terminus peptides with physicochemical mobility features
+  by up to 0.017), and identification counts are unchanged or within 5 PSMs.
+
 ## [v0.1.0-beta.8] - 2026-09-24
 
 ### Fixed

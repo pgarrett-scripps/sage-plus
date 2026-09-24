@@ -262,3 +262,144 @@ fn retention_fit_ignores_decoys_and_low_confidence_psms() {
     let model = RetentionModel::fit(&db, &features, RetentionTimeFeatureSet::Basic).unwrap();
     assert!(model.predict_peptide(&db, &features[2]).is_finite());
 }
+
+/// Deterministic tryptic-like peptides over the 20 canonical residues, with
+/// realistic masses (so the mass column is nearly a linear combination of the
+/// residue counts, as in real data).
+fn noiseless_peptides(count: usize) -> Vec<Peptide> {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    (0..count)
+        .map(|_| {
+            let length = 7 + (next() % 24) as usize;
+            let mut sequence = (0..length - 1)
+                .map(|_| RESIDUES[(next() % 20) as usize])
+                .collect::<Vec<_>>();
+            sequence.push(if next() % 2 == 0 { b'K' } else { b'R' });
+            let oxidized = next() % 5 == 0;
+            let monoisotopic = sequence
+                .iter()
+                .map(|&residue| crate::mass::monoisotopic(residue))
+                .sum::<f32>()
+                + crate::mass::H2O
+                + if oxidized { 15.9949 } else { 0.0 };
+            Peptide {
+                sequence: sequence.into(),
+                monoisotopic,
+                ..Peptide::default()
+            }
+        })
+        .collect()
+}
+
+fn noiseless_weights<const D: usize>(seed: u64) -> [f64; D] {
+    let mut state = seed;
+    std::array::from_fn(|_| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 0.2
+    })
+}
+
+fn dot<const D: usize>(row: &[f64; D], beta: &[f64]) -> f64 {
+    row.iter().zip(beta).map(|(x, w)| x * w).sum()
+}
+
+fn map() -> [usize; 26] {
+    let mut map = [0; 26];
+    for (idx, aa) in VALID_AA.iter().enumerate() {
+        map[(aa - b'A') as usize] = idx;
+    }
+    map
+}
+
+#[test]
+fn basic_retention_embedding_fits_noiseless_linear_data() {
+    let map = map();
+    let peptides = noiseless_peptides(20_000);
+    let weights = noiseless_weights::<BASIC_FEATURES>(7);
+    let items = peptides
+        .iter()
+        .map(|peptide| {
+            let row = RetentionModel::embed(peptide, &map);
+            (row, dot(&row, &weights))
+        })
+        .collect::<Vec<_>>();
+    let scale = items.iter().map(|(_, y)| y.abs()).fold(0.0, f64::max);
+    let lr = LinearRegression::fit::<_, BASIC_FEATURES>(&items, |_| true, |(x, _)| *x, |(_, y)| *y)
+        .unwrap();
+    let error = items
+        .iter()
+        .map(|(x, y)| (dot(x, &lr.beta) - y).abs())
+        .fold(0.0, f64::max);
+    eprintln!("basic RT noiseless max |error| = {error:e} (max |y| = {scale:.3})");
+    assert!(error < 1e-9, "max |error| = {error:e}");
+    assert!((lr.r2 - 1.0).abs() < 1e-12, "r2 = {}", lr.r2);
+}
+
+#[test]
+fn basic_retention_predictions_ignore_redundant_and_permuted_columns() {
+    const AUGMENTED: usize = BASIC_FEATURES + 1;
+    let map = map();
+    let peptides = noiseless_peptides(8_000);
+    let weights = noiseless_weights::<BASIC_FEATURES>(11);
+    // A realistic, noisy target so the redundant directions are not trivially
+    // pinned by an exact solution.
+    let items = peptides
+        .iter()
+        .enumerate()
+        .map(|(idx, peptide)| {
+            let row = RetentionModel::embed(peptide, &map);
+            (
+                row,
+                dot(&row, &weights) + ((idx as f64) * 0.37).sin() * 0.05,
+            )
+        })
+        .collect::<Vec<_>>();
+    let base =
+        LinearRegression::fit::<_, BASIC_FEATURES>(&items, |_| true, |(x, _)| *x, |(_, y)| *y)
+            .unwrap();
+    // Append 2 * length - 0.5 * count(A) + 3 * intercept.
+    let augment = |x: &[f64; BASIC_FEATURES]| -> [f64; AUGMENTED] {
+        let mut row = [0.0; AUGMENTED];
+        row[..BASIC_FEATURES].copy_from_slice(x);
+        row[BASIC_FEATURES] = 2.0 * x[PEPTIDE_LEN] - 0.5 * x[0] + 3.0 * x[INTERCEPT];
+        row
+    };
+    let augmented =
+        LinearRegression::fit::<_, AUGMENTED>(&items, |_| true, |(x, _)| augment(x), |(_, y)| *y)
+            .unwrap();
+    let permute = |x: &[f64; BASIC_FEATURES]| -> [f64; BASIC_FEATURES] {
+        std::array::from_fn(|j| x[BASIC_FEATURES - 1 - j])
+    };
+    let permuted = LinearRegression::fit::<_, BASIC_FEATURES>(
+        &items,
+        |_| true,
+        |(x, _)| permute(x),
+        |(_, y)| *y,
+    )
+    .unwrap();
+    let mut redundant = 0.0f64;
+    let mut reordered = 0.0f64;
+    for (x, _) in &items {
+        let reference = dot(x, &base.beta);
+        redundant = redundant.max((dot(&augment(x), &augmented.beta) - reference).abs());
+        reordered = reordered.max((dot(&permute(x), &permuted.beta) - reference).abs());
+    }
+    eprintln!("basic RT redundant-column shift = {redundant:e}, permutation shift = {reordered:e}");
+    assert!(
+        redundant < 1e-9,
+        "redundant column moved predictions by {redundant:e}"
+    );
+    assert!(
+        reordered < 1e-9,
+        "column permutation moved predictions by {reordered:e}"
+    );
+}
