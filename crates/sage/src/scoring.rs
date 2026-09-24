@@ -1197,7 +1197,7 @@ impl<'db> Scorer<'db> {
             max_fragment_charge(self.max_fragment_charge, score.precursor_charge);
         let fragment_correction = self
             .correction(query.file_id)
-            .and_then(|correction| correction.fragment.as_ref());
+            .and_then(|correction| correction.fragment_model(query.acquisition));
 
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)

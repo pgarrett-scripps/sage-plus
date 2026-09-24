@@ -1,7 +1,7 @@
 use async_compression::tokio::bufread::ZlibDecoder;
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use sage_core::spectrum::{Precursor, Representation};
+use sage_core::spectrum::{AcquisitionGroup, Activation, MassAnalyzer, Precursor, Representation};
 use sage_core::{mass::Tolerance, spectrum::RawSpectrum};
 use std::collections::HashMap;
 use tokio::io::{AsyncBufRead, AsyncReadExt};
@@ -174,6 +174,43 @@ const ISO_WINDOW_UPPER: &[u8] = b"MS:1000829";
 
 const INVERSE_ION_MOBILITY: &[u8] = b"MS:1002815";
 
+const FILTER_STRING: &[u8] = b"MS:1000512";
+
+/// Activation methods, from `<precursor><activation>`.
+fn activation_flag(accession: &[u8]) -> Option<Activation> {
+    match accession {
+        b"MS:1000133" | b"MS:1002679" => Some(Activation::Cid),
+        b"MS:1000422" | b"MS:1002481" | b"MS:1002678" => Some(Activation::Hcd),
+        b"MS:1000598" => Some(Activation::Etd),
+        b"MS:1002631" => Some(Activation::Ethcd),
+        _ => None,
+    }
+}
+
+/// Mass analyzers, from `<instrumentConfiguration><componentList><analyzer>`.
+fn analyzer_term(accession: &[u8]) -> Option<MassAnalyzer> {
+    match accession {
+        b"MS:1000484" => Some(MassAnalyzer::Orbitrap),
+        b"MS:1000084" => Some(MassAnalyzer::Tof),
+        b"MS:1000264" | b"MS:1000082" | b"MS:1000291" | b"MS:1000078" | b"MS:1000083" => {
+            Some(MassAnalyzer::IonTrap)
+        }
+        b"MS:1000079" | b"MS:1000080" | b"MS:1000081" | b"MS:1000443" => Some(MassAnalyzer::Other),
+        _ => None,
+    }
+}
+
+/// Combine the activations listed for one precursor.
+fn combine_activation(current: Activation, next: Activation) -> Activation {
+    match (current, next) {
+        (Activation::Unknown, next) => next,
+        (Activation::Etd, Activation::Hcd) | (Activation::Hcd, Activation::Etd) => {
+            Activation::Ethcd
+        }
+        (current, _) => current,
+    }
+}
+
 pub struct MzMLReader {
     ms_level: Option<u8>,
     // If set to Some(level) and noise intensities are present in the MzML file,
@@ -241,6 +278,16 @@ impl MzMLReader {
         let mut referenceable_params: HashMap<String, Vec<CvParam>> = HashMap::new();
         let mut current_referenceable_group: Option<String> = None;
 
+        // Analyzer of each instrument configuration; a scan names its
+        // configuration or inherits the run default.
+        let mut analyzers: HashMap<String, MassAnalyzer> = HashMap::new();
+        let mut current_instrument: Option<String> = None;
+        let mut in_analyzer = false;
+        let mut default_instrument: Option<String> = None;
+        let mut scan_instrument: Option<String> = None;
+        let mut filter_group: Option<AcquisitionGroup> = None;
+        let mut activation = Activation::Unknown;
+
         macro_rules! extract {
             ($ev:expr, $key:expr) => {
                 $ev.try_get_attribute($key)?
@@ -291,6 +338,10 @@ impl MzMLReader {
                         _ => {}
                     },
                     Some(State::Precursor) => match param.accession.as_slice() {
+                        accession if activation_flag(accession).is_some() => {
+                            let next = activation_flag(accession).expect("checked above");
+                            activation = combine_activation(activation, next);
+                        }
                         ISO_WINDOW_TARGET => {
                             if precursor.mz == 0.0 {
                                 precursor.mz = param.parse_value()?;
@@ -325,6 +376,12 @@ impl MzMLReader {
                         }
                         ION_INJECTION_TIME => {
                             spectrum.ion_injection_time = param.parse_value()?;
+                        }
+                        FILTER_STRING => {
+                            filter_group = param
+                                .value
+                                .as_deref()
+                                .map(AcquisitionGroup::from_thermo_filter);
                         }
                         INVERSE_ION_MOBILITY => {
                             precursor.inverse_ion_mobility = Some(param.parse_value()?);
@@ -369,6 +426,24 @@ impl MzMLReader {
                                 precursor.spectrum_ref = Some(scan.to_string())
                             }
                         }
+                        b"instrumentConfiguration" => {
+                            let id = extract!(ev, b"id");
+                            current_instrument = Some(std::str::from_utf8(&id)?.to_owned());
+                        }
+                        b"analyzer" => in_analyzer = current_instrument.is_some(),
+                        b"run" => {
+                            if let Some(id) =
+                                ev.try_get_attribute(b"defaultInstrumentConfigurationRef")?
+                            {
+                                default_instrument =
+                                    Some(std::str::from_utf8(&id.value)?.to_owned());
+                            }
+                        }
+                        b"scan" => {
+                            if let Some(id) = ev.try_get_attribute(b"instrumentConfigurationRef")? {
+                                scan_instrument = Some(std::str::from_utf8(&id.value)?.to_owned());
+                            }
+                        }
                         b"referenceableParamGroup" => {
                             let id = extract!(ev, b"id");
                             let id = std::str::from_utf8(&id)?.to_owned();
@@ -381,7 +456,19 @@ impl MzMLReader {
                 Ok(Event::Empty(ref ev)) => {
                     if ev.name().into_inner() == b"cvParam" {
                         let param = CvParam::from_event(ev)?;
-                        if let Some(group) = current_referenceable_group.as_ref() {
+                        if in_analyzer {
+                            if let (Some(id), Some(analyzer)) =
+                                (current_instrument.as_ref(), analyzer_term(&param.accession))
+                            {
+                                // A later, non-generic analyzer (e.g. the Orbitrap
+                                // after a quadrupole) describes the recorded peaks.
+                                let slot = analyzers.entry(id.clone()).or_default();
+                                if *slot == MassAnalyzer::Unknown || analyzer != MassAnalyzer::Other
+                                {
+                                    *slot = analyzer;
+                                }
+                            }
+                        } else if let Some(group) = current_referenceable_group.as_ref() {
                             referenceable_params
                                 .get_mut(group)
                                 .ok_or(MzMLError::Malformed)?
@@ -472,7 +559,32 @@ impl MzMLReader {
                             current_referenceable_group = None;
                             state
                         }
+                        (_, b"analyzer") => {
+                            in_analyzer = false;
+                            state
+                        }
+                        (_, b"instrumentConfiguration") => {
+                            current_instrument = None;
+                            state
+                        }
                         (_, b"spectrum") => {
+                            let filter = filter_group.take().unwrap_or_default();
+                            let configured = scan_instrument
+                                .take()
+                                .or_else(|| default_instrument.clone())
+                                .and_then(|id| analyzers.get(&id).copied())
+                                .unwrap_or_default();
+                            spectrum.acquisition = AcquisitionGroup {
+                                analyzer: match filter.analyzer {
+                                    MassAnalyzer::Unknown => configured,
+                                    analyzer => analyzer,
+                                },
+                                activation: match filter.activation {
+                                    Activation::Unknown => activation,
+                                    known => known,
+                                },
+                            };
+                            activation = Activation::Unknown;
                             let allow = self
                                 .ms_level
                                 .as_ref()

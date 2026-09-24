@@ -138,21 +138,33 @@ impl Runner {
                 .par_iter()
                 .filter(|(_, feature)| feature.mass_offset.is_none())
                 .flat_map_iter(|(index, feature)| {
-                    let fragments = scorer.annotate_candidate(sample[*index], feature);
+                    let spectrum = sample[*index];
+                    let fragments = scorer.annotate_candidate(spectrum, feature);
+                    let acquisition = spectrum.acquisition;
                     let group = stable_hash(&feature.spec_id);
                     let rt = feature.rt;
                     fragments
                         .mz_experimental
                         .into_iter()
                         .zip(fragments.mz_calculated)
-                        .map(move |(observed, theoretical)| MassErrorPoint {
-                            rt_minutes: rt,
-                            mz: observed,
-                            error_ppm: (observed - theoretical) * 1e6 / theoretical,
-                            group,
+                        .map(move |(observed, theoretical)| {
+                            let point = MassErrorPoint {
+                                rt_minutes: rt,
+                                mz: observed,
+                                error_ppm: (observed - theoretical) * 1e6 / theoretical,
+                                group,
+                            };
+                            (acquisition, point)
                         })
                 })
                 .collect::<Vec<_>>();
+            let mut groups: Vec<(AcquisitionGroup, usize)> = Vec::new();
+            for spectrum in &sample {
+                match groups.iter_mut().find(|(g, _)| *g == spectrum.acquisition) {
+                    Some((_, count)) => *count += 1,
+                    None => groups.push((spectrum.acquisition, 1)),
+                }
+            }
 
             let options = |cap: Option<f32>, min_mz_span: f32| RecalibrationOptions {
                 max_kind: if cap.is_some() {
@@ -170,13 +182,20 @@ impl Runner {
                 _ => None,
             };
             let precursor = select_model(&precursor_points, options(precursor_cap, 100.0));
-            let fragment = select_model(
+            let fragment = select_group_models(
                 &fragment_points,
+                &groups,
                 options(recalibration_cap_ppm(self.parameters.fragment_tol), 200.0),
             );
             let correction = FileMassCorrection {
                 precursor: precursor.model.clone(),
-                fragment: fragment.model.clone(),
+                fragment: fragment
+                    .iter()
+                    .map(|group| GroupMassCorrection {
+                        group: group.group,
+                        model: group.selection.model.clone(),
+                    })
+                    .collect(),
             };
             let describe = |selection: &ModelSelection| match &selection.model {
                 Some(model) => format!(
@@ -202,7 +221,16 @@ impl Runner {
                 sample.len() * stride,
                 confident.len(),
                 describe(&precursor),
-                describe(&fragment),
+                fragment
+                    .iter()
+                    .map(|group| format!(
+                        "{} ({} spectra) {}",
+                        group.group.label(),
+                        group.spectra,
+                        describe(&group.selection)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
                 start.elapsed().as_millis(),
             );
             self.mass_recalibration
@@ -255,7 +283,7 @@ impl Runner {
             let correction = recalibration.as_deref().and_then(|r| r.file(file_id));
             (
                 correction.is_some_and(|c| c.precursor.as_ref().is_some_and(|m| !m.is_identity())),
-                correction.is_some_and(|c| c.fragment.as_ref().is_some_and(|m| !m.is_identity())),
+                correction.is_some_and(|c| c.corrects_fragments()),
             )
         };
         features.par_iter_mut().for_each(|feature| {

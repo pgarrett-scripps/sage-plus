@@ -574,3 +574,80 @@ async fn noise_array_does_not_carry_into_the_next_spectrum() -> Result<(), MzMLE
     assert_eq!(spectra[1].intensity, [10.0, 20.0, 30.0]);
     Ok(())
 }
+
+#[tokio::test]
+async fn reads_analyzer_and_activation_per_spectrum() -> Result<(), MzMLError> {
+    use sage_core::spectrum::{Activation, MassAnalyzer};
+    let spectrum = |id: &str, scan: &str, precursor: &str| {
+        format!(
+            r#"<spectrum id="{id}">
+              <cvParam accession="MS:1000511" value="2"/>
+              <cvParam accession="MS:1000127"/>
+              <scanList count="1"><scan{scan}>
+                <cvParam accession="MS:1000016" value="1.0" unitAccession="UO:0000031"/>
+              </scan></scanList>
+              <precursorList count="1"><precursor>
+                <selectedIonList count="1"><selectedIon>
+                  <cvParam accession="MS:1000744" value="500.0"/>
+                  <cvParam accession="MS:1000041" value="2"/>
+                </selectedIon></selectedIonList>
+                <activation>{precursor}</activation>
+              </precursor></precursorList>
+            </spectrum>"#
+        )
+    };
+    let body = [
+        // Run default configuration (Orbitrap after a quadrupole), HCD.
+        spectrum("scan=1", "", r#"<cvParam accession="MS:1000422"/>"#),
+        // Scan names the ion-trap configuration; CID.
+        spectrum(
+            "scan=2",
+            r#" instrumentConfigurationRef="IC2""#,
+            r#"<cvParam accession="MS:1000133"/>"#,
+        ),
+        // ETD followed by supplemental HCD.
+        spectrum(
+            "scan=3",
+            "",
+            r#"<cvParam accession="MS:1000598"/><cvParam accession="MS:1002481"/>"#,
+        ),
+    ]
+    .join("\n");
+    // A Thermo filter string overrides the configuration and cvParams.
+    let filtered = spectrum("scan=4", "", r#"<cvParam accession="MS:1000422"/>"#).replace(
+        "<scan>",
+        r#"<scan><cvParam accession="MS:1000512" value="ITMS + c NSI r d Full ms2 500.00@cid35.00 [140.00-1010.00]"/>"#,
+    );
+    let input = format!(
+        r#"<mzML>
+          <instrumentConfigurationList count="2">
+            <instrumentConfiguration id="IC1"><componentList count="3">
+              <analyzer order="2"><cvParam accession="MS:1000081"/></analyzer>
+              <analyzer order="3"><cvParam accession="MS:1000484"/></analyzer>
+            </componentList></instrumentConfiguration>
+            <instrumentConfiguration id="IC2"><componentList count="1">
+              <analyzer order="2"><cvParam accession="MS:1000264"/></analyzer>
+            </componentList></instrumentConfiguration>
+          </instrumentConfigurationList>
+          <run defaultInstrumentConfigurationRef="IC1"><spectrumList count="4">
+          {body}
+          {filtered}
+          </spectrumList></run></mzML>"#
+    );
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+    let groups = spectra
+        .iter()
+        .map(|s| (s.acquisition.analyzer, s.acquisition.activation))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        groups,
+        [
+            (MassAnalyzer::Orbitrap, Activation::Hcd),
+            (MassAnalyzer::IonTrap, Activation::Cid),
+            (MassAnalyzer::Orbitrap, Activation::Ethcd),
+            (MassAnalyzer::IonTrap, Activation::Cid),
+        ]
+    );
+    Ok(())
+}

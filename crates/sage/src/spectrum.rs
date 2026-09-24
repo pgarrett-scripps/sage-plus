@@ -143,6 +143,8 @@ pub struct ProcessedSpectrum {
     pub mobilities: Vec<f32>,
     /// Total ion current
     pub total_ion_current: f32,
+    /// Analyzer and activation that produced the peaks.
+    pub acquisition: AcquisitionGroup,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -173,6 +175,8 @@ pub struct RawSpectrum {
     pub fragment_charges: Option<Vec<u8>>,
     /// Mobility array
     pub mobility: Option<Vec<f32>>,
+    /// Analyzer and activation that produced the peaks.
+    pub acquisition: AcquisitionGroup,
 }
 
 impl RawSpectrum {
@@ -182,6 +186,120 @@ impl RawSpectrum {
         Self {
             file_id,
             ..Default::default()
+        }
+    }
+}
+
+/// Mass analyzer that recorded a spectrum's peaks.
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum MassAnalyzer {
+    #[default]
+    Unknown,
+    Orbitrap,
+    Astral,
+    Tof,
+    IonTrap,
+    Other,
+}
+
+impl MassAnalyzer {
+    /// Unit-resolution analyzers whose errors are not meaningful in ppm.
+    pub fn is_low_accuracy(self) -> bool {
+        matches!(self, MassAnalyzer::IonTrap)
+    }
+}
+
+/// Fragmentation method of an MSn spectrum.
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Activation {
+    #[default]
+    Unknown,
+    Hcd,
+    Cid,
+    Etd,
+    Ethcd,
+    Other,
+}
+
+/// Acquisition setting that can carry its own mass bias: the analyzer that
+/// measured the peaks and the activation that produced them. Resolution and
+/// fill time are not part of the key; they are rarely recorded per scan and
+/// would split the calibration data into groups too small to fit.
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub struct AcquisitionGroup {
+    pub analyzer: MassAnalyzer,
+    pub activation: Activation,
+}
+
+impl AcquisitionGroup {
+    /// Parse a Thermo scan filter such as
+    /// `FTMS + p NSI d Full ms2 445.12@hcd28.00 [110.00-1000.00]`.
+    pub fn from_thermo_filter(filter: &str) -> Self {
+        let analyzer = match filter.split_whitespace().next() {
+            Some("FTMS") => MassAnalyzer::Orbitrap,
+            Some("ASTMS") => MassAnalyzer::Astral,
+            Some("ITMS") => MassAnalyzer::IonTrap,
+            Some("TOFMS") => MassAnalyzer::Tof,
+            Some(_) => MassAnalyzer::Other,
+            None => MassAnalyzer::Unknown,
+        };
+        let lower = filter.to_ascii_lowercase();
+        let has = |method: &str| lower.contains(&format!("@{method}"));
+        let activation = if has("etd") && has("hcd") {
+            Activation::Ethcd
+        } else if has("etd") {
+            Activation::Etd
+        } else if has("hcd") {
+            Activation::Hcd
+        } else if has("cid") {
+            Activation::Cid
+        } else if lower.contains('@') {
+            Activation::Other
+        } else {
+            Activation::Unknown
+        };
+        Self {
+            analyzer,
+            activation,
+        }
+    }
+
+    /// Short label such as `orbitrap/hcd`.
+    pub fn label(&self) -> String {
+        format!("{}/{}", self.analyzer.as_str(), self.activation.as_str())
+    }
+}
+
+impl MassAnalyzer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MassAnalyzer::Unknown => "unknown",
+            MassAnalyzer::Orbitrap => "orbitrap",
+            MassAnalyzer::Astral => "astral",
+            MassAnalyzer::Tof => "tof",
+            MassAnalyzer::IonTrap => "ion_trap",
+            MassAnalyzer::Other => "other",
+        }
+    }
+}
+
+impl Activation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Activation::Unknown => "unknown",
+            Activation::Hcd => "hcd",
+            Activation::Cid => "cid",
+            Activation::Etd => "etd",
+            Activation::Ethcd => "ethcd",
+            Activation::Other => "other",
         }
     }
 }
@@ -849,6 +967,7 @@ impl SpectrumProcessor {
             charge_is_known,
             mobilities,
             total_ion_current,
+            acquisition: spectrum.acquisition,
         }
     }
 }

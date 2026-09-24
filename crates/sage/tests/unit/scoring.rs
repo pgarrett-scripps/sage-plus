@@ -936,11 +936,21 @@ mod mass_offsets {
     #[test]
     fn recalibration_recovers_shifted_spectrum_and_keeps_raw_errors() {
         use crate::mass_recalibration::{
-            FileMassCorrection, MassErrorModel, MassModelAxes, MassModelKind, MassRecalibration,
+            FileMassCorrection, GroupMassCorrection, MassErrorModel, MassModelAxes, MassModelKind,
+            MassRecalibration,
         };
+        use crate::spectrum::{AcquisitionGroup, Activation, MassAnalyzer};
         let expanded = database(SearchMode::Database);
         let target = expanded_target(&expanded);
         let mut query = spectrum(&target);
+        query.acquisition = AcquisitionGroup {
+            analyzer: MassAnalyzer::Orbitrap,
+            activation: Activation::Hcd,
+        };
+        let ion_trap = AcquisitionGroup {
+            analyzer: MassAnalyzer::IonTrap,
+            activation: Activation::Cid,
+        };
         let shift = 1.0 + 15e-6;
         for precursor in &mut query.precursors {
             precursor.mz *= shift;
@@ -965,7 +975,20 @@ mod mass_offsets {
         let recalibration = MassRecalibration {
             files: vec![FileMassCorrection {
                 precursor: Some(offset.clone()),
-                fragment: Some(offset),
+                fragment: vec![
+                    GroupMassCorrection {
+                        group: query.acquisition,
+                        model: Some(offset.clone()),
+                    },
+                    // Another analyzer's model must not touch this spectrum.
+                    GroupMassCorrection {
+                        group: ion_trap,
+                        model: Some(MassErrorModel {
+                            intercept_ppm: -15.0,
+                            ..offset
+                        }),
+                    },
+                ],
             }],
         };
         let corrected = Scorer {
@@ -995,5 +1018,27 @@ mod mass_offsets {
         for mz in &fragments.mz_experimental {
             assert!(observed.iter().any(|o| (o - mz).abs() < 1e-3), "{mz}");
         }
+
+        // The same spectrum recorded by an analyzer without a fragment model
+        // keeps its fragment error; only the per-file precursor model applies.
+        let mut other = query.clone();
+        other.acquisition = AcquisitionGroup {
+            analyzer: MassAnalyzer::Tof,
+            activation: Activation::Hcd,
+        };
+        // Widen the fragment window so the uncorrected 15 ppm peaks still match.
+        let wide = Scorer {
+            fragment_tol: Tolerance::Ppm(-30.0, 30.0),
+            mass_recalibration: corrected.mass_recalibration.clone(),
+            ..scorer(&expanded, false)
+        };
+        let hits = wide.score(&other);
+        let hit = &hits[0];
+        assert!(hit.aligned_delta_mass.abs() < 0.2);
+        assert!(
+            (hit.aligned_average_ppm - 15.0).abs() < 0.5,
+            "{}",
+            hit.aligned_average_ppm
+        );
     }
 }

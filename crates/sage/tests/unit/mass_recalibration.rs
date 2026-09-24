@@ -140,3 +140,124 @@ fn correction_removes_predicted_error() {
     assert!((model.correct_mz(observed, 0.0) - theoretical).abs() < 1e-3);
     assert_ne!(stable_hash("a"), stable_hash("b"));
 }
+
+#[test]
+fn acquisition_groups_with_opposite_biases_get_separate_models() {
+    use crate::spectrum::{AcquisitionGroup, Activation, MassAnalyzer};
+    let hcd = AcquisitionGroup {
+        analyzer: MassAnalyzer::Orbitrap,
+        activation: Activation::Hcd,
+    };
+    let tof = AcquisitionGroup {
+        analyzer: MassAnalyzer::Tof,
+        activation: Activation::Hcd,
+    };
+    let trap = AcquisitionGroup {
+        analyzer: MassAnalyzer::IonTrap,
+        activation: Activation::Cid,
+    };
+    let thin = AcquisitionGroup {
+        analyzer: MassAnalyzer::Orbitrap,
+        activation: Activation::Etd,
+    };
+    // Interleaved PSMs from two analyzers with +4 and -4 ppm biases. Pooled,
+    // no single offset fits both, so each group must be modelled separately.
+    let mut data = Vec::new();
+    for (i, point) in points(3000, |_, _| 0.0, 0.5).into_iter().enumerate() {
+        let (group, bias) = if i % 2 == 0 { (hcd, 4.0) } else { (tof, -4.0) };
+        let point = MassErrorPoint {
+            error_ppm: point.error_ppm + bias,
+            ..point
+        };
+        data.push((group, point));
+    }
+    for point in points(3000, |_, _| 30.0, 50.0).into_iter().take(600) {
+        data.push((
+            trap,
+            MassErrorPoint {
+                group: point.group + 10_000,
+                ..point
+            },
+        ));
+    }
+    for point in points(20, |_, _| 5.0, 0.5) {
+        data.push((
+            thin,
+            MassErrorPoint {
+                group: point.group + 20_000,
+                ..point
+            },
+        ));
+    }
+
+    let groups = [(tof, 1500), (hcd, 1500), (trap, 600), (thin, 20)];
+    let selected = select_group_models(&data, &groups, RecalibrationOptions::default());
+    assert_eq!(selected.len(), 4);
+    let find = |group| selected.iter().find(|s| s.group == group).unwrap();
+    let hcd_model = find(hcd).selection.model.clone().expect("orbitrap model");
+    let tof_model = find(tof).selection.model.clone().expect("tof model");
+    assert!(
+        (hcd_model.intercept_ppm - 4.0).abs() < 0.2,
+        "{}",
+        hcd_model.intercept_ppm
+    );
+    assert!(
+        (tof_model.intercept_ppm + 4.0).abs() < 0.2,
+        "{}",
+        tof_model.intercept_ppm
+    );
+    assert_eq!(
+        find(trap).selection.skipped.as_deref(),
+        Some("low_accuracy_analyzer")
+    );
+    assert!(find(trap).selection.model.is_none());
+    assert_eq!(
+        find(thin).selection.skipped.as_deref(),
+        Some("too_few_psms")
+    );
+
+    // Corrections are looked up by group; unknown groups are left alone.
+    let correction = FileMassCorrection {
+        precursor: None,
+        fragment: selected
+            .iter()
+            .map(|s| GroupMassCorrection {
+                group: s.group,
+                model: s.selection.model.clone(),
+            })
+            .collect(),
+    };
+    assert!((correction.fragment_ppm(hcd, 60.0, 700.0) - 4.0).abs() < 0.2);
+    assert!((correction.fragment_ppm(tof, 60.0, 700.0) + 4.0).abs() < 0.2);
+    assert_eq!(correction.fragment_ppm(trap, 60.0, 700.0), 0.0);
+    assert_eq!(
+        correction.fragment_ppm(AcquisitionGroup::default(), 60.0, 700.0),
+        0.0
+    );
+}
+
+#[test]
+fn thermo_filters_map_to_acquisition_groups() {
+    use crate::spectrum::{AcquisitionGroup, Activation, MassAnalyzer};
+    let parse = AcquisitionGroup::from_thermo_filter;
+    let group = parse("FTMS + p NSI d Full ms2 445.12@hcd28.00 [110.00-1000.00]");
+    assert_eq!(
+        (group.analyzer, group.activation),
+        (MassAnalyzer::Orbitrap, Activation::Hcd)
+    );
+    let group = parse("ITMS + c NSI r d Full ms2 652.33@cid35.00 [165.00-1315.00]");
+    assert_eq!(
+        (group.analyzer, group.activation),
+        (MassAnalyzer::IonTrap, Activation::Cid)
+    );
+    let group = parse("FTMS + p NSI d Full ms2 700.00@etd25.00@hcd20.00 [120.00-2000.00]");
+    assert_eq!(group.activation, Activation::Ethcd);
+    let group = parse("FTMS + p NSI Full ms [350.00-1500.00]");
+    assert_eq!(
+        (group.analyzer, group.activation),
+        (MassAnalyzer::Orbitrap, Activation::Unknown)
+    );
+    let group = parse("ASTMS + c NSI d Full ms2 500.00@hcd25.00 [150.00-2000.00]");
+    assert_eq!(group.analyzer, MassAnalyzer::Astral);
+    assert_eq!(group.label(), "astral/hcd");
+}

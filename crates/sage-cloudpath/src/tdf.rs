@@ -4,7 +4,15 @@ use crate::tims_mobility::{
 use rayon::prelude::*;
 use sage_core::{
     mass::Tolerance,
-    spectrum::{Precursor, RawSpectrum, Representation},
+    spectrum::{
+        AcquisitionGroup, Activation, MassAnalyzer, Precursor, RawSpectrum, Representation,
+    },
+};
+
+/// timsTOF spectra are all measured by the TOF analyzer after CID.
+const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
+    analyzer: MassAnalyzer::Tof,
+    activation: Activation::Cid,
 };
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap, path::Path};
@@ -310,6 +318,7 @@ impl TdfReader {
                             total_ion_current,
                             fragment_charges: None,
                             mobility: Some(mobility),
+                            acquisition: TIMS_TOF,
                         };
                         Some(spec)
                     }
@@ -368,6 +377,7 @@ impl TdfReader {
                                 .collect(),
                             fragment_charges: None,
                             mobility: None,
+                            acquisition: TIMS_TOF,
                         };
                         Some(spectrum)
                     }
