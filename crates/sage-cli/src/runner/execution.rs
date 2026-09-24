@@ -84,6 +84,23 @@ impl Runner {
                 .total_cmp(&right.poisson)
                 .then_with(|| feature_identity_cmp(left, right))
         });
+        // Carry repeated-spectrum occurrences over from search-time to final
+        // PSM ids so the post-FDR pass can tell same-ID spectra apart.
+        let spectrum_occurrences = if outputs.repeated_spectrum_psms.is_empty() {
+            HashMap::new()
+        } else {
+            outputs
+                .features
+                .iter()
+                .enumerate()
+                .filter_map(|(index, feature)| {
+                    outputs
+                        .repeated_spectrum_psms
+                        .get(&feature.psm_id)
+                        .map(|&occurrence| (index + 1, occurrence))
+                })
+                .collect::<HashMap<_, _>>()
+        };
         assign_psm_ids(&mut outputs.features);
         sage_core::ml::qvalue::spectrum_q_value_by(&mut outputs.features, |feature| {
             feature.poisson
@@ -195,7 +212,12 @@ impl Runner {
         });
         self.cancellation.check()?;
 
-        let postprocess = self.postprocess_features(&scorer, &mut outputs.features, parallel)?;
+        let postprocess = self.postprocess_features(
+            &scorer,
+            &mut outputs.features,
+            &spectrum_occurrences,
+            parallel,
+        )?;
         self.cancellation.check()?;
         self.events.check()?;
         if self.parameters.annotate_matches {

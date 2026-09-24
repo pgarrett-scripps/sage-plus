@@ -478,6 +478,24 @@ fn sort_features_by_discriminant(features: &mut [Feature]) {
     });
 }
 
+/// Zero-based occurrence of each spectrum's `(file_id, id)` among the
+/// preceding spectra. Unique IDs are always 0. Readers return spectra in file
+/// order, so the numbering is identical between the search pass and the
+/// post-FDR reread of the same files.
+fn spectrum_id_occurrences(spectra: &[ProcessedSpectrum]) -> Vec<usize> {
+    let mut seen = HashMap::with_capacity(spectra.len());
+    spectra
+        .iter()
+        .map(|spectrum| {
+            let count = seen
+                .entry((spectrum.file_id, spectrum.id.as_str()))
+                .or_insert(0usize);
+            *count += 1;
+            *count - 1
+        })
+        .collect()
+}
+
 fn assign_psm_ids(features: &mut [Feature]) {
     for (index, feature) in features.iter_mut().enumerate() {
         feature.psm_id = index + 1;

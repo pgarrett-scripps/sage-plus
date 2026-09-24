@@ -1,7 +1,8 @@
 use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
     missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
-    sort_features_by_discriminant, LabelGroupIndex, OutputTarget, RunSummary, SpectrumAccumulator,
+    sort_features_by_discriminant, spectrum_id_occurrences, LabelGroupIndex, OutputTarget,
+    RunSummary, SpectrumAccumulator,
 };
 
 #[test]
@@ -216,6 +217,23 @@ fn remote_output_target_flushes_through_cloud_writer() {
     let mut output = OutputTarget::new(&url).unwrap();
     output.write_all(b"remote sage output\n").unwrap();
     output.finish(&url).unwrap();
+}
+
+#[test]
+fn repeated_spectrum_ids_are_numbered_per_file() {
+    let spectrum = |file_id, id: &str| ProcessedSpectrum {
+        file_id,
+        id: id.into(),
+        ..ProcessedSpectrum::default()
+    };
+    let spectra = vec![
+        spectrum(0, "a"),
+        spectrum(0, "b"),
+        spectrum(0, "a"),
+        spectrum(1, "a"),
+        spectrum(0, "a"),
+    ];
+    assert_eq!(spectrum_id_occurrences(&spectra), vec![0, 0, 1, 0, 2]);
 }
 
 #[test]

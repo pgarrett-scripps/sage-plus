@@ -4,10 +4,15 @@ impl Runner {
     /// Re-read only the MS2 files needed for post-FDR work. Detailed matched
     /// fragments and PTM localization share this pass so enabling both does
     /// not double the input I/O.
+    ///
+    /// `spectrum_occurrences` maps final `psm_id` to the zero-based occurrence
+    /// of the PSM's spectrum ID within its file; PSMs absent from the map come
+    /// from the first (usually only) spectrum with that ID.
     pub(super) fn postprocess_features(
         &self,
         scorer: &Scorer,
         features: &mut [Feature],
+        spectrum_occurrences: &HashMap<usize, usize>,
         batch_size: usize,
     ) -> anyhow::Result<PostprocessStats> {
         #[derive(Default)]
@@ -48,11 +53,22 @@ impl Runner {
                 .then_some(idx)
             })
             .collect::<HashSet<_>>();
-        let mut work: HashMap<usize, HashMap<String, SpectrumWork>> = HashMap::new();
+        // Keyed by (file_id, spectrum ID occurrence), then spectrum ID, so
+        // spectra sharing an ID within a file each replay only their own PSMs.
+        let spectrum_key = |feature: &Feature| {
+            (
+                feature.file_id,
+                spectrum_occurrences
+                    .get(&feature.psm_id)
+                    .copied()
+                    .unwrap_or(0),
+            )
+        };
+        let mut work: HashMap<(usize, usize), HashMap<String, SpectrumWork>> = HashMap::new();
 
         if annotate_fragments {
             for (idx, feature) in features.iter().enumerate() {
-                work.entry(feature.file_id)
+                work.entry(spectrum_key(feature))
                     .or_default()
                     .entry(feature.spec_id.clone())
                     .or_default()
@@ -62,7 +78,7 @@ impl Runner {
             for idx in &annotation_indices {
                 let feature = &features[*idx];
                 if let Some(spectrum) = work
-                    .get_mut(&feature.file_id)
+                    .get_mut(&spectrum_key(feature))
                     .and_then(|file| file.get_mut(feature.spec_id.as_str()))
                 {
                     spectrum.annotate = true;
@@ -80,7 +96,7 @@ impl Runner {
                             .localization_rules(&self.database[feature.peptide_idx]),
                     )
                 {
-                    work.entry(feature.file_id)
+                    work.entry(spectrum_key(feature))
                         .or_default()
                         .entry(feature.spec_id.clone())
                         .or_default()
@@ -121,19 +137,22 @@ impl Runner {
         for (chunk_idx, chunk) in self.parameters.mzml_paths.chunks(batch_size).enumerate() {
             self.cancellation.check()?;
             let first_file_id = chunk_idx * batch_size;
-            if !(first_file_id..first_file_id + chunk.len())
-                .any(|file_id| work.contains_key(&file_id))
-            {
+            let file_ids = first_file_id..first_file_id + chunk.len();
+            if !work.keys().any(|(file_id, _)| file_ids.contains(file_id)) {
                 continue;
             }
 
             let spectra = self
                 .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)?
                 .1;
+            let occurrences = spectrum_id_occurrences(&spectra);
             let results = spectra
                 .par_iter()
-                .filter_map(|spectrum| {
-                    let spectrum_work = work.get(&spectrum.file_id)?.get(spectrum.id.as_str())?;
+                .zip(occurrences.par_iter())
+                .filter_map(|(spectrum, &occurrence)| {
+                    let spectrum_work = work
+                        .get(&(spectrum.file_id, occurrence))?
+                        .get(spectrum.id.as_str())?;
                     let mut annotated = Vec::new();
 
                     if spectrum_work.annotate {

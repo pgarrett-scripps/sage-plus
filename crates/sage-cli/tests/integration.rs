@@ -230,3 +230,66 @@ fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+fn run_sage_with_events(
+    workspace: &std::path::Path,
+    config: &std::path::Path,
+    root: &std::path::Path,
+) -> anyhow::Result<Vec<serde_json::Value>> {
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(workspace)
+        .arg(config)
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--events-jsonl")
+        .arg(root.join("events.jsonl"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    Ok(std::fs::read_to_string(root.join("events.jsonl"))?
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()?)
+}
+
+#[test]
+fn duplicate_spectrum_ids_are_annotated_against_their_own_spectrum() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-duplicate-ids-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+
+    // Repeat the only spectrum, keeping its native ID, as an MGF with
+    // repeated TITLE= lines would.
+    let mzml = std::fs::read_to_string(workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML"))?;
+    let start = mzml.find("<spectrum index=\"0\"").unwrap();
+    let end = mzml.find("</spectrum>").unwrap() + "</spectrum>".len();
+    let duplicate = mzml[start..end].replacen("index=\"0\"", "index=\"1\"", 1);
+    let mzml = format!("{}\n{}{}", &mzml[..end], duplicate, &mzml[end..]);
+    std::fs::write(root.join("duplicate.mzML"), mzml)?;
+
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["mzml_paths"] = serde_json::json!([root.join("duplicate.mzML")]);
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+
+    let events = run_sage_with_events(&workspace, &root.join("config.json"), &root)?;
+    let annotation = events
+        .iter()
+        .find(|event| event["event"] == "fragment_annotation_completed")
+        .expect("fragment annotation event");
+    // Each copy is scored and annotated once, exactly like the single-copy
+    // input (1 PSM, 22 fragments).
+    assert_eq!(annotation["psms"], 2);
+    assert_eq!(annotation["fragments"], 44);
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
