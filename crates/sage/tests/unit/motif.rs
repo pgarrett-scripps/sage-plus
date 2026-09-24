@@ -78,6 +78,25 @@ fn canonical_classes_reparse_identically() {
     assert!(SiteMotif::parse("{ACDEFGHIKLMNPQRSTVWYUO}*").is_err());
 }
 
+#[test]
+fn oversized_repeats_are_rejected_before_expansion() {
+    // Rejected by the width check, not by a capacity overflow or a huge
+    // allocation while expanding the repeat.
+    for pattern in [
+        "x(18446744073709551615)-N*",
+        "x(10000000000)-N*",
+        "N*-x(64)",
+        "x(40)-N*-x(40)",
+    ] {
+        let error = SiteMotif::parse(pattern).unwrap_err();
+        assert!(
+            error.contains("wider than 64 residues"),
+            "{pattern}: {error}"
+        );
+    }
+    assert!(SiteMotif::parse("N*-x(63)").is_ok());
+}
+
 mod database {
     use crate::database::{Builder, Parameters};
     use crate::enzyme::Position;

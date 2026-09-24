@@ -202,12 +202,13 @@ impl SiteMotif {
                 spelled.push('*');
             }
             canonical.push(spelled);
-            elements.extend(std::iter::repeat_n(set, repeat));
-            if elements.len() > MAX_MOTIF_WIDTH {
+            // Check before extending, so a huge repeat cannot allocate or overflow.
+            if repeat > MAX_MOTIF_WIDTH - elements.len() {
                 return Err(format!(
                     "motif `{pattern}` is wider than {MAX_MOTIF_WIDTH} residues"
                 ));
             }
+            elements.extend(std::iter::repeat_n(set, repeat));
         }
         let site = site.ok_or_else(|| {
             format!("motif `{pattern}` must mark the modified residue with `*`, e.g. N*-{{P}}-[ST]")
