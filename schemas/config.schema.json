@@ -1719,7 +1719,7 @@
           "type": "null"
         }
       ],
-      "description": "Search tolerance mode: `fixed` (default) or `auto`. `auto` runs the\ndiscovery pass (also when `mass_recalibration` is off) and narrows ppm\nprecursor tolerances per file and ppm fragment tolerances per file and\nacquisition group to 1.2x the 99th percentile of absolute residuals\nafter correction, if that covers 98% of held-out residuals. Tolerances\nare never widened; Da and percent tolerances are unchanged. Ignored for\nwide-window searches."
+      "description": "Search tolerance mode: `fixed` (default) or `auto`. `auto` runs the\ndiscovery pass (also when `mass_recalibration` is off) and narrows ppm\nprecursor tolerances per file and ppm fragment tolerances per file and\nacquisition group to the window holding 99% of the true-match signal,\nfrom a signal plus uniform background fit of residuals after\ncorrection, if that holds 98% of the estimated held-out signal.\nTolerances are never widened; Da and percent tolerances are unchanged.\nIgnored for wide-window searches."
     },
     "wide_window": {
       "type": [

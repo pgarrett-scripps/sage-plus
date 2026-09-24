@@ -29,14 +29,15 @@
 //!
 //! With [`ToleranceMode::Auto`], the same discovery residuals also narrow the
 //! search tolerances ([`auto_tolerance`]): the precursor window per file and
-//! the fragment window per acquisition group. The half-width is a margin
-//! times the 99th percentile of absolute fit-set residuals after the fit-set
-//! model (mass errors are heavy-tailed, so a multiple of a robust sigma cuts
-//! real matches). Windows are never wider than configured, never narrower
-//! than a floor, and are kept only if they cover enough held-out residuals.
+//! the fragment window per acquisition group. Residuals after the fit-set
+//! model are fitted as a signal plus a uniform background over the searched
+//! window ([`crate::signal_mixture`]), and the window holds 99% of the signal.
+//! Windows are never wider than configured, never narrower than a floor, and
+//! are kept only if they hold enough of the estimated held-out signal.
 
 use crate::mass::{Tolerance, PROTON};
 use crate::ml::regression::cholesky_solve;
+use crate::signal_mixture::{fit_signal_mixture, MixtureOptions, SignalFit};
 use crate::spectrum::{AcquisitionGroup, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
 
@@ -492,8 +493,9 @@ pub struct ResidualSpread {
     /// `1.4826 * MAD` of held-out residuals.
     pub validation_sigma_ppm: f32,
     /// Precursor PSMs matched at a non-zero isotope error, added by
-    /// [`ResidualSpread::add_isotope_error_points`]. They size the window, as
-    /// every isotope hypothesis is searched with it, but never fit models.
+    /// [`ResidualSpread::add_isotope_error_points`]. They are fitted as their
+    /// own subgroup when sizing the window, as every isotope hypothesis is
+    /// searched with it, but never fit mass models.
     #[serde(default)]
     pub isotope_error_points: usize,
     /// Fit-set residuals, used to size tolerances.
@@ -502,12 +504,16 @@ pub struct ResidualSpread {
     /// Held-out residuals, kept to measure tolerance coverage.
     #[serde(skip)]
     pub validation_residuals: Vec<f32>,
+    #[serde(skip)]
+    pub isotope_fit_residuals: Vec<f32>,
+    #[serde(skip)]
+    pub isotope_validation_residuals: Vec<f32>,
 }
 
 impl ResidualSpread {
-    /// Add residuals of points that took no part in model selection (such as
-    /// precursor PSMs matched at a non-zero isotope error) after `model`,
-    /// split into fit and held-out sets as model selection splits PSMs.
+    /// Add residuals of precursor PSMs matched at a non-zero isotope error
+    /// after `model`, split into fit and held-out sets as model selection
+    /// splits PSMs. They take no part in model selection.
     pub fn add_isotope_error_points(
         &mut self,
         model: Option<&MassErrorModel>,
@@ -525,12 +531,9 @@ impl ResidualSpread {
         let (fit, validation): (Vec<_>, Vec<_>) = finite
             .into_iter()
             .partition(|p| !is_validation(p.group, validation_tenths));
-        self.fit_points += fit.len();
-        self.validation_points += validation.len();
-        self.validation_psms += count_groups(&validation);
         self.isotope_error_points += fit.len() + validation.len();
-        self.fit_residuals.extend(fit.iter().map(residual));
-        self.validation_residuals
+        self.isotope_fit_residuals.extend(fit.iter().map(residual));
+        self.isotope_validation_residuals
             .extend(validation.iter().map(residual));
     }
 }
@@ -564,34 +567,43 @@ fn residual_spread(
         isotope_error_points: 0,
         fit_residuals,
         validation_residuals,
+        isotope_fit_residuals: Vec::new(),
+        isotope_validation_residuals: Vec::new(),
     })
 }
 
 /// Settings for [`auto_tolerance`].
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct AutoToleranceOptions {
-    /// Quantile of absolute fit-set residuals that sizes the window.
-    pub quantile: f32,
-    /// Multiplier on that quantile.
-    pub margin: f32,
     /// Smallest half-width, in ppm.
     pub floor_ppm: f32,
     /// Held-out PSMs needed to narrow a tolerance.
     pub min_validation_psms: usize,
-    /// Smallest fraction of held-out residuals the window must cover.
+    /// Smallest fraction of the estimated held-out signal the window must
+    /// hold.
     pub min_coverage: f32,
+    /// Smallest signal fraction (`pi`) of a trusted fit.
+    pub min_signal_fraction: f32,
+    /// A fit whose signal half-width exceeds this fraction of the searched
+    /// half-width cannot be told apart from the background.
+    pub max_window_fraction: f32,
+    /// Isotope-error points needed to fit them as a subgroup; with fewer,
+    /// they are left out.
+    pub min_isotope_error_points: usize,
+    pub mixture: MixtureOptions,
 }
 
 impl AutoToleranceOptions {
-    /// Precursor defaults: 1.2 x the 99th percentile, 3 ppm floor, 100
-    /// held-out PSMs, 98% held-out coverage.
+    /// Precursor defaults: 3 ppm floor.
     pub fn precursor() -> Self {
         Self {
-            quantile: 0.99,
-            margin: 1.2,
             floor_ppm: 3.0,
             min_validation_psms: 100,
             min_coverage: 0.98,
+            min_signal_fraction: 0.2,
+            max_window_fraction: 0.9,
+            min_isotope_error_points: 200,
+            mixture: MixtureOptions::default(),
         }
     }
 
@@ -613,28 +625,24 @@ pub struct ToleranceEstimate {
     pub narrowed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped: Option<String>,
-    pub quantile: f32,
-    pub margin: f32,
     pub floor_ppm: f32,
-    /// Window center: the fit-set residual median after correction.
+    /// Signal center of the monoisotopic (or only) residuals.
     pub center_ppm: f32,
-    /// Half-width before clipping to `configured`.
+    /// Half-width from the signal fit, before the floor and clipping.
     pub half_width_ppm: f32,
-    /// `quantile` of absolute fit-set residuals around `center_ppm`.
-    pub fit_quantile_ppm: f32,
-    /// The same quantile on held-out residuals, for comparison.
-    pub validation_quantile_ppm: f32,
-    /// `1.4826 * MAD` of fit-set and held-out residuals, for reference.
-    pub fit_sigma_ppm: f32,
-    pub validation_sigma_ppm: f32,
     pub validation_psms: usize,
     pub validation_points: usize,
-    /// Precursor points matched at a non-zero isotope error.
+    /// Precursor residuals matched at a non-zero isotope error.
     pub isotope_error_points: usize,
-    /// Fraction of held-out residuals inside the proposed window. Every
-    /// held-out residual lies inside `configured`, as discovery searched
-    /// with it.
+    /// Estimated share of held-out signal inside the proposed window (signal
+    /// responsibilities of held-out residuals inside it over all of them).
     pub validation_coverage: f32,
+    /// Signal + background fit of the residuals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<SignalFit>,
+    /// Fit of isotope-error precursor residuals, when there are enough.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isotope_error_signal: Option<SignalFit>,
 }
 
 impl ToleranceEstimate {
@@ -645,43 +653,47 @@ impl ToleranceEstimate {
             tolerance: configured,
             narrowed: false,
             skipped: Some(reason.into()),
-            quantile: options.quantile,
-            margin: options.margin,
             floor_ppm: options.floor_ppm,
             center_ppm: f32::NAN,
             half_width_ppm: f32::NAN,
-            fit_quantile_ppm: f32::NAN,
-            validation_quantile_ppm: f32::NAN,
-            fit_sigma_ppm: f32::NAN,
-            validation_sigma_ppm: f32::NAN,
             validation_psms: 0,
             validation_points: 0,
             isotope_error_points: 0,
             validation_coverage: 1.0,
+            signal: None,
+            isotope_error_signal: None,
         }
     }
 }
 
-fn quantile_abs(values: &[f32], center: f32, q: f32) -> f32 {
-    if values.is_empty() {
-        return f32::NAN;
+/// Why a fit cannot size a window, if it cannot.
+fn untrusted(
+    fit: &SignalFit,
+    lo: f32,
+    hi: f32,
+    options: &AutoToleranceOptions,
+) -> Option<&'static str> {
+    if !fit.converged {
+        Some("not_converged")
+    } else if fit.scale_at_bound {
+        Some("scale_at_bound")
+    } else if fit.signal_fraction < options.min_signal_fraction {
+        Some("low_signal_fraction")
+    } else if fit.half_width_ppm > options.max_window_fraction * 0.5 * (hi - lo) {
+        Some("signal_fills_window")
+    } else {
+        None
     }
-    let mut deviations = values
-        .iter()
-        .map(|v| (v - center).abs())
-        .collect::<Vec<_>>();
-    let index = ((q.clamp(0.0, 1.0) * (deviations.len() - 1) as f32).ceil() as usize)
-        .min(deviations.len() - 1);
-    let (_, value, _) = deviations.select_nth_unstable_by(index, f32::total_cmp);
-    *value
 }
 
-/// Narrow a ppm tolerance to `center +/- max(margin * q, floor)`, where
-/// `center` is the fit-set residual median after the fit-set model and `q`
-/// the `quantile` of absolute fit-set residuals around it. The window is
-/// clipped to `configured`, so it never widens, and is kept only if it covers
-/// at least `min_coverage` of held-out residuals. Da and percent tolerances,
-/// selections without residuals, and too few held-out PSMs keep `configured`.
+/// Narrow a ppm tolerance from a signal + uniform background fit of the
+/// residuals after the fit-set model: the window is `center +/- max(h,
+/// floor)`, where `h` holds 99% of the signal. For precursors with enough
+/// isotope-error matches, those are fitted separately and the window covers
+/// both signals. The window is clipped to `configured`, so it never widens,
+/// and is applied only if it holds at least `min_coverage` of the estimated
+/// held-out signal. Da and percent tolerances, selections without residuals,
+/// too few held-out PSMs, and untrusted fits keep `configured`.
 pub fn auto_tolerance(
     selection: &ModelSelection,
     configured: Tolerance,
@@ -694,17 +706,7 @@ pub fn auto_tolerance(
         let reason = selection.skipped.as_deref().unwrap_or("no_residuals");
         return ToleranceEstimate::unchanged(configured, options, reason);
     };
-    let center = spread.fit_center_ppm;
     let mut estimate = ToleranceEstimate {
-        center_ppm: center,
-        fit_quantile_ppm: quantile_abs(&spread.fit_residuals, center, options.quantile),
-        validation_quantile_ppm: quantile_abs(
-            &spread.validation_residuals,
-            center,
-            options.quantile,
-        ),
-        fit_sigma_ppm: spread.fit_sigma_ppm,
-        validation_sigma_ppm: spread.validation_sigma_ppm,
         validation_psms: spread.validation_psms,
         validation_points: spread.validation_points,
         isotope_error_points: spread.isotope_error_points,
@@ -715,24 +717,83 @@ pub fn auto_tolerance(
         estimate.skipped = Some("too_few_psms".into());
         return estimate;
     }
-    if !center.is_finite() || !estimate.fit_quantile_ppm.is_finite() {
+    let Some(signal) = fit_signal_mixture(
+        &spread.fit_residuals,
+        &spread.validation_residuals,
+        lo,
+        hi,
+        &options.mixture,
+    ) else {
         estimate.skipped = Some("no_residuals".into());
         return estimate;
+    };
+    estimate.center_ppm = signal.center_ppm;
+    estimate.half_width_ppm = signal.half_width_ppm;
+    let reason = untrusted(&signal, lo, hi, &options);
+    estimate.signal = Some(signal);
+    if let Some(reason) = reason {
+        estimate.skipped = Some(reason.into());
+        return estimate;
     }
-    let half = (options.margin * estimate.fit_quantile_ppm).max(options.floor_ppm);
-    estimate.half_width_ppm = half;
-    let new_lo = (center - half).max(lo);
-    let new_hi = (center + half).min(hi);
+    if spread.isotope_error_points >= options.min_isotope_error_points {
+        let isotope = fit_signal_mixture(
+            &spread.isotope_fit_residuals,
+            &spread.isotope_validation_residuals,
+            lo,
+            hi,
+            &options.mixture,
+        );
+        let reason = match &isotope {
+            None => Some("no_residuals"),
+            Some(fit) => untrusted(fit, lo, hi, &options),
+        };
+        estimate.isotope_error_signal = isotope;
+        if let Some(reason) = reason {
+            estimate.skipped = Some(format!("isotope_error_{reason}"));
+            return estimate;
+        }
+    }
+
+    let fits = [
+        estimate.signal.as_ref(),
+        estimate.isotope_error_signal.as_ref(),
+    ];
+    let fits = fits.into_iter().flatten().collect::<Vec<_>>();
+    let (mut new_lo, mut new_hi) = (f32::INFINITY, f32::NEG_INFINITY);
+    for fit in &fits {
+        let half = fit.half_width_ppm.max(options.floor_ppm);
+        new_lo = new_lo.min(fit.center_ppm - half);
+        new_hi = new_hi.max(fit.center_ppm + half);
+    }
+    let (new_lo, new_hi) = (new_lo.max(lo), new_hi.min(hi));
     if new_hi <= new_lo {
         estimate.skipped = Some("empty_window".into());
         return estimate;
     }
-    let inside = spread
-        .validation_residuals
-        .iter()
-        .filter(|&&r| r >= new_lo && r <= new_hi)
-        .count();
-    estimate.validation_coverage = inside as f32 / spread.validation_residuals.len() as f32;
+    // Estimated held-out signal inside the window.
+    let validation = [
+        (estimate.signal.as_ref(), &spread.validation_residuals),
+        (
+            estimate.isotope_error_signal.as_ref(),
+            &spread.isotope_validation_residuals,
+        ),
+    ];
+    let (mut inside, mut total) = (0.0f64, 0.0f64);
+    for (fit, residuals) in validation {
+        let Some(fit) = fit else { continue };
+        for &r in residuals.iter() {
+            let g = fit.signal_probability(r) as f64;
+            total += g;
+            if r >= new_lo && r <= new_hi {
+                inside += g;
+            }
+        }
+    }
+    estimate.validation_coverage = if total > 0.0 {
+        (inside / total) as f32
+    } else {
+        0.0
+    };
     if estimate.validation_coverage < options.min_coverage {
         estimate.skipped = Some("low_coverage".into());
         return estimate;

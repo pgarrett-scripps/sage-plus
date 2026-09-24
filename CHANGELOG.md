@@ -27,12 +27,16 @@ entries are retained below for provenance.
   lists each group's model.
 - `tolerance_mode` (`"fixed"` by default, or `"auto"`) narrows ppm search tolerances from
   the discovery pass: the precursor tolerance per file and the fragment tolerance per file and
-  acquisition group, to 1.2 times the 99th percentile of absolute residuals after correction
-  (floors of 3 ppm for precursors and 5 ppm for fragments), never wider than configured and
-  only when the window covers 98% of held-out residuals. Precursor windows also count PSMs
-  matched at a non-zero isotope error. Da and percent tolerances, ion-trap groups, sparse
-  groups, mass-offset searches, and open precursor windows keep the configured tolerance. The
-  run summary reports applied windows, fit and held-out percentiles, and held-out coverage.
+  acquisition group. Residuals after correction are fitted as a signal (Gaussian, Student-t
+  with 4 degrees of freedom, or two Gaussians with a shared center, chosen by held-out
+  likelihood) plus a uniform background, and the window holds 99% of the signal (floors of
+  3 ppm for precursors and 5 ppm for fragments). Precursor PSMs matched at a non-zero isotope
+  error are fitted as their own subgroup and the window covers both. Windows are never wider
+  than configured and are applied only when they hold 98% of the estimated held-out signal.
+  Untrusted fits, Da and percent tolerances, ion-trap groups, sparse groups, mass-offset
+  searches, and open precursor windows keep the configured tolerance. The run summary reports
+  each fit (form, signal fraction, center, scale, 99% half-width, candidate likelihoods), the
+  applied window or why it was kept, and held-out coverage.
 
 ### Changed
 - Nonlinear retention-time alignment is the default. When `retention_time_alignment` is not
