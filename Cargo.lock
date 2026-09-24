@@ -2477,9 +2477,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "opentfraw"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfeb6cfccaa1ae1d967cabda663853c4f402e672e662f4859a2d814b88a37425"
+checksum = "ef587c26e732a3178c3acb194eece1f8c8e6bebba81c6b16b743291af4288d13"
 dependencies = [
  "openmassspec-core",
  "thiserror 2.0.18",
