@@ -13,6 +13,7 @@ fn result(index: usize) -> SageResults {
         quant: vec![TmtQuant {
             spec_id: format!("quant-{index}"),
             file_id: index,
+            occurrence: 0,
             ion_injection_time: index as f32,
             peaks: vec![index as f32],
         }],

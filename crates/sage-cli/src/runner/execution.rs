@@ -348,6 +348,7 @@ impl Runner {
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
             &outputs.quant,
+            &spectrum_occurrences,
             &filenames,
             &self.database,
             output_psm_q_value,

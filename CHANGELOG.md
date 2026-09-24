@@ -48,15 +48,18 @@ entries are retained below for provenance.
   scale applied (`mixed` when only some inputs fell back).
 - mzML array type, compression, precursor, isolation-window, and noise state are reset for
   every array, precursor, and spectrum, so values no longer leak between them.
-- MGF spectra without a title, precursor mass, or peaks are skipped with one warning per file
+- MGF spectra without a title, a valid precursor mass, or finite peaks are skipped with one warning per file
   instead of failing the file. File-level `CHARGE`, `TOL`, and `TOLU` apply to the first
   spectrum, multi-digit charges parse correctly, and an empty `CHARGE=` means unknown charge.
 - Spectra that share an ID within a file are annotated and localized against their own peaks
-  after FDR instead of failing or borrowing another spectrum's features.
+  after FDR, and MS2 TMT reporter ions stay with their own spectrum, instead of failing or
+  borrowing another spectrum's features. `TmtQuant` gains an `occurrence` field and
+  `serialize_features` takes the repeated-spectrum occurrence map.
 - File progress events are emitted once per file; the prefilter and post-FDR rereads no longer
   repeat them.
 - The HTML report keeps inputs with the same file name in different directories separate.
-- The MCP `query_results` modification filter matches PSM peptides, and a job that finished
+- The MCP `query_results` modification filter matches inside bracketed tags of PSM and
+  spectral-library sequences (plain residue letters no longer match), and a job that finished
   before a cancellation request is reported as completed.
 - `DOCS.md` states the correct `predict_rt` default (true).
 

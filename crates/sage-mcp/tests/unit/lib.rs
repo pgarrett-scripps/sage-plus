@@ -515,6 +515,28 @@ fn modification_filter_matches_psm_peptide_tags() {
             "{needle}"
         );
     }
+    // A needle that names the residue matches the residue and its tag.
+    assert!(result_row_matches(&args("S[Phospho]"), "spectrum_q", &psm));
+    assert!(!result_row_matches(&args("T[Phospho]"), "spectrum_q", &psm));
+
+    // Spectral-library rows follow the same rule on their sequence columns.
+    let library = row(serde_json::json!({
+        "modified_peptide": "PEPS[Phospho]TIDEK",
+        "proforma": "PEPS[Phospho]TIDEK/2",
+    }));
+    for needle in ["Phospho", "S[Phospho]"] {
+        assert!(
+            result_row_matches(&args(needle), "spectrum_q", &library),
+            "{needle}"
+        );
+    }
+    for needle in ["PEP", "K", "Oxidation"] {
+        assert!(
+            !result_row_matches(&args(needle), "spectrum_q", &library),
+            "{needle}"
+        );
+    }
+
     let unmodified = row(serde_json::json!({"peptide": "PEPTIDEK", "spectrum_q": 0.001}));
     assert!(!result_row_matches(
         &args("Phospho"),

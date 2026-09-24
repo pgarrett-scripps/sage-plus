@@ -803,11 +803,20 @@ fn result_row_matches(
         if let Some(modification) = text("modification") {
             return !modification.contains(needle);
         }
-        !text("peptide").is_some_and(|peptide| {
-            modification_tags(peptide).any(|modification| modification.contains(needle))
-        }) && !text("modified_peptide").is_some_and(|value| value.contains(needle))
-            && !text("proforma").is_some_and(|value| value.contains(needle))
+        !["peptide", "modified_peptide", "proforma"]
+            .iter()
+            .any(|name| text(name).is_some_and(|value| carries_modification(value, needle)))
     })
+}
+
+/// Residue letters outside the tags are not modifications, so a plain needle
+/// (`Phospho`, `+15.99`) only matches inside bracketed tags. A needle that
+/// includes a tag (`S[Phospho]`) is matched against the whole sequence.
+fn carries_modification(sequence: &str, needle: &str) -> bool {
+    match needle.contains('[') {
+        true => sequence.contains(needle),
+        false => modification_tags(sequence).any(|modification| modification.contains(needle)),
+    }
 }
 
 /// Bracketed modification tags, brackets included, in a Sage peptide string.
@@ -1229,7 +1238,8 @@ pub struct QueryResultsArgs {
     pub protein: Option<String>,
     /// Optional case-sensitive peptide substring.
     pub peptide: Option<String>,
-    /// Optional case-sensitive modification substring.
+    /// Optional case-sensitive modification substring, matched inside bracketed
+    /// tags (`Phospho`, `+15.99`); include the residue (`S[Phospho]`) to match a site.
     pub modification: Option<String>,
     /// Maximum matching rows to return (default 50, maximum 200).
     pub limit: Option<usize>,
