@@ -1182,3 +1182,65 @@ fn named_static_modifications_apply_terminal_and_residue_sites_separately() {
     assert_eq!(peptides[0].modification_at(2), 42.0);
     assert_eq!(peptides[0].applied_modifications().count(), 3);
 }
+
+#[test]
+fn label_group_recovers_base_definitions_with_nonzero_masses() {
+    // `(mass + offset) - offset` is not exact in f32, so recovering the base
+    // label by recomputing its mass used to panic for these definitions.
+    for (residue, sequence, mass, heavy) in [
+        ("K", "PEPKR", 28.0313_f32, 4.025107_f32),
+        ("K", "PEPKR", 28.0313, 8.014199),
+        ("^", "PEPKR", 28.0313, 4.025107),
+        ("C", "PEPCR", 57.021464, 10.008269),
+        ("M", "PEPMR", 15.9949, 6.020129),
+    ] {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "generate_decoys": false,
+            "static_mods": {
+                residue: {
+                    "mass": mass,
+                    "channel_offsets": {"light": 0.0, "heavy": heavy}
+                }
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        parameters.validate_channels().unwrap();
+        let peptides = parameters.peptides_from_tsv(&format!("sequence\n{sequence}\n"));
+        let db = parameters.build_from_peptides(peptides);
+        let groups = db
+            .peptides
+            .iter()
+            .map(|peptide| {
+                (
+                    peptide.label_channel.as_deref().unwrap().to_string(),
+                    peptide.label_group(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(groups.len(), 2, "{residue} {mass} {heavy}");
+        assert_eq!(groups["light"], groups["heavy"], "{residue} {mass} {heavy}");
+    }
+
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "generate_decoys": false,
+        "variable_mods": {
+            "M": [{
+                "mass": 15.9949,
+                "channel_offsets": {"light": 0.0, "heavy": 4.025107}
+            }]
+        }
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    parameters.validate_channels().unwrap();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPMR\n");
+    let db = parameters.build_from_peptides(peptides);
+    let modified = db
+        .peptides
+        .iter()
+        .map(|peptide| peptide.label_group())
+        .filter(|group| group.contains('['))
+        .collect::<HashSet<_>>();
+    assert_eq!(modified.len(), 1, "{modified:?}");
+}

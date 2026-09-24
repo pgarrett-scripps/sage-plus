@@ -75,6 +75,9 @@ struct LookupRecord {
     site: SiteClass,
     kind: ModificationKind,
     definition: Arc<ModificationDefinition>,
+    /// Channel-base definition that a `Label` record was resolved from. Kept by
+    /// identity because `(mass + offset) - offset` is not exact in f32.
+    base: Option<Arc<ModificationDefinition>>,
 }
 
 /// Shared metadata addressed by the compact one-byte modification IDs stored
@@ -107,7 +110,7 @@ impl ModificationLookup {
     fn from_records(
         records: impl IntoIterator<Item = LookupRecord>,
     ) -> Result<Arc<Self>, ModificationLookupError> {
-        let mut unique = BTreeMap::<LookupKey, Arc<ModificationDefinition>>::new();
+        let mut unique = BTreeMap::<LookupKey, LookupRecord>::new();
         let mut pointers = Vec::new();
         for record in records {
             let key = LookupKey {
@@ -116,7 +119,7 @@ impl ModificationLookup {
                 definition: record.definition.as_ref().clone(),
             };
             pointers.push((Arc::as_ptr(&record.definition) as usize, key.clone()));
-            unique.entry(key).or_insert(record.definition);
+            unique.entry(key).or_insert(record);
         }
         if unique.len() > MAX_COMPACT_DEFINITIONS {
             return Err(ModificationLookupError {
@@ -125,13 +128,9 @@ impl ModificationLookup {
         }
 
         let mut lookup = Self::default();
-        for (key, definition) in unique {
+        for (key, record) in unique {
             let id = lookup.records.len() as u8;
-            lookup.records.push(LookupRecord {
-                site: key.site,
-                kind: key.kind,
-                definition,
-            });
+            lookup.records.push(record);
             lookup.ids.insert(key, id);
         }
         for (pointer, key) in pointers {
@@ -153,6 +152,7 @@ impl ModificationLookup {
                     site: SiteClass::from_site(site),
                     kind,
                     definition,
+                    base: None,
                 }),
         )
     }
@@ -563,14 +563,16 @@ impl ModificationLookup {
                 site,
                 kind,
                 definition: definition.clone(),
+                base: None,
             });
             if kind == ModificationKind::ChannelBase {
                 for channel in channels {
-                    if let Some(definition) = labels.resolve(definition, channel) {
+                    if let Some(resolved) = labels.resolve(definition, channel) {
                         records.push(LookupRecord {
                             site,
                             kind: ModificationKind::Label,
-                            definition,
+                            definition: resolved,
+                            base: Some(definition.clone()),
                         });
                     }
                 }
@@ -969,9 +971,12 @@ impl Peptide {
                 Site::Sequence(_) => {}
             }
             base.monoisotopic -= offset;
-            let unresolved = record.definition.with_mass(record.definition.mass - offset);
+            let unresolved = record
+                .base
+                .as_ref()
+                .expect("label definition has no recorded channel base");
             encoded.modification_id = lookup
-                .id_value(record.site, &unresolved, ModificationKind::ChannelBase)
+                .id(record.site, unresolved, ModificationKind::ChannelBase)
                 .expect("base label definition missing from compact lookup");
         }
         base.label_channel = None;
