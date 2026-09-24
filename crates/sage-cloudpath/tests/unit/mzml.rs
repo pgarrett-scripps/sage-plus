@@ -514,3 +514,63 @@ async fn precursor_state_does_not_carry_into_the_next_precursor() -> Result<(), 
     assert_eq!(precursor.inverse_ion_mobility, None);
     Ok(())
 }
+
+#[tokio::test]
+async fn noise_array_does_not_carry_into_the_next_spectrum() -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="2">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="1"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="3">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUAAAAAAAEB/QAAAAAAAwIJA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1002744"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAQAAAgEAAAKBA</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+      <spectrum id="scan=2">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="2">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUAAAAAAAEB/QAAAAAAAwIJA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let mut reader = MzMLReader::with_file_id(0);
+    reader.set_signal_to_noise(Some(2));
+    let spectra = reader.parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 2);
+    // S/N only applies to MS2, which has no noise array of its own.
+    assert_eq!(spectra[0].intensity, [10.0, 20.0, 30.0]);
+    assert_eq!(spectra[1].intensity, [10.0, 20.0, 30.0]);
+    Ok(())
+}

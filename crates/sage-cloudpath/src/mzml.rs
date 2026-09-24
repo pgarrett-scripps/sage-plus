@@ -500,7 +500,6 @@ impl MzMLReader {
                                         .iter_mut()
                                         .zip(noise_array.iter())
                                         .for_each(|(int, noise)| *int /= noise);
-                                    noise_array.clear();
                                     spectra.push(spectrum);
                                 }
                                 (true, _) => {
@@ -509,6 +508,7 @@ impl MzMLReader {
                                 (false, _) => {}
                             }
                             spectrum = RawSpectrum::default_with_file_id(self.file_id);
+                            noise_array.clear();
                             // Scan-level mobility of a spectrum without precursors
                             // belongs to that spectrum only.
                             precursor = Precursor::default();
