@@ -611,6 +611,12 @@ async fn reads_analyzer_and_activation_per_spectrum() -> Result<(), MzMLError> {
             "",
             r#"<cvParam accession="MS:1000598"/><cvParam accession="MS:1002481"/>"#,
         ),
+        // ETD followed by supplemental CID.
+        spectrum(
+            "scan=5",
+            "",
+            r#"<cvParam accession="MS:1000598"/><cvParam accession="MS:1000133"/>"#,
+        ),
     ]
     .join("\n");
     // A Thermo filter string overrides the configuration and cvParams.
@@ -629,7 +635,7 @@ async fn reads_analyzer_and_activation_per_spectrum() -> Result<(), MzMLError> {
               <analyzer order="2"><cvParam accession="MS:1000264"/></analyzer>
             </componentList></instrumentConfiguration>
           </instrumentConfigurationList>
-          <run defaultInstrumentConfigurationRef="IC1"><spectrumList count="4">
+          <run defaultInstrumentConfigurationRef="IC1"><spectrumList count="5">
           {body}
           {filtered}
           </spectrumList></run></mzML>"#
@@ -646,6 +652,7 @@ async fn reads_analyzer_and_activation_per_spectrum() -> Result<(), MzMLError> {
             (MassAnalyzer::Orbitrap, Activation::Hcd),
             (MassAnalyzer::IonTrap, Activation::Cid),
             (MassAnalyzer::Orbitrap, Activation::Ethcd),
+            (MassAnalyzer::Orbitrap, Activation::Etcid),
             (MassAnalyzer::IonTrap, Activation::Cid),
         ]
     );
