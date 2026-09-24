@@ -122,7 +122,11 @@ impl<'a> MotifContext<'a> {
         Self::neighbors(&None, &None, position)
     }
 
-    /// One known residue on each side, as recorded by `prev_aa`/`next_aa`.
+    /// One known residue on each side, as recorded by `prev_aa`/`next_aa`,
+    /// for an occurrence without its source protein. A missing flank may mean
+    /// "unknown" rather than "terminus" there (a preview without flanks), so
+    /// terminal anchors also require the digest position. FASTA occurrences
+    /// keep their source protein and use [`Self::in_protein`] instead.
     pub fn neighbors(prev: &'a Option<u8>, next: &'a Option<u8>, position: Position) -> Self {
         Self {
             left: prev.as_ref().map(std::slice::from_ref).unwrap_or(&[]),
@@ -132,15 +136,16 @@ impl<'a> MotifContext<'a> {
         }
     }
 
-    /// Full protein context around the span `start..start + len`.
-    pub fn in_protein(protein: &'a [u8], start: usize, len: usize, position: Position) -> Self {
+    /// Full protein context around the span `start..start + len`. The protein
+    /// termini come from the coordinates alone, so the result does not depend
+    /// on which digest position a shared peptide was grouped under.
+    pub fn in_protein(protein: &'a [u8], start: usize, len: usize) -> Self {
         let end = start + len;
         Self {
             left: &protein[..start],
             right: &protein[end..],
-            left_boundary: start == 0 && matches!(position, Position::Nterm | Position::Full),
-            right_boundary: end == protein.len()
-                && matches!(position, Position::Cterm | Position::Full),
+            left_boundary: start == 0,
+            right_boundary: end == protein.len(),
         }
     }
 }

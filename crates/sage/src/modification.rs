@@ -623,7 +623,13 @@ impl ModificationSpecificity {
     /// A decoy whose occurrences hold its literal sequence (a FASTA decoy) is
     /// matched literally. A generated decoy carries its target's occurrences:
     /// the motif is evaluated on the target sequence and positions are
-    /// mirrored, matching decoys built by reversing modified targets.
+    /// mirrored, matching decoys built by reversing modified targets. A decoy
+    /// without occurrences (peptide TSV input) is treated the same way,
+    /// because a decoy row and a decoy generated from a TSV target look alike.
+    ///
+    /// Protein-terminal anchors come from each occurrence's coordinates when
+    /// its source protein is known, not from `position`: a shared peptide
+    /// keeps only one position although its occurrences may differ.
     pub fn sites_for_occurrences(
         self,
         sequence: &[u8],
@@ -674,15 +680,11 @@ impl ModificationSpecificity {
             match (protein, &reversed) {
                 (Some((protein, start, span)), _) if span == sequence => collect(
                     sequence,
-                    MotifContext::in_protein(protein, start, len, position),
+                    MotifContext::in_protein(protein, start, len),
                     false,
                 ),
                 (Some((protein, start, span)), Some(target)) if span == target.as_slice() => {
-                    collect(
-                        target,
-                        MotifContext::in_protein(protein, start, len, position),
-                        true,
-                    )
+                    collect(target, MotifContext::in_protein(protein, start, len), true)
                 }
                 // Inconsistent coordinates cannot vouch for a motif.
                 (Some(_), _) => {}

@@ -315,7 +315,6 @@ impl Runner {
                                             sequence.as_bytes(),
                                             start,
                                             row.peptide_sequence.len(),
-                                            position,
                                         ),
                                     )
                                     .contains(&site)

@@ -53,10 +53,28 @@ pub struct ProteinOccurrence {
 impl ProteinOccurrence {
     /// Occurrence of a digest, keeping its source protein when the digest
     /// sequence is a span of that protein at `protein_start`.
+    ///
+    /// A sequence that spans its whole allocation is ambiguous: it may be a
+    /// whole-protein digest or a standalone sequence, such as a reversed
+    /// [`Digest::reverse`] decoy or a preview peptide, whose allocation is not
+    /// a protein. Such digests get no source here; use
+    /// [`Self::of_protein_digest`] for digests cut from a protein.
     pub fn of(digest: &Digest) -> Self {
+        Self::with_source(digest, false)
+    }
+
+    /// Occurrence of a digest cut from its protein by [`EnzymeParameters`],
+    /// so the sequence always views the protein allocation. This keeps the
+    /// source also when the peptide is the whole protein, which matters for a
+    /// single-peptide FASTA decoy that must be matched literally.
+    pub fn of_protein_digest(digest: &Digest) -> Self {
+        Self::with_source(digest, true)
+    }
+
+    fn with_source(digest: &Digest, protein_backed: bool) -> Self {
         let (storage, offset) = digest.sequence.source();
         let source = (digest.protein_start == Some(offset)
-            && storage.as_bytes().len() > digest.sequence.len())
+            && (protein_backed || storage.as_bytes().len() > digest.sequence.len()))
         .then_some(storage);
         Self {
             protein: digest.protein.clone(),
@@ -109,7 +127,21 @@ fn normalize_origins(group: &mut DigestGroup) {
     group.origins.dedup();
 }
 
-pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
+/// Group digests of any origin. See [`ProteinOccurrence::of`].
+pub fn group_digests(digests: Vec<Digest>) -> Vec<DigestGroup> {
+    group_digests_by(digests, ProteinOccurrence::of)
+}
+
+/// Group digests cut from FASTA proteins, keeping every occurrence's source
+/// protein. See [`ProteinOccurrence::of_protein_digest`].
+pub fn group_protein_digests(digests: Vec<Digest>) -> Vec<DigestGroup> {
+    group_digests_by(digests, ProteinOccurrence::of_protein_digest)
+}
+
+fn group_digests_by(
+    mut digests: Vec<Digest>,
+    occurrence: fn(&Digest) -> ProteinOccurrence,
+) -> Vec<DigestGroup> {
     if digests.is_empty() {
         return Vec::new();
     }
@@ -122,7 +154,7 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
     });
     let mut digests = digests.into_iter();
     let first = digests.next().expect("checked non-empty above");
-    let first_origin = ProteinOccurrence::of(&first);
+    let first_origin = occurrence(&first);
     let mut curr_group = DigestGroup {
         reference: first,
         origins: vec![first_origin],
@@ -132,11 +164,11 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             && digest.position == curr_group.reference.position
             && digest.sequence == curr_group.reference.sequence
         {
-            curr_group.origins.push(ProteinOccurrence::of(&digest));
+            curr_group.origins.push(occurrence(&digest));
         } else {
             normalize_origins(&mut curr_group);
             groups.push(curr_group);
-            let origin = ProteinOccurrence::of(&digest);
+            let origin = occurrence(&digest);
             curr_group = DigestGroup {
                 reference: digest,
                 origins: vec![origin],
