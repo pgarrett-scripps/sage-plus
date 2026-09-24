@@ -1,4 +1,6 @@
-use crate::tims_mobility::{BrukerMobilityScale, MobilityCalibration};
+use crate::tims_mobility::{
+    analysis_tdf, BrukerMobilityScale, LinearMobilityScale, MobilityCalibration,
+};
 use rayon::prelude::*;
 use sage_core::{
     mass::Tolerance,
@@ -140,7 +142,9 @@ enum MobilityScale {
         calibration: MobilityCalibration,
         precursors: HashMap<usize, (usize, f64)>,
     },
-    Linear,
+    /// The scale of Beta 6 and earlier, or timsrust's own values for inputs
+    /// without an `analysis.tdf`.
+    Linear(Option<LinearMobilityScale>),
 }
 
 impl MobilityScale {
@@ -160,7 +164,10 @@ impl MobilityScale {
                         path.display()
                     );
                 }
-                Self::Linear
+                Self::Linear(match analysis_tdf(path) {
+                    Some(_) => Some(LinearMobilityScale::from_path(path)?),
+                    None => None,
+                })
             }
         })
     }
@@ -169,7 +176,10 @@ impl MobilityScale {
     /// their parent frame's model; DIA window centers use the run's dominant model.
     fn precursor(&self, precursor: &TimsrustPrecursor) -> f32 {
         match self {
-            Self::Linear => f64::from(precursor.im()) as f32,
+            Self::Linear(Some(linear)) => {
+                linear.one_over_k0(usize::from(precursor.scan_index()) as u32) as f32
+            }
+            Self::Linear(None) => f64::from(precursor.im()) as f32,
             Self::Calibrated {
                 calibration,
                 precursors,
@@ -257,7 +267,16 @@ impl TdfReader {
                                     &mz_converter,
                                 )
                             }
-                            MobilityScale::Linear => buffer.with_frame(
+                            MobilityScale::Linear(Some(linear)) => buffer.with_frame(
+                                &frame,
+                                |scan| {
+                                    let scan =
+                                        u32::try_from(scan).expect("scan index exceeds u32 range");
+                                    linear.one_over_k0(scan) as f32
+                                },
+                                &mz_converter,
+                            ),
+                            MobilityScale::Linear(None) => buffer.with_frame(
                                 &frame,
                                 |scan| {
                                     let scan = ScanIndex::try_from(scan)

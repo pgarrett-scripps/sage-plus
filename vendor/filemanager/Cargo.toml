@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "filemanager"
-version = "0.6.5"
+version = "0.6.6"
 build = false
 autolib = false
 autobins = false

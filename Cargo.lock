@@ -1116,7 +1116,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "filemanager"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "arrow",
  "futures",
@@ -3646,7 +3646,7 @@ version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
- "errno 0.3.14",
+ "errno 0.2.8",
  "libc",
 ]
 
@@ -3889,9 +3889,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e25d797bec46fdbf542df5042e2d4ce1e1eb474c9729537836350a23b65f84cb"
+checksum = "759015c472341619a14d7d6400e9179c9b4ffad78d5c0d6c1acfbf3cf389165c"
 dependencies = [
  "rayon",
  "thiserror 2.0.18",
@@ -3905,9 +3905,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-centroid"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02ec5f949ef0457ac08d587b1b1ec5f604a04dcda3434bff212977b62846db50"
+checksum = "654e1615608a3dd5025437ac797b6e4e149e02821e8b584a14a0e555d69b1f21"
 dependencies = [
  "rayon",
  "rustc-hash",
@@ -3917,9 +3917,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-core"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22082604c816a5da87fa9be0a9068c3831b575c67d69346b00cdf992a4294b5e"
+checksum = "e1c3ede24f07fc9a41fe03069ca6f3763a74315558e5cd47516f79149cf2ba13"
 dependencies = [
  "filemanager",
  "rayon",
@@ -3928,9 +3928,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-minitdf"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cbfc13c9ca83b45161f5720bfc0f3d64f65783d658432b59e2cffab0241d3cf"
+checksum = "033f0348649fd01fe91320210be9c25882d58e738f815aabea09ee93eddbf022"
 dependencies = [
  "bytemuck",
  "serde",
@@ -3941,9 +3941,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-parquet-spectra"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0acb74d1b14633e934d63a4141a0651133fc8f782839f405f3a6164be92fc05a"
+checksum = "65c982b3ed689ce73c3828d834db99c82e2ea67c85172aed094b061a34b712d3"
 dependencies = [
  "serde",
  "timsrust-core",
@@ -3951,9 +3951,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-tdf"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e08d7ef0e5c9c232708918aa599aefcd48f831a42c9f449820841391f80fd140"
+checksum = "6edca1c1a4aa4b84f94fe8b387fe695a0a194b595dc6b316cf969b6fc356f30c"
 dependencies = [
  "lzf",
  "rayon",
@@ -3965,9 +3965,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-tsf"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4545a5792396df8c838a4de7fbe00309a28736b3c613630948f78bfaecefda1"
+checksum = "40451bf028c539771afa62a22422082ed867093908e39fb0adf1cee432fb66b4"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -3977,9 +3977,9 @@ dependencies = [
 
 [[package]]
 name = "timsrust-utils"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a036af637715b151d30af384392d91b1c120728d6469665ed589a71a36429cc7"
+checksum = "2b145bf3d3563d473d8278eaf31bec014d669f68f8463db79e35a46c5e8d4dbc"
 dependencies = [
  "rayon",
 ]

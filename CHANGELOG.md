@@ -61,6 +61,11 @@ entries are retained below for provenance.
 - `DOCS.md` states the correct `predict_rt` default (true).
 
 ### Changed
+- Update timsrust from 0.6.5 to 0.6.6, with the vendored `filemanager` patch rebased on 0.6.6.
+  timsrust 0.6.6 changed its uncalibrated scan-to-1/K0 conversion from linear in sqrt(1/K0)
+  to linear in 1/K0. The default calibrated scale does not use it. `ion_mobility_scale:
+  "linear"` now computes the earlier conversion in Sage Plus and still reproduces Beta 6.
+  Spans of the opt-in `UniformMobility` DIA window splitting follow timsrust's new scale.
 - Update OpenTFRaw from 1.4.0 to 1.4.1. The fix affects profile spectra only, and Thermo RAW
   search output is unchanged.
 
