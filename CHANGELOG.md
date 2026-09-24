@@ -64,6 +64,11 @@ entries are retained below for provenance.
   trailers can contain MS2 scans without a plausible precursor m/z; the reader already
   reported that they would not be searched, but they were searched and the run aborted with
   `missing MS1 precursor` (also in Beta 8).
+- Thermo RAW files whose scan events are out of step with their trailers no longer take
+  acquisition groups from those events. Their filter strings belong to other scans, so an
+  Orbitrap HCD scan could be labelled ion trap and skipped by fragment recalibration. Such files
+  now report every scan as `unknown/unknown`, with a warning, since the trailers do not name
+  the analyzer or activation.
 
 ## [v0.1.0-beta.8] - 2026-09-24
 
