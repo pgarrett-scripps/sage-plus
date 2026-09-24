@@ -67,10 +67,11 @@ impl Runner {
         stats
     }
 
-    /// Discovery pass for every file in a batch: search an even sample of
-    /// each file's MS2 spectra with observed masses, keep rank-1 targets at
-    /// 1% Poisson spectrum q-value, and select per-file precursor and
-    /// fragment models. Models are fitted on targets only and are applied to
+    /// Discovery pass for every file in a batch: search a sample of each
+    /// file's MS2 spectra, stratified by acquisition group, with observed
+    /// masses, keep rank-1 targets at 1% Poisson spectrum q-value computed
+    /// within each acquisition group, and select a per-file precursor model
+    /// and per-group fragment models. Models are fitted on targets only and are applied to
     /// every spectrum of the file, so targets and decoys are treated alike.
     fn discover_mass_corrections(&self, scorer: &Scorer, spectra: &[ProcessedSpectrum]) {
         let mut file_ids = spectra
@@ -99,7 +100,7 @@ impl Runner {
                 .into_iter()
                 .map(|index| candidates[index])
                 .collect::<Vec<_>>();
-            let mut features = sample
+            let features = sample
                 .par_iter()
                 .enumerate()
                 .flat_map_iter(|(index, spectrum)| {
@@ -110,19 +111,18 @@ impl Runner {
                         .map(move |feature| (index, feature))
                 })
                 .collect::<Vec<_>>();
-            features.sort_unstable_by(|left, right| {
-                left.1
-                    .poisson
-                    .total_cmp(&right.1.poisson)
-                    .then_with(|| left.0.cmp(&right.0))
-            });
-            let (indices, mut features): (Vec<_>, Vec<_>) = features.into_iter().unzip();
-            sage_core::ml::qvalue::spectrum_q_value_by(&mut features, |feature| feature.poisson);
-            let confident = indices
-                .into_iter()
-                .zip(features.iter())
-                .filter(|(_, feature)| feature.label == 1 && feature.spectrum_q <= 0.01)
-                .collect::<Vec<_>>();
+            // Q-values are computed within each acquisition group: pooled,
+            // a low-accuracy group searched with a wide fragment window
+            // floods the decoy counts and leaves almost no confident PSMs in
+            // an accurate group. The precursor model uses the union; each
+            // fragment model sees only its own group's PSMs.
+            let confident = confident_per_group(
+                features
+                    .into_iter()
+                    .map(|(index, feature)| (sample[index].acquisition, index, feature))
+                    .collect(),
+                0.01,
+            );
 
             let precursor_points = confident
                 .iter()
@@ -231,9 +231,10 @@ impl Runner {
                 fragment
                     .iter()
                     .map(|group| format!(
-                        "{} ({} spectra) {}",
+                        "{} ({} spectra, {} PSMs) {}",
                         group.group.label(),
                         group.spectra,
+                        group.selection.psms,
                         describe(&group.selection)
                     ))
                     .collect::<Vec<_>>()

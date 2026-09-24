@@ -296,3 +296,35 @@ fn discovery_sample_is_stratified_by_acquisition_group() {
     assert!(sample.contains(&500));
     assert_eq!(sample.len(), 100);
 }
+
+#[test]
+fn discovery_q_values_are_computed_per_acquisition_group() {
+    use crate::scoring::Feature;
+    let psm = |poisson: f64, label: i32| Feature {
+        poisson,
+        label,
+        rank: 1,
+        ..Default::default()
+    };
+    let mut psms = Vec::new();
+    // Accurate group: 200 targets, no decoys.
+    for i in 0..200 {
+        psms.push(("orbitrap", i, psm(-20.0 + i as f64 * 0.05, 1)));
+    }
+    // Wide-window group: decoys score better than every accurate target.
+    for i in 0..400 {
+        let label = if i % 2 == 0 { -1 } else { 1 };
+        psms.push(("ion_trap", 200 + i, psm(-40.0 + i as f64 * 0.05, label)));
+    }
+    let pooled = {
+        let mut features = psms.iter().map(|(_, _, f)| f.clone()).collect::<Vec<_>>();
+        features.sort_by(|a, b| a.poisson.total_cmp(&b.poisson));
+        crate::ml::qvalue::spectrum_q_value_by(&mut features, |f| f.poisson)
+    };
+    assert_eq!(pooled, 0);
+    let confident = confident_per_group(psms, 0.01);
+    // All accurate targets pass; the wide-window group has none.
+    assert_eq!(confident.len(), 200);
+    assert!(confident.iter().all(|(index, _)| *index < 200));
+    assert!(confident.windows(2).all(|pair| pair[0].0 < pair[1].0));
+}
