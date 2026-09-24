@@ -1,0 +1,61 @@
+{
+ "batch_size": 1,
+ "chimera": false,
+ "database": {
+  "bucket_size": 16384,
+  "decoy_tag": "rev_",
+  "enzyme": {
+   "cleave_at": "KR",
+   "max_len": 50,
+   "min_len": 7,
+   "missed_cleavages": 2,
+   "restrict": "P"
+  },
+  "fasta": "/mnt/data1/scan-profile-bench/fasta/ecoli_k12_sp.fasta",
+  "generate_decoys": true,
+  "static_mods": {
+   "C": 57.021464,
+   "peptide_c_term": 1.007825
+  },
+  "variable_mods": {
+   "M": [
+    15.9949
+   ]
+  },
+  "ion_kinds": [
+   "c",
+   "z"
+  ]
+ },
+ "deisotope": true,
+ "fragment_tol": {
+  "ppm": [
+   -20,
+   20
+  ]
+ },
+ "isotope_errors": [
+  -1,
+  3
+ ],
+ "max_fragment_charge": 2,
+ "max_memory_gb": 20,
+ "min_free_memory_gb": 2,
+ "min_matched_peaks": 6,
+ "output_filter": {
+  "psm_q_value": 1.0
+ },
+ "precursor_tol": {
+  "ppm": [
+   -10,
+   10
+  ]
+ },
+ "report_psms": 1,
+ "score_type": "SageHyperScore",
+ "mass_recalibration": "off",
+ "mzml_paths": [
+  "/mnt/data1/scan-profile-bench/PXD018176/mzml/B191108_09_Lumos_AB_DE_165_Ec_dualHCD_ETD_1.mzML"
+ ],
+ "output_directory": "/mnt/data1/scan-profile-bench/sim/out/B-etd-czdot"
+}

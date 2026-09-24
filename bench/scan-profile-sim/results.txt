@@ -1,0 +1,38 @@
+ file                                arm  psms  peps_from_psms  peptides                                              per_group  native_psms  native_peps
+  ot2                            ppm-all  7569            5477      5455                                      orbitrap/hcd=7569       7567.0       5432.0
+  ot2                             da-all  6757            5066      4973                    ion_trap/ethcd=50 orbitrap/hcd=6707       6915.0       4924.0
+  ot2            combined(OT ppm, IT Da)  7619            5477      5455                    ion_trap/ethcd=50 orbitrap/hcd=7569          NaN          NaN
+quad1                            ppm-all  7719            5489      5429                                      orbitrap/hcd=7719       7717.0       5427.0
+quad1                             da-all  6793            5057      4993                     ion_trap/ethcd=8 orbitrap/hcd=6785       6785.0       4977.0
+quad1            combined(OT ppm, IT Da)  7727            5489      5429                     ion_trap/ethcd=8 orbitrap/hcd=7719          NaN          NaN
+  hyb                            ppm-all 18239             910       845                      ion_trap/cid=1 orbitrap/hcd=18238      18238.0        842.0
+  hyb                             da-all 31496            1010       808 ion_trap/cid=7917 ion_trap/hcd=7373 orbitrap/hcd=16206      31433.0        745.0
+  hyb            combined(OT ppm, IT Da) 33528             983       858 ion_trap/cid=7917 ion_trap/hcd=7373 orbitrap/hcd=18238          NaN          NaN
+ethcd                             by-all 18468            7438      7409                  orbitrap/ethcd=8820 orbitrap/hcd=9648      18476.0       7357.0
+ethcd                             cz-all  9082            5720      5710                  orbitrap/ethcd=6575 orbitrap/hcd=2507       9185.0       5674.0
+ethcd                           bycz-all 18725            7461      7431                  orbitrap/ethcd=9064 orbitrap/hcd=9661      18717.0       7373.0
+ethcd           combined(HCD by, ETx cz) 16223            7408      7386                  orbitrap/ethcd=6575 orbitrap/hcd=9648          NaN          NaN
+ethcd         combined(HCD by, ETx bycz) 18712            7470      7443                  orbitrap/ethcd=9064 orbitrap/hcd=9648          NaN          NaN
+  etd                             by-all 11415            7470      7455                    orbitrap/etd=1626 orbitrap/hcd=9789      11418.0       7442.0
+  etd                             cz-all  6029            4334      4321                    orbitrap/etd=3508 orbitrap/hcd=2521       6255.0       4399.0
+  etd                           bycz-all 13877            7528      7501                    orbitrap/etd=4067 orbitrap/hcd=9810      13858.0       7463.0
+  etd           combined(HCD by, ETx cz) 13297            7496      7475                    orbitrap/etd=3508 orbitrap/hcd=9789          NaN          NaN
+  etd         combined(HCD by, ETx bycz) 13856            7512      7493                    orbitrap/etd=4067 orbitrap/hcd=9789          NaN          NaN
+ethcd                   czdot-all (hack)  8144            6494      6487                     orbitrap/ethcd=8136 orbitrap/hcd=8       8085.0       6456.0
+ethcd        combined(HCD by, ETx czdot) 17784            7459      7436                  orbitrap/ethcd=8136 orbitrap/hcd=9648          NaN          NaN
+ethcd combined(HCD by, ETx b+c+zdot+y+1) 18433            7478      7437                  orbitrap/ethcd=8785 orbitrap/hcd=9648          NaN          NaN
+  etd                   czdot-all (hack)  5057            4459      4459                       orbitrap/etd=5054 orbitrap/hcd=3       5047.0       4457.0
+  etd        combined(HCD by, ETx czdot) 14843            7533      7523                    orbitrap/etd=5054 orbitrap/hcd=9789          NaN          NaN
+  etd combined(HCD by, ETx b+c+zdot+y+1) 15090            7535      7521                    orbitrap/etd=5301 orbitrap/hcd=9789          NaN          NaN
+  ot2                         cz-ppm-all   230             220       220                                       orbitrap/hcd=230        219.0        183.0
+  ot2                          cz-da-all     3               3         3                        ion_trap/ethcd=2 orbitrap/hcd=1          0.0          0.0
+  ot2                       bycz-ppm-all  7383            5432      5424                     ion_trap/ethcd=1 orbitrap/hcd=7382       7382.0       5425.0
+  ot2                        bycz-da-all  4639            3584      3478                   ion_trap/ethcd=222 orbitrap/hcd=4417       4590.0       3525.0
+  ot2     combined(HCD ppm by, IT Da cz)  7571            5479      5457                     ion_trap/ethcd=2 orbitrap/hcd=7569          NaN          NaN
+  ot2   combined(HCD ppm by, IT Da bycz)  7791            5490      5468                   ion_trap/ethcd=222 orbitrap/hcd=7569          NaN          NaN
+quad1                         cz-ppm-all   159             147       147                      ion_trap/ethcd=1 orbitrap/hcd=158        138.0          0.0
+quad1                          cz-da-all     1               1         1                                       ion_trap/ethcd=1          0.0          0.0
+quad1                       bycz-ppm-all  7505            5419      5419                     ion_trap/ethcd=4 orbitrap/hcd=7501       7501.0       5429.0
+quad1                        bycz-da-all  4610            3629      3444                    ion_trap/ethcd=43 orbitrap/hcd=4567       4609.0       3439.0
+quad1     combined(HCD ppm by, IT Da cz)  7720            5490      5430                     ion_trap/ethcd=1 orbitrap/hcd=7719          NaN          NaN
+quad1   combined(HCD ppm by, IT Da bycz)  7762            5491      5431                    ion_trap/ethcd=43 orbitrap/hcd=7719          NaN          NaN

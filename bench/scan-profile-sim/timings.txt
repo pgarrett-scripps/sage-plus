@@ -1,0 +1,45 @@
+B-etd-cz status=0 wall=4s
+B-etd-bycz status=0 wall=6s
+B-ethcd-by status=0 wall=5s
+B-ethcd-cz status=0 wall=5s
+B-ethcd-bycz status=0 wall=6s
+A-hyb-ppm status=0 wall=21s
+A-hyb-da status=0 wall=25s
+A-ot2-ppm status=1 wall=5s
+A-ot2-da status=1 wall=5s
+A-quad1-ppm status=1 wall=5s
+A-quad1-da status=1 wall=4s
+B-ot2-cz-da status=1 wall=5s
+B-ot2-cz-ppm status=1 wall=5s
+B-ot2-bycz-da status=1 wall=4s
+B-ot2-bycz-ppm status=1 wall=5s
+B-quad1-cz-da status=1 wall=5s
+B-quad1-cz-ppm status=1 wall=4s
+B-quad1-bycz-da status=1 wall=5s
+B-quad1-bycz-ppm status=1 wall=5s
+done
+== phospho runs Thu Sep 24 03:16:30 PM PDT 2026
+A-ot2-ppm status=0 wall=115s
+A-ot2-da status=1 wall=89s
+B-ot2-cz-da status=1 wall=70s
+B-ot2-bycz-da status=1 wall=75s
+== phospho runs v2 (mc1, maxlen35) Thu Sep 24 03:22:43 PM PDT 2026
+A-ot2-da status=0 (manual, v2)
+A-ot2-ppm status=0 wall=64s
+B-ot2-cz-da status=0 wall=111s
+B-ot2-bycz-da status=0 wall=155s
+A-quad1-ppm status=0 wall=49s
+A-quad1-da status=0 wall=65s
+B-quad1-cz-da status=0 wall=63s
+B-quad1-bycz-da status=0 wall=107s
+B-ot2-cz-ppm status=0 wall=48s
+B-ot2-bycz-ppm status=0 wall=76s
+B-quad1-cz-ppm status=0 wall=47s
+B-quad1-bycz-ppm status=0 wall=77s
+done
+== z-dot hack runs (static peptide_c_term +1.007825; precursor via isotope error) Thu Sep 24 03:39:30 PM PDT 2026
+B-etd-czdot status=0 wall=5s
+B-ethcd-czdot status=0 wall=5s
+B-etd-byczdot status=0 wall=5s
+B-ethcd-byczdot status=0 wall=6s
+done
