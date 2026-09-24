@@ -44,6 +44,7 @@ fn integration() -> anyhow::Result<()> {
         annotate_matches: false,
         mass_shift_ppm: 50.0,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
 
     let psm = scorer.score(&processed);
@@ -192,6 +193,45 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
 
     std::fs::remove_dir_all(output_directory)?;
     std::fs::remove_file(config_path)?;
+    Ok(())
+}
+
+#[test]
+fn mass_recalibration_reports_per_file_models() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-mass-recalibration-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["mass_recalibration"] = "auto".into();
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    let recalibration = &summary["models"]["mass_recalibration"];
+    assert_eq!(recalibration["mode"], "auto");
+    let file = &recalibration["files"][0];
+    assert_eq!(file["file_id"], 0);
+    // One spectrum cannot support a model; the search falls back to none.
+    assert_eq!(file["precursor"]["skipped"], "too_few_psms");
+    assert!(file["precursor"]["model"].is_null());
+    assert!(summary["psms_at_one_percent_fdr"].as_u64().is_some());
+    std::fs::remove_dir_all(root)?;
     Ok(())
 }
 

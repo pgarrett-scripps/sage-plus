@@ -82,6 +82,7 @@ fn exact_prefilter_preserves_tied_isobaric_scoring() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
     let full_scorer = make_scorer(&full);
     let full_features = full_scorer.score(&query);
@@ -279,6 +280,7 @@ fn equal_nonzero_isotope_bounds_are_honored() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
 
     let features = scorer.score(&query);
@@ -350,6 +352,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
 
     let features = scorer.score(&query);
@@ -416,6 +419,7 @@ fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         annotate_matches: true,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
     let query = ProcessedSpectrum {
         masses: variants
@@ -500,6 +504,7 @@ fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
     let rank_one = Feature {
         peptide_idx: PeptideIx(0),
@@ -622,6 +627,7 @@ mod mass_offsets {
             annotate_matches: false,
             mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
             score_type: ScoreType::SageHyperScore,
+            mass_recalibration: None,
         }
     }
 
@@ -923,5 +929,71 @@ mod mass_offsets {
         let hits = scorer(&database, false).score(&spectrum(&target));
         assert_eq!(hits[0].mass_offset, None, "indexed form wins exact ties");
         assert!(hits.len() < 2 || hits[1].hyperscore < hits[0].hyperscore);
+    }
+
+    /// Spectra shifted beyond the search tolerance are recovered by a
+    /// search-time correction, while reported errors stay raw.
+    #[test]
+    fn recalibration_recovers_shifted_spectrum_and_keeps_raw_errors() {
+        use crate::mass_recalibration::{
+            FileMassCorrection, MassErrorModel, MassModelAxes, MassModelKind, MassRecalibration,
+        };
+        let expanded = database(SearchMode::Database);
+        let target = expanded_target(&expanded);
+        let mut query = spectrum(&target);
+        let shift = 1.0 + 15e-6;
+        for precursor in &mut query.precursors {
+            precursor.mz *= shift;
+        }
+        for mass in &mut query.masses {
+            *mass = (*mass + PROTON) * shift - PROTON;
+        }
+
+        let plain = scorer(&expanded, false).score(&query);
+        assert!(plain
+            .first()
+            .is_none_or(|hit| expanded[hit.peptide_idx].to_string() != "MAGSPEPTS[Phospho]IDEK"));
+
+        let offset = MassErrorModel {
+            kind: MassModelKind::Static,
+            axes: MassModelAxes::None,
+            intercept_ppm: 15.0,
+            rt: None,
+            mz: None,
+            max_abs_ppm: 20.0,
+        };
+        let recalibration = MassRecalibration {
+            files: vec![FileMassCorrection {
+                precursor: Some(offset.clone()),
+                fragment: Some(offset),
+            }],
+        };
+        let corrected = Scorer {
+            mass_recalibration: Some(Arc::new(recalibration)),
+            ..scorer(&expanded, false)
+        };
+        let hits = corrected.score(&query);
+        let hit = &hits[0];
+        assert_eq!(
+            expanded[hit.peptide_idx].to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+        assert!((hit.delta_mass - 15.0).abs() < 0.2, "{}", hit.delta_mass);
+        assert!(hit.aligned_delta_mass.abs() < 0.2);
+        assert!((hit.expmass - query.precursors[0].mz * 2.0 + 2.0 * PROTON).abs() < 1e-3);
+        assert!((hit.average_ppm - 15.0).abs() < 0.2, "{}", hit.average_ppm);
+        assert!((hit.signed_fragment_ppm - 15.0).abs() < 0.2);
+        assert!(hit.aligned_average_ppm < 0.2);
+
+        // Annotation reports observed peak m/z, not corrected m/z.
+        let fragments = corrected.annotate_candidate(&query, hit);
+        let observed = query
+            .masses
+            .iter()
+            .map(|mass| mass + PROTON)
+            .collect::<Vec<_>>();
+        for mz in &fragments.mz_experimental {
+            assert!(observed.iter().any(|o| (o - mz).abs() < 1e-3), "{mz}");
+        }
     }
 }

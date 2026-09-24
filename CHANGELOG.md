@@ -9,6 +9,18 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `mass_recalibration` (`"off"` by default; `"static"`, `"linear"`, or `"auto"`) corrects
+  precursor and fragment m/z during the search. A sampled discovery search of each file
+  selects rank-1 target PSMs at 1% q-value, fits per-file precursor and fragment models on
+  a deterministic fit split, and accepts a static offset, a linear RT and/or m/z term, or a
+  smooth additive curve (`auto` only, at most five intervals) only when it improves held-out
+  residuals without worsening any RT or m/z tercile. The file is then searched again with
+  corrected masses for targets and decoys alike. `precursor_ppm`, `fragment_ppm`, and
+  `expmass` stay raw, `calibrated_*_ppm` report residuals, and `run-summary.json` records
+  the chosen model, candidate scores, and residual bins per file under
+  `models.mass_recalibration`.
+
 ### Changed
 - The retention-time and ion-mobility models are fit on standardized features with a fixed,
   tiny ridge penalty and a Cholesky solve, replacing Gaussian elimination that retried with a

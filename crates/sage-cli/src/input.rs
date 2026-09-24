@@ -8,6 +8,7 @@ use sage_core::{
     database::{Builder, Parameters},
     lfq::LfqSettings,
     mass::Tolerance,
+    mass_recalibration::MassRecalibrationMode,
     ml::mobility_model::IonMobilitySettings,
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
@@ -85,6 +86,9 @@ pub struct Search {
     /// for sequence-ambiguity annotation (`ambiguity_sequence` / `mass_shift`)
     pub mass_shift_ppm: f32,
 
+    /// Search-time precursor and fragment mass recalibration.
+    pub mass_recalibration: MassRecalibrationMode,
+
     #[serde(skip_serializing)]
     pub output_directory: Url,
 
@@ -151,6 +155,12 @@ pub struct Input {
     pub spectral_library: Option<SpectralLibrarySettings>,
     #[schemars(range(min = 0.0))]
     pub mass_shift_ppm: Option<f32>,
+    /// Search-time mass recalibration: `off` (default), `static`, `linear`,
+    /// or `auto`. When enabled, each file is first searched to collect
+    /// confident PSMs, validated per-file precursor and fragment mass-error
+    /// models are fitted, and the file is searched again with corrected
+    /// masses. Ignored for wide-window searches.
+    pub mass_recalibration: Option<MassRecalibrationMode>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -694,6 +704,7 @@ impl Input {
             mass_shift_ppm: self
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
+            mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             score_type,
         })
     }

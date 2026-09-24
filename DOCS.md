@@ -884,6 +884,12 @@ Retention-time alignment and prediction are separate features. `retention_time_a
     }
     ```
 - **retention_time_alignment**: Explicitly align observed retention times across experiments. `"linear"` uses Sage's existing ordinary least-squares alignment. `"nonlinear"` enables robust outlier filtering followed by a monotone piecewise-linear warp. This operates independently of `predict_rt`.
+- **mass_recalibration**: `"off"` (default), `"static"`, `"linear"`, or `"auto"`. Correct precursor and fragment m/z during the search. Each file is first searched on a sample of up to 25,000 MS2 spectra; rank-1 target PSMs at 1% Poisson spectrum q-value supply signed precursor errors (isotope error 0, no mass offset) and per-PSM median signed fragment errors. Every PSM is assigned to a fit or validation set (30%) by a stable hash of its spectrum ID, and each file gets separate precursor and fragment models. The mode sets the most flexible model allowed:
+  - `static`: one ppm offset.
+  - `linear`: offset plus linear terms in retention time and/or m/z.
+  - `auto`: additionally a smooth additive curve in retention time and/or m/z (piecewise linear, at most five intervals, curvature penalty). There are no RT-by-m/z surfaces.
+
+  A more flexible model is accepted only when it lowers the validation median absolute residual (2% for static, 5% for each further step), no retention-time or m/z tercile gets more than 2% worse, and there are enough PSMs (50 static, 200 linear, 1,000 smooth with 50 per interval) spread over at least 10 minutes and 100 m/z (200 for fragments). Otherwise the next simpler model, or no correction, is kept. The accepted form is refit on all inlier PSMs, is flat outside the fitted range, and is capped at the tolerance half-width (fragment Da tolerances are converted at m/z 2000). A Da precursor tolerance disables the precursor model. The full search then reruns with corrected masses on targets and decoys alike, using the configured tolerances; the preliminary prefilter is widened by one tolerance half-width on each side so corrected windows remain covered. Wide-window searches ignore this setting. Chosen models, candidate validation scores, and residual bins are written per file to `run-summary.json` under `models.mass_recalibration`, and files corrected at search time skip the post-search mass-error feature alignment.
 - **min_peaks**: Integer. Only process MS2 spectra with at least N peaks (default: 15).
 - **max_peaks**: Integer. Take the top N most intense MS2 peaks to search (default: 150).
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
@@ -1045,8 +1051,9 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 - `pepide_len`: Length of the peptide sequence.
 - `missed_cleavages`: Number of missed cleavages.
 - `isotope_error`: C13 isotope error.
-- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million.
-- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions.
+- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million. Always the raw, uncorrected error, and `expmass` is always the raw experimental mass, even with `mass_recalibration`.
+- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions. Always computed from raw fragment m/z.
+- `calibrated_precursor_ppm` / `calibrated_fragment_ppm`: Residual errors after mass correction: the search-time `mass_recalibration` model when one was applied, otherwise the post-search per-file alignment.
 - `hyperscore`: X!Tandem hyperscore for the PSM.
 - `delta_next`: Difference between the hyperscore of this candidate and the next best candidate.
 - `delta_bext`: Difference between the hyperscore of the best candidate (rank=1) and this candidate.

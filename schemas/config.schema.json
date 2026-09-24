@@ -540,6 +540,31 @@
       },
       "type": "object"
     },
+    "MassRecalibrationMode": {
+      "description": "How much search-time mass recalibration a run may apply.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "Search once with observed masses (post-hoc alignment still feeds the\ndiscriminant model).",
+          "type": "string"
+        },
+        {
+          "const": "static",
+          "description": "Correct each file by at most a validated constant offset.",
+          "type": "string"
+        },
+        {
+          "const": "linear",
+          "description": "Allow validated offsets and linear RT/m/z terms.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Allow validated offsets, linear terms, and smooth additive RT/m/z\ncurves.",
+          "type": "string"
+        }
+      ]
+    },
     "NamedStaticModification": {
       "additionalProperties": false,
       "description": "Public definition keyed by modification identity, with explicit attachment rules.",
@@ -1449,6 +1474,17 @@
         "array",
         "null"
       ]
+    },
+    "mass_recalibration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MassRecalibrationMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Search-time mass recalibration: `off` (default), `static`, `linear`,\nor `auto`. When enabled, each file is first searched to collect\nconfident PSMs, validated per-file precursor and fragment mass-error\nmodels are fitted, and the file is searched again with corrected\nmasses. Ignored for wide-window searches."
     },
     "mass_shift_ppm": {
       "format": "float",
