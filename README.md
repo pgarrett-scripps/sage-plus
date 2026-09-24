@@ -118,6 +118,19 @@ two-modification search only fits with it. Open searches and multi-file runs tha
 peptides are faster without it. See the [prefilter benchmark](benchmarks/PREFILTER.md) for
 memory, output agreement, and repeats.
 
+## Roadmap
+
+These additions are planned. None of them is available yet.
+
+| Addition | Goal | Notes |
+|---|---|---|
+| dnoise MS1 denoising for Bruker timsTOF | Keep ion-mobility streaks and drop MS1 noise before feature extraction, which evaluations show improves quantified coverage. | Optional, MS1 only, off by default. Targets dnoise 0.5.0, which shares Sage Plus's timsrust and SQLite versions. |
+| koth feature finding | Extract MS1 and fragment ion chromatograms (hills) with retention time and ion mobility. | Replaces or complements the current MS1 feature extraction for LFQ, and provides the signals for the DIA mode below. |
+| Chromatogram-based DIA mode | Score precursor and fragment chromatograms together, possibly in a peptide-centric search, instead of treating DIA scans as wide-window spectra. | Builds on koth feature finding, retention-time and mobility models, and spectral libraries. |
+| Custom residue compositions and isotope-labeled residues | Define residues by elemental composition, and label whole residues or backbones with heavy isotopes (for example <sup>15</sup>N or <sup>13</sup>C metabolic labeling, or deuterium). | Label mass shifts then depend on the sequence rather than on a fixed modification mass. |
+| Glycopeptide search | Search glycan compositions on sequon or motif-restricted sites with oxonium and Y-ion evidence. | Builds on mass offsets, neutral losses, and motif modification sites. |
+| Crosslink search | Identify crosslinked peptide pairs, starting with simple or MS-cleavable linkers. | Needs pair-aware candidate generation and crosslink-specific FDR. |
+
 ## Build and run
 
 Sage Plus currently requires Rust 1.88 or newer.
