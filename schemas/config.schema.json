@@ -4,12 +4,12 @@
       "oneOf": [
         {
           "const": "linear",
-          "description": "Preserve Sage's existing ordinary least-squares alignment.",
+          "description": "Sage's ordinary least-squares alignment, the default before Beta 9.",
           "type": "string"
         },
         {
           "const": "nonlinear",
-          "description": "Robust outlier filtering followed by a monotone piecewise-linear warp.",
+          "description": "Robust outlier filtering followed by a monotone piecewise-linear warp (default).",
           "type": "string"
         }
       ]
@@ -1626,7 +1626,8 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "description": "Cross-run retention-time alignment method (default: `nonlinear`). Alignment runs when\nthis is set, `predict_rt` is true, or LFQ is enabled; `linear` restores the\nordinary least-squares alignment used before Beta 9."
     },
     "retention_time_model": {
       "anyOf": [

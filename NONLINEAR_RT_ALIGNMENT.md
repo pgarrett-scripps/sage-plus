@@ -1,22 +1,23 @@
-# Nonlinear retention-time alignment exploration
+# Nonlinear retention-time alignment
 
-Enable the prototype explicitly in the search JSON:
+Nonlinear alignment is the default from Beta 9. Alignment runs whenever `predict_rt` is
+true (the default), LFQ is enabled, or `retention_time_alignment` is set. To restore the
+ordinary least-squares alignment used before Beta 9, set:
 
 ```json
-"retention_time_alignment": "nonlinear"
+"retention_time_alignment": "linear"
 ```
 
-This explicitly enables nonlinear alignment of observed retention times, independently
-of `predict_rt`. Retention-time prediction and LFQ use alignment internally; if no
-method is specified for those workflows, they retain Sage's existing linear alignment.
+With `"linear"`, results are byte-identical to the previous default. `run-summary.json` records the method
+used under `models.retention_time_alignment`.
 
-Sage currently maps each run to a global consensus with one ordinary least-squares
+Upstream Sage maps each run to a global consensus with one ordinary least-squares
 line. That is fast and easy to extrapolate, but a few incorrect peptide landmarks can
 move the fit and one line cannot represent local changes in a chromatography gradient.
 
-## Prototype in this branch
+## Method
 
-The prototype uses shared, high-confidence peptide IDs as landmarks and fits each run
+The method uses shared, high-confidence peptide IDs as landmarks and fits each run
 in two stages:
 
 1. Normalize RT by the run's maximum observed RT and use the across-run median RT as
@@ -28,7 +29,8 @@ in two stages:
 4. Apply weighted isotonic regression to the bin targets, then use piecewise-linear
    interpolation between the monotone knots.
 5. Fall back to a robust affine alignment when there are fewer than 16 landmarks or
-   when they cover less than 25% of the normalized gradient.
+   when they cover less than 25% of the normalized gradient. A single-file search has no
+   shared landmarks and is left unwarped, which gives the same aligned times as `linear`.
 
 The same `Alignment::transform` method is used for PSM RTs and LFQ MS1 scan times.
 
@@ -45,18 +47,36 @@ The same `Alignment::transform` method is used for PSM RTs and LFQ MS1 scan time
   but Sage's current inputs naturally provide sparse peptide landmarks. DTW also needs
   explicit regularization to avoid implausible warps.
 - **Monotone piecewise linear:** simple, dependency-free, predictable outside local
-  perturbations, and directly compatible with LFQ range lookup. This is the prototype.
+  perturbations, and directly compatible with LFQ range lookup. This is the chosen method.
 
-## Evaluation before merging
+## Evaluation
 
-The synthetic unit tests cover outliers, large shifts, monotonicity, nonlinear error,
-and sparse fallback. A dataset-level comparison should additionally measure:
+Synthetic unit tests cover outliers, large shifts, monotonicity, nonlinear error, sparse
+fallback, and single-run behavior. The dataset comparison below made nonlinear the
+default. Both searches used five PXD028735 Orbitrap LFQ files (HYE mixture,
+`hye-irt-defined.fasta`, LFQ enabled, 8 threads). Residuals are the absolute difference
+between each peptide's aligned RT and its across-run median, for target peptides at 1%
+peptide FDR seen in at least two runs, converted to minutes.
 
-- held-out shared-peptide median absolute RT error per run;
-- error by RT decile, especially gradient boundaries;
-- the number of LFQ features recovered at a fixed FDR;
-- coefficient of variation for confidently quantified peptides;
-- knot count, rejected-landmark fraction, and runtime/memory; and
+| Metric | Linear | Nonlinear |
+| --- | ---: | ---: |
+| PSMs / peptides / proteins at 1% FDR | 312,533 / 62,817 / 7,051 | 312,487 / 62,795 / 7,045 |
+| Protein groups at 1% FDR | 7,177 | 7,171 |
+| LFQ precursors at 1% q-value | 24,038 | 31,418 |
+| LFQ precursors quantified in all 5 files | 23,055 | 30,828 |
+| Human log2(A/B) MAD (expected 0) | 0.213 | 0.191 |
+| Yeast log2(A/B) median / MAD | 1.111 / 0.208 | 1.114 / 0.198 |
+| E. coli log2(A/B) median / MAD | -2.225 / 0.388 | -2.215 / 0.397 |
+| Alignment residual median / 90th percentile (min) | 0.128 / 0.913 | 0.077 / 0.391 |
+
+Each run received 24 knots. LFQ decoys at 1% q-value stayed near 1% of targets (239 and
+313). Alignment and LFQ take the same time with either method; end-to-end runtime
+differences were within run-to-run variation on a shared machine. A single-file HEK SILAC
+search produced byte-identical results with both methods.
+
+Still worth measuring on other datasets:
+
+- held-out shared-peptide RT error, by RT decile, especially at gradient boundaries;
 - behavior for disconnected run groups with few or no shared peptides.
 
 The current global consensus is computed once. If experiments contain several weakly
