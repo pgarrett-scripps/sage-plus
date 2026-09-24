@@ -176,7 +176,7 @@ pub trait LocalizationRule {
     fn mass(&self) -> f32;
     fn definition(&self) -> Option<Arc<ModificationDefinition>>;
     fn sites(&self, peptide: &Peptide) -> Vec<Site> {
-        peptide.rule_sites(self.specificity(), true)
+        peptide.rule_sites(self.specificity())
     }
 }
 

@@ -308,7 +308,16 @@ impl Runner {
                                     == Some(row.modification.as_str())
                             }) && attachment.is_some_and(|site| {
                                 specificity
-                                    .sites(row.peptide_sequence.as_bytes(), position)
+                                    .sites_in_context(
+                                        row.peptide_sequence.as_bytes(),
+                                        position,
+                                        sage_core::motif::MotifContext::in_protein(
+                                            sequence.as_bytes(),
+                                            start,
+                                            row.peptide_sequence.len(),
+                                            position,
+                                        ),
+                                    )
                                     .contains(&site)
                             })
                         },

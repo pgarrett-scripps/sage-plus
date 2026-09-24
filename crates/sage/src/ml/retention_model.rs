@@ -444,7 +444,7 @@ pub(crate) fn variable_mod_count(
     mass: f32,
 ) -> f64 {
     peptide
-        .rule_sites(specificity, true)
+        .rule_sites(specificity)
         .into_iter()
         .filter(|site| {
             let observed = match site {

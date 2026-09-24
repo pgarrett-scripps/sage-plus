@@ -90,6 +90,17 @@ impl PeptideSequence {
         std::str::from_utf8(self.as_bytes()).expect("peptide sequence is not valid UTF-8")
     }
 
+    /// The shared allocation this span views, and the span's start within it.
+    /// For FASTA digests the allocation is the whole source protein.
+    pub fn source(&self) -> (ProteinSequence, u32) {
+        (
+            ProteinSequence {
+                storage: self.storage.clone(),
+            },
+            self.start,
+        )
+    }
+
     pub fn starts_with(&self, prefix: &str) -> bool {
         self.as_bytes().starts_with(prefix.as_bytes())
     }

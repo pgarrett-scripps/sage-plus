@@ -14,18 +14,20 @@
 //! residue: `N*-{P}-[ST]` is the N-glycosylation sequon, `R-x-x-[ST]*` a basophilic
 //! kinase motif, and `C*-x-x-x>` a CaaX prenylation box.
 //!
-//! Motifs are evaluated against the peptide plus whatever protein flanking
-//! residues the caller supplies. Positions outside the supplied context never
-//! match, so a motif that needs unavailable flanking residues is not satisfied.
+//! Motifs are evaluated against the full source protein of each peptide
+//! occurrence. Residues outside the supplied context never match, so without
+//! protein context (for example, peptide lists) only in-peptide motifs apply.
 
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{Mutex, OnceLock};
 
+use crate::enzyme::Position;
 use crate::mass::VALID_AA;
 
-/// Longest supported motif, in residues. Keeps per-site checks trivially cheap.
-pub const MAX_MOTIF_WIDTH: usize = 16;
+/// Longest accepted pattern, in residues. This bounds pattern size only; the
+/// protein context a motif may span is unlimited.
+pub const MAX_MOTIF_WIDTH: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ResidueSet(u32);
@@ -41,13 +43,17 @@ impl ResidueSet {
         Self::bit(residue).is_some_and(|bit| self.0 & bit != 0)
     }
 
+    /// Every uppercase letter, so `x` and exclusions also match letters such
+    /// as `X` that appear in FASTA sequences but are not searchable residues.
     fn any() -> Self {
-        Self(
-            VALID_AA
-                .iter()
-                .filter_map(|&r| Self::bit(r))
-                .fold(0, |a, b| a | b),
-        )
+        Self((1 << 26) - 1)
+    }
+
+    fn valid() -> u32 {
+        VALID_AA
+            .iter()
+            .filter_map(|&r| Self::bit(r))
+            .fold(0, |a, b| a | b)
     }
 
     pub fn residues(self) -> Vec<u8> {
@@ -109,9 +115,34 @@ pub struct MotifContext<'a> {
     pub right_boundary: bool,
 }
 
-/// One optional flanking residue as a context slice.
-pub fn flank(aa: &Option<u8>) -> &[u8] {
-    aa.as_ref().map(std::slice::from_ref).unwrap_or(&[])
+impl<'a> MotifContext<'a> {
+    /// Peptide without known protein residues. Protein-terminal anchors follow
+    /// the digest position.
+    pub fn peptide_only(position: Position) -> Self {
+        Self::neighbors(&None, &None, position)
+    }
+
+    /// One known residue on each side, as recorded by `prev_aa`/`next_aa`.
+    pub fn neighbors(prev: &'a Option<u8>, next: &'a Option<u8>, position: Position) -> Self {
+        Self {
+            left: prev.as_ref().map(std::slice::from_ref).unwrap_or(&[]),
+            right: next.as_ref().map(std::slice::from_ref).unwrap_or(&[]),
+            left_boundary: prev.is_none() && matches!(position, Position::Nterm | Position::Full),
+            right_boundary: next.is_none() && matches!(position, Position::Cterm | Position::Full),
+        }
+    }
+
+    /// Full protein context around the span `start..start + len`.
+    pub fn in_protein(protein: &'a [u8], start: usize, len: usize, position: Position) -> Self {
+        let end = start + len;
+        Self {
+            left: &protein[..start],
+            right: &protein[end..],
+            left_boundary: start == 0 && matches!(position, Position::Nterm | Position::Full),
+            right_boundary: end == protein.len()
+                && matches!(position, Position::Cterm | Position::Full),
+        }
+    }
 }
 
 impl SiteMotif {
@@ -153,6 +184,9 @@ impl SiteMotif {
             if marked {
                 if repeat != 1 {
                     return Err(format!("modified element `{raw}` must match one residue"));
+                }
+                if set.residues().is_empty() {
+                    return Err(format!("modified element `{raw}` admits no residue"));
                 }
                 if site.replace(elements.len()).is_some() {
                     return Err(format!(
@@ -279,82 +313,27 @@ fn parse_element(token: &str) -> Option<ResidueSet> {
     }
 }
 
+/// Positive classes contain only searchable residues; `x` and exclusions also
+/// contain every other letter. Printing by that split reparses identically.
 fn canonical_element(set: ResidueSet) -> String {
     let any = ResidueSet::any();
-    let included = set.residues();
-    if set == any {
-        return "x".into();
-    }
-    if included.len() == 1 {
-        return (included[0] as char).to_string();
-    }
     let excluded = ResidueSet(any.0 & !set.0).residues();
-    if excluded.len() < included.len() {
-        format!("{{{}}}", String::from_utf8(excluded).unwrap())
-    } else {
-        format!("[{}]", String::from_utf8(included).unwrap())
+    let negative = set.0 & !ResidueSet(ResidueSet::valid()).0 != 0;
+    let listed = |residues: Vec<u8>| String::from_utf8(residues).expect("residues are ASCII");
+    match (negative, excluded.is_empty()) {
+        (true, true) => "x".into(),
+        (true, false) => format!("{{{}}}", listed(excluded)),
+        (false, _) => {
+            let included = set.residues();
+            if included.len() == 1 {
+                listed(included)
+            } else {
+                format!("[{}]", listed(included))
+            }
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ctx<'a>(left: &'a [u8], right: &'a [u8]) -> MotifContext<'a> {
-        MotifContext {
-            left,
-            right,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn parses_and_canonicalizes() {
-        let motif = SiteMotif::parse("N*-{P}-[TS]").unwrap();
-        assert_eq!(motif.canonical(), "motif:N*-{P}-[ST]");
-        assert_eq!(motif.reach(), (0, 2));
-        assert_eq!(motif.site_residues(), b"N");
-        let kinase = SiteMotif::parse("R-x(2)-[ST]*").unwrap();
-        assert_eq!(kinase.canonical(), "motif:R-x(2)-[ST]*");
-        assert_eq!(kinase.reach(), (3, 0));
-        assert!(SiteMotif::parse("N-{P}-[ST]").is_err());
-        assert!(SiteMotif::parse("N*-[ST]*").is_err());
-        assert!(SiteMotif::parse("x(2)*").is_err());
-        assert!(SiteMotif::parse("N*-[ZB]").is_err());
-        assert!(SiteMotif::parse("N*-x(20)").is_err());
-        assert_eq!(
-            SiteMotif::intern("N*-{P}-[ST]").unwrap() as *const _,
-            SiteMotif::intern("N*-{P}-[TS]").unwrap() as *const _
-        );
-    }
-
-    #[test]
-    fn sequon_matches_peptide_and_flanks() {
-        let motif = SiteMotif::parse("N*-{P}-[ST]").unwrap();
-        // NGT sequon, NPS is excluded by the proline rule.
-        assert_eq!(motif.sites(b"ANGTANPSK", ctx(b"", b"")), vec![1]);
-        // N second-to-last needs one flanking residue after the peptide.
-        assert_eq!(motif.sites(b"AANK", ctx(b"", b"")), Vec::<u32>::new());
-        assert_eq!(motif.sites(b"AANK", ctx(b"", b"S")), vec![2]);
-        assert_eq!(motif.sites(b"AANK", ctx(b"", b"P")), Vec::<u32>::new());
-    }
-
-    #[test]
-    fn kinase_motif_uses_left_flank() {
-        let motif = SiteMotif::parse("R-x-x-[ST]*").unwrap();
-        assert_eq!(motif.sites(b"GASPK", ctx(b"R", b"")), vec![2]);
-        assert_eq!(motif.sites(b"GASPK", ctx(b"", b"")), Vec::<u32>::new());
-    }
-
-    #[test]
-    fn protein_terminal_anchor() {
-        let motif = SiteMotif::parse("C*-x-x-x>").unwrap();
-        let terminal = MotifContext {
-            right_boundary: true,
-            ..Default::default()
-        };
-        assert_eq!(motif.sites(b"GKCVLS", terminal), vec![2]);
-        assert_eq!(motif.sites(b"GKCVLS", ctx(b"", b"")), Vec::<u32>::new());
-        assert_eq!(motif.sites(b"GKCVLSA", terminal), Vec::<u32>::new());
-    }
-}
+#[path = "../tests/unit/motif.rs"]
+mod test;
