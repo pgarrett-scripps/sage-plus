@@ -253,9 +253,24 @@ fn raw_ms_levels_match_vendor_conversion() {
                         .is_none()
             })
             .count();
+        let mut groups = std::collections::BTreeMap::new();
+        for spectrum in spectra.iter().filter(|spectrum| spectrum.ms_level == 2) {
+            *groups.entry(spectrum.acquisition.label()).or_insert(0usize) += 1;
+        }
         println!(
             "{path}: levels {observed:?}, {missing} MS2 scans without a precursor, \
-             {unlinked} MSn scans above MS2 without a parent scan"
+             {unlinked} MSn scans above MS2 without a parent scan, MS2 groups {groups:?}"
         );
     }
+}
+
+#[test]
+fn records_without_a_filter_have_an_unknown_acquisition_group() {
+    use sage_core::spectrum::{AcquisitionGroup, MassAnalyzer};
+    // Misaligned files drop their event filters; the group must then be
+    // unknown rather than a guess, and unknown is not low accuracy.
+    let spectrum = ThermoRawReader::with_file_id(0).convert(record(5, 2));
+    assert_eq!(spectrum.acquisition, AcquisitionGroup::default());
+    assert_eq!(spectrum.acquisition.analyzer, MassAnalyzer::Unknown);
+    assert!(!spectrum.acquisition.analyzer.is_low_accuracy());
 }
