@@ -1,6 +1,6 @@
 //! Peptide ion-mobility prediction using cross-fitted linear regression.
 
-use super::regression::LinearRegression;
+use super::regression::{cholesky_solve, LinearRegression};
 use super::retention_model::{peptide_fold, variable_mod_count};
 use crate::database::IndexedDatabase;
 use crate::mass::VALID_AA;
@@ -431,8 +431,6 @@ impl MobilityPtmOffsetModel {
         indices: &[usize],
         regularization: f64,
     ) -> Option<Self> {
-        use super::{gauss::Gauss, matrix::Matrix};
-
         let mut keys = db.model_mods.clone();
         keys.sort_unstable_by(|(a_spec, a_mass), (b_spec, b_mass)| {
             a_spec.cmp(b_spec).then_with(|| a_mass.total_cmp(b_mass))
@@ -473,11 +471,9 @@ impl MobilityPtmOffsetModel {
             covariance[diagonal * dimensions + diagonal] +=
                 regularization * if charge_specific { 4.0 } else { 1.0 };
         }
-        let offsets = Gauss::solve(
-            Matrix::new(covariance, dimensions, dimensions),
-            Matrix::col_vector(response),
-        )?
-        .take();
+        // The explicit ridge makes the system positive definite; no additional
+        // perturbation is applied.
+        let offsets = cholesky_solve(covariance, response)?;
         Some(Self {
             keys,
             charges,

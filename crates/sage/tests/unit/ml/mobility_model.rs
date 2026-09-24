@@ -262,3 +262,194 @@ fn cross_fit_rejects_folds_without_enough_training_rows() {
     let error = cross_fit::<BASIC_FEATURES>(&db, &features, &settings, basic_embed).unwrap_err();
     assert!(error.contains("training observations"));
 }
+
+fn noiseless_peptides(count: usize) -> Vec<(Peptide, u8)> {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    (0..count)
+        .map(|_| {
+            let length = 7 + (next() % 24) as usize;
+            let mut sequence = (0..length - 1)
+                .map(|_| RESIDUES[(next() % 20) as usize])
+                .collect::<Vec<_>>();
+            sequence.push(if next() % 2 == 0 { b'K' } else { b'R' });
+            let oxidized = next() % 5 == 0;
+            let monoisotopic = sequence
+                .iter()
+                .map(|&residue| crate::mass::monoisotopic(residue))
+                .sum::<f32>()
+                + crate::mass::H2O
+                + if oxidized { 15.9949 } else { 0.0 };
+            let charge = 2 + (next() % 3) as u8;
+            (
+                Peptide {
+                    sequence: sequence.into(),
+                    monoisotopic,
+                    ..Peptide::default()
+                },
+                charge,
+            )
+        })
+        .collect()
+}
+
+fn noiseless_weights<const D: usize>(seed: u64) -> [f64; D] {
+    let mut state = seed;
+    std::array::from_fn(|_| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 0.2
+    })
+}
+
+fn dot<const D: usize>(row: &[f64; D], beta: &[f64]) -> f64 {
+    row.iter().zip(beta).map(|(x, w)| x * w).sum()
+}
+
+#[test]
+fn basic_mobility_embedding_fits_noiseless_linear_data() {
+    let map = amino_acid_map();
+    let weights = noiseless_weights::<BASIC_FEATURES>(3);
+    let items = noiseless_peptides(20_000)
+        .iter()
+        .map(|(peptide, charge)| {
+            let row = basic_embed(peptide, *charge, &map);
+            (row, dot(&row, &weights))
+        })
+        .collect::<Vec<_>>();
+    let scale = items.iter().map(|(_, y)| y.abs()).fold(0.0, f64::max);
+    let lr = LinearRegression::fit::<_, BASIC_FEATURES>(&items, |_| true, |(x, _)| *x, |(_, y)| *y)
+        .unwrap();
+    let error = items
+        .iter()
+        .map(|(x, y)| (dot(x, &lr.beta) - y).abs())
+        .fold(0.0, f64::max);
+    eprintln!("basic mobility noiseless max |error| = {error:e} (max |y| = {scale:.3})");
+    assert!(error < 1e-9, "max |error| = {error:e}");
+}
+
+#[test]
+fn enriched_mobility_embedding_fits_noiseless_linear_data() {
+    let map = amino_acid_map();
+    let weights = noiseless_weights::<ENRICHED_FEATURES>(5);
+    let items = noiseless_peptides(20_000)
+        .iter()
+        .map(|(peptide, charge)| {
+            let row = enriched_embed(peptide, *charge, &map);
+            (row, dot(&row, &weights))
+        })
+        .collect::<Vec<_>>();
+    let lr =
+        LinearRegression::fit::<_, ENRICHED_FEATURES>(&items, |_| true, |(x, _)| *x, |(_, y)| *y)
+            .unwrap();
+    let error = items
+        .iter()
+        .map(|(x, y)| (dot(x, &lr.beta) - y).abs())
+        .fold(0.0, f64::max);
+    eprintln!("enriched mobility noiseless max |error| = {error:e}");
+    assert!(error < 1e-9, "max |error| = {error:e}");
+}
+
+#[test]
+fn basic_mobility_predictions_ignore_redundant_class_columns() {
+    let map = amino_acid_map();
+    let weights = noiseless_weights::<BASIC_FEATURES>(9);
+    let items = noiseless_peptides(8_000)
+        .iter()
+        .enumerate()
+        .map(|(idx, (peptide, charge))| {
+            let row = basic_embed(peptide, *charge, &map);
+            (
+                row,
+                dot(&row, &weights) + ((idx as f64) * 0.37).sin() * 0.01,
+            )
+        })
+        .collect::<Vec<_>>();
+    let base =
+        LinearRegression::fit::<_, BASIC_FEATURES>(&items, |_| true, |(x, _)| *x, |(_, y)| *y)
+            .unwrap();
+    // Residue-class counts are sums of residue counts. Replacing them with other
+    // linear combinations of the residue counts must not change the fit.
+    let relabel = |x: &[f64; BASIC_FEATURES]| -> [f64; BASIC_FEATURES] {
+        let mut row = *x;
+        for (offset, column) in (BASIC_NUM_BRANCHED..=BASIC_NUM_NEGATIVE).enumerate() {
+            row[column] = x[offset] + 2.0 * x[offset + 3] - x[BASIC_LEN] + 0.5 * x[BASIC_INTERCEPT];
+        }
+        row
+    };
+    let relabeled = LinearRegression::fit::<_, BASIC_FEATURES>(
+        &items,
+        |_| true,
+        |(x, _)| relabel(x),
+        |(_, y)| *y,
+    )
+    .unwrap();
+    let shift = items
+        .iter()
+        .map(|(x, _)| (dot(&relabel(x), &relabeled.beta) - dot(x, &base.beta)).abs())
+        .fold(0.0, f64::max);
+    eprintln!("basic mobility redundant-class-column shift = {shift:e}");
+    assert!(
+        shift < 1e-9,
+        "redundant class columns moved predictions by {shift:e}"
+    );
+}
+
+#[test]
+fn mobility_fit_is_insensitive_to_the_standardized_ridge_penalty() {
+    let map = amino_acid_map();
+    let weights = noiseless_weights::<BASIC_FEATURES>(3);
+    let clean = noiseless_peptides(50_000)
+        .iter()
+        .map(|(peptide, charge)| {
+            let row = basic_embed(peptide, *charge, &map);
+            (row, dot(&row, &weights))
+        })
+        .collect::<Vec<_>>();
+    let noisy = clean
+        .iter()
+        .enumerate()
+        .map(|(idx, (x, y))| (*x, y + ((idx as f64) * 0.37).sin() * 0.02))
+        .collect::<Vec<_>>();
+    let fit = |items: &[([f64; BASIC_FEATURES], f64)], ridge: f64| {
+        LinearRegression::fit_with_ridge::<_, BASIC_FEATURES>(
+            items,
+            |_| true,
+            |(x, _)| *x,
+            |(_, y)| *y,
+            ridge,
+        )
+        .unwrap()
+    };
+    let reference = fit(&noisy, crate::ml::regression::RIDGE_PER_ROW);
+    for (ridge, tolerance) in [
+        (1e-12, 1e-9),
+        (1e-10, 1e-9),
+        (1e-8, 1e-9),
+        (1e-6, 1e-8),
+        (1e-5, 1e-5),
+        (1e-4, 1e-3),
+        (1e-3, 1e-2),
+    ] {
+        let exact = fit(&clean, ridge);
+        let error = clean
+            .iter()
+            .map(|(x, y)| (dot(x, &exact.beta) - y).abs())
+            .fold(0.0, f64::max);
+        let perturbed = fit(&noisy, ridge);
+        let shift = noisy
+            .iter()
+            .map(|(x, _)| (dot(x, &perturbed.beta) - dot(x, &reference.beta)).abs())
+            .fold(0.0, f64::max);
+        eprintln!("ridge {ridge:e}: noiseless max |error| = {error:e}, noisy-fit shift vs default = {shift:e}");
+        assert!(error < tolerance, "ridge {ridge:e}: error {error:e}");
+        assert!(shift < tolerance, "ridge {ridge:e}: shift {shift:e}");
+    }
+}

@@ -3,7 +3,7 @@
 //! See Klammer et al., Anal. Chem. 2007, 79, 16, 6111–6118
 //! <https://doi.org/10.1021/ac070262k>
 
-use super::regression::LinearRegression;
+use super::regression::{cholesky_solve, LinearRegression};
 use crate::database::IndexedDatabase;
 use crate::mass::VALID_AA;
 use crate::modification::ModificationSpecificity;
@@ -476,8 +476,6 @@ impl PtmOffsetModel {
         indices: &[usize],
         regularization: f64,
     ) -> Option<Self> {
-        use super::{gauss::Gauss, matrix::Matrix as SageMatrix};
-
         let mut keys = db.model_mods.clone();
         keys.sort_unstable_by(|(a_spec, a_mass), (b_spec, b_mass)| {
             a_spec.cmp(b_spec).then_with(|| a_mass.total_cmp(b_mass))
@@ -509,11 +507,9 @@ impl PtmOffsetModel {
         for diagonal in 0..dimensions {
             covariance[diagonal * dimensions + diagonal] += regularization;
         }
-        let offsets = Gauss::solve(
-            SageMatrix::new(covariance, dimensions, dimensions),
-            SageMatrix::col_vector(response),
-        )?
-        .take();
+        // The explicit ridge makes the system positive definite; no additional
+        // perturbation is applied.
+        let offsets = cholesky_solve(covariance, response)?;
         Some(Self { keys, offsets })
     }
 
