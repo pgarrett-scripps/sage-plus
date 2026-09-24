@@ -979,6 +979,7 @@ mod mass_offsets {
                     GroupMassCorrection {
                         group: query.acquisition,
                         model: Some(offset.clone()),
+                        fragment_tol: None,
                     },
                     // Another analyzer's model must not touch this spectrum.
                     GroupMassCorrection {
@@ -987,8 +988,10 @@ mod mass_offsets {
                             intercept_ppm: -15.0,
                             ..offset
                         }),
+                        fragment_tol: None,
                     },
                 ],
+                precursor_tol: None,
             }],
         };
         let corrected = Scorer {
@@ -1040,5 +1043,79 @@ mod mass_offsets {
             "{}",
             hit.aligned_average_ppm
         );
+    }
+
+    /// Narrowed tolerances apply only to spectra of their file and group.
+    #[test]
+    fn narrowed_tolerances_apply_per_file_and_group() {
+        use crate::mass_recalibration::{
+            FileMassCorrection, GroupMassCorrection, MassRecalibration,
+        };
+        use crate::spectrum::{AcquisitionGroup, Activation, MassAnalyzer};
+        let expanded = database(SearchMode::Database);
+        let target = expanded_target(&expanded);
+        let hcd = AcquisitionGroup {
+            analyzer: MassAnalyzer::Orbitrap,
+            activation: Activation::Hcd,
+        };
+        let mut query = spectrum(&target);
+        query.acquisition = hcd;
+        // Precursor 8 ppm off: inside the configured 10 ppm, outside 5 ppm.
+        for precursor in &mut query.precursors {
+            precursor.mz *= 1.0 + 8e-6;
+        }
+        let is_target = |hits: &[Feature]| {
+            hits.first().is_some_and(|hit| {
+                expanded[hit.peptide_idx].to_string() == "MAGSPEPTS[Phospho]IDEK"
+            })
+        };
+        assert!(is_target(&scorer(&expanded, false).score(&query)));
+
+        let tuned = |precursor_tol, fragment_tol| Scorer {
+            mass_recalibration: Some(Arc::new(MassRecalibration {
+                files: vec![FileMassCorrection {
+                    precursor: None,
+                    fragment: vec![GroupMassCorrection {
+                        group: hcd,
+                        model: None,
+                        fragment_tol,
+                    }],
+                    precursor_tol,
+                }],
+            })),
+            ..scorer(&expanded, false)
+        };
+        let narrow = tuned(Some(Tolerance::Ppm(-5.0, 5.0)), None);
+        assert!(!is_target(&narrow.score(&query)));
+        // Another file keeps the configured window.
+        let mut other_file = query.clone();
+        other_file.file_id = 1;
+        assert!(is_target(&narrow.score(&other_file)));
+
+        // A narrowed fragment window for another group leaves this one alone;
+        // for this group, fragments far outside it find no match.
+        let other_group = Scorer {
+            mass_recalibration: Some(Arc::new(MassRecalibration {
+                files: vec![FileMassCorrection {
+                    precursor: None,
+                    fragment: vec![GroupMassCorrection {
+                        group: AcquisitionGroup::default(),
+                        model: None,
+                        fragment_tol: Some(Tolerance::Ppm(-0.001, 0.001)),
+                    }],
+                    precursor_tol: None,
+                }],
+            })),
+            ..scorer(&expanded, false)
+        };
+        assert!(is_target(&other_group.score(&query)));
+        let mut shifted = spectrum(&target);
+        shifted.acquisition = hcd;
+        for mass in &mut shifted.masses {
+            *mass = (*mass + PROTON) * (1.0 + 8e-6) - PROTON;
+        }
+        assert!(is_target(&scorer(&expanded, false).score(&shifted)));
+        let narrow_fragment = tuned(None, Some(Tolerance::Ppm(-5.0, 5.0)));
+        assert!(!is_target(&narrow_fragment.score(&shifted)));
     }
 }

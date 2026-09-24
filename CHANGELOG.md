@@ -25,6 +25,14 @@ entries are retained below for provenance.
   for Bruker TDF. `mass_recalibration` selects fragment models separately per group, never
   corrects ion-trap groups, and leaves groups with too few PSMs uncorrected; the run summary
   lists each group's model.
+- `tolerance_mode` (`"fixed"` by default, or `"auto"`) narrows ppm search tolerances from
+  the discovery pass: the precursor tolerance per file and the fragment tolerance per file and
+  acquisition group, to 1.2 times the 99th percentile of absolute residuals after correction
+  (floors of 3 ppm for precursors and 5 ppm for fragments), never wider than configured and
+  only when the window covers 98% of held-out residuals. Precursor windows also count PSMs
+  matched at a non-zero isotope error. Da and percent tolerances, ion-trap groups, sparse
+  groups, mass-offset searches, and open precursor windows keep the configured tolerance. The
+  run summary reports applied windows, fit and held-out percentiles, and held-out coverage.
 
 ### Changed
 - Nonlinear retention-time alignment is the default. When `retention_time_alignment` is not

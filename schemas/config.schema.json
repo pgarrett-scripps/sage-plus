@@ -1125,6 +1125,21 @@
         }
       ]
     },
+    "ToleranceMode": {
+      "description": "Whether search tolerances are fixed or narrowed from discovery residuals.",
+      "oneOf": [
+        {
+          "const": "fixed",
+          "description": "Search with the configured tolerances.",
+          "type": "string"
+        },
+        {
+          "const": "auto",
+          "description": "Narrow ppm tolerances to the validated residual spread, never beyond\nthe configured window.",
+          "type": "string"
+        }
+      ]
+    },
     "VarModEntry": {
       "anyOf": [
         {
@@ -1694,6 +1709,17 @@
           "type": "null"
         }
       ]
+    },
+    "tolerance_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ToleranceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Search tolerance mode: `fixed` (default) or `auto`. `auto` runs the\ndiscovery pass (also when `mass_recalibration` is off) and narrows ppm\nprecursor tolerances per file and ppm fragment tolerances per file and\nacquisition group to 1.2x the 99th percentile of absolute residuals\nafter correction, if that covers 98% of held-out residuals. Tolerances\nare never widened; Da and percent tolerances are unchanged. Ignored for\nwide-window searches."
     },
     "wide_window": {
       "type": [

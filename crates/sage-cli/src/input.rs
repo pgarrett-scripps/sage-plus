@@ -8,7 +8,7 @@ use sage_core::{
     database::{Builder, Parameters},
     lfq::LfqSettings,
     mass::Tolerance,
-    mass_recalibration::MassRecalibrationMode,
+    mass_recalibration::{MassRecalibrationMode, ToleranceMode},
     ml::mobility_model::IonMobilitySettings,
     ml::retention_alignment::AlignmentMethod,
     ml::retention_model::RetentionTimeSettings,
@@ -89,6 +89,9 @@ pub struct Search {
     /// Search-time precursor and fragment mass recalibration.
     pub mass_recalibration: MassRecalibrationMode,
 
+    /// Fixed tolerances, or tolerances narrowed from discovery residuals.
+    pub tolerance_mode: ToleranceMode,
+
     #[serde(skip_serializing)]
     pub output_directory: Url,
 
@@ -164,6 +167,14 @@ pub struct Input {
     /// models are fitted, and the file is searched again with corrected
     /// masses. Ignored for wide-window searches.
     pub mass_recalibration: Option<MassRecalibrationMode>,
+    /// Search tolerance mode: `fixed` (default) or `auto`. `auto` runs the
+    /// discovery pass (also when `mass_recalibration` is off) and narrows ppm
+    /// precursor tolerances per file and ppm fragment tolerances per file and
+    /// acquisition group to 1.2x the 99th percentile of absolute residuals
+    /// after correction, if that covers 98% of held-out residuals. Tolerances
+    /// are never widened; Da and percent tolerances are unchanged. Ignored for
+    /// wide-window searches.
+    pub tolerance_mode: Option<ToleranceMode>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -708,6 +719,7 @@ impl Input {
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
+            tolerance_mode: self.tolerance_mode.unwrap_or_default(),
             score_type,
         })
     }

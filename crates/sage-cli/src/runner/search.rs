@@ -4,6 +4,10 @@ use super::*;
 /// taken at an even stride, so the sample spans the whole gradient.
 const MAX_DISCOVERY_SPECTRA: usize = 25_000;
 
+/// Ppm precursor windows wider than this on either side are treated as open
+/// searches and keep their configured tolerance in `tolerance_mode: auto`.
+const MAX_AUTO_PRECURSOR_PPM: f32 = 100.0;
+
 /// Largest correction, in ppm, a model may apply for `tolerance`: the
 /// window half-width for ppm tolerances, or the Da half-width at m/z 2000.
 pub(super) fn recalibration_cap_ppm(tolerance: Tolerance) -> Option<f32> {
@@ -37,13 +41,27 @@ impl Runner {
             && !self.parameters.wide_window
     }
 
+    /// Whether tolerances are narrowed from discovery residuals.
+    pub(super) fn auto_tolerance_enabled(&self) -> bool {
+        self.parameters.tolerance_mode == ToleranceMode::Auto && !self.parameters.wide_window
+    }
+
+    /// Whether each file is first searched on a sample to fit models and
+    /// tolerances.
+    pub(super) fn discovery_enabled(&self) -> bool {
+        self.mass_recalibration_enabled() || self.auto_tolerance_enabled()
+    }
+
     /// Corrections selected so far, indexed by file.
     pub(super) fn mass_recalibration_models(&self) -> Option<Arc<MassRecalibration>> {
         let stats = self
             .mass_recalibration
             .lock()
             .expect("mass recalibration lock");
-        if stats.iter().all(|file| file.correction.is_identity()) {
+        if stats
+            .iter()
+            .all(|file| file.correction.is_identity() && !file.correction.tunes_tolerances())
+        {
             return None;
         }
         let mut files = vec![FileMassCorrection::default(); self.parameters.mzml_paths.len()];
@@ -78,7 +96,12 @@ impl Runner {
             .collect::<Vec<_>>();
         file_ids.sort_unstable();
         file_ids.dedup();
-        let max_kind = self.parameters.mass_recalibration.max_kind();
+        let max_kind = if self.mass_recalibration_enabled() {
+            self.parameters.mass_recalibration.max_kind()
+        } else {
+            MassModelKind::None
+        };
+        let tune_tolerances = self.auto_tolerance_enabled();
 
         for file_id in file_ids {
             let start = Instant::now();
@@ -117,22 +140,31 @@ impl Runner {
                 .filter(|(_, feature)| feature.label == 1 && feature.spectrum_q <= 0.01)
                 .collect::<Vec<_>>();
 
-            let precursor_points = confident
+            // Precursor error against the matched isotope (`isotope_error` is
+            // in Da), as the search tests each isotope hypothesis.
+            let precursor_point = |feature: &Feature| {
+                let z = feature.charge.max(1) as f32;
+                let observed = (feature.expmass - feature.isotope_error) / z + PROTON;
+                let theoretical = feature.calcmass / z + PROTON;
+                MassErrorPoint {
+                    rt_minutes: feature.rt,
+                    mz: observed,
+                    error_ppm: (observed - theoretical) * 1e6 / theoretical,
+                    group: stable_hash(&feature.spec_id),
+                }
+            };
+            let (precursor_points, isotope_error_points): (Vec<_>, Vec<_>) = confident
                 .iter()
-                .filter(|(_, feature)| {
-                    feature.isotope_error == 0.0 && feature.mass_offset.is_none()
-                })
-                .map(|(_, feature)| {
-                    let z = feature.charge.max(1) as f32;
-                    let observed = feature.expmass / z + PROTON;
-                    let theoretical = feature.calcmass / z + PROTON;
-                    MassErrorPoint {
-                        rt_minutes: feature.rt,
-                        mz: observed,
-                        error_ppm: (observed - theoretical) * 1e6 / theoretical,
-                        group: stable_hash(&feature.spec_id),
-                    }
-                })
+                .filter(|(_, feature)| feature.mass_offset.is_none())
+                .map(|(_, feature)| (feature.isotope_error == 0.0, precursor_point(feature)))
+                .partition(|(monoisotopic, _)| *monoisotopic);
+            let precursor_points = precursor_points
+                .into_iter()
+                .map(|(_, point)| point)
+                .collect::<Vec<_>>();
+            let isotope_error_points = isotope_error_points
+                .into_iter()
+                .map(|(_, point)| point)
                 .collect::<Vec<_>>();
             let fragment_points = confident
                 .par_iter()
@@ -181,12 +213,52 @@ impl Runner {
                 Tolerance::Ppm(_, _) => recalibration_cap_ppm(self.parameters.precursor_tol),
                 _ => None,
             };
-            let precursor = select_model(&precursor_points, options(precursor_cap, 100.0));
-            let fragment = select_group_models(
+            let precursor_options = options(precursor_cap, 100.0);
+            let mut precursor = select_model(&precursor_points, precursor_options);
+            if tune_tolerances {
+                // Only monoisotopic matches fit models, but every isotope
+                // hypothesis is searched with the precursor window.
+                let model = precursor.model.clone();
+                if let Some(spread) = precursor.spread.as_mut() {
+                    spread.add_isotope_error_points(
+                        model.as_ref(),
+                        &isotope_error_points,
+                        precursor_options.validation_tenths,
+                    );
+                }
+            }
+            let mut fragment = select_group_models(
                 &fragment_points,
                 &groups,
                 options(recalibration_cap_ppm(self.parameters.fragment_tol), 200.0),
             );
+            let precursor_tolerance = tune_tolerances.then(|| {
+                let configured = self.parameters.precursor_tol;
+                let options = AutoToleranceOptions::precursor();
+                let open = matches!(configured, Tolerance::Ppm(lo, hi)
+                    if lo.abs().max(hi.abs()) > MAX_AUTO_PRECURSOR_PPM);
+                if !self.database.mass_offsets.is_empty() {
+                    ToleranceEstimate::unchanged(configured, options, "mass_offsets")
+                } else if open {
+                    ToleranceEstimate::unchanged(configured, options, "open_search")
+                } else {
+                    auto_tolerance(&precursor, configured, options)
+                }
+            });
+            if tune_tolerances {
+                for group in &mut fragment {
+                    group.tolerance = Some(auto_tolerance(
+                        &group.selection,
+                        self.parameters.fragment_tol,
+                        AutoToleranceOptions::fragment(),
+                    ));
+                }
+            }
+            let narrowed = |estimate: Option<&ToleranceEstimate>| {
+                estimate
+                    .filter(|estimate| estimate.narrowed)
+                    .map(|estimate| estimate.tolerance)
+            };
             let correction = FileMassCorrection {
                 precursor: precursor.model.clone(),
                 fragment: fragment
@@ -194,8 +266,10 @@ impl Runner {
                     .map(|group| GroupMassCorrection {
                         group: group.group,
                         model: group.selection.model.clone(),
+                        fragment_tol: narrowed(group.tolerance.as_ref()),
                     })
                     .collect(),
+                precursor_tol: narrowed(precursor_tolerance.as_ref()),
             };
             let describe = |selection: &ModelSelection| match &selection.model {
                 Some(model) => format!(
@@ -214,20 +288,32 @@ impl Runner {
                         .unwrap_or("no validated improvement")
                 ),
             };
+            let describe_tolerance = |estimate: Option<&ToleranceEstimate>| match estimate {
+                None => String::new(),
+                Some(estimate) if estimate.narrowed => {
+                    format!(", tolerance {:?}", estimate.tolerance).to_lowercase()
+                }
+                Some(estimate) => format!(
+                    ", tolerance unchanged ({})",
+                    estimate.skipped.as_deref().unwrap_or("not narrower")
+                ),
+            };
             info!(
-                "- file {} mass recalibration: {} of {} spectra searched, {} confident PSMs; precursor {}; fragment {} [{} ms]",
+                "- file {} mass recalibration: {} of {} spectra searched, {} confident PSMs; precursor {}{}; fragment {} [{} ms]",
                 file_id,
                 sample.len(),
                 sample.len() * stride,
                 confident.len(),
                 describe(&precursor),
+                describe_tolerance(precursor_tolerance.as_ref()),
                 fragment
                     .iter()
                     .map(|group| format!(
-                        "{} ({} spectra) {}",
+                        "{} ({} spectra) {}{}",
                         group.group.label(),
                         group.spectra,
-                        describe(&group.selection)
+                        describe(&group.selection),
+                        describe_tolerance(group.tolerance.as_ref())
                     ))
                     .collect::<Vec<_>>()
                     .join(", "),
@@ -243,6 +329,7 @@ impl Runner {
                     discovery_ms: start.elapsed().as_millis() as u64,
                     precursor,
                     fragment,
+                    precursor_tolerance,
                     correction,
                 });
         }
@@ -514,7 +601,7 @@ impl Runner {
             }
             None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
         };
-        let (features, repeated_spectrum_psms) = if self.mass_recalibration_enabled() {
+        let (features, repeated_spectrum_psms) = if self.discovery_enabled() {
             self.discover_mass_corrections(scorer, &spectra.1);
             let recalibrated = Scorer {
                 mass_recalibration: self.mass_recalibration_models(),

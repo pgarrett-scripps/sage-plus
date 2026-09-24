@@ -413,6 +413,7 @@ impl Score {
     }
 }
 
+#[derive(Clone)]
 pub struct Scorer<'db> {
     pub db: &'db IndexedDatabase,
     pub precursor_tol: Tolerance,
@@ -440,7 +441,9 @@ pub struct Scorer<'db> {
     pub score_type: ScoreType,
     /// Per-file search-time mass corrections. Spectra are corrected before
     /// matching; reported `expmass`, `delta_mass`, `average_ppm`,
-    /// `signed_fragment_ppm` and fragment `mz_experimental` stay raw.
+    /// `signed_fragment_ppm` and fragment `mz_experimental` stay raw. Narrowed
+    /// per-file precursor and per-group fragment tolerances, when present,
+    /// replace `precursor_tol` and `fragment_tol` for that spectrum.
     pub mass_recalibration: Option<Arc<MassRecalibration>>,
 }
 
@@ -477,6 +480,9 @@ impl<'db> Scorer<'db> {
             "internal bug, trying to score a non-MS2 scan!"
         );
         assert_eq!(keep.len(), self.db.peptides.len());
+        if let Some(tuned) = self.tuned(query) {
+            return tuned.exact_prefilter(query, keep);
+        }
         let query = self.recalibrated(query);
         let query = query.as_ref();
         let precursor = query
@@ -586,6 +592,27 @@ impl<'db> Scorer<'db> {
             .and_then(|recalibration| recalibration.file(file_id))
     }
 
+    /// A copy of this scorer with the narrowed tolerances for `query`'s file
+    /// and acquisition group, or `None` when they equal the current ones. The
+    /// copy returns `None` for the same spectrum, so entry points can
+    /// delegate to it without recursing further.
+    fn tuned(&self, query: &ProcessedSpectrum) -> Option<Scorer<'db>> {
+        let (precursor, fragment) = self
+            .mass_recalibration
+            .as_deref()?
+            .tolerances(query.file_id, query.acquisition);
+        let precursor = precursor.filter(|tol| *tol != self.precursor_tol);
+        let fragment = fragment.filter(|tol| *tol != self.fragment_tol);
+        if precursor.is_none() && fragment.is_none() {
+            return None;
+        }
+        Some(Scorer {
+            precursor_tol: precursor.unwrap_or(self.precursor_tol),
+            fragment_tol: fragment.unwrap_or(self.fragment_tol),
+            ..self.clone()
+        })
+    }
+
     /// The spectrum as it is matched: corrected when its file has a
     /// search-time mass correction, otherwise borrowed unchanged.
     pub fn recalibrated<'a>(&self, query: &'a ProcessedSpectrum) -> Cow<'a, ProcessedSpectrum> {
@@ -604,6 +631,9 @@ impl<'db> Scorer<'db> {
             query.level, 2,
             "internal bug, trying to score a non-MS2 scan!"
         );
+        if let Some(tuned) = self.tuned(query) {
+            return tuned.score(query);
+        }
         let query = self.recalibrated(query);
         let query = query.as_ref();
         match self.chimera {
@@ -1335,6 +1365,9 @@ impl<'db> Scorer<'db> {
     /// primary search so neutral-loss selection, charge assignment, and mass
     /// calculations cannot drift between scoring and deferred annotation.
     pub fn annotate_candidate(&self, query: &ProcessedSpectrum, feature: &Feature) -> Fragments {
+        if let Some(tuned) = self.tuned(query) {
+            return tuned.annotate_candidate(query, feature);
+        }
         self.annotate_recalibrated(self.recalibrated(query).as_ref(), feature)
     }
 
@@ -1367,6 +1400,9 @@ impl<'db> Scorer<'db> {
         selected: &[bool],
     ) -> Vec<Option<Fragments>> {
         assert_eq!(features.len(), selected.len());
+        if let Some(tuned) = self.tuned(query) {
+            return tuned.annotate_ranked_candidates(query, features, selected);
+        }
         let query = self.recalibrated(query);
         let query = query.as_ref();
         if !self.chimera {

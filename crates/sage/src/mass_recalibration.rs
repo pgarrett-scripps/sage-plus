@@ -26,8 +26,16 @@
 //! Groups never pool: a group with too little data, or measured by a
 //! low-accuracy analyzer such as an ion trap, gets no correction. Precursor
 //! m/z comes from MS1 spectra, so the precursor model stays per file.
+//!
+//! With [`ToleranceMode::Auto`], the same discovery residuals also narrow the
+//! search tolerances ([`auto_tolerance`]): the precursor window per file and
+//! the fragment window per acquisition group. The half-width is a margin
+//! times the 99th percentile of absolute fit-set residuals after the fit-set
+//! model (mass errors are heavy-tailed, so a multiple of a robust sigma cuts
+//! real matches). Windows are never wider than configured, never narrower
+//! than a floor, and are kept only if they cover enough held-out residuals.
 
-use crate::mass::PROTON;
+use crate::mass::{Tolerance, PROTON};
 use crate::ml::regression::cholesky_solve;
 use crate::spectrum::{AcquisitionGroup, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
@@ -66,6 +74,29 @@ impl MassRecalibrationMode {
             Self::Off => "off",
             Self::Static => "static",
             Self::Linear => "linear",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+/// Whether search tolerances are fixed or narrowed from discovery residuals.
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToleranceMode {
+    /// Search with the configured tolerances.
+    #[default]
+    Fixed,
+    /// Narrow ppm tolerances to the validated residual spread, never beyond
+    /// the configured window.
+    Auto,
+}
+
+impl ToleranceMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fixed => "fixed",
             Self::Auto => "auto",
         }
     }
@@ -206,6 +237,8 @@ impl MassErrorModel {
 pub struct GroupMassCorrection {
     pub group: AcquisitionGroup,
     pub model: Option<MassErrorModel>,
+    /// Fragment tolerance for this group's spectra, when narrowed.
+    pub fragment_tol: Option<Tolerance>,
 }
 
 /// Per-file corrections applied during the second search pass.
@@ -216,6 +249,8 @@ pub struct FileMassCorrection {
     /// Corrections applied to fragment m/z, by acquisition group. Spectra of
     /// groups not listed are not corrected.
     pub fragment: Vec<GroupMassCorrection>,
+    /// Precursor tolerance for this file, when narrowed.
+    pub precursor_tol: Option<Tolerance>,
 }
 
 impl FileMassCorrection {
@@ -227,6 +262,11 @@ impl FileMassCorrection {
                 .fragment
                 .iter()
                 .all(|group| group.model.as_ref().is_none_or(MassErrorModel::is_identity))
+    }
+
+    /// Whether this file searches with any narrowed tolerance.
+    pub fn tunes_tolerances(&self) -> bool {
+        self.precursor_tol.is_some() || self.fragment.iter().any(|g| g.fragment_tol.is_some())
     }
 
     /// Whether any acquisition group has a non-identity fragment model.
@@ -273,6 +313,25 @@ impl MassRecalibration {
         self.files
             .get(file_id)
             .filter(|correction| !correction.is_identity())
+    }
+
+    /// Narrowed precursor and fragment tolerances for a spectrum of `file_id`
+    /// recorded in `group`, where set.
+    #[inline]
+    pub fn tolerances(
+        &self,
+        file_id: usize,
+        group: AcquisitionGroup,
+    ) -> (Option<Tolerance>, Option<Tolerance>) {
+        let Some(file) = self.files.get(file_id) else {
+            return (None, None);
+        };
+        let fragment = file
+            .fragment
+            .iter()
+            .find(|correction| correction.group == group)
+            .and_then(|correction| correction.fragment_tol);
+        (file.precursor_tol, fragment)
     }
 
     /// A copy of `spectrum` with corrected precursor and fragment m/z, or
@@ -413,6 +472,276 @@ pub struct ModelSelection {
     pub candidates: Vec<CandidateScore>,
     /// Validation residuals before (raw) and after (fit-set model).
     pub bins: Vec<ResidualBin>,
+    /// Spread of residuals after the fit-set model, used to size tolerances.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spread: Option<ResidualSpread>,
+}
+
+/// Robust spread of residuals after the model chosen on the fit set, for the
+/// fit set itself and for held-out validation PSMs. Every observation is
+/// included; no outlier cut is applied.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ResidualSpread {
+    pub fit_points: usize,
+    pub fit_center_ppm: f32,
+    /// `1.4826 * MAD` of fit-set residuals.
+    pub fit_sigma_ppm: f32,
+    pub validation_psms: usize,
+    pub validation_points: usize,
+    pub validation_center_ppm: f32,
+    /// `1.4826 * MAD` of held-out residuals.
+    pub validation_sigma_ppm: f32,
+    /// Precursor PSMs matched at a non-zero isotope error, added by
+    /// [`ResidualSpread::add_isotope_error_points`]. They size the window, as
+    /// every isotope hypothesis is searched with it, but never fit models.
+    #[serde(default)]
+    pub isotope_error_points: usize,
+    /// Fit-set residuals, used to size tolerances.
+    #[serde(skip)]
+    pub fit_residuals: Vec<f32>,
+    /// Held-out residuals, kept to measure tolerance coverage.
+    #[serde(skip)]
+    pub validation_residuals: Vec<f32>,
+}
+
+impl ResidualSpread {
+    /// Add residuals of points that took no part in model selection (such as
+    /// precursor PSMs matched at a non-zero isotope error) after `model`,
+    /// split into fit and held-out sets as model selection splits PSMs.
+    pub fn add_isotope_error_points(
+        &mut self,
+        model: Option<&MassErrorModel>,
+        points: &[MassErrorPoint],
+        validation_tenths: u64,
+    ) {
+        let finite = points
+            .iter()
+            .filter(|p| p.rt_minutes.is_finite() && p.mz.is_finite() && p.error_ppm.is_finite())
+            .copied()
+            .collect::<Vec<_>>();
+        let residual = |p: &MassErrorPoint| {
+            p.error_ppm - model.map_or(0.0, |m| m.predict_ppm(p.rt_minutes, p.mz))
+        };
+        let (fit, validation): (Vec<_>, Vec<_>) = finite
+            .into_iter()
+            .partition(|p| !is_validation(p.group, validation_tenths));
+        self.fit_points += fit.len();
+        self.validation_points += validation.len();
+        self.validation_psms += count_groups(&validation);
+        self.isotope_error_points += fit.len() + validation.len();
+        self.fit_residuals.extend(fit.iter().map(residual));
+        self.validation_residuals
+            .extend(validation.iter().map(residual));
+    }
+}
+
+fn residual_spread(
+    model: &MassErrorModel,
+    fit: &[MassErrorPoint],
+    validation: &[MassErrorPoint],
+) -> Option<ResidualSpread> {
+    let residuals = |points: &[MassErrorPoint]| {
+        points
+            .iter()
+            .map(|p| p.error_ppm - model.predict_ppm(p.rt_minutes, p.mz))
+            .collect::<Vec<_>>()
+    };
+    let fit_residuals = residuals(fit);
+    let validation_residuals = residuals(validation);
+    if fit_residuals.is_empty() || validation_residuals.is_empty() {
+        return None;
+    }
+    let (fit_center, fit_mad) = median_mad(&fit_residuals);
+    let (validation_center, validation_mad) = median_mad(&validation_residuals);
+    Some(ResidualSpread {
+        fit_points: fit_residuals.len(),
+        fit_center_ppm: fit_center,
+        fit_sigma_ppm: 1.4826 * fit_mad,
+        validation_psms: count_groups(validation),
+        validation_points: validation_residuals.len(),
+        validation_center_ppm: validation_center,
+        validation_sigma_ppm: 1.4826 * validation_mad,
+        isotope_error_points: 0,
+        fit_residuals,
+        validation_residuals,
+    })
+}
+
+/// Settings for [`auto_tolerance`].
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct AutoToleranceOptions {
+    /// Quantile of absolute fit-set residuals that sizes the window.
+    pub quantile: f32,
+    /// Multiplier on that quantile.
+    pub margin: f32,
+    /// Smallest half-width, in ppm.
+    pub floor_ppm: f32,
+    /// Held-out PSMs needed to narrow a tolerance.
+    pub min_validation_psms: usize,
+    /// Smallest fraction of held-out residuals the window must cover.
+    pub min_coverage: f32,
+}
+
+impl AutoToleranceOptions {
+    /// Precursor defaults: 1.2 x the 99th percentile, 3 ppm floor, 100
+    /// held-out PSMs, 98% held-out coverage.
+    pub fn precursor() -> Self {
+        Self {
+            quantile: 0.99,
+            margin: 1.2,
+            floor_ppm: 3.0,
+            min_validation_psms: 100,
+            min_coverage: 0.98,
+        }
+    }
+
+    /// Fragment defaults: as for precursors with a 5 ppm floor.
+    pub fn fragment() -> Self {
+        Self {
+            floor_ppm: 5.0,
+            ..Self::precursor()
+        }
+    }
+}
+
+/// A search tolerance chosen from discovery residuals.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToleranceEstimate {
+    pub configured: Tolerance,
+    /// Tolerance used by the search; equal to `configured` unless narrowed.
+    pub tolerance: Tolerance,
+    pub narrowed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+    pub quantile: f32,
+    pub margin: f32,
+    pub floor_ppm: f32,
+    /// Window center: the fit-set residual median after correction.
+    pub center_ppm: f32,
+    /// Half-width before clipping to `configured`.
+    pub half_width_ppm: f32,
+    /// `quantile` of absolute fit-set residuals around `center_ppm`.
+    pub fit_quantile_ppm: f32,
+    /// The same quantile on held-out residuals, for comparison.
+    pub validation_quantile_ppm: f32,
+    /// `1.4826 * MAD` of fit-set and held-out residuals, for reference.
+    pub fit_sigma_ppm: f32,
+    pub validation_sigma_ppm: f32,
+    pub validation_psms: usize,
+    pub validation_points: usize,
+    /// Precursor points matched at a non-zero isotope error.
+    pub isotope_error_points: usize,
+    /// Fraction of held-out residuals inside the proposed window. Every
+    /// held-out residual lies inside `configured`, as discovery searched
+    /// with it.
+    pub validation_coverage: f32,
+}
+
+impl ToleranceEstimate {
+    /// The configured tolerance, kept for `reason`.
+    pub fn unchanged(configured: Tolerance, options: AutoToleranceOptions, reason: &str) -> Self {
+        Self {
+            configured,
+            tolerance: configured,
+            narrowed: false,
+            skipped: Some(reason.into()),
+            quantile: options.quantile,
+            margin: options.margin,
+            floor_ppm: options.floor_ppm,
+            center_ppm: f32::NAN,
+            half_width_ppm: f32::NAN,
+            fit_quantile_ppm: f32::NAN,
+            validation_quantile_ppm: f32::NAN,
+            fit_sigma_ppm: f32::NAN,
+            validation_sigma_ppm: f32::NAN,
+            validation_psms: 0,
+            validation_points: 0,
+            isotope_error_points: 0,
+            validation_coverage: 1.0,
+        }
+    }
+}
+
+fn quantile_abs(values: &[f32], center: f32, q: f32) -> f32 {
+    if values.is_empty() {
+        return f32::NAN;
+    }
+    let mut deviations = values
+        .iter()
+        .map(|v| (v - center).abs())
+        .collect::<Vec<_>>();
+    let index = ((q.clamp(0.0, 1.0) * (deviations.len() - 1) as f32).ceil() as usize)
+        .min(deviations.len() - 1);
+    let (_, value, _) = deviations.select_nth_unstable_by(index, f32::total_cmp);
+    *value
+}
+
+/// Narrow a ppm tolerance to `center +/- max(margin * q, floor)`, where
+/// `center` is the fit-set residual median after the fit-set model and `q`
+/// the `quantile` of absolute fit-set residuals around it. The window is
+/// clipped to `configured`, so it never widens, and is kept only if it covers
+/// at least `min_coverage` of held-out residuals. Da and percent tolerances,
+/// selections without residuals, and too few held-out PSMs keep `configured`.
+pub fn auto_tolerance(
+    selection: &ModelSelection,
+    configured: Tolerance,
+    options: AutoToleranceOptions,
+) -> ToleranceEstimate {
+    let Tolerance::Ppm(lo, hi) = configured else {
+        return ToleranceEstimate::unchanged(configured, options, "not_ppm");
+    };
+    let Some(spread) = selection.spread.as_ref() else {
+        let reason = selection.skipped.as_deref().unwrap_or("no_residuals");
+        return ToleranceEstimate::unchanged(configured, options, reason);
+    };
+    let center = spread.fit_center_ppm;
+    let mut estimate = ToleranceEstimate {
+        center_ppm: center,
+        fit_quantile_ppm: quantile_abs(&spread.fit_residuals, center, options.quantile),
+        validation_quantile_ppm: quantile_abs(
+            &spread.validation_residuals,
+            center,
+            options.quantile,
+        ),
+        fit_sigma_ppm: spread.fit_sigma_ppm,
+        validation_sigma_ppm: spread.validation_sigma_ppm,
+        validation_psms: spread.validation_psms,
+        validation_points: spread.validation_points,
+        isotope_error_points: spread.isotope_error_points,
+        ..ToleranceEstimate::unchanged(configured, options, "")
+    };
+    estimate.skipped = None;
+    if spread.validation_psms < options.min_validation_psms {
+        estimate.skipped = Some("too_few_psms".into());
+        return estimate;
+    }
+    if !center.is_finite() || !estimate.fit_quantile_ppm.is_finite() {
+        estimate.skipped = Some("no_residuals".into());
+        return estimate;
+    }
+    let half = (options.margin * estimate.fit_quantile_ppm).max(options.floor_ppm);
+    estimate.half_width_ppm = half;
+    let new_lo = (center - half).max(lo);
+    let new_hi = (center + half).min(hi);
+    if new_hi <= new_lo {
+        estimate.skipped = Some("empty_window".into());
+        return estimate;
+    }
+    let inside = spread
+        .validation_residuals
+        .iter()
+        .filter(|&&r| r >= new_lo && r <= new_hi)
+        .count();
+    estimate.validation_coverage = inside as f32 / spread.validation_residuals.len() as f32;
+    if estimate.validation_coverage < options.min_coverage {
+        estimate.skipped = Some("low_coverage".into());
+        return estimate;
+    }
+    if new_lo > lo || new_hi < hi {
+        estimate.tolerance = Tolerance::Ppm(new_lo, new_hi);
+        estimate.narrowed = true;
+    }
+    estimate
 }
 
 impl ModelSelection {
@@ -439,6 +768,9 @@ pub struct GroupModelSelection {
     pub spectra: usize,
     #[serde(flatten)]
     pub selection: ModelSelection,
+    /// Fragment tolerance chosen for this group (`tolerance_mode: auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<ToleranceEstimate>,
 }
 
 /// Select a fragment model for each acquisition group independently.
@@ -473,6 +805,7 @@ pub fn select_group_models(
                 group,
                 spectra,
                 selection,
+                tolerance: None,
             }
         })
         .collect()
@@ -506,11 +839,10 @@ pub fn select_model(points: &[MassErrorPoint], options: RecalibrationOptions) ->
         .filter(|p| p.rt_minutes.is_finite() && p.mz.is_finite() && p.error_ppm.is_finite())
         .collect::<Vec<_>>();
     let psms = count_groups(&finite);
-    if options.max_kind == MassModelKind::None {
-        return ModelSelection::skipped(psms, finite.len(), "disabled");
-    }
+    let disabled = options.max_kind == MassModelKind::None;
     if psms < options.min_static_psms {
-        return ModelSelection::skipped(psms, finite.len(), "too_few_psms");
+        let reason = if disabled { "disabled" } else { "too_few_psms" };
+        return ModelSelection::skipped(psms, finite.len(), reason);
     }
 
     let (fit, validation): (Vec<_>, Vec<_>) = finite
@@ -520,6 +852,7 @@ pub fn select_model(points: &[MassErrorPoint], options: RecalibrationOptions) ->
     if fit.is_empty() || validation.is_empty() {
         return ModelSelection::skipped(psms, finite.len(), "empty_split");
     }
+    let (fit_all, validation_all) = (fit.clone(), validation.clone());
 
     // Remove grossly wrong observations around the fit-set median.
     let center = median(&fit.iter().map(|p| p.error_ppm).collect::<Vec<_>>());
@@ -544,7 +877,14 @@ pub fn select_model(points: &[MassErrorPoint], options: RecalibrationOptions) ->
         skipped: None,
         candidates: Vec::new(),
         bins: Vec::new(),
+        spread: None,
     };
+    if disabled {
+        // No correction, but the residual spread still sizes tolerances.
+        selection.skipped = Some("disabled".into());
+        selection.spread = residual_spread(&MassErrorModel::none(), &fit_all, &validation_all);
+        return selection;
+    }
     if fit_psms < options.min_static_psms || validation.is_empty() {
         selection.skipped = Some("too_few_inliers".into());
         return selection;
@@ -665,6 +1005,7 @@ pub fn select_model(points: &[MassErrorPoint], options: RecalibrationOptions) ->
     // Report validation residuals of the fit-set model, then refit the chosen
     // form on every inlier.
     selection.bins = residual_bins(&current, &validation, &rt_bins, &mz_bins);
+    selection.spread = residual_spread(&current, &fit_all, &validation_all);
     if current.kind == MassModelKind::None {
         return selection;
     }
