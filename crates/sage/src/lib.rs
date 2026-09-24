@@ -10,6 +10,7 @@ pub mod isotopes;
 pub mod lfq;
 pub mod mass;
 pub mod mass_calibration;
+pub mod mass_recalibration;
 pub mod ml;
 pub mod modification;
 pub mod motif;

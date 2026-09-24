@@ -162,6 +162,7 @@ fn scorer<'db>(database: &'db IndexedDatabase, s: &SpectrumIndexSettings) -> Sco
         annotate_matches: false,
         mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     }
 }
 

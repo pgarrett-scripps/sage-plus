@@ -130,8 +130,16 @@ impl Runner {
 
     fn spectrum_index_builder(&self, db_params: &Parameters) -> SpectrumIndexBuilder {
         let settings = SpectrumIndexSettings {
-            precursor_tol: self.parameters.precursor_tol,
-            fragment_tol: self.parameters.fragment_tol,
+            precursor_tol: if self.mass_recalibration_enabled() {
+                super::search::widen_for_recalibration(self.parameters.precursor_tol)
+            } else {
+                self.parameters.precursor_tol
+            },
+            fragment_tol: if self.mass_recalibration_enabled() {
+                super::search::widen_for_recalibration(self.parameters.fragment_tol)
+            } else {
+                self.parameters.fragment_tol
+            },
             min_isotope_err: self.parameters.isotope_errors.0,
             max_isotope_err: self.parameters.isotope_errors.1,
             min_precursor_charge: self.parameters.precursor_charge.0,

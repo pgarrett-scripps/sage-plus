@@ -135,6 +135,7 @@ fn main() {
         annotate_matches: false,
         mass_shift_ppm: 50.0,
         score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
     };
 
     if std::env::var_os("SAGE_BENCH_DETAILS").is_some() {

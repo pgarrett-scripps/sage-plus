@@ -43,7 +43,7 @@ impl Runner {
         }
     }
 
-    fn scorer(&self) -> Scorer<'_> {
+    pub(super) fn scorer(&self) -> Scorer<'_> {
         Scorer {
             db: &self.database,
             precursor_tol: self.parameters.precursor_tol,
@@ -61,6 +61,7 @@ impl Runner {
             annotate_matches: false,
             mass_shift_ppm: self.parameters.mass_shift_ppm,
             score_type: self.parameters.score_type,
+            mass_recalibration: self.mass_recalibration_models(),
         }
     }
 
@@ -520,6 +521,12 @@ impl Runner {
                     .iter()
                     .any(|file| file.precursor.is_some() || file.fragment.is_some()),
                 mass_alignment_files,
+                mass_recalibration: self.mass_recalibration_enabled().then(|| {
+                    MassRecalibrationRunStats {
+                        mode: self.parameters.mass_recalibration.as_str().into(),
+                        files: self.mass_recalibration_stats(),
+                    }
+                }),
                 retention_time_prediction_enabled: self.parameters.predict_rt,
                 retention_time_model_fitted,
                 retention_time_features: format!(

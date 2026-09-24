@@ -1,5 +1,226 @@
 use super::*;
 
+/// Most MS2 spectra per file searched in the discovery pass. Spectra are
+/// taken at an even stride, so the sample spans the whole gradient.
+const MAX_DISCOVERY_SPECTRA: usize = 25_000;
+
+/// Largest correction, in ppm, a model may apply for `tolerance`: the
+/// window half-width for ppm tolerances, or the Da half-width at m/z 2000.
+pub(super) fn recalibration_cap_ppm(tolerance: Tolerance) -> Option<f32> {
+    match tolerance {
+        Tolerance::Ppm(lo, hi) => Some(lo.abs().max(hi.abs())),
+        Tolerance::Da(lo, hi) => Some(lo.abs().max(hi.abs()) * 1e6 / 2000.0),
+        Tolerance::Pct(_, _) => None,
+    }
+}
+
+/// Widen a tolerance by its own half-width on both sides, so a window that
+/// is later moved by at most the recalibration cap stays inside it.
+pub(super) fn widen_for_recalibration(tolerance: Tolerance) -> Tolerance {
+    match tolerance {
+        Tolerance::Ppm(lo, hi) => {
+            let m = lo.abs().max(hi.abs());
+            Tolerance::Ppm(lo - m, hi + m)
+        }
+        Tolerance::Da(lo, hi) => {
+            let m = lo.abs().max(hi.abs());
+            Tolerance::Da(lo - m, hi + m)
+        }
+        other => other,
+    }
+}
+
+impl Runner {
+    /// Whether the search runs a discovery pass and recalibrates masses.
+    pub(super) fn mass_recalibration_enabled(&self) -> bool {
+        self.parameters.mass_recalibration != MassRecalibrationMode::Off
+            && !self.parameters.wide_window
+    }
+
+    /// Corrections selected so far, indexed by file.
+    pub(super) fn mass_recalibration_models(&self) -> Option<Arc<MassRecalibration>> {
+        let stats = self
+            .mass_recalibration
+            .lock()
+            .expect("mass recalibration lock");
+        if stats.iter().all(|file| file.correction.is_identity()) {
+            return None;
+        }
+        let mut files = vec![FileMassCorrection::default(); self.parameters.mzml_paths.len()];
+        for file in stats.iter() {
+            if let Some(slot) = files.get_mut(file.file_id) {
+                *slot = file.correction.clone();
+            }
+        }
+        Some(Arc::new(MassRecalibration { files }))
+    }
+
+    pub(super) fn mass_recalibration_stats(&self) -> Vec<MassRecalibrationFileStats> {
+        let mut stats = self
+            .mass_recalibration
+            .lock()
+            .expect("mass recalibration lock")
+            .clone();
+        stats.sort_by_key(|file| file.file_id);
+        stats
+    }
+
+    /// Discovery pass for every file in a batch: search an even sample of
+    /// each file's MS2 spectra with observed masses, keep rank-1 targets at
+    /// 1% Poisson spectrum q-value, and select per-file precursor and
+    /// fragment models. Models are fitted on targets only and are applied to
+    /// every spectrum of the file, so targets and decoys are treated alike.
+    fn discover_mass_corrections(&self, scorer: &Scorer, spectra: &[ProcessedSpectrum]) {
+        let mut file_ids = spectra
+            .iter()
+            .filter(|spectrum| spectrum.level == 2)
+            .map(|spectrum| spectrum.file_id)
+            .collect::<Vec<_>>();
+        file_ids.sort_unstable();
+        file_ids.dedup();
+        let max_kind = self.parameters.mass_recalibration.max_kind();
+
+        for file_id in file_ids {
+            let start = Instant::now();
+            let candidates = spectra
+                .iter()
+                .filter(|spectrum| {
+                    spectrum.file_id == file_id
+                        && spectrum.level == 2
+                        && spectrum.masses.len() >= self.parameters.min_peaks
+                })
+                .collect::<Vec<_>>();
+            let stride = candidates.len().div_ceil(MAX_DISCOVERY_SPECTRA).max(1);
+            let sample = candidates.into_iter().step_by(stride).collect::<Vec<_>>();
+            let mut features = sample
+                .par_iter()
+                .enumerate()
+                .flat_map_iter(|(index, spectrum)| {
+                    scorer
+                        .score(spectrum)
+                        .into_iter()
+                        .filter(|feature| feature.rank == 1)
+                        .map(move |feature| (index, feature))
+                })
+                .collect::<Vec<_>>();
+            features.sort_unstable_by(|left, right| {
+                left.1
+                    .poisson
+                    .total_cmp(&right.1.poisson)
+                    .then_with(|| left.0.cmp(&right.0))
+            });
+            let (indices, mut features): (Vec<_>, Vec<_>) = features.into_iter().unzip();
+            sage_core::ml::qvalue::spectrum_q_value_by(&mut features, |feature| feature.poisson);
+            let confident = indices
+                .into_iter()
+                .zip(features.iter())
+                .filter(|(_, feature)| feature.label == 1 && feature.spectrum_q <= 0.01)
+                .collect::<Vec<_>>();
+
+            let precursor_points = confident
+                .iter()
+                .filter(|(_, feature)| {
+                    feature.isotope_error == 0.0 && feature.mass_offset.is_none()
+                })
+                .map(|(_, feature)| {
+                    let z = feature.charge.max(1) as f32;
+                    let observed = feature.expmass / z + PROTON;
+                    let theoretical = feature.calcmass / z + PROTON;
+                    MassErrorPoint {
+                        rt_minutes: feature.rt,
+                        mz: observed,
+                        error_ppm: (observed - theoretical) * 1e6 / theoretical,
+                        group: stable_hash(&feature.spec_id),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let fragment_points = confident
+                .par_iter()
+                .filter(|(_, feature)| feature.mass_offset.is_none())
+                .flat_map_iter(|(index, feature)| {
+                    let fragments = scorer.annotate_candidate(sample[*index], feature);
+                    let group = stable_hash(&feature.spec_id);
+                    let rt = feature.rt;
+                    fragments
+                        .mz_experimental
+                        .into_iter()
+                        .zip(fragments.mz_calculated)
+                        .map(move |(observed, theoretical)| MassErrorPoint {
+                            rt_minutes: rt,
+                            mz: observed,
+                            error_ppm: (observed - theoretical) * 1e6 / theoretical,
+                            group,
+                        })
+                })
+                .collect::<Vec<_>>();
+
+            let options = |cap: Option<f32>, min_mz_span: f32| RecalibrationOptions {
+                max_kind: if cap.is_some() {
+                    max_kind
+                } else {
+                    MassModelKind::None
+                },
+                max_abs_ppm: cap.unwrap_or(0.0),
+                min_mz_span,
+                ..RecalibrationOptions::default()
+            };
+            // Precursor corrections require a ppm window, as in post-hoc alignment.
+            let precursor_cap = match self.parameters.precursor_tol {
+                Tolerance::Ppm(_, _) => recalibration_cap_ppm(self.parameters.precursor_tol),
+                _ => None,
+            };
+            let precursor = select_model(&precursor_points, options(precursor_cap, 100.0));
+            let fragment = select_model(
+                &fragment_points,
+                options(recalibration_cap_ppm(self.parameters.fragment_tol), 200.0),
+            );
+            let correction = FileMassCorrection {
+                precursor: precursor.model.clone(),
+                fragment: fragment.model.clone(),
+            };
+            let describe = |selection: &ModelSelection| match &selection.model {
+                Some(model) => format!(
+                    "{:?}/{:?} ({} parameters, offset {:.2} ppm)",
+                    model.kind,
+                    model.axes,
+                    model.parameters(),
+                    model.intercept_ppm
+                )
+                .to_lowercase(),
+                None => format!(
+                    "none ({})",
+                    selection
+                        .skipped
+                        .as_deref()
+                        .unwrap_or("no validated improvement")
+                ),
+            };
+            info!(
+                "- file {} mass recalibration: {} of {} spectra searched, {} confident PSMs; precursor {}; fragment {} [{} ms]",
+                file_id,
+                sample.len(),
+                sample.len() * stride,
+                confident.len(),
+                describe(&precursor),
+                describe(&fragment),
+                start.elapsed().as_millis(),
+            );
+            self.mass_recalibration
+                .lock()
+                .expect("mass recalibration lock")
+                .push(MassRecalibrationFileStats {
+                    file_id,
+                    discovery_spectra: sample.len(),
+                    discovery_psms: confident.len(),
+                    discovery_ms: start.elapsed().as_millis() as u64,
+                    precursor,
+                    fragment,
+                    correction,
+                });
+        }
+    }
+}
+
 impl Runner {
     pub(super) fn spectrum_fdr(&self, features: &mut Vec<Feature>) -> usize {
         if sage_core::ml::linear_discriminant::score_psms(features, self.parameters.precursor_tol)
@@ -27,9 +248,24 @@ impl Runner {
         features: &mut [Feature],
     ) -> Vec<MassAlignmentFileStats> {
         let mut diagnostics = Vec::with_capacity(self.parameters.mzml_paths.len());
+        // Files corrected at search time already carry residual errors in the
+        // aligned columns; post-hoc alignment only handles the rest.
+        let recalibration = self.mass_recalibration_models();
+        let corrected = |file_id: usize| {
+            let correction = recalibration.as_deref().and_then(|r| r.file(file_id));
+            (
+                correction.is_some_and(|c| c.precursor.as_ref().is_some_and(|m| !m.is_identity())),
+                correction.is_some_and(|c| c.fragment.as_ref().is_some_and(|m| !m.is_identity())),
+            )
+        };
         features.par_iter_mut().for_each(|feature| {
-            feature.aligned_delta_mass = feature.delta_mass;
-            feature.aligned_average_ppm = feature.average_ppm;
+            let (precursor, fragment) = corrected(feature.file_id);
+            if !precursor {
+                feature.aligned_delta_mass = feature.delta_mass;
+            }
+            if !fragment {
+                feature.aligned_average_ppm = feature.average_ppm;
+            }
         });
 
         let fit_options = FitOptions {
@@ -65,25 +301,35 @@ impl Runner {
                 })
                 .collect::<Vec<_>>();
 
-            let precursor_fit = matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _))
-                .then(|| fit_mass_calibration(&precursor_points, fit_options))
+            let (precursor_corrected, fragment_corrected) = corrected(file_id);
+            let precursor_fit = (!precursor_corrected
+                && matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)))
+            .then(|| fit_mass_calibration(&precursor_points, fit_options))
+            .flatten();
+            let fragment_fit = (!fragment_corrected)
+                .then(|| fit_mass_calibration(&fragment_points, fit_options))
                 .flatten();
-            let fragment_fit = fit_mass_calibration(&fragment_points, fit_options);
             diagnostics.push(MassAlignmentFileStats {
                 file_id,
                 calibration_psms: calibration_psms.len(),
                 precursor: precursor_fit.map(|fit| fit.model),
                 fragment: fragment_fit.map(|fit| fit.model),
                 precursor_skip_reason: precursor_fit.is_none().then(|| {
-                    if matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)) {
+                    if precursor_corrected {
+                        "corrected by search-time mass recalibration".into()
+                    } else if matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)) {
                         "insufficient finite high-confidence observations".into()
                     } else {
                         "precursor alignment requires ppm tolerance".into()
                     }
                 }),
-                fragment_skip_reason: fragment_fit
-                    .is_none()
-                    .then(|| "insufficient finite high-confidence observations".into()),
+                fragment_skip_reason: fragment_fit.is_none().then(|| {
+                    if fragment_corrected {
+                        "corrected by search-time mass recalibration".into()
+                    } else {
+                        "insufficient finite high-confidence observations".into()
+                    }
+                }),
             });
 
             if let Some(fit) = precursor_fit {
@@ -240,7 +486,16 @@ impl Runner {
             }
             None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
         };
-        let (features, repeated_spectrum_psms) = self.search_processed_spectra(scorer, &spectra.1);
+        let (features, repeated_spectrum_psms) = if self.mass_recalibration_enabled() {
+            self.discover_mass_corrections(scorer, &spectra.1);
+            let recalibrated = Scorer {
+                mass_recalibration: self.mass_recalibration_models(),
+                ..self.scorer()
+            };
+            self.search_processed_spectra(&recalibrated, &spectra.1)
+        } else {
+            self.search_processed_spectra(scorer, &spectra.1)
+        };
         Ok(self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms))
     }
 
