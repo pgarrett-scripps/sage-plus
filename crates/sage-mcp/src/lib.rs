@@ -749,23 +749,7 @@ impl State {
         let q_column = args.dataset.q_column();
         let (rows, scanned_rows, truncated) =
             sage_cloudpath::parquet::scan_json_rows(&path, scan_limit, limit, |row| {
-                let text = |name: &str| row.get(name).and_then(serde_json::Value::as_str);
-                !args.max_q_value.is_some_and(|max| {
-                    row.get(q_column)
-                        .and_then(serde_json::Value::as_f64)
-                        .is_none_or(|q| q > max)
-                }) && !args.protein.as_deref().is_some_and(|needle| {
-                    !text("proteins").is_some_and(|value| value.contains(needle))
-                        && !text("protein").is_some_and(|value| value.contains(needle))
-                }) && !args.peptide.as_deref().is_some_and(|needle| {
-                    !text("peptide").is_some_and(|value| value.contains(needle))
-                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
-                        && !text("stripped_peptide").is_some_and(|value| value.contains(needle))
-                }) && !args.modification.as_deref().is_some_and(|needle| {
-                    !text("modification").is_some_and(|value| value.contains(needle))
-                        && !text("modified_peptide").is_some_and(|value| value.contains(needle))
-                        && !text("proforma").is_some_and(|value| value.contains(needle))
-                })
+                result_row_matches(&args, q_column, row)
             })?;
         Ok(ResultQuery {
             job_id: args.job_id,
@@ -792,6 +776,50 @@ impl State {
             _ => anyhow::bail!("unknown job resource `{kind}`"),
         }
     }
+}
+
+/// Row predicate for `query_results`. Datasets with a `modification` column
+/// (PTM and protein sites) match on it; PSM rows carry their modifications
+/// only as bracketed tags in `peptide` (`S[Phospho]`, `C[+57.0216]`), and
+/// spectral-library rows in `modified_peptide`/`proforma`.
+fn result_row_matches(
+    args: &QueryResultsArgs,
+    q_column: &str,
+    row: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    let text = |name: &str| row.get(name).and_then(serde_json::Value::as_str);
+    !args.max_q_value.is_some_and(|max| {
+        row.get(q_column)
+            .and_then(serde_json::Value::as_f64)
+            .is_none_or(|q| q > max)
+    }) && !args.protein.as_deref().is_some_and(|needle| {
+        !text("proteins").is_some_and(|value| value.contains(needle))
+            && !text("protein").is_some_and(|value| value.contains(needle))
+    }) && !args.peptide.as_deref().is_some_and(|needle| {
+        !text("peptide").is_some_and(|value| value.contains(needle))
+            && !text("modified_peptide").is_some_and(|value| value.contains(needle))
+            && !text("stripped_peptide").is_some_and(|value| value.contains(needle))
+    }) && !args.modification.as_deref().is_some_and(|needle| {
+        if let Some(modification) = text("modification") {
+            return !modification.contains(needle);
+        }
+        !text("peptide").is_some_and(|peptide| {
+            modification_tags(peptide).any(|modification| modification.contains(needle))
+        }) && !text("modified_peptide").is_some_and(|value| value.contains(needle))
+            && !text("proforma").is_some_and(|value| value.contains(needle))
+    })
+}
+
+/// Bracketed modification tags, brackets included, in a Sage peptide string.
+fn modification_tags(peptide: &str) -> impl Iterator<Item = &str> {
+    let mut rest = peptide;
+    std::iter::from_fn(move || {
+        let start = rest.find('[')?;
+        let end = start + rest[start..].find(']')?;
+        let tag = &rest[start..=end];
+        rest = &rest[end + 1..];
+        Some(tag)
+    })
 }
 
 fn resolve_existing_under(root: &Path, value: &str) -> anyhow::Result<PathBuf> {
@@ -1379,7 +1407,7 @@ impl SageMcp {
     }
 
     #[tool(
-        description = "Query a bounded number of TSV PSM, PTM-site, or protein-site results with optional q-value and text filters"
+        description = "Query a bounded number of Parquet PSM, PTM-site, protein-site, or spectral-library results with optional q-value, protein, peptide, and modification filters"
     )]
     async fn query_results(
         &self,

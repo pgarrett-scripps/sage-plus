@@ -482,3 +482,60 @@ fn ratios_avoid_division_by_zero() {
     assert_eq!(ratio(1, 0), None);
     assert_eq!(percent(1, 0), None);
 }
+
+#[test]
+fn modification_filter_matches_psm_peptide_tags() {
+    let args = |modification: &str| QueryResultsArgs {
+        job_id: "job".into(),
+        dataset: ResultDataset::Psms,
+        max_q_value: None,
+        protein: None,
+        peptide: None,
+        modification: Some(modification.into()),
+        limit: None,
+        scan_limit: None,
+    };
+    let row = |value: serde_json::Value| value.as_object().unwrap().clone();
+    // results.sage.parquet stores modifications only inside `peptide`.
+    let psm = row(serde_json::json!({
+        "peptide": "PEPS[Phospho]TIDEC[+57.0216]K",
+        "stripped_peptide": "PEPSTIDECK",
+        "spectrum_q": 0.001,
+    }));
+    for needle in ["Phospho", "[Phospho]", "+57.0216", "57.02"] {
+        assert!(
+            result_row_matches(&args(needle), "spectrum_q", &psm),
+            "{needle}"
+        );
+    }
+    // Residue letters outside the tags are not modifications.
+    for needle in ["Oxidation", "PEP", "K"] {
+        assert!(
+            !result_row_matches(&args(needle), "spectrum_q", &psm),
+            "{needle}"
+        );
+    }
+    let unmodified = row(serde_json::json!({"peptide": "PEPTIDEK", "spectrum_q": 0.001}));
+    assert!(!result_row_matches(
+        &args("Phospho"),
+        "spectrum_q",
+        &unmodified
+    ));
+
+    // Site datasets keep matching on their dedicated column only.
+    let site = row(serde_json::json!({
+        "peptide": "PEPS[Phospho]M[Oxidation]K",
+        "modification": "Oxidation",
+        "localization_q_value": 0.01,
+    }));
+    assert!(result_row_matches(
+        &args("Oxidation"),
+        "localization_q_value",
+        &site
+    ));
+    assert!(!result_row_matches(
+        &args("Phospho"),
+        "localization_q_value",
+        &site
+    ));
+}
