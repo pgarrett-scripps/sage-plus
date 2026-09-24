@@ -121,9 +121,7 @@ impl SpectrumIndexBuilder {
     pub fn add(&mut self, spectra: &[ProcessedSpectrum]) {
         let local = spectra
             .par_iter()
-            .filter(|spectrum| {
-                spectrum.masses.len() >= self.settings.min_peaks && spectrum.level == 2
-            })
+            .filter(|spectrum| spectrum.is_searchable(self.settings.min_peaks))
             .map(|spectrum| self.local_spectrum(spectrum))
             .collect::<Vec<_>>();
 
