@@ -577,8 +577,8 @@ then S or T. The second is a basophilic kinase motif, and the last is a CaaX box
 cysteine four residues from the protein C-terminus.
 
 A site must be written in canonical form, which the error message prints. Classes
-list residues in alphabetical order, and exclusions such as `{P}` are used where they
-are shorter. The canonical string is the site key in preview output.
+list residues in the order `ACDEFGHIKLMNPQRSTVWYUO` (alphabetical for the standard
+residues, then U and O), and exclusions such as `{P}` are used where they are shorter. The canonical string is the site key in preview output.
 Motifs are allowed only in named definitions. A legacy residue-keyed section rejects
 them.
 
@@ -586,7 +586,9 @@ Motifs are evaluated against each peptide's source protein, so a motif may exten
 past either end of the peptide. `AANK` from `…AANKST…` carries a sequon although S
 is not part of the peptide. A peptide shared by several proteins is eligible at a
 position if any occurrence matches. Protein coordinates, library records, and site
-reports keep each occurrence separately. When no protein is known, as for peptide
+reports keep each occurrence separately. The `<` and `>` anchors follow each
+occurrence's protein coordinates, so a peptide shared between a protein terminus and
+a protein interior keeps its terminal sites. When no protein is known, as for peptide
 TSV input, only the peptide sequence is matched. Letters such as `X` in the FASTA
 match `x` and exclusions but no listed residue.
 
@@ -594,7 +596,11 @@ Generated decoys carry the sites of their target, mirrored as the decoy sequence
 reversed. The target and decoy search spaces are therefore the same size, and
 localization of a decoy considers the mirrored target sites. With
 `generate_decoys: false`, decoy proteins from the FASTA are matched literally, like
-any other protein.
+any other protein. Decoy rows in a peptide TSV have no protein, and at search time
+they cannot be told apart from decoys generated from peptide TSV targets. They are
+therefore treated as reversed targets as well: the motif is matched on the reversed
+decoy sequence and the sites are mirrored. A decoy row `GTGNAK` carries HexNAc at its
+N because its reversal `GANGTK` holds a sequon; a decoy row `GANGTK` carries none.
 
 Motif sites follow the same rules as other explicit sites. They share `max_count` and
 the variable modification limits, work for static, indexed variable, and
