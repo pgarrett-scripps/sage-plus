@@ -19,10 +19,17 @@
 //! and validation sets. A more complex model replaces a simpler one only when
 //! its median absolute validation residual improves by a set fraction and no
 //! RT or m/z tercile of the validation set gets worse.
+//!
+//! Fragment models are selected separately for each acquisition group
+//! (analyzer and activation, see [`AcquisitionGroup`]) of a file, because a
+//! hybrid method can record MS2 spectra with analyzers whose biases differ.
+//! Groups never pool: a group with too little data, or measured by a
+//! low-accuracy analyzer such as an ion trap, gets no correction. Precursor
+//! m/z comes from MS1 spectra, so the precursor model stays per file.
 
 use crate::mass::PROTON;
 use crate::ml::regression::cholesky_solve;
-use crate::spectrum::ProcessedSpectrum;
+use crate::spectrum::{AcquisitionGroup, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
 
 /// How much search-time mass recalibration a run may apply.
@@ -194,13 +201,21 @@ impl MassErrorModel {
     }
 }
 
+/// Fragment correction for the MS2 spectra of one acquisition group.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GroupMassCorrection {
+    pub group: AcquisitionGroup,
+    pub model: Option<MassErrorModel>,
+}
+
 /// Per-file corrections applied during the second search pass.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FileMassCorrection {
     /// Correction applied to precursor m/z.
     pub precursor: Option<MassErrorModel>,
-    /// Correction applied to fragment m/z, as a function of fragment m/z.
-    pub fragment: Option<MassErrorModel>,
+    /// Corrections applied to fragment m/z, by acquisition group. Spectra of
+    /// groups not listed are not corrected.
+    pub fragment: Vec<GroupMassCorrection>,
 }
 
 impl FileMassCorrection {
@@ -210,8 +225,25 @@ impl FileMassCorrection {
             .is_none_or(MassErrorModel::is_identity)
             && self
                 .fragment
-                .as_ref()
-                .is_none_or(MassErrorModel::is_identity)
+                .iter()
+                .all(|group| group.model.as_ref().is_none_or(MassErrorModel::is_identity))
+    }
+
+    /// Whether any acquisition group has a non-identity fragment model.
+    pub fn corrects_fragments(&self) -> bool {
+        self.fragment
+            .iter()
+            .any(|group| group.model.as_ref().is_some_and(|m| !m.is_identity()))
+    }
+
+    /// The fragment model for spectra of `group`, if any.
+    #[inline]
+    pub fn fragment_model(&self, group: AcquisitionGroup) -> Option<&MassErrorModel> {
+        self.fragment
+            .iter()
+            .find(|correction| correction.group == group)
+            .and_then(|correction| correction.model.as_ref())
+            .filter(|model| !model.is_identity())
     }
 
     #[inline]
@@ -222,9 +254,8 @@ impl FileMassCorrection {
     }
 
     #[inline]
-    pub fn fragment_ppm(&self, rt_minutes: f32, mz: f32) -> f32 {
-        self.fragment
-            .as_ref()
+    pub fn fragment_ppm(&self, group: AcquisitionGroup, rt_minutes: f32, mz: f32) -> f32 {
+        self.fragment_model(group)
             .map_or(0.0, |model| model.predict_ppm(rt_minutes, mz))
     }
 }
@@ -257,7 +288,7 @@ impl MassRecalibration {
                 precursor.mz = model.correct_mz(precursor.mz, rt);
             }
         }
-        if let Some(model) = correction.fragment.as_ref().filter(|m| !m.is_identity()) {
+        if let Some(model) = correction.fragment_model(spectrum.acquisition) {
             for (mass, &charge) in out.masses.iter_mut().zip(&spectrum.charges) {
                 let z = charge.max(1) as f32;
                 let mz = *mass / z + PROTON;
@@ -385,7 +416,7 @@ pub struct ModelSelection {
 }
 
 impl ModelSelection {
-    fn skipped(psms: usize, points: usize, reason: &str) -> Self {
+    pub fn skipped(psms: usize, points: usize, reason: &str) -> Self {
         Self {
             psms,
             points,
@@ -397,6 +428,54 @@ impl ModelSelection {
     pub fn kind(&self) -> MassModelKind {
         self.model.as_ref().map_or(MassModelKind::None, |m| m.kind)
     }
+}
+
+/// Model selection for the fragment spectra of one acquisition group.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GroupModelSelection {
+    #[serde(flatten)]
+    pub group: AcquisitionGroup,
+    /// Discovery spectra searched in this group.
+    pub spectra: usize,
+    #[serde(flatten)]
+    pub selection: ModelSelection,
+}
+
+/// Select a fragment model for each acquisition group independently.
+/// `groups` lists every group seen in the file with its discovery spectrum
+/// count, so groups without confident PSMs are still reported. Groups
+/// measured by a low-accuracy analyzer are skipped.
+pub fn select_group_models(
+    points: &[(AcquisitionGroup, MassErrorPoint)],
+    groups: &[(AcquisitionGroup, usize)],
+    options: RecalibrationOptions,
+) -> Vec<GroupModelSelection> {
+    let mut groups = groups.to_vec();
+    groups.sort_unstable();
+    groups
+        .into_iter()
+        .map(|(group, spectra)| {
+            let members = points
+                .iter()
+                .filter(|(g, _)| *g == group)
+                .map(|(_, point)| *point)
+                .collect::<Vec<_>>();
+            let selection = if group.analyzer.is_low_accuracy() {
+                ModelSelection::skipped(
+                    count_groups(&members),
+                    members.len(),
+                    "low_accuracy_analyzer",
+                )
+            } else {
+                select_model(&members, options)
+            };
+            GroupModelSelection {
+                group,
+                spectra,
+                selection,
+            }
+        })
+        .collect()
 }
 
 /// FNV-1a hash of a string, used to split PSMs deterministically.

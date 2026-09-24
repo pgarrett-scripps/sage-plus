@@ -5,7 +5,7 @@ use mzdata::io::MzMLbReader as MzMLbReaderImpl;
 use mzdata::prelude::{IonMobilityMeasure, PrecursorSelection, SpectrumLike};
 use mzdata::spectrum::{RawSpectrum as MzDataSpectrum, SignalContinuity};
 use sage_core::mass::Tolerance;
-use sage_core::spectrum::{Precursor, RawSpectrum, Representation};
+use sage_core::spectrum::{AcquisitionGroup, Precursor, RawSpectrum, Representation};
 
 pub struct MzMLbReader {
     file_id: usize,
@@ -54,6 +54,12 @@ impl MzMLbReader {
                     .map(|scan| scan.injection_time)
                     .unwrap_or_default();
                 let scan_mobility = spectrum.ion_mobility().map(|value| value as f32);
+                let acquisition = spectrum
+                    .acquisition()
+                    .first_scan()
+                    .and_then(|scan| scan.filter_string())
+                    .map(|filter| AcquisitionGroup::from_thermo_filter(&filter))
+                    .unwrap_or_default();
                 let representation = match spectrum.signal_continuity() {
                     SignalContinuity::Centroid => Representation::Centroid,
                     SignalContinuity::Profile | SignalContinuity::Unknown => {
@@ -118,6 +124,7 @@ impl MzMLbReader {
                     intensity: raw.intensities().to_vec(),
                     fragment_charges,
                     mobility: None,
+                    acquisition,
                 }
             })
             .collect())

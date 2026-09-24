@@ -1,7 +1,7 @@
 use opentfraw::{iter_spectra, PrecursorInfo, RawFileReader, ScanParams, SpectrumRecord};
 use sage_core::{
     mass::Tolerance,
-    spectrum::{Precursor, RawSpectrum, Representation},
+    spectrum::{AcquisitionGroup, Precursor, RawSpectrum, Representation},
 };
 use std::{fs::File, io::BufReader, path::Path};
 
@@ -106,6 +106,11 @@ impl ThermoRawReader {
 
     fn convert(&self, record: SpectrumRecord) -> RawSpectrum {
         let ms_level = record.ms_level;
+        let acquisition = record
+            .filter
+            .as_deref()
+            .map(AcquisitionGroup::from_thermo_filter)
+            .unwrap_or_default();
         let precursor = record.precursor.and_then(|value| {
             // MS3 reporter-ion quantification needs only the link to the MS2
             // scan, which the trailer keeps even when the m/z is unknown.
@@ -148,6 +153,7 @@ impl ThermoRawReader {
             intensity: record.intensity,
             fragment_charges: None,
             mobility: None,
+            acquisition,
         }
     }
 }

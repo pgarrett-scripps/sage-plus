@@ -17,15 +17,16 @@ use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::mass_recalibration::{
-    select_model, stable_hash, FileMassCorrection, MassErrorPoint, MassModelKind,
-    MassRecalibration, MassRecalibrationMode, ModelSelection, RecalibrationOptions,
+    select_group_models, select_model, stable_hash, FileMassCorrection, GroupMassCorrection,
+    MassErrorPoint, MassModelKind, MassRecalibration, MassRecalibrationMode, ModelSelection,
+    RecalibrationOptions,
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
 use sage_core::spectral_library::{
     self, LibrarySelection, SpectralLibraryFormat, SpectralLibraryStrategy,
 };
-use sage_core::spectrum::{ProcessedSpectrum, SpectrumProcessor};
+use sage_core::spectrum::{AcquisitionGroup, ProcessedSpectrum, SpectrumProcessor};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufWriter, Write};
@@ -360,7 +361,8 @@ pub struct MassRecalibrationFileStats {
     pub discovery_psms: usize,
     pub discovery_ms: u64,
     pub precursor: sage_core::mass_recalibration::ModelSelection,
-    pub fragment: sage_core::mass_recalibration::ModelSelection,
+    /// Fragment models, one per acquisition group (analyzer and activation).
+    pub fragment: Vec<sage_core::mass_recalibration::GroupModelSelection>,
     #[serde(skip)]
     pub correction: sage_core::mass_recalibration::FileMassCorrection,
 }
