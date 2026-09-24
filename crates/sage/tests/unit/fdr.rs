@@ -163,3 +163,68 @@ fn empty_and_decoy_only_count_confidence_are_conservative() {
     assert_eq!(assign_count_q_values(&mut rows, 0.01), 0);
     assert_eq!(rows[0].q, 1.0);
 }
+
+fn protein_peptide(sequence: &str, decoy: bool, protein: &str) -> Peptide {
+    let mut peptide = peptide(sequence, decoy);
+    peptide.proteins = [Arc::<str>::from(protein)].into_iter().collect();
+    peptide
+}
+
+fn grouped(peptide_idx: u32, groups: &str, score: f32) -> Feature {
+    Feature {
+        peptide_idx: PeptideIx(peptide_idx),
+        protein_groups: Some(groups.into()),
+        num_protein_groups: 1,
+        discriminant_score: score,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn decoy_protein_groups_compete_with_their_target_group() {
+    for generate_decoys in [true, false] {
+        let decoy_accession = |protein: &str| match generate_decoys {
+            true => protein.to_string(),
+            false => format!("rev_{protein}"),
+        };
+        let db = IndexedDatabase {
+            peptides: vec![
+                protein_peptide("PEPTIDEK", false, "P1"),
+                protein_peptide("KEDITPEP", true, &decoy_accession("P1")),
+                protein_peptide("AAAAAK", false, "P3"),
+                protein_peptide("KAAAAA", true, &decoy_accession("P9")),
+            ],
+            decoy_tag: "rev_".into(),
+            generate_decoys,
+            ..Default::default()
+        };
+        // Targets carry parsimony groups; decoys keep their raw decoy accession.
+        let features = [
+            grouped(0, "P1/P2", 10.0),
+            grouped(1, "rev_P1", 4.0),
+            grouped(2, "P3", 8.0),
+            grouped(3, "rev_P9", 3.0),
+        ];
+        let target_groups = target_protein_groups(&db, &features);
+        assert_eq!(
+            decoy_competition_group(&db, &features[1], &target_groups).as_deref(),
+            Some("P1/P2")
+        );
+        // A decoy whose target protein has no reported group stays unpaired.
+        assert_eq!(
+            decoy_competition_group(&db, &features[3], &target_groups).as_deref(),
+            Some("rev_P9")
+        );
+
+        // A second decoy accession reversed from the same target group.
+        let mut db = db;
+        db.peptides
+            .push(protein_peptide("KEDITPEPP", true, &decoy_accession("P2")));
+        let mut features = features.to_vec();
+        features.push(grouped(4, "rev_P2", 5.0));
+        picked_protein_group(&db, &mut features);
+        assert!(features.iter().all(|feat| feat.protein_group_q <= 1.0));
+        // Both decoys of the P1/P2 group share the competition's decoy q-value.
+        assert_eq!(features[1].protein_group_q, features[4].protein_group_q);
+    }
+}

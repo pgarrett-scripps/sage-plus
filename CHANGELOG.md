@@ -21,6 +21,10 @@ entries are retained below for provenance.
 - LFQ with `mbr: false` quantifies each file against its own identification. Files previously
   shared one retention-time grid whose centre and reference file depended on thread timing, so
   intensities were wrong and changed between runs.
+- Protein-group FDR pairs each decoy with the group of the target protein it was reversed
+  from. Decoys were never grouped, so no decoy group key matched a target group and picked
+  competition reduced to plain target-decoy counting. On five PXD028735 LFQ files, protein
+  groups at 1% FDR rose from 7,046 to 7,177; PSM, peptide, and protein results are unchanged.
 - Linear regression for the retention-time and mobility models and the kernel density estimate
   for PEP and q-values sum in a fixed order. Repeated runs, including multi-file searches, now
   produce byte-identical results.
