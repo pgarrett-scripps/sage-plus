@@ -1010,7 +1010,13 @@ fn supervise_worker(
         match status {
             Ok(status) => {
                 entry.record.worker_exit_code = status.code();
-                if cancellation_requested {
+                // A worker that already finished successfully wins over a
+                // cancel request that arrived too late to stop it.
+                let completed = status.success()
+                    && outcome
+                        .as_ref()
+                        .is_some_and(|outcome| outcome.summary.is_some());
+                if cancellation_requested && !completed {
                     entry.record.status = JobStatus::Cancelled;
                     entry.record.error = outcome
                         .as_ref()

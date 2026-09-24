@@ -539,3 +539,62 @@ fn modification_filter_matches_psm_peptide_tags() {
         &site
     ));
 }
+
+#[cfg(unix)]
+#[test]
+fn completed_worker_wins_over_a_late_cancellation_request() {
+    let temp = temporary_root();
+    let state = State::new(temp.clone(), None).unwrap();
+    let record = test_job(&state, "finished-job", JobStatus::Cancelling, 10);
+    let job_directory = PathBuf::from(&record.job_directory);
+    let result_path = job_directory.join("result.json");
+    let summary: RunSummary = serde_json::from_value(serde_json::json!({
+        "runtime_secs": 1,
+        "files": 1,
+        "peptides_in_database": 10,
+        "fragments_in_database": 20,
+        "psms_at_one_percent_fdr": 2,
+        "peptides_at_one_percent_fdr": 1,
+        "proteins_at_one_percent_fdr": 1,
+        "protein_groups_at_one_percent_fdr": 1,
+        "output_paths": []
+    }))
+    .unwrap();
+    fs::write(
+        &result_path,
+        serde_json::to_vec(&WorkerOutcome {
+            summary: Some(summary),
+            error: None,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    // The worker finished successfully just as the cancel request arrived.
+    let child = Command::new("true").spawn().unwrap();
+    let worker = WorkerHandle {
+        child: Arc::new(Mutex::new(child)),
+        cancel_path: job_directory.join("cancel.requested"),
+        cancellation_requested: Arc::new(AtomicBool::new(true)),
+    };
+    state.jobs.write().unwrap().insert(
+        record.job_id.clone(),
+        JobEntry {
+            record,
+            worker: Some(worker.clone()),
+            memory_limited: false,
+        },
+    );
+
+    supervise_worker(
+        state.jobs.clone(),
+        "finished-job".into(),
+        worker,
+        result_path,
+        job_directory.join("stderr.log"),
+    );
+    let finished = state.job("finished-job").unwrap();
+    assert_eq!(finished.status, JobStatus::Completed);
+    assert!(finished.summary.is_some());
+    assert_eq!(finished.error, None);
+    fs::remove_dir_all(temp).unwrap();
+}
