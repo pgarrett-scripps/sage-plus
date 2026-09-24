@@ -20,6 +20,11 @@ entries are retained below for provenance.
   `expmass` stay raw, `calibrated_*_ppm` report residuals, and `run-summary.json` records
   the chosen model, candidate scores, and residual bins per file under
   `models.mass_recalibration`.
+- Spectra now carry an acquisition group (MS2 mass analyzer and activation) read from Thermo
+  filter strings, mzML instrument configurations and activation terms, or fixed as TOF/CID
+  for Bruker TDF. `mass_recalibration` selects fragment models separately per group, never
+  corrects ion-trap groups, and leaves groups with too few PSMs uncorrected; the run summary
+  lists each group's model.
 
 ### Changed
 - The retention-time and ion-mobility models are fit on standardized features with a fixed,
