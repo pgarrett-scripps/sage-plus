@@ -146,7 +146,7 @@ fn rules(parameters: &Parameters, peptide: &Peptide) -> Vec<Value> {
     let mut output = Vec::new();
     for (specificity, entry) in &parameters.static_mods {
         let mut sites = Vec::new();
-        peptide.compatible_sites(*specificity, &mut sites);
+        peptide.compatible_sites(*specificity, &mut sites, false);
         let definition = entry.definition();
         output.push(json!({"kind": "static", "key": specificity.explicit_name(),
             "mass": definition.mass, "name": definition.name.as_deref(),

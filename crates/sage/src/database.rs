@@ -432,7 +432,7 @@ impl Parameters {
             .flat_map(|(specificity, entries)| {
                 entries.iter().map(move |entry| {
                     let definition = Arc::new(entry.definition());
-                    let mut sites = specificity.sites(&peptide.sequence, peptide.position);
+                    let mut sites = peptide.rule_sites(*specificity, self.generate_decoys);
                     if entry.site_mode() == SiteMode::Library {
                         sites.retain(|candidate| {
                             self.loaded_ptm_library.as_ref().is_some_and(|library| {
@@ -874,7 +874,13 @@ impl Parameters {
                 }
             };
 
-            for site in rule.specificity.sites(sequence, digest.position) {
+            let flank = crate::motif::flank;
+            for site in rule.specificity.sites_with_flanks(
+                sequence,
+                digest.position,
+                flank(&digest.prev_aa),
+                flank(&digest.next_aa),
+            ) {
                 add_site(match site {
                     Site::Nterm => nterm,
                     Site::Cterm => cterm,
@@ -2021,7 +2027,7 @@ impl IndexedDatabase {
     pub fn mass_offset_sites(&self, peptide: &Peptide, offset: &MassOffset) -> Vec<Site> {
         let mut sites = Vec::new();
         for specificity in &offset.specificities {
-            peptide.compatible_sites(*specificity, &mut sites);
+            peptide.compatible_sites(*specificity, &mut sites, self.generate_decoys);
         }
         sites.retain(|site| match site {
             Site::Nterm => peptide.nterm.is_none(),

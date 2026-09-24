@@ -18,7 +18,7 @@ pub fn generate_config_schema() -> String {
         .expect("deprecated compatibility field is present")
         .insert("deprecated".into(), true.into());
 
-    let explicit = "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])";
+    let explicit = "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])";
     for name in ["NamedStaticModification", "NamedVariableModification"] {
         value["$defs"][name]["properties"]["sites"]["minItems"] = 1.into();
         value["$defs"][name]["properties"]["sites"]["items"]["pattern"] = explicit.into();

@@ -569,6 +569,8 @@ pub enum ModificationSpecificity {
     PeptideCTerm(u8),
     ProteinNTerm(u8),
     ProteinCTerm(u8),
+    /// Residue selected by a sequence motif evaluated with protein context.
+    Motif(&'static crate::motif::SiteMotif),
 }
 
 impl ModificationSpecificity {
@@ -589,6 +591,41 @@ impl ModificationSpecificity {
             Self::PeptideCTerm(r) => format!("peptide_c_term:{}", r as char),
             Self::ProteinNTerm(r) => format!("protein_n_term:{}", r as char),
             Self::ProteinCTerm(r) => format!("protein_c_term:{}", r as char),
+            Self::Motif(motif) => motif.canonical().to_string(),
+        }
+    }
+
+    pub fn is_motif(self) -> bool {
+        matches!(self, Self::Motif(_))
+    }
+
+    /// Select sites with known protein flanking residues. Only motifs use the
+    /// flanks; every other rule is decided by the peptide and its position.
+    pub fn sites_with_flanks(
+        self,
+        sequence: &[u8],
+        position: crate::enzyme::Position,
+        left: &[u8],
+        right: &[u8],
+    ) -> Vec<crate::peptide::Site> {
+        use crate::enzyme::Position;
+        match self {
+            Self::Motif(motif) => motif
+                .sites(
+                    sequence,
+                    crate::motif::MotifContext {
+                        left,
+                        right,
+                        left_boundary: left.is_empty()
+                            && matches!(position, Position::Nterm | Position::Full),
+                        right_boundary: right.is_empty()
+                            && matches!(position, Position::Cterm | Position::Full),
+                    },
+                )
+                .into_iter()
+                .map(crate::peptide::Site::Sequence)
+                .collect(),
+            _ => self.sites(sequence, position),
         }
     }
 
@@ -630,12 +667,32 @@ impl ModificationSpecificity {
             Self::PeptideCTerm(r) if sequence[last] == r => vec![Site::Cterm],
             Self::ProteinNTerm(r) if protein_n && sequence[0] == r => vec![Site::Nterm],
             Self::ProteinCTerm(r) if protein_c && sequence[last] == r => vec![Site::Cterm],
+            Self::Motif(_) => self.sites_with_flanks(sequence, position, &[], &[]),
             _ => Vec::new(),
         }
     }
 
     pub fn overlaps(self, other: Self) -> bool {
         use crate::enzyme::Position;
+        if let Some(motif) = [self, other].into_iter().find_map(|rule| match rule {
+            Self::Motif(motif) => Some(motif),
+            _ => None,
+        }) {
+            // Conservative: motif rules overlap any residue rule sharing a residue.
+            let residues = |rule| match rule {
+                Self::Motif(m) => m.site_residues(),
+                Self::Residue(r)
+                | Self::Internal(r)
+                | Self::PeptideN(Some(r))
+                | Self::PeptideC(Some(r))
+                | Self::ProteinN(Some(r))
+                | Self::ProteinC(Some(r)) => vec![r],
+                _ => Vec::new(),
+            };
+            let other = if self.is_motif() { other } else { self };
+            let mine = motif.site_residues();
+            return residues(other).iter().any(|r| mine.contains(r));
+        }
         let residue = |rule| match rule {
             Self::Residue(r)
             | Self::Internal(r)
@@ -644,6 +701,7 @@ impl ModificationSpecificity {
             | Self::ProteinNTerm(r)
             | Self::ProteinCTerm(r) => Some(r),
             Self::PeptideN(r) | Self::PeptideC(r) | Self::ProteinN(r) | Self::ProteinC(r) => r,
+            Self::Motif(_) => unreachable!(),
         };
         let mut alphabet = vec![b'A'];
         alphabet.extend(residue(self));
@@ -684,6 +742,7 @@ impl Display for ModificationSpecificity {
                 | Self::PeptideCTerm(_)
                 | Self::ProteinNTerm(_)
                 | Self::ProteinCTerm(_)
+                | Self::Motif(_)
         ) {
             return f.write_str(&self.explicit_name());
         }
@@ -734,12 +793,18 @@ pub enum InvalidModification {
     Empty,
     InvalidResidue(char),
     TooLong(String),
+    Motif(String),
 }
 
 impl FromStr for ModificationSpecificity {
     type Err = InvalidModification;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some(pattern) = s.strip_prefix("motif:") {
+            return crate::motif::SiteMotif::intern(pattern)
+                .map(Self::Motif)
+                .map_err(InvalidModification::Motif);
+        }
         let (kind, residue) = s.split_once(':').map_or((s, None), |(k, r)| (k, Some(r)));
         let aa = match residue {
             Some(r) if r.len() == 1 && VALID_AA.contains(&r.as_bytes()[0]) => Some(r.as_bytes()[0]),
@@ -914,8 +979,14 @@ where
         }
         let mut seen = std::collections::HashSet::new();
         for site in sites {
-            let specificity = site.parse::<ModificationSpecificity>().map_err(|_| {
-                de::Error::custom(format!("invalid site `{site}` for modification `{id}`"))
+            let specificity = site.parse::<ModificationSpecificity>().map_err(|error| {
+                let detail = match error {
+                    InvalidModification::Motif(detail) => format!(": {detail}"),
+                    _ => String::new(),
+                };
+                de::Error::custom(format!(
+                    "invalid site `{site}` for modification `{id}`{detail}"
+                ))
             })?;
             if specificity.explicit_name() != site {
                 return Err(de::Error::custom(format!(
