@@ -520,11 +520,10 @@ impl Runner {
                     .iter()
                     .any(|file| file.precursor.is_some() || file.fragment.is_some()),
                 mass_alignment_files,
-                mass_recalibration: self.mass_recalibration_enabled().then(|| {
-                    MassRecalibrationRunStats {
-                        mode: self.parameters.mass_recalibration.as_str().into(),
-                        files: self.mass_recalibration_stats(),
-                    }
+                mass_recalibration: self.discovery_enabled().then(|| MassRecalibrationRunStats {
+                    mode: self.parameters.mass_recalibration.as_str().into(),
+                    tolerance_mode: self.parameters.tolerance_mode.as_str().into(),
+                    files: self.mass_recalibration_stats(),
                 }),
                 retention_time_prediction_enabled: self.parameters.predict_rt,
                 retention_time_model_fitted,

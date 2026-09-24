@@ -17,9 +17,9 @@ use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::mass_recalibration::{
-    select_group_models, select_model, stable_hash, FileMassCorrection, GroupMassCorrection,
-    MassErrorPoint, MassModelKind, MassRecalibration, MassRecalibrationMode, ModelSelection,
-    RecalibrationOptions,
+    auto_tolerance, select_group_models, select_model, stable_hash, AutoToleranceOptions,
+    FileMassCorrection, GroupMassCorrection, MassErrorPoint, MassModelKind, MassRecalibration,
+    MassRecalibrationMode, ModelSelection, RecalibrationOptions, ToleranceEstimate, ToleranceMode,
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
@@ -363,14 +363,20 @@ pub struct MassRecalibrationFileStats {
     pub precursor: sage_core::mass_recalibration::ModelSelection,
     /// Fragment models, one per acquisition group (analyzer and activation).
     pub fragment: Vec<sage_core::mass_recalibration::GroupModelSelection>,
+    /// Precursor tolerance chosen for this file (`tolerance_mode: auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precursor_tolerance: Option<ToleranceEstimate>,
     #[serde(skip)]
     pub correction: sage_core::mass_recalibration::FileMassCorrection,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MassRecalibrationRunStats {
-    /// Configured mode: `static`, `linear`, or `auto`.
+    /// Configured mode: `off`, `static`, `linear`, or `auto`.
     pub mode: String,
+    /// Configured tolerance mode: `fixed` or `auto`.
+    #[serde(default)]
+    pub tolerance_mode: String,
     pub files: Vec<MassRecalibrationFileStats>,
 }
 
@@ -391,7 +397,8 @@ pub struct ModelRunStats {
     pub mass_alignment_applied: bool,
     #[serde(default)]
     pub mass_alignment_files: Vec<MassAlignmentFileStats>,
-    /// Search-time mass recalibration; absent when `mass_recalibration` is off.
+    /// Discovery-pass models and tolerances; absent when `mass_recalibration`
+    /// is off and `tolerance_mode` is fixed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mass_recalibration: Option<MassRecalibrationRunStats>,
     pub retention_time_prediction_enabled: bool,

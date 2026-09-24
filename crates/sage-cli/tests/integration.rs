@@ -208,6 +208,7 @@ fn mass_recalibration_reports_per_file_models() -> anyhow::Result<()> {
     let mut config: serde_json::Value =
         serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
     config["mass_recalibration"] = "auto".into();
+    config["tolerance_mode"] = "auto".into();
     std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
     let result = Command::new(env!("CARGO_BIN_EXE_sage"))
         .current_dir(&workspace)
@@ -230,6 +231,12 @@ fn mass_recalibration_reports_per_file_models() -> anyhow::Result<()> {
     // One spectrum cannot support a model; the search falls back to none.
     assert_eq!(file["precursor"]["skipped"], "too_few_psms");
     assert!(file["precursor"]["model"].is_null());
+    assert_eq!(recalibration["tolerance_mode"], "auto");
+    // Without residuals the configured tolerance is kept and reported.
+    let tolerance = &file["precursor_tolerance"];
+    assert_eq!(tolerance["narrowed"], false);
+    assert_eq!(tolerance["skipped"], "too_few_psms");
+    assert_eq!(tolerance["tolerance"], tolerance["configured"]);
     assert!(summary["psms_at_one_percent_fdr"].as_u64().is_some());
     std::fs::remove_dir_all(root)?;
     Ok(())
