@@ -29,8 +29,10 @@ entries are retained below for provenance.
 - `mass_shift` and `ambiguity_sequence` exclude the matched isotope error. PSMs at a non-zero
   isotope error previously reported a spurious shift of about 1.003 Da per isotope.
 - Ion-mobility residue-class features count the intended residues.
-- Thermo RAW MS levels and precursors come from the scan trailers when OpenTFRaw decodes scan
-  events out of step with the scans, as on some Orbitrap Fusion files. An SPS-MS3 TMT file
+- Thermo RAW MS levels and precursors come from the scan trailers wherever OpenTFRaw's scan
+  event contradicts them, as on some Orbitrap Fusion files where events are decoded out of step
+  with the scans. Dependent scans follow their master scan chain; scans without a master keep an
+  MSn event only when it has a plausible precursor, as DIA and targeted scans do. An SPS-MS3 TMT file
   previously read as 104,433 MS1 scans and 1 MS2 scan; it now matches msconvert (14,239 MS1,
   45,139 MS2, 45,056 MS3), and MS3 scans keep their MS2 parent for reporter ions. MS2 scans
   whose trailer has no precursor m/z are reported with a warning and are not searched.

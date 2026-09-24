@@ -34,41 +34,47 @@ impl ThermoRawReader {
             })
             .collect::<Vec<_>>();
         let levels = trailer_levels(first_scan, &masters);
-        let disagreements = event_level_disagreements(first_scan, &records, &levels);
-        if events_misaligned(disagreements, records.len()) {
+        let mut corrected = 0;
+        let mut unsearchable = 0;
+        for record in &mut records {
+            let idx = (record.scan_number - first_scan) as usize;
+            let plausible = raw
+                .scan_events
+                .get(idx)
+                .and_then(|event| event.reactions.first())
+                .is_some_and(|reaction| plausible_precursor_mz(reaction.precursor_mz));
+            let Some(level) = corrected_level(record.ms_level, levels[idx], plausible) else {
+                continue;
+            };
+            let params = raw.scan_params(record.scan_number);
+            apply_trailer_level(record, level, params.as_ref());
+            corrected += 1;
+            if level == 2
+                && record
+                    .precursor
+                    .as_ref()
+                    .and_then(|precursor| precursor.selected_mz.or(precursor.target_mz))
+                    .is_none()
+            {
+                unsearchable += 1;
+            }
+        }
+        if corrected > 0 {
             log::warn!(
-                "OpenTFRaw scan events disagree with the master scan numbers of {} of {} scans in {}; \
-                 deriving MS levels and precursors from the scan trailers",
-                disagreements,
+                "OpenTFRaw scan events contradict the scan trailers of {} of {} scans in {}; \
+                 their MS levels and precursors come from the trailers",
+                corrected,
                 records.len(),
                 path.display()
             );
-            for record in &mut records {
-                let idx = (record.scan_number - first_scan) as usize;
-                if let Some(level) = levels[idx] {
-                    let params = raw.scan_params(record.scan_number);
-                    apply_trailer_level(record, level, params.as_ref());
-                }
-            }
-            let unsearchable = records
-                .iter()
-                .filter(|record| {
-                    record.ms_level == 2
-                        && record
-                            .precursor
-                            .as_ref()
-                            .and_then(|precursor| precursor.selected_mz.or(precursor.target_mz))
-                            .is_none()
-                })
-                .count();
-            if unsearchable > 0 {
-                log::warn!(
-                    "{} MS2 scans in {} have no precursor m/z in their trailer and will not be \
-                     searched; convert the file to mzML with msconvert to search them",
-                    unsearchable,
-                    path.display()
-                );
-            }
+        }
+        if unsearchable > 0 {
+            log::warn!(
+                "{} MS2 scans in {} have no precursor m/z in their trailer and will not be \
+                 searched; convert the file to mzML with msconvert to search them",
+                unsearchable,
+                path.display()
+            );
         }
         let spectra: Vec<_> = records
             .into_iter()
@@ -154,29 +160,28 @@ pub(crate) fn trailer_levels(first_scan: u32, masters: &[Option<u32>]) -> Vec<Op
     levels
 }
 
-/// Decoded scans whose event MS level differs from the trailer level.
-pub(crate) fn event_level_disagreements(
-    first_scan: u32,
-    records: &[SpectrumRecord],
-    levels: &[Option<u32>],
-) -> usize {
-    records
-        .iter()
-        .filter(|record| {
-            levels
-                .get((record.scan_number - first_scan) as usize)
-                .copied()
-                .flatten()
-                .is_some_and(|level| level != record.ms_level)
-        })
-        .count()
+/// The MS level to use when a scan's event contradicts its trailer, or
+/// `None` to keep the event.
+///
+/// OpenTFRaw can decode scan events out of step with the scans on some
+/// Orbitrap Fusion files, while the trailer master scan numbers stay correct.
+/// A dependent scan (one with a master) takes its level from the master
+/// chain. A scan without a master is MS1 unless its event is an MSn scan with
+/// a plausible precursor, as DIA and targeted scans have no master scan.
+pub(crate) fn corrected_level(
+    event_level: u32,
+    trailer_level: Option<u32>,
+    plausible_event_precursor: bool,
+) -> Option<u32> {
+    match trailer_level? {
+        level if level == event_level => None,
+        1 if plausible_event_precursor => None,
+        level => Some(level),
+    }
 }
 
-/// OpenTFRaw can decode scan events out of step with the scans on some
-/// Orbitrap Fusion files, so that about half of the dependent scans read as
-/// MS1. A few disagreements are tolerated; beyond that the trailers win.
-pub(crate) fn events_misaligned(disagreements: usize, scans: usize) -> bool {
-    disagreements > 10.max(scans / 100)
+pub(crate) fn plausible_precursor_mz(mz: f64) -> bool {
+    (50.0..20_000.0).contains(&mz)
 }
 
 /// Replace the event-derived MS level and precursor of `record` with values
