@@ -55,6 +55,12 @@ impl ThermoRawReader {
         let mut corrected = 0;
         for (record, &plausible) in records.iter_mut().zip(&plausible_events) {
             let idx = (record.scan_number - first_scan) as usize;
+            if misaligned {
+                // The filter string comes from the same out-of-step event, so
+                // its analyzer and activation belong to another scan. The
+                // trailers name neither, so the acquisition group is unknown.
+                record.filter = None;
+            }
             let level = match misaligned {
                 true => levels[idx],
                 false => corrected_level(record.ms_level, levels[idx], plausible),
@@ -78,6 +84,14 @@ impl ThermoRawReader {
                  MS levels and precursors come from the trailers",
                 corrected,
                 records.len(),
+                path.display()
+            );
+        }
+        if misaligned {
+            log::warn!(
+                "mass analyzer and activation of {} are unknown because its OpenTFRaw scan \
+                 filters are out of step; all MS2 scans share one acquisition group, so \
+                 per-analyzer fragment recalibration needs an mzML conversion",
                 path.display()
             );
         }
