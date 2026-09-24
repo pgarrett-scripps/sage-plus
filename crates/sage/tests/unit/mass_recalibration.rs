@@ -252,6 +252,11 @@ fn thermo_filters_map_to_acquisition_groups() {
     );
     let group = parse("FTMS + p NSI d Full ms2 700.00@etd25.00@hcd20.00 [120.00-2000.00]");
     assert_eq!(group.activation, Activation::Ethcd);
+    let group = parse("FTMS + c NSI d sa Full ms2 700.00@etd25.00@cid20.00 [120.00-2000.00]");
+    assert_eq!(group.activation, Activation::Etcid);
+    assert_eq!(group.label(), "orbitrap/etcid");
+    let group = parse("FTMS + c NSI d Full ms2 700.00@etd25.00 [120.00-2000.00]");
+    assert_eq!(group.activation, Activation::Etd);
     let group = parse("FTMS + p NSI Full ms [350.00-1500.00]");
     assert_eq!(
         (group.analyzer, group.activation),

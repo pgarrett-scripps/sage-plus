@@ -207,6 +207,9 @@ fn combine_activation(current: Activation, next: Activation) -> Activation {
         (Activation::Etd, Activation::Hcd) | (Activation::Hcd, Activation::Etd) => {
             Activation::Ethcd
         }
+        (Activation::Etd, Activation::Cid) | (Activation::Cid, Activation::Etd) => {
+            Activation::Etcid
+        }
         (current, _) => current,
     }
 }
