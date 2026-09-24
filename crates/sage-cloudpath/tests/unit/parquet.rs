@@ -580,3 +580,33 @@ fn typed_ptm_library_round_trip_preserves_all_attachments() {
         assert!(restored.iter().any(|record| record == &site));
     }
 }
+
+#[test]
+fn scan_json_rows_reports_truncation_only_for_unscanned_rows() -> parquet::errors::Result<()> {
+    let schema =
+        parquet::schema::parser::parse_message_type("message schema { required int64 value; }")
+            .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("rows.parquet");
+    let mut writer = SerializedFileWriter::new(
+        File::create(&path).unwrap(),
+        schema.into(),
+        WriterProperties::default().into(),
+    )?;
+    let mut row_group = writer.next_row_group()?;
+    write_required_column!(row_group, [1_i64, 2, 3], Int64Type);
+    row_group.close()?;
+    writer.close()?;
+
+    let scan = |scan_limit, limit| {
+        let (rows, scanned, truncated) = scan_json_rows(&path, scan_limit, limit, |_| true)?;
+        Ok::<_, ParquetError>((rows.len(), scanned, truncated))
+    };
+    // Scanning exactly every row is not truncation.
+    assert_eq!(scan(3, 10)?, (3, 3, false));
+    assert_eq!(scan(10, 10)?, (3, 3, false));
+    assert_eq!(scan(2, 10)?, (2, 2, true));
+    assert_eq!(scan(3, 2)?, (2, 3, true));
+    assert_eq!(scan(3, 3)?, (3, 3, false));
+    Ok(())
+}
