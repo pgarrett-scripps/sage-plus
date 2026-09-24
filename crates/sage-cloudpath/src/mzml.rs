@@ -355,6 +355,13 @@ impl MzMLReader {
                             let id = std::str::from_utf8(&id)?;
                             spectrum.id = id.to_string();
                         }
+                        b"binaryDataArray" => {
+                            // Each array declares its own kind, compression, and
+                            // dtype. Unknown or empty arrays must not inherit them.
+                            binary_array = None;
+                            compression = false;
+                            binary_dtype = Dtype::F64;
+                        }
                         b"precursor" => {
                             // Not all precursor fields have a spectrumRef
                             if let Some(scan) = ev.try_get_attribute(b"spectrumRef")? {

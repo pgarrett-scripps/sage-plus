@@ -396,3 +396,43 @@ async fn parse_spectrum_issue_210() -> Result<(), MzMLError> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn unknown_array_after_empty_array_is_not_decoded_as_the_previous_kind(
+) -> Result<(), MzMLError> {
+    let input = r#"
+    <mzML><run><spectrumList count="1">
+      <spectrum id="scan=1">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000285" value="60"/>
+        <binaryDataArrayList count="3">
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQAAoEEAAPBB</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary></binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1002893"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>zcxMP2ZmZj8AAIA/</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 1);
+    assert_eq!(spectra[0].intensity, [10.0, 20.0, 30.0]);
+    assert!(spectra[0].mz.is_empty(), "m/z = {:?}", spectra[0].mz);
+    Ok(())
+}
