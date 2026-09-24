@@ -130,7 +130,10 @@ impl Runner {
 
     fn spectrum_index_builder(&self, db_params: &Parameters) -> SpectrumIndexBuilder {
         let settings = SpectrumIndexSettings {
-            precursor_tol: if self.mass_recalibration_enabled() {
+            // Precursors are corrected only under ppm tolerances.
+            precursor_tol: if self.mass_recalibration_enabled()
+                && matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _))
+            {
                 super::search::widen_for_recalibration(self.parameters.precursor_tol)
             } else {
                 self.parameters.precursor_tol

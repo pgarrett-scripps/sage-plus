@@ -665,10 +665,17 @@ impl Input {
         let spectral_library = self.spectral_library.unwrap_or_default();
         spectral_library.validate().map_err(anyhow::Error::msg)?;
 
+        let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
+        let predict_rt = self.predict_rt.unwrap_or(true);
+        // Record the alignment method that will run, so results.json states it.
+        let retention_time_alignment = self
+            .retention_time_alignment
+            .or_else(|| (predict_rt || quant.lfq).then(AlignmentMethod::default));
+
         Ok(Search {
             version: clap::crate_version!().into(),
             database,
-            quant: self.quant.map(Into::into).unwrap_or_default(),
+            quant,
             mzml_paths,
             output_directory,
             precursor_tol: self.precursor_tol,
@@ -689,9 +696,9 @@ impl Input {
                 .resolve(),
             chimera: self.chimera.unwrap_or(false),
             wide_window: self.wide_window.unwrap_or(false),
-            predict_rt: self.predict_rt.unwrap_or(true),
+            predict_rt,
             retention_time_model: self.retention_time_model.unwrap_or_default(),
-            retention_time_alignment: self.retention_time_alignment,
+            retention_time_alignment,
             ion_mobility_model: self.ion_mobility_model.unwrap_or_default(),
             output_paths: Vec::new(),
             write_pin: self.write_pin.unwrap_or(false),

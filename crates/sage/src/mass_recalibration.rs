@@ -276,19 +276,26 @@ impl MassRecalibration {
     }
 
     /// A copy of `spectrum` with corrected precursor and fragment m/z, or
-    /// `None` when its file has no correction. Peak order, intensities and
+    /// `None` when nothing applies to it. Peak order, intensities and
     /// charges are unchanged; a fragment correction is far smaller than peak
     /// spacing, so ascending order is preserved up to ties.
     pub fn recalibrate(&self, spectrum: &ProcessedSpectrum) -> Option<ProcessedSpectrum> {
         let correction = self.file(spectrum.file_id)?;
+        let precursor = correction.precursor.as_ref().filter(|m| !m.is_identity());
+        let fragment = correction.fragment_model(spectrum.acquisition);
+        // Spectra that nothing corrects (e.g. an ion-trap group of a hybrid
+        // file with an identity precursor model) are not copied.
+        if precursor.is_none() && fragment.is_none() {
+            return None;
+        }
         let rt = spectrum.scan_start_time;
         let mut out = spectrum.clone();
-        if let Some(model) = correction.precursor.as_ref().filter(|m| !m.is_identity()) {
+        if let Some(model) = precursor {
             for precursor in &mut out.precursors {
                 precursor.mz = model.correct_mz(precursor.mz, rt);
             }
         }
-        if let Some(model) = correction.fragment_model(spectrum.acquisition) {
+        if let Some(model) = fragment {
             for (mass, &charge) in out.masses.iter_mut().zip(&spectrum.charges) {
                 let z = charge.max(1) as f32;
                 let mz = *mass / z + PROTON;
@@ -586,13 +593,8 @@ pub fn select_model(points: &[MassErrorPoint], options: RecalibrationOptions) ->
     }
 
     // Remove grossly wrong observations around the fit-set median.
-    let center = median(&fit.iter().map(|p| p.error_ppm).collect::<Vec<_>>());
-    let mad = median(
-        &fit.iter()
-            .map(|p| (p.error_ppm - center).abs())
-            .collect::<Vec<_>>(),
-    );
-    let cutoff = (options.outlier_mads * 1.4826 * mad).max(0.25);
+    let (center, mad) = median_mad(&fit.iter().map(|p| p.error_ppm).collect::<Vec<_>>());
+    let cutoff = outlier_cutoff(mad, options.outlier_mads);
     let keep = |p: &MassErrorPoint| (p.error_ppm - center).abs() <= cutoff;
     let fit = fit.into_iter().filter(keep).collect::<Vec<_>>();
     let validation = validation.into_iter().filter(keep).collect::<Vec<_>>();
@@ -1119,7 +1121,13 @@ pub fn median_mad(values: &[f32]) -> (f32, f32) {
     (center, median(&deviations))
 }
 
-fn median(values: &[f32]) -> f32 {
+/// Robust outlier cutoff: `outlier_mads` scaled MADs, with a 0.25 ppm floor
+/// so a near-perfect run keeps harmless rounding noise.
+pub(crate) fn outlier_cutoff(mad: f32, outlier_mads: f32) -> f32 {
+    (outlier_mads * 1.4826 * mad).max(0.25)
+}
+
+pub(crate) fn median(values: &[f32]) -> f32 {
     if values.is_empty() {
         return f32::NAN;
     }

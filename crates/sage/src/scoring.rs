@@ -266,6 +266,10 @@ pub struct Feature {
     /// Fragment mass error after per-file retention-time alignment.
     #[serde(skip_serializing)]
     pub aligned_average_ppm: f32,
+    /// Signed fragment error after search-time recalibration; equal to
+    /// `signed_fragment_ppm` when no fragment correction applies.
+    #[serde(skip_serializing)]
+    pub aligned_signed_fragment_ppm: f32,
     /// X!Tandem hyperscore
     pub hyperscore: f64,
     /// Difference between hyperscore of this candidate, and the next best candidate
@@ -979,6 +983,7 @@ impl<'db> Scorer<'db> {
                 average_ppm: score.raw_ppm_difference,
                 signed_fragment_ppm: score.raw_signed_ppm_difference,
                 aligned_average_ppm: score.ppm_difference,
+                aligned_signed_fragment_ppm: score.signed_ppm_difference,
                 hyperscore: score.hyperscore,
                 delta_next: score.hyperscore - next,
                 delta_best: best - score.hyperscore,

@@ -178,43 +178,12 @@ const FILTER_STRING: &[u8] = b"MS:1000512";
 
 /// Activation methods, from `<precursor><activation>`.
 fn activation_flag(accession: &[u8]) -> Option<Activation> {
-    match accession {
-        b"MS:1000133" | b"MS:1002679" => Some(Activation::Cid),
-        b"MS:1000422" | b"MS:1002481" | b"MS:1002678" => Some(Activation::Hcd),
-        b"MS:1000598" => Some(Activation::Etd),
-        b"MS:1002631" => Some(Activation::Ethcd),
-        _ => None,
-    }
+    Activation::from_psi_ms(std::str::from_utf8(accession).ok()?)
 }
 
 /// Mass analyzers, from `<instrumentConfiguration><componentList><analyzer>`.
 fn analyzer_term(accession: &[u8]) -> Option<MassAnalyzer> {
-    match accession {
-        b"MS:1000484" => Some(MassAnalyzer::Orbitrap),
-        // Asymmetric track lossless (Astral) analyzer, written by msconvert
-        // and ThermoRawFileParser for Orbitrap Astral MS2 configurations.
-        b"MS:1003379" => Some(MassAnalyzer::Astral),
-        b"MS:1000084" => Some(MassAnalyzer::Tof),
-        b"MS:1000264" | b"MS:1000082" | b"MS:1000291" | b"MS:1000078" | b"MS:1000083" => {
-            Some(MassAnalyzer::IonTrap)
-        }
-        b"MS:1000079" | b"MS:1000080" | b"MS:1000081" | b"MS:1000443" => Some(MassAnalyzer::Other),
-        _ => None,
-    }
-}
-
-/// Combine the activations listed for one precursor.
-fn combine_activation(current: Activation, next: Activation) -> Activation {
-    match (current, next) {
-        (Activation::Unknown, next) => next,
-        (Activation::Etd, Activation::Hcd) | (Activation::Hcd, Activation::Etd) => {
-            Activation::Ethcd
-        }
-        (Activation::Etd, Activation::Cid) | (Activation::Cid, Activation::Etd) => {
-            Activation::Etcid
-        }
-        (current, _) => current,
-    }
+    MassAnalyzer::from_psi_ms(std::str::from_utf8(accession).ok()?)
 }
 
 pub struct MzMLReader {
@@ -291,7 +260,7 @@ impl MzMLReader {
         let mut in_analyzer = false;
         let mut default_instrument: Option<String> = None;
         let mut scan_instrument: Option<String> = None;
-        let mut filter_group: Option<AcquisitionGroup> = None;
+        let mut filter_string: Option<String> = None;
         let mut activation = Activation::Unknown;
 
         macro_rules! extract {
@@ -346,7 +315,7 @@ impl MzMLReader {
                     Some(State::Precursor) => match param.accession.as_slice() {
                         accession if activation_flag(accession).is_some() => {
                             let next = activation_flag(accession).expect("checked above");
-                            activation = combine_activation(activation, next);
+                            activation = activation.combine(next);
                         }
                         ISO_WINDOW_TARGET => {
                             if precursor.mz == 0.0 {
@@ -384,10 +353,7 @@ impl MzMLReader {
                             spectrum.ion_injection_time = param.parse_value()?;
                         }
                         FILTER_STRING => {
-                            filter_group = param
-                                .value
-                                .as_deref()
-                                .map(AcquisitionGroup::from_thermo_filter);
+                            filter_string = param.value.as_deref().map(str::to_string);
                         }
                         INVERSE_ION_MOBILITY => {
                             precursor.inverse_ion_mobility = Some(param.parse_value()?);
@@ -466,13 +432,8 @@ impl MzMLReader {
                             if let (Some(id), Some(analyzer)) =
                                 (current_instrument.as_ref(), analyzer_term(&param.accession))
                             {
-                                // A later, non-generic analyzer (e.g. the Orbitrap
-                                // after a quadrupole) describes the recorded peaks.
                                 let slot = analyzers.entry(id.clone()).or_default();
-                                if *slot == MassAnalyzer::Unknown || analyzer != MassAnalyzer::Other
-                                {
-                                    *slot = analyzer;
-                                }
+                                *slot = slot.combine(analyzer);
                             }
                         } else if let Some(group) = current_referenceable_group.as_ref() {
                             referenceable_params
@@ -574,22 +535,16 @@ impl MzMLReader {
                             state
                         }
                         (_, b"spectrum") => {
-                            let filter = filter_group.take().unwrap_or_default();
                             let configured = scan_instrument
                                 .take()
                                 .or_else(|| default_instrument.clone())
                                 .and_then(|id| analyzers.get(&id).copied())
                                 .unwrap_or_default();
-                            spectrum.acquisition = AcquisitionGroup {
-                                analyzer: match filter.analyzer {
-                                    MassAnalyzer::Unknown => configured,
-                                    analyzer => analyzer,
-                                },
-                                activation: match filter.activation {
-                                    Activation::Unknown => activation,
-                                    known => known,
-                                },
-                            };
+                            spectrum.acquisition = AcquisitionGroup::resolve(
+                                filter_string.take().as_deref(),
+                                configured,
+                                activation,
+                            );
                             activation = Activation::Unknown;
                             let allow = self
                                 .ms_level

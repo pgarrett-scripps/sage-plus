@@ -2,13 +2,20 @@ use std::io;
 use std::path::Path;
 
 use mzdata::io::MzMLbReader as MzMLbReaderImpl;
-use mzdata::prelude::{IonMobilityMeasure, PrecursorSelection, SpectrumLike};
+use mzdata::prelude::{IonMobilityMeasure, MSDataFileMetadata, PrecursorSelection, SpectrumLike};
 use mzdata::spectrum::{RawSpectrum as MzDataSpectrum, SignalContinuity};
 use sage_core::mass::Tolerance;
-use sage_core::spectrum::{AcquisitionGroup, Precursor, RawSpectrum, Representation};
+use sage_core::spectrum::{
+    AcquisitionGroup, Activation, MassAnalyzer, Precursor, RawSpectrum, Representation,
+};
 
 pub struct MzMLbReader {
     file_id: usize,
+}
+
+/// PSI-MS CURIE for an accession number, e.g. `MS:1000484`.
+fn psi_ms(accession: u32) -> String {
+    format!("MS:{accession:07}")
 }
 
 fn normalize_fragment_charges(
@@ -43,6 +50,20 @@ impl MzMLbReader {
 
     pub fn parse(&self, path: impl AsRef<Path>) -> io::Result<Vec<RawSpectrum>> {
         let reader = MzMLbReaderImpl::new(&path.as_ref().to_path_buf())?;
+        // The analyzer of each instrument configuration, as in mzML.
+        let analyzers = reader
+            .instrument_configurations()
+            .iter()
+            .map(|(&id, configuration)| {
+                let analyzer = configuration
+                    .components
+                    .iter()
+                    .filter_map(|component| component.mass_analyzer())
+                    .filter_map(|term| MassAnalyzer::from_psi_ms(&psi_ms(term.accession())))
+                    .fold(MassAnalyzer::Unknown, MassAnalyzer::combine);
+                (id, analyzer)
+            })
+            .collect::<std::collections::HashMap<_, _>>();
         Ok(reader
             .map(|spectrum| {
                 let ms_level = spectrum.ms_level();
@@ -54,12 +75,19 @@ impl MzMLbReader {
                     .map(|scan| scan.injection_time)
                     .unwrap_or_default();
                 let scan_mobility = spectrum.ion_mobility().map(|value| value as f32);
-                let acquisition = spectrum
-                    .acquisition()
-                    .first_scan()
-                    .and_then(|scan| scan.filter_string())
-                    .map(|filter| AcquisitionGroup::from_thermo_filter(&filter))
-                    .unwrap_or_default();
+                let scan = spectrum.acquisition().first_scan();
+                let activation = spectrum
+                    .precursor_iter()
+                    .flat_map(|precursor| precursor.activation.methods())
+                    .filter_map(|method| Activation::from_psi_ms(&psi_ms(method.accession())))
+                    .fold(Activation::Unknown, Activation::combine);
+                let acquisition = AcquisitionGroup::resolve(
+                    scan.and_then(|scan| scan.filter_string()).as_deref(),
+                    scan.and_then(|scan| analyzers.get(&scan.instrument_configuration_id))
+                        .copied()
+                        .unwrap_or_default(),
+                    activation,
+                );
                 let representation = match spectrum.signal_continuity() {
                     SignalContinuity::Centroid => Representation::Centroid,
                     SignalContinuity::Profile | SignalContinuity::Unknown => {

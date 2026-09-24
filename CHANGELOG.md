@@ -18,12 +18,13 @@ entries are retained below for provenance.
   fragment model per group on its own PSMs, each on a deterministic fit split, and accepts a static offset, a linear RT and/or m/z term, or a
   smooth additive curve (`auto` only, at most five intervals) only when it improves held-out
   residuals without worsening any RT or m/z tercile. The file is then searched again with
-  corrected masses for targets and decoys alike. `precursor_ppm`, `fragment_ppm`, and
+  corrected masses for targets and decoys alike, and the post-search mass-error feature
+  alignment is fitted on what the correction leaves. `precursor_ppm`, `fragment_ppm`, and
   `expmass` stay raw, `calibrated_*_ppm` report residuals, and `run-summary.json` records
   the chosen model, candidate scores, and residual bins per file under
   `models.mass_recalibration`.
 - Spectra now carry an acquisition group (MS2 mass analyzer and activation) read from Thermo
-  filter strings, mzML instrument configurations and activation terms, or fixed as TOF/CID
+  filter strings, mzML or mzMLb instrument configurations and activation terms, or fixed as TOF/CID
   for Bruker TDF. The Astral analyzer is read from the `ASTMS` filter or from mzML
   `MS:1003379`, as msconvert and ThermoRawFileParser write it. Activations are HCD, CID, ETD, EThcD, and ETciD (`etcid`, ETD with
   supplemental CID, kept apart from ETD). `mass_recalibration` selects fragment models
@@ -42,7 +43,8 @@ entries are retained below for provenance.
   human log2(A/B) ratios (MAD) fell from 0.213 to 0.191, and the median cross-run aligned-RT
   residual fell from 0.128 to 0.077 min. PSMs, peptides, and proteins at 1% FDR changed by
   less than 0.1% (312,533 to 312,487 PSMs), and runtime was unchanged within noise.
-  `run-summary.json` already records the method; its schema stays at version 9.
+  `run-summary.json` already records the method, and `results.json` now records it too when
+  it was left unset; the run-summary schema stays at version 9.
 - The retention-time and ion-mobility models are fit on standardized features with a fixed,
   tiny ridge penalty and a Cholesky solve, replacing Gaussian elimination that retried with a
   growing perturbation. The default feature sets contain exactly redundant columns; fitted
