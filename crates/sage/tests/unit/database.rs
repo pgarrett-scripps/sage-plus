@@ -1306,3 +1306,48 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
         .collect::<HashSet<_>>();
     assert_eq!(modified.len(), 1, "{modified:?}");
 }
+
+#[test]
+fn required_neutral_loss_fragment_shift_matches_preliminary_index() {
+    // Loss order in the configuration must not matter: the preliminary index
+    // keeps the smallest total loss, so the offset shift must use it too.
+    for losses in [[97.9769_f32, 18.0106], [18.0106, 97.9769]] {
+        let definition = Arc::new(ModificationDefinition {
+            mass: 79.96633,
+            name: Some("Phospho".into()),
+            neutral_losses: Arc::from(losses.as_slice()),
+            neutral_loss_mode: crate::modification::NeutralLossMode::Required,
+            channel_offsets: Arc::default(),
+        });
+        let offset = MassOffset {
+            definition: definition.clone(),
+            specificities: vec![ModificationSpecificity::Residue(b'S')],
+            site_mode: SiteMode::Exhaustive,
+        };
+        assert!((offset.fragment_shift() - (79.96633 - 18.0106)).abs() < 1e-4);
+
+        let parameters = Builder {
+            generate_decoys: Some(false),
+            ..Default::default()
+        }
+        .make_parameters();
+        let peptide = parameters
+            .peptides_from_tsv("sequence\nPEPSTIDEK\n")
+            .pop()
+            .unwrap();
+        let modified = peptide.with_mass_offset(Site::Sequence(3), &definition);
+        let base = preliminary_fragment_masses(&parameters, &peptide).collect::<Vec<_>>();
+        let shifted = preliminary_fragment_masses(&parameters, &modified).collect::<Vec<_>>();
+        assert_eq!(base.len(), shifted.len());
+        let observed = base
+            .iter()
+            .zip(&shifted)
+            .map(|(base, shifted)| shifted - base)
+            .filter(|delta| delta.abs() > 1e-3)
+            .collect::<Vec<_>>();
+        assert!(!observed.is_empty());
+        for delta in observed {
+            assert!((delta - offset.fragment_shift()).abs() < 1e-3, "{delta}");
+        }
+    }
+}
