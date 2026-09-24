@@ -261,3 +261,14 @@ fn multi_digit_charges_are_parsed() -> Result<(), MgfError> {
     assert_eq!(charges(&spectra[1]), [Some(10)]);
     Ok(())
 }
+
+#[test]
+fn empty_charge_is_unknown_charge() -> Result<(), MgfError> {
+    let s = "CHARGE=2+\n\
+             BEGIN IONS\nTITLE=a\nPEPMASS=500\nCHARGE=\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    assert_eq!(spectra.len(), 1);
+    assert_eq!(spectra[0].precursors.len(), 1);
+    assert_eq!(spectra[0].precursors[0].charge, None);
+    Ok(())
+}

@@ -208,7 +208,7 @@ impl DefaultParser {
         let regex_for_charge = &default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            default_params.charge_array = Some(parse_charges(regex_for_charge, charge_str));
+            default_params.charge_array = parse_charges(regex_for_charge, charge_str);
             return Ok(true);
         }
         Ok(false)
@@ -277,7 +277,7 @@ impl QueryParser {
         let regex_for_charge = &query_data.default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            query_data.precursor_charge_array = Some(parse_charges(regex_for_charge, charge_str));
+            query_data.precursor_charge_array = parse_charges(regex_for_charge, charge_str);
             return Ok(true);
         }
         Ok(false)
@@ -382,12 +382,14 @@ impl QueryParser {
     }
 }
 
-/// Charges listed in a `CHARGE=` value such as `2+ and 3+` or `10+`.
-fn parse_charges(regex_for_charge: &Regex, value: &str) -> Vec<u8> {
-    regex_for_charge
+/// Charges listed in a `CHARGE=` value such as `2+ and 3+` or `10+`. A value
+/// without any charge means the charge is unknown.
+fn parse_charges(regex_for_charge: &Regex, value: &str) -> Option<Vec<u8>> {
+    let charges = regex_for_charge
         .captures_iter(value)
         .filter_map(|cap| cap[1].parse().ok())
-        .collect()
+        .collect::<Vec<_>>();
+    (!charges.is_empty()).then_some(charges)
 }
 
 fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {
