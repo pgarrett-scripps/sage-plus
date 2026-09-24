@@ -4,6 +4,7 @@ use crate::database::{
 use crate::heap::bounded_min_heapify;
 use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
+use crate::mass_recalibration::{FileMassCorrection, MassRecalibration};
 use crate::peptide::Peptide;
 use crate::spectrum::{Precursor, ProcessedSpectrum};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// A compact thread-safe set used while spectra are searched in parallel.
 pub struct AtomicBitSet {
@@ -69,8 +71,13 @@ struct Score {
     longest_b: usize,
     longest_y: usize,
     hyperscore: f64,
+    /// Fragment errors after search-time recalibration (equal to the raw
+    /// errors when no correction applies).
     ppm_difference: f32,
     signed_ppm_difference: f32,
+    /// Fragment errors of the observed, uncorrected peaks.
+    raw_ppm_difference: f32,
+    raw_signed_ppm_difference: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -431,6 +438,10 @@ pub struct Scorer<'db> {
     /// calculated mass is treated as no shift for sequence-ambiguity annotation.
     pub mass_shift_ppm: f32,
     pub score_type: ScoreType,
+    /// Per-file search-time mass corrections. Spectra are corrected before
+    /// matching; reported `expmass`, `delta_mass`, `average_ppm`,
+    /// `signed_fragment_ppm` and fragment `mz_experimental` stay raw.
+    pub mass_recalibration: Option<Arc<MassRecalibration>>,
 }
 
 #[inline(always)]
@@ -466,6 +477,8 @@ impl<'db> Scorer<'db> {
             "internal bug, trying to score a non-MS2 scan!"
         );
         assert_eq!(keep.len(), self.db.peptides.len());
+        let query = self.recalibrated(query);
+        let query = query.as_ref();
         let precursor = query
             .precursors
             .first()
@@ -565,11 +578,34 @@ impl<'db> Scorer<'db> {
         hits.preliminary = trimmed;
     }
 
+    /// The correction applied to spectra from `file_id`, if any.
+    #[inline]
+    fn correction(&self, file_id: usize) -> Option<&FileMassCorrection> {
+        self.mass_recalibration
+            .as_deref()
+            .and_then(|recalibration| recalibration.file(file_id))
+    }
+
+    /// The spectrum as it is matched: corrected when its file has a
+    /// search-time mass correction, otherwise borrowed unchanged.
+    pub fn recalibrated<'a>(&self, query: &'a ProcessedSpectrum) -> Cow<'a, ProcessedSpectrum> {
+        match self
+            .mass_recalibration
+            .as_deref()
+            .and_then(|recalibration| recalibration.recalibrate(query))
+        {
+            Some(corrected) => Cow::Owned(corrected),
+            None => Cow::Borrowed(query),
+        }
+    }
+
     pub fn score(&self, query: &ProcessedSpectrum) -> Vec<Feature> {
         assert_eq!(
             query.level, 2,
             "internal bug, trying to score a non-MS2 scan!"
         );
+        let query = self.recalibrated(query);
+        let query = query.as_ref();
         match self.chimera {
             true => self.score_chimera_fast(query),
             false => self.score_standard(query),
@@ -850,6 +886,15 @@ impl<'db> Scorer<'db> {
 
         // Sage operates on masses without protons; [M] instead of [MH+]
         let mz = precursor.mz - PROTON;
+        // `precursor` may be recalibrated; errors are also reported against
+        // the observed precursor m/z.
+        let raw_mz = match self.correction(query.file_id) {
+            Some(correction) => {
+                let ppm = correction.precursor_ppm(query.scan_start_time, precursor.mz);
+                precursor.mz * (1.0 + ppm * 1e-6) - PROTON
+            }
+            None => mz,
+        };
 
         for idx in 0..report_psms.min(score_vector.len()) {
             let score = score_vector[idx].score;
@@ -860,6 +905,7 @@ impl<'db> Scorer<'db> {
 
             let peptide: &Peptide = &score_vector[idx].peptide;
             let precursor_mass = mz * score.precursor_charge as f32;
+            let raw_precursor_mass = raw_mz * score.precursor_charge as f32;
 
             let next = score_vector
                 .get(idx + 1)
@@ -879,8 +925,12 @@ impl<'db> Scorer<'db> {
                 (k as f64 * lambda.ln() - lambda - lnfact(k)) / std::f64::consts::LN_10;
 
             let isotope_error = score.isotope_error as f32 * NEUTRON;
-            let delta_mass = (precursor_mass - peptide.monoisotopic - isotope_error) * 2E6
-                / (precursor_mass - isotope_error + peptide.monoisotopic);
+            let ppm_delta = |mass: f32| {
+                (mass - peptide.monoisotopic - isotope_error) * 2E6
+                    / (mass - isotope_error + peptide.monoisotopic)
+            };
+            let delta_mass = ppm_delta(raw_precursor_mass);
+            let aligned_delta_mass = ppm_delta(precursor_mass);
 
             // Sequence-ambiguity annotation. A residual precursor mass shift is
             // only placed when it exceeds the closed-search tolerance (a small
@@ -912,7 +962,7 @@ impl<'db> Scorer<'db> {
                 file_id: query.file_id,
                 rank: idx as u32 + 1,
                 label: peptide.label(),
-                expmass: precursor_mass,
+                expmass: raw_precursor_mass,
                 calcmass: peptide.monoisotopic,
                 // Features
                 charge: score.precursor_charge,
@@ -924,10 +974,10 @@ impl<'db> Scorer<'db> {
                     .inverse_ion_mobility
                     .unwrap_or(0.0),
                 delta_mass,
-                aligned_delta_mass: delta_mass,
+                aligned_delta_mass,
                 isotope_error,
-                average_ppm: score.ppm_difference,
-                signed_fragment_ppm: score.signed_ppm_difference,
+                average_ppm: score.raw_ppm_difference,
+                signed_fragment_ppm: score.raw_signed_ppm_difference,
                 aligned_average_ppm: score.ppm_difference,
                 hyperscore: score.hyperscore,
                 delta_next: score.hyperscore - next,
@@ -1145,6 +1195,9 @@ impl<'db> Scorer<'db> {
         };
         let max_fragment_charge =
             max_fragment_charge(self.max_fragment_charge, score.precursor_charge);
+        let fragment_correction = self
+            .correction(query.file_id)
+            .and_then(|correction| correction.fragment.as_ref());
 
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)
@@ -1202,7 +1255,26 @@ impl<'db> Scorer<'db> {
                         peak_intensity * (peak_mass - expected_mass) * 2E6
                             / (expected_mass + peak_mass);
 
-                    let exp_mz = query.peak_mz(peak_idx);
+                    // Undo any search-time correction to report the error
+                    // and m/z of the observed peak.
+                    let mut exp_mz = query.peak_mz(peak_idx);
+                    let raw_peak_mass = match fragment_correction {
+                        Some(model) => {
+                            let raw_mz = exp_mz
+                                * (1.0 + model.predict_ppm(query.scan_start_time, exp_mz) * 1e-6);
+                            let raw_mass =
+                                peak_mass + (raw_mz - exp_mz) * query.charges[peak_idx] as f32;
+                            exp_mz = raw_mz;
+                            raw_mass
+                        }
+                        None => peak_mass,
+                    };
+                    score.raw_ppm_difference +=
+                        peak_intensity * (expected_mass - raw_peak_mass).abs() * 2E6
+                            / (expected_mass + raw_peak_mass);
+                    score.raw_signed_ppm_difference +=
+                        peak_intensity * (raw_peak_mass - expected_mass) * 2E6
+                            / (expected_mass + raw_peak_mass);
                     let calc_mz = frag.monoisotopic_mass / charge as f32 + PROTON;
 
                     match frag.kind {
@@ -1247,6 +1319,8 @@ impl<'db> Scorer<'db> {
         score.longest_y = y_run.longest;
         score.ppm_difference /= score.summed_b + score.summed_y;
         score.signed_ppm_difference /= score.summed_b + score.summed_y;
+        score.raw_ppm_difference /= score.summed_b + score.summed_y;
+        score.raw_signed_ppm_difference /= score.summed_b + score.summed_y;
 
         if collect_fragments {
             (score, Some(fragments_details), coverage)
@@ -1261,6 +1335,12 @@ impl<'db> Scorer<'db> {
     /// primary search so neutral-loss selection, charge assignment, and mass
     /// calculations cannot drift between scoring and deferred annotation.
     pub fn annotate_candidate(&self, query: &ProcessedSpectrum, feature: &Feature) -> Fragments {
+        self.annotate_recalibrated(self.recalibrated(query).as_ref(), feature)
+    }
+
+    /// [`Self::annotate_candidate`] for a spectrum already passed through
+    /// [`Self::recalibrated`].
+    fn annotate_recalibrated(&self, query: &ProcessedSpectrum, feature: &Feature) -> Fragments {
         let pre_score = PreScore {
             peptide: feature.peptide_idx,
             precursor_charge: feature.charge,
@@ -1287,12 +1367,14 @@ impl<'db> Scorer<'db> {
         selected: &[bool],
     ) -> Vec<Option<Fragments>> {
         assert_eq!(features.len(), selected.len());
+        let query = self.recalibrated(query);
+        let query = query.as_ref();
         if !self.chimera {
             return features
                 .iter()
                 .zip(selected)
                 .map(|(feature, selected)| {
-                    selected.then(|| self.annotate_candidate(query, feature))
+                    selected.then(|| self.annotate_recalibrated(query, feature))
                 })
                 .collect();
         }
@@ -1302,7 +1384,7 @@ impl<'db> Scorer<'db> {
             .iter()
             .zip(selected)
             .map(|(feature, selected)| {
-                let fragments = selected.then(|| self.annotate_candidate(&residual, feature));
+                let fragments = selected.then(|| self.annotate_recalibrated(&residual, feature));
                 self.remove_matched_peaks(&mut residual, feature);
                 fragments
             })

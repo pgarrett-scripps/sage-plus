@@ -110,6 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 annotate_matches: false,
                 mass_shift_ppm: 20.0,
                 score_type: ScoreType::SageHyperScore,
+                mass_recalibration: None,
             };
             let hits = scorer.score(&spectrum);
             let hit = hits.first().expect("synthetic truth must be identified");

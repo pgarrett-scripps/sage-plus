@@ -12,8 +12,13 @@ use sage_core::database::{IndexedDatabase, Parameters};
 use sage_core::fasta::Fasta;
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
+use sage_core::mass::PROTON;
 use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+};
+use sage_core::mass_recalibration::{
+    select_model, stable_hash, FileMassCorrection, MassErrorPoint, MassModelKind,
+    MassRecalibration, MassRecalibrationMode, ModelSelection, RecalibrationOptions,
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
@@ -251,6 +256,8 @@ pub struct Runner {
     /// Spectra read by the prefilter, kept for the search so each file is
     /// read and processed once.
     retained_spectra: std::sync::Mutex<RetainedSpectra>,
+    /// Search-time mass corrections selected for each searched file.
+    mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -342,6 +349,29 @@ pub struct MassAlignmentFileStats {
     pub fragment_skip_reason: Option<String>,
 }
 
+/// Search-time mass recalibration of one file: the discovery pass and the
+/// precursor and fragment models it selected.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MassRecalibrationFileStats {
+    pub file_id: usize,
+    /// MS2 spectra searched in the discovery pass.
+    pub discovery_spectra: usize,
+    /// Rank-1 target PSMs at 1% Poisson spectrum q-value in the discovery pass.
+    pub discovery_psms: usize,
+    pub discovery_ms: u64,
+    pub precursor: sage_core::mass_recalibration::ModelSelection,
+    pub fragment: sage_core::mass_recalibration::ModelSelection,
+    #[serde(skip)]
+    pub correction: sage_core::mass_recalibration::FileMassCorrection,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MassRecalibrationRunStats {
+    /// Configured mode: `static`, `linear`, or `auto`.
+    pub mode: String,
+    pub files: Vec<MassRecalibrationFileStats>,
+}
+
 const fn run_summary_schema_version() -> u32 {
     1
 }
@@ -359,6 +389,9 @@ pub struct ModelRunStats {
     pub mass_alignment_applied: bool,
     #[serde(default)]
     pub mass_alignment_files: Vec<MassAlignmentFileStats>,
+    /// Search-time mass recalibration; absent when `mass_recalibration` is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_recalibration: Option<MassRecalibrationRunStats>,
     pub retention_time_prediction_enabled: bool,
     pub retention_time_model_fitted: bool,
     pub retention_time_features: String,
@@ -820,6 +853,7 @@ impl Runner {
                             events: events.clone(),
                             cancellation: cancellation.clone(),
                             retained_spectra: Default::default(),
+                            mass_recalibration: Default::default(),
                         };
                         let (peptides, retained) =
                             mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -929,6 +963,7 @@ impl Runner {
             events,
             cancellation,
             retained_spectra: std::sync::Mutex::new(retained_spectra),
+            mass_recalibration: Default::default(),
         })
     }
 }

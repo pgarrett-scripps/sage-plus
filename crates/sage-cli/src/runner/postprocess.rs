@@ -182,6 +182,9 @@ impl Runner {
                         );
                     }
 
+                    // Localization matches fragments with the same corrected
+                    // masses the search used.
+                    let matched = scorer.recalibrated(spectrum);
                     let localized = spectrum_work
                         .localization_indices
                         .iter()
@@ -191,7 +194,7 @@ impl Runner {
                             let peptide = &self.database[feature.peptide_idx];
                             let localization = sage_core::ptm::localize(
                                 peptide,
-                                spectrum,
+                                matched.as_ref(),
                                 &self.database.ion_kinds,
                                 &self.database_parameters.localization_rules(peptide),
                                 self.parameters.fragment_tol,
