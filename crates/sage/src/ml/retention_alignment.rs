@@ -437,8 +437,9 @@ fn fit_alignment(file_id: usize, max_rt: f64, mut points: Vec<(f64, f64)>) -> Al
 ///
 /// Kept for API compatibility and always linear. The CLI default is
 /// [`AlignmentMethod::Nonlinear`]; use [`global_alignment_with_method`] to choose.
+/// Align with the default method (nonlinear since Beta 9).
 pub fn global_alignment(features: &mut [Feature], n_files: usize) -> Vec<Alignment> {
-    global_alignment_with_method(features, n_files, AlignmentMethod::Linear)
+    global_alignment_with_method(features, n_files, AlignmentMethod::default())
 }
 
 pub fn global_alignment_with_method(

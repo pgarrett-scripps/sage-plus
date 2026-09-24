@@ -265,6 +265,52 @@ fn thermo_filters_map_to_acquisition_groups() {
     let group = parse("ASTMS + c NSI d Full ms2 500.00@hcd25.00 [150.00-2000.00]");
     assert_eq!(group.analyzer, MassAnalyzer::Astral);
     assert_eq!(group.label(), "astral/hcd");
+
+    // Other Thermo analyzers, and filters that name none.
+    assert_eq!(
+        parse("TQMS + c NSI SRM ms2 500.00@cid25.00 [150.00-160.00]").analyzer,
+        MassAnalyzer::Other
+    );
+    let group = parse("+ c ESI Full ms2 500.00@hcd25.00 [150.00-2000.00]");
+    assert_eq!(
+        (group.analyzer, group.activation),
+        (MassAnalyzer::Unknown, Activation::Hcd)
+    );
+    // Text that is not a Thermo filter never becomes `other`.
+    assert_eq!(
+        parse("scan from vendor@site notes"),
+        AcquisitionGroup::default()
+    );
+}
+
+#[test]
+fn filter_overrides_configured_sources() {
+    use crate::spectrum::{AcquisitionGroup, Activation, MassAnalyzer};
+    // The filter keeps the ETD a converter dropped from the activation terms.
+    let group = AcquisitionGroup::resolve(
+        Some("ITMS + c NSI r d sa Full ms3 700.00@etd25.00@hcd20.00 [120.00-2000.00]"),
+        MassAnalyzer::Orbitrap,
+        Activation::Hcd,
+    );
+    assert_eq!(group.label(), "ion_trap/ethcd");
+    // Without a usable filter, the configured analyzer and terms are used.
+    for filter in [None, Some("not a filter")] {
+        let group = AcquisitionGroup::resolve(filter, MassAnalyzer::Tof, Activation::Cid);
+        assert_eq!(group.label(), "tof/cid");
+    }
+    assert_eq!(Activation::Etd.combine(Activation::Hcd), Activation::Ethcd);
+    assert_eq!(
+        MassAnalyzer::Other.combine(MassAnalyzer::Orbitrap),
+        MassAnalyzer::Orbitrap
+    );
+    assert_eq!(
+        MassAnalyzer::Orbitrap.combine(MassAnalyzer::Other),
+        MassAnalyzer::Orbitrap
+    );
+    assert_eq!(
+        MassAnalyzer::from_psi_ms("MS:1003379"),
+        Some(MassAnalyzer::Astral)
+    );
 }
 
 #[test]

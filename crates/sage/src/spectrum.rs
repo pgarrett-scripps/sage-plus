@@ -206,6 +206,36 @@ pub enum MassAnalyzer {
 }
 
 impl MassAnalyzer {
+    /// Mass analyzer for a PSI-MS accession such as `MS:1000484`, from an
+    /// mzML instrument configuration.
+    pub fn from_psi_ms(accession: &str) -> Option<Self> {
+        match accession {
+            "MS:1000484" => Some(MassAnalyzer::Orbitrap),
+            // Asymmetric track lossless (Astral) analyzer, written by msconvert
+            // and ThermoRawFileParser for Orbitrap Astral MS2 configurations.
+            "MS:1003379" => Some(MassAnalyzer::Astral),
+            "MS:1000084" => Some(MassAnalyzer::Tof),
+            "MS:1000264" | "MS:1000082" | "MS:1000291" | "MS:1000078" | "MS:1000083" => {
+                Some(MassAnalyzer::IonTrap)
+            }
+            "MS:1000079" | "MS:1000080" | "MS:1000081" | "MS:1000443" => Some(MassAnalyzer::Other),
+            _ => None,
+        }
+    }
+
+    /// Combine analyzers listed in order for one instrument configuration:
+    /// a later, specific analyzer (e.g. the Orbitrap after a quadrupole)
+    /// describes the recorded peaks.
+    pub fn combine(self, next: MassAnalyzer) -> MassAnalyzer {
+        if self == MassAnalyzer::Unknown || next != MassAnalyzer::Other {
+            next
+        } else {
+            self
+        }
+    }
+}
+
+impl MassAnalyzer {
     /// Unit-resolution analyzers whose errors are not meaningful in ppm.
     pub fn is_low_accuracy(self) -> bool {
         matches!(self, MassAnalyzer::IonTrap)
@@ -230,6 +260,34 @@ pub enum Activation {
     Other,
 }
 
+impl Activation {
+    /// Activation for a PSI-MS dissociation method accession such as
+    /// `MS:1000422`, from an mzML precursor's `<activation>`.
+    pub fn from_psi_ms(accession: &str) -> Option<Self> {
+        match accession {
+            "MS:1000133" | "MS:1002679" => Some(Activation::Cid),
+            "MS:1000422" | "MS:1002481" | "MS:1002678" => Some(Activation::Hcd),
+            "MS:1000598" => Some(Activation::Etd),
+            "MS:1002631" => Some(Activation::Ethcd),
+            _ => None,
+        }
+    }
+
+    /// Combine two activations listed for one precursor.
+    pub fn combine(self, next: Activation) -> Activation {
+        match (self, next) {
+            (Activation::Unknown, next) => next,
+            (Activation::Etd, Activation::Hcd) | (Activation::Hcd, Activation::Etd) => {
+                Activation::Ethcd
+            }
+            (Activation::Etd, Activation::Cid) | (Activation::Cid, Activation::Etd) => {
+                Activation::Etcid
+            }
+            (current, _) => current,
+        }
+    }
+}
+
 /// Acquisition setting that can carry its own mass bias: the analyzer that
 /// measured the peaks and the activation that produced them. Resolution and
 /// fill time are not part of the key; they are rarely recorded per scan and
@@ -244,15 +302,33 @@ pub struct AcquisitionGroup {
 
 impl AcquisitionGroup {
     /// Parse a Thermo scan filter such as
-    /// `FTMS + p NSI d Full ms2 445.12@hcd28.00 [110.00-1000.00]`.
+    /// `FTMS + p NSI d Full ms2 445.12@hcd28.00 [110.00-1000.00]`. Text that
+    /// is not a Thermo filter (no `ms`/`msN` scan-type token) yields the
+    /// unknown group, so it never overrides better sources.
     pub fn from_thermo_filter(filter: &str) -> Self {
+        let is_thermo = filter.split_whitespace().any(|token| {
+            token
+                .strip_prefix("ms")
+                .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+        });
+        if !is_thermo {
+            return Self::default();
+        }
         let analyzer = match filter.split_whitespace().next() {
             Some("FTMS") => MassAnalyzer::Orbitrap,
             Some("ASTMS") => MassAnalyzer::Astral,
             Some("ITMS") => MassAnalyzer::IonTrap,
             Some("TOFMS") => MassAnalyzer::Tof,
-            Some(_) => MassAnalyzer::Other,
-            None => MassAnalyzer::Unknown,
+            // Other Thermo analyzer tokens (e.g. `SQMS`, `TQMS`); a filter
+            // starting with polarity (`+`, `-`) names no analyzer.
+            Some(token)
+                if token.len() > 2
+                    && token.ends_with("MS")
+                    && token.chars().all(|c| c.is_ascii_uppercase()) =>
+            {
+                MassAnalyzer::Other
+            }
+            _ => MassAnalyzer::Unknown,
         };
         let lower = filter.to_ascii_lowercase();
         let has = |method: &str| lower.contains(&format!("@{method}"));
@@ -274,6 +350,24 @@ impl AcquisitionGroup {
         Self {
             analyzer,
             activation,
+        }
+    }
+
+    /// Combine the sources an mzML-like file offers. What the scan filter
+    /// states wins, as converters can drop activation terms (e.g. the ETD term
+    /// of neutral-loss-triggered EThcD scans); otherwise the instrument
+    /// configuration's analyzer and the precursor's activation terms are used.
+    pub fn resolve(filter: Option<&str>, analyzer: MassAnalyzer, activation: Activation) -> Self {
+        let filter = filter.map(Self::from_thermo_filter).unwrap_or_default();
+        Self {
+            analyzer: match filter.analyzer {
+                MassAnalyzer::Unknown => analyzer,
+                known => known,
+            },
+            activation: match filter.activation {
+                Activation::Unknown => activation,
+                known => known,
+            },
         }
     }
 

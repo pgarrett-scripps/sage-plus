@@ -82,8 +82,16 @@ impl Runner {
         file_ids.sort_unstable();
         file_ids.dedup();
         let max_kind = self.parameters.mass_recalibration.max_kind();
+        // Discovery measures the observed masses, whatever the caller's scorer.
+        let scorer = &Scorer {
+            mass_recalibration: None,
+            ..*scorer
+        };
 
         for file_id in file_ids {
+            if self.cancellation.is_cancelled() {
+                return;
+            }
             let start = Instant::now();
             let candidates = spectra
                 .iter()
@@ -103,6 +111,7 @@ impl Runner {
             let features = sample
                 .par_iter()
                 .enumerate()
+                .filter(|_| !self.cancellation.is_cancelled())
                 .flat_map_iter(|(index, spectrum)| {
                     scorer
                         .score(spectrum)
@@ -284,26 +293,9 @@ impl Runner {
         features: &mut [Feature],
     ) -> Vec<MassAlignmentFileStats> {
         let mut diagnostics = Vec::with_capacity(self.parameters.mzml_paths.len());
-        // Files corrected at search time already carry residual errors in the
-        // aligned columns; post-hoc alignment only handles the rest.
-        let recalibration = self.mass_recalibration_models();
-        let corrected = |file_id: usize| {
-            let correction = recalibration.as_deref().and_then(|r| r.file(file_id));
-            (
-                correction.is_some_and(|c| c.precursor.as_ref().is_some_and(|m| !m.is_identity())),
-                correction.is_some_and(|c| c.corrects_fragments()),
-            )
-        };
-        features.par_iter_mut().for_each(|feature| {
-            let (precursor, fragment) = corrected(feature.file_id);
-            if !precursor {
-                feature.aligned_delta_mass = feature.delta_mass;
-            }
-            if !fragment {
-                feature.aligned_average_ppm = feature.average_ppm;
-            }
-        });
-
+        // The aligned columns start as the errors after any search-time
+        // correction (equal to the raw errors where none applied), so the
+        // post-hoc fit removes whatever drift the search-time models left.
         let fit_options = FitOptions {
             // A line is useful even for modest drift; reject it only when its
             // held-in robust residual is worse than the static center.
@@ -326,46 +318,36 @@ impl Runner {
                 .iter()
                 .map(|feature| CalibrationPoint {
                     rt_minutes: feature.rt,
-                    error_ppm: feature.delta_mass,
+                    error_ppm: feature.aligned_delta_mass,
                 })
                 .collect::<Vec<_>>();
             let fragment_points = calibration_psms
                 .iter()
                 .map(|feature| CalibrationPoint {
                     rt_minutes: feature.rt,
-                    error_ppm: feature.signed_fragment_ppm,
+                    error_ppm: feature.aligned_signed_fragment_ppm,
                 })
                 .collect::<Vec<_>>();
 
-            let (precursor_corrected, fragment_corrected) = corrected(file_id);
-            let precursor_fit = (!precursor_corrected
-                && matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)))
-            .then(|| fit_mass_calibration(&precursor_points, fit_options))
-            .flatten();
-            let fragment_fit = (!fragment_corrected)
-                .then(|| fit_mass_calibration(&fragment_points, fit_options))
+            let precursor_fit = matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _))
+                .then(|| fit_mass_calibration(&precursor_points, fit_options))
                 .flatten();
+            let fragment_fit = fit_mass_calibration(&fragment_points, fit_options);
             diagnostics.push(MassAlignmentFileStats {
                 file_id,
                 calibration_psms: calibration_psms.len(),
                 precursor: precursor_fit.map(|fit| fit.model),
                 fragment: fragment_fit.map(|fit| fit.model),
                 precursor_skip_reason: precursor_fit.is_none().then(|| {
-                    if precursor_corrected {
-                        "corrected by search-time mass recalibration".into()
-                    } else if matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)) {
+                    if matches!(self.parameters.precursor_tol, Tolerance::Ppm(_, _)) {
                         "insufficient finite high-confidence observations".into()
                     } else {
                         "precursor alignment requires ppm tolerance".into()
                     }
                 }),
-                fragment_skip_reason: fragment_fit.is_none().then(|| {
-                    if fragment_corrected {
-                        "corrected by search-time mass recalibration".into()
-                    } else {
-                        "insufficient finite high-confidence observations".into()
-                    }
-                }),
+                fragment_skip_reason: fragment_fit
+                    .is_none()
+                    .then(|| "insufficient finite high-confidence observations".into()),
             });
 
             if let Some(fit) = precursor_fit {
@@ -394,16 +376,15 @@ impl Runner {
                 .filter(|feature| feature.file_id == file_id)
                 .for_each(|feature| {
                     if let Some(fit) = precursor_fit {
-                        feature.aligned_delta_mass =
-                            feature.delta_mass - fit.model.predict_ppm(feature.rt);
+                        feature.aligned_delta_mass -= fit.model.predict_ppm(feature.rt);
                     }
                     if let Some(fit) = fragment_fit {
                         let predicted = fit.model.predict_ppm(feature.rt);
                         // Preserve the within-PSM absolute-error spread while
                         // translating its signed center to the fitted baseline.
                         feature.aligned_average_ppm = align_fragment_error(
-                            feature.average_ppm,
-                            feature.signed_fragment_ppm,
+                            feature.aligned_average_ppm,
+                            feature.aligned_signed_fragment_ppm,
                             predicted,
                         );
                     }
@@ -524,7 +505,7 @@ impl Runner {
             self.discover_mass_corrections(scorer, &spectra.1);
             let recalibrated = Scorer {
                 mass_recalibration: self.mass_recalibration_models(),
-                ..self.scorer()
+                ..*scorer
             };
             self.search_processed_spectra(&recalibrated, &spectra.1)
         } else {

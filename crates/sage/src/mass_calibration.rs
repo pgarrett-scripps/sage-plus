@@ -3,6 +3,7 @@
 //! The sign convention used here is `observed - theoretical`, in ppm. A model
 //! prediction is therefore removed from an observed mass before searching.
 
+use crate::mass_recalibration::{median, median_mad, outlier_cutoff};
 use serde::{Deserialize, Serialize};
 
 /// A mass-error observation from a confidently identified PSM.
@@ -101,15 +102,8 @@ pub fn fit(points: &[CalibrationPoint], options: FitOptions) -> Option<Calibrati
     }
 
     let errors = finite.iter().map(|p| p.error_ppm).collect::<Vec<_>>();
-    let static_offset = median(&errors);
-    let deviations = errors
-        .iter()
-        .map(|error| (error - static_offset).abs())
-        .collect::<Vec<_>>();
-    let mad = median(&deviations);
-    // A small floor keeps a near-perfect run from rejecting harmless rounding
-    // noise while still removing grossly incorrect PSMs.
-    let cutoff = (options.outlier_mads * 1.4826 * mad).max(0.25);
+    let (static_offset, mad) = median_mad(&errors);
+    let cutoff = outlier_cutoff(mad, options.outlier_mads);
     let inliers = finite
         .iter()
         .copied()
@@ -182,18 +176,6 @@ pub fn fit(points: &[CalibrationPoint], options: FitOptions) -> Option<Calibrati
         static_median_abs_residual: static_mar,
         model_median_abs_residual: if use_linear { linear_mar } else { static_mar },
     })
-}
-
-fn median(values: &[f32]) -> f32 {
-    debug_assert!(!values.is_empty());
-    let mut values = values.to_vec();
-    values.sort_unstable_by(f32::total_cmp);
-    let middle = values.len() / 2;
-    if values.len().is_multiple_of(2) {
-        (values[middle - 1] + values[middle]) / 2.0
-    } else {
-        values[middle]
-    }
 }
 
 #[cfg(test)]
