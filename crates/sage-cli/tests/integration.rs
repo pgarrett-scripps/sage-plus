@@ -303,14 +303,42 @@ fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
         SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
     ));
     std::fs::create_dir_all(&root)?;
-    // tests/config.json enables annotate_matches, which rereads the input.
-    let events = run_sage_with_events(&workspace, &workspace.join("tests/config.json"), &root)?;
-    assert!(events
-        .iter()
-        .any(|event| event["event"] == "fragment_annotation_completed"));
-    for kind in ["file_started", "file_completed", "spectra_processed"] {
-        let count = events.iter().filter(|event| event["event"] == kind).count();
-        assert_eq!(count, 1, "{kind} emitted {count} times");
+    // tests/config.json enables annotate_matches, which rereads the input. The
+    // prefilter reads the input once more before the search.
+    let mut config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        workspace.join("tests/config.json"),
+    )?)?;
+    // The prefilter only runs when the FASTA has more proteins than one chunk.
+    let fasta = root.join("two-proteins.fasta");
+    std::fs::write(
+        &fasta,
+        std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?
+            + "\n>sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n",
+    )?;
+    config["database"]["fasta"] = serde_json::Value::String(fasta.display().to_string());
+    config["database"]["prefilter"] = serde_json::Value::Bool(true);
+    config["database"]["prefilter_chunk_size"] = serde_json::Value::from(1);
+    let prefilter_config = root.join("prefilter.json");
+    std::fs::write(&prefilter_config, serde_json::to_string(&config)?)?;
+    for (run, config) in [workspace.join("tests/config.json"), prefilter_config]
+        .into_iter()
+        .enumerate()
+    {
+        let run_root = root.join(run.to_string());
+        std::fs::create_dir_all(&run_root)?;
+        let events = run_sage_with_events(&workspace, &config, &run_root)?;
+        assert!(events
+            .iter()
+            .any(|event| event["event"] == "fragment_annotation_completed"));
+        for kind in ["file_started", "file_completed", "spectra_processed"] {
+            let count = events.iter().filter(|event| event["event"] == kind).count();
+            assert_eq!(
+                count,
+                1,
+                "{kind} emitted {count} times for {}",
+                config.display()
+            );
+        }
     }
     std::fs::remove_dir_all(root)?;
     Ok(())

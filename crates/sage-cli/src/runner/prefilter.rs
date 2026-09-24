@@ -55,7 +55,16 @@ impl Runner {
             .chunks(parallel.max(1))
             .collect::<Vec<_>>();
         for (batch_idx, batch) in batches.iter().enumerate() {
-            let spectra = self.read_processed_spectra(batch, batch_idx, parallel)?.1;
+            // The search reports per-file progress when it reads the spectra again.
+            let spectra = self
+                .read_processed_spectra_with_ms1(
+                    batch,
+                    batch_idx,
+                    parallel,
+                    self.requires_ms1(),
+                    false,
+                )?
+                .1;
             builder.add(&spectra);
             drop(spectra);
             let last = batch_idx + 1 == batches.len();
