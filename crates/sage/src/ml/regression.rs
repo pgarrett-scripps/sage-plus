@@ -1,15 +1,21 @@
 //! Streaming OLS linear regression.
 //!
 //! Fits `beta = (X^T X)^-1 X^T y` without materializing the `n x D` design
-//! matrix: one parallel fold/reduce pass accumulates `X^T X`, `X^T y`,
-//! `sum(y)`, `sum(y^2)`, `n` from per-row outer products. A second pass
-//! evaluates `sum((X beta - y)^2)` to report r^2 that matches the
-//! materialized formula numerically.
+//! matrix: one parallel pass accumulates `X^T X`, `X^T y`, `sum(y)`,
+//! `sum(y^2)`, `n` from per-row outer products. A second pass evaluates
+//! `sum((X beta - y)^2)` to report r^2 that matches the materialized formula
+//! numerically.
 //!
-//! Per-worker scratch is `O(D^2)` (the cov accumulator), independent of `n`.
+//! Both passes sum fixed-size chunks sequentially and then combine the chunk
+//! partials in index order, so results are bitwise reproducible regardless of
+//! thread count or scheduling. Scratch is `O(D^2)` per chunk.
 
 use super::{gauss::Gauss, matrix::Matrix};
 use rayon::prelude::*;
+
+/// Rows per sequentially-summed chunk. Fixed (not derived from the thread
+/// count) so the floating-point summation order never changes.
+const CHUNK_SIZE: usize = 4096;
 
 pub struct LinearRegression {
     pub beta: Vec<f64>,
@@ -76,17 +82,17 @@ impl LinearRegression {
         target: impl Fn(&T) -> f64 + Sync,
     ) -> Option<Self> {
         let acc = items
-            .par_iter()
-            .filter(|x| filter(x))
-            .fold(
-                || Acc::zero(D),
-                |mut acc, x| {
-                    let row = embed(x);
-                    acc.add_row(&row, target(x));
-                    acc
-                },
-            )
-            .reduce(|| Acc::zero(D), Acc::merge);
+            .par_chunks(CHUNK_SIZE)
+            .map(|chunk| {
+                let mut acc = Acc::zero(D);
+                for x in chunk.iter().filter(|x| filter(x)) {
+                    acc.add_row(&embed(x), target(x));
+                }
+                acc
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .fold(Acc::zero(D), Acc::merge);
 
         if acc.n == 0 {
             return None;
@@ -102,14 +108,21 @@ impl LinearRegression {
 
         // Streaming pass for SSE = sum((X beta - y)^2). O(N*D), small vs fit.
         let sse: f64 = items
-            .par_iter()
-            .filter(|x| filter(x))
-            .map(|x| {
-                let row = embed(x);
-                let pred: f64 = row.iter().zip(&beta).map(|(v, w)| v * w).sum();
-                let act = target(x);
-                (pred - act).powi(2)
+            .par_chunks(CHUNK_SIZE)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .filter(|x| filter(x))
+                    .map(|x| {
+                        let row = embed(x);
+                        let pred: f64 = row.iter().zip(&beta).map(|(v, w)| v * w).sum();
+                        let act = target(x);
+                        (pred - act).powi(2)
+                    })
+                    .sum::<f64>()
             })
+            .collect::<Vec<_>>()
+            .into_iter()
             .sum();
 
         let r2 = 1.0 - sse / y_var;
