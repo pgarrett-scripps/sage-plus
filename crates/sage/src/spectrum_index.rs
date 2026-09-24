@@ -192,11 +192,14 @@ impl SpectrumIndexBuilder {
                 Some((_, probes)) => probes.clone(),
                 None => {
                     let peakset = local.peaksets.len() as u32;
+                    // Non-finite peaks never match a fragment in the exact
+                    // prefilter, and would break the monotone window order.
                     local.peaksets.push(
                         FragmentMatchIndex::new(query, fragment_charge)
                             .peaks
                             .iter()
                             .map(|peak| peak.neutral_mass)
+                            .filter(|mass| mass.is_finite())
                             .collect(),
                     );
                     let shifts = std::iter::once(0.0).chain(self.offsets.iter().map(|o| o.1));
@@ -219,6 +222,11 @@ impl SpectrumIndexBuilder {
                         _ => offset_query(mass, tolerance, self.offsets[offset - 1].0),
                     };
                     let (lo, hi) = tolerance.bounds(mass);
+                    // Windows from non-finite precursor masses contain no
+                    // finite peptide mass (NaN bounds compare false).
+                    if !(lo < f32::INFINITY && hi > f32::NEG_INFINITY) {
+                        continue;
+                    }
                     local.windows.push(PrecursorWindow {
                         lo,
                         hi,

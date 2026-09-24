@@ -472,6 +472,10 @@ impl<'db> Scorer<'db> {
         let mz = precursor.mz - PROTON;
 
         let mark = |precursor_mass: f32, precursor_charge: u8, tolerance: Tolerance| {
+            // A non-finite precursor has no finite candidate window.
+            if !precursor_mass.is_finite() {
+                return;
+            }
             let fragment_index = FragmentMatchIndex::new(
                 query,
                 max_fragment_charge(self.max_fragment_charge, precursor_charge),
