@@ -18,7 +18,7 @@ impl Default for DefaultParams {
         Self {
             is_query_start: false,
             file_id: 0,
-            regex_for_charge: Regex::new(r"(\d)\+?").unwrap(),
+            regex_for_charge: Regex::new(r"(\d+)\+?").unwrap(),
             tol: None,
             tol_unit: None,
             charge_array: None,
@@ -208,13 +208,7 @@ impl DefaultParser {
         let regex_for_charge = &default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            let mut charge_array: Vec<u8> = Vec::new();
-            for cap in regex_for_charge.captures_iter(charge_str) {
-                if let Some(charge) = cap[0].chars().next().unwrap().to_digit(10) {
-                    charge_array.push(charge as u8);
-                }
-            }
-            default_params.charge_array = Some(charge_array);
+            default_params.charge_array = Some(parse_charges(regex_for_charge, charge_str));
             return Ok(true);
         }
         Ok(false)
@@ -283,13 +277,7 @@ impl QueryParser {
         let regex_for_charge = &query_data.default_params.regex_for_charge;
 
         if let Some(charge_str) = line.strip_prefix("CHARGE=") {
-            let mut charge_array = Vec::new();
-            for cap in regex_for_charge.captures_iter(charge_str) {
-                if let Some(charge) = cap[0].chars().next().unwrap().to_digit(10) {
-                    charge_array.push(charge as u8);
-                }
-            }
-            query_data.precursor_charge_array = Some(charge_array);
+            query_data.precursor_charge_array = Some(parse_charges(regex_for_charge, charge_str));
             return Ok(true);
         }
         Ok(false)
@@ -392,6 +380,14 @@ impl QueryParser {
         }
         Ok(false)
     }
+}
+
+/// Charges listed in a `CHARGE=` value such as `2+ and 3+` or `10+`.
+fn parse_charges(regex_for_charge: &Regex, value: &str) -> Vec<u8> {
+    regex_for_charge
+        .captures_iter(value)
+        .filter_map(|cap| cap[1].parse().ok())
+        .collect()
 }
 
 fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {

@@ -244,3 +244,20 @@ fn header_tolerance_applies_to_the_first_spectrum() -> Result<(), MgfError> {
     }
     Ok(())
 }
+
+#[test]
+fn multi_digit_charges_are_parsed() -> Result<(), MgfError> {
+    let s = "CHARGE=2+ and 12+\n\
+             BEGIN IONS\nTITLE=header\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=local\nPEPMASS=500\nCHARGE=10+\n100 20\nEND IONS\n";
+    let spectra = MgfReader::with_file_id(0).parse(s.to_string())?;
+    let charges = |s: &RawSpectrum| {
+        s.precursors
+            .iter()
+            .map(|precursor| precursor.charge)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(charges(&spectra[0]), [Some(2), Some(12)]);
+    assert_eq!(charges(&spectra[1]), [Some(10)]);
+    Ok(())
+}
