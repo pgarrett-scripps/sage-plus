@@ -114,6 +114,10 @@ fn configured_batching_overrides_legacy_api_parallelism() -> anyhow::Result<()> 
             rayon::current_num_threads()
         );
         assert!(!result.summary.models.mass_alignment_applied);
+        assert_eq!(
+            result.summary.models.retention_time_alignment.as_deref(),
+            Some("nonlinear")
+        );
         assert_eq!(result.summary.models.mass_alignment_files.len(), 3);
         assert!(result
             .summary

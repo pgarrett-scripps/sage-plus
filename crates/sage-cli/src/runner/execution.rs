@@ -141,9 +141,10 @@ impl Runner {
         let needs_alignment = self.parameters.predict_rt
             || self.parameters.quant.lfq
             || self.parameters.retention_time_alignment.is_some();
+        // Unspecified alignment resolves to nonlinear; "linear" restores the pre-Beta 9 fit.
+        let alignment_method = self.parameters.retention_time_alignment.unwrap_or_default();
         let alignments = if needs_alignment {
             // Alignment landmarks are observed target PSMs passing 1% spectrum FDR.
-            let alignment_method = self.parameters.retention_time_alignment.unwrap_or_default();
             let alignments = sage_core::ml::retention_alignment::global_alignment_with_method(
                 &mut outputs.features,
                 self.parameters.mzml_paths.len(),
@@ -526,13 +527,8 @@ impl Runner {
                     self.parameters.retention_time_model.features
                 )
                 .to_lowercase(),
-                retention_time_alignment: needs_alignment.then(|| {
-                    format!(
-                        "{:?}",
-                        self.parameters.retention_time_alignment.unwrap_or_default()
-                    )
-                    .to_lowercase()
-                }),
+                retention_time_alignment: needs_alignment
+                    .then(|| format!("{alignment_method:?}").to_lowercase()),
                 ion_mobility_observed: has_ion_mobility,
                 ion_mobility_model_enabled: self.parameters.ion_mobility_model.enabled,
                 ion_mobility_model_fitted,

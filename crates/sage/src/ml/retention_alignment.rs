@@ -33,10 +33,10 @@ const MIN_X_SEPARATION: f64 = 0.05;
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AlignmentMethod {
-    /// Preserve Sage's existing ordinary least-squares alignment.
-    #[default]
+    /// Sage's ordinary least-squares alignment, the default before Beta 9.
     Linear,
-    /// Robust outlier filtering followed by a monotone piecewise-linear warp.
+    /// Robust outlier filtering followed by a monotone piecewise-linear warp (default).
+    #[default]
     Nonlinear,
 }
 
@@ -433,10 +433,10 @@ fn fit_alignment(file_id: usize, max_rt: f64, mut points: Vec<(f64, f64)>) -> Al
     }
 }
 
-/// Align runs with Sage's existing linear method.
+/// Align runs with Sage's ordinary least-squares linear method.
 ///
-/// Kept as the default entry point for API compatibility. Use
-/// [`global_alignment_with_method`] to request nonlinear alignment.
+/// Kept for API compatibility and always linear. The CLI default is
+/// [`AlignmentMethod::Nonlinear`]; use [`global_alignment_with_method`] to choose.
 pub fn global_alignment(features: &mut [Feature], n_files: usize) -> Vec<Alignment> {
     global_alignment_with_method(features, n_files, AlignmentMethod::Linear)
 }
