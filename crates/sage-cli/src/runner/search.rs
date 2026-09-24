@@ -1,7 +1,9 @@
 use super::*;
 
-/// Most MS2 spectra per file searched in the discovery pass. Spectra are
-/// taken at an even stride, so the sample spans the whole gradient.
+/// Most MS2 spectra per file searched in the discovery pass. Each
+/// acquisition group keeps its share of the sample, taken at even positions
+/// across its own spectra, so the sample spans the whole gradient and does
+/// not alias with interleaved scan cycles.
 const MAX_DISCOVERY_SPECTRA: usize = 25_000;
 
 /// Largest correction, in ppm, a model may apply for `tolerance`: the
@@ -89,8 +91,14 @@ impl Runner {
                 })
                 .collect::<Vec<_>>();
             let searchable = candidates.len();
-            let stride = searchable.div_ceil(MAX_DISCOVERY_SPECTRA).max(1);
-            let sample = candidates.into_iter().step_by(stride).collect::<Vec<_>>();
+            let keys = candidates
+                .iter()
+                .map(|spectrum| spectrum.acquisition)
+                .collect::<Vec<_>>();
+            let sample = stratified_sample(&keys, MAX_DISCOVERY_SPECTRA)
+                .into_iter()
+                .map(|index| candidates[index])
+                .collect::<Vec<_>>();
             let mut features = sample
                 .par_iter()
                 .enumerate()

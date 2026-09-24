@@ -266,3 +266,33 @@ fn thermo_filters_map_to_acquisition_groups() {
     assert_eq!(group.analyzer, MassAnalyzer::Astral);
     assert_eq!(group.label(), "astral/hcd");
 }
+
+#[test]
+fn discovery_sample_is_stratified_by_acquisition_group() {
+    // A strict 4-scan cycle (two Orbitrap scans, then two ion-trap scans),
+    // where a stride of 4 would sample only the first scan type.
+    let cycle = [0u8, 1, 2, 0];
+    let keys = (0..100_000).map(|i| cycle[i % 4]).collect::<Vec<_>>();
+    let sample = stratified_sample(&keys, 25_000);
+    assert!(sample.len() <= 25_000);
+    assert!(sample.windows(2).all(|pair| pair[0] < pair[1]));
+    let count = |key: u8| sample.iter().filter(|&&i| keys[i] == key).count();
+    assert_eq!((count(0), count(1), count(2)), (12_500, 6_250, 6_250));
+    // Every group spans the gradient.
+    for key in 0..3 {
+        let members = sample
+            .iter()
+            .filter(|&&i| keys[i] == key)
+            .collect::<Vec<_>>();
+        assert!(*members[0] < 100 && *members[members.len() - 1] > 99_900);
+    }
+    assert_eq!(sample, stratified_sample(&keys, 25_000));
+
+    // Small inputs are searched whole; rare groups keep at least one spectrum.
+    assert_eq!(stratified_sample(&[1, 2, 3], 5), vec![0, 1, 2]);
+    let mut keys = vec![0u8; 1_000];
+    keys[500] = 1;
+    let sample = stratified_sample(&keys, 100);
+    assert!(sample.contains(&500));
+    assert_eq!(sample.len(), 100);
+}
