@@ -78,6 +78,35 @@ fn canonical_classes_reparse_identically() {
     assert!(SiteMotif::parse("{ACDEFGHIKLMNPQRSTVWYUO}*").is_err());
 }
 
+#[test]
+fn oversized_repeats_are_rejected_before_expansion() {
+    // Rejected by the width check, not by a capacity overflow or a huge
+    // allocation while expanding the repeat.
+    for pattern in [
+        "x(18446744073709551615)-N*",
+        "x(10000000000)-N*",
+        "N*-x(64)",
+        "x(40)-N*-x(40)",
+    ] {
+        let error = SiteMotif::parse(pattern).unwrap_err();
+        assert!(
+            error.contains("wider than 64 residues"),
+            "{pattern}: {error}"
+        );
+    }
+    assert!(SiteMotif::parse("N*-x(63)").is_ok());
+}
+
+#[test]
+fn protein_context_anchors_follow_coordinates_only() {
+    let context = MotifContext::in_protein(b"GGGGCVLK", 0, 8);
+    assert!(context.left_boundary && context.right_boundary);
+    let context = MotifContext::in_protein(b"GGGGCVLKAAAAAR", 0, 8);
+    assert!(context.left_boundary && !context.right_boundary);
+    let context = MotifContext::in_protein(b"AAGGGGCVLK", 2, 8);
+    assert!(!context.left_boundary && context.right_boundary);
+}
+
 mod database {
     use crate::database::{Builder, Parameters};
     use crate::enzyme::Position;
@@ -372,5 +401,115 @@ mod database {
         .unwrap()
         .to_string();
         assert!(error.contains("must mark the modified residue"), "{error}");
+    }
+
+    fn mass_offset_database(
+        fasta: &str,
+        sites: &str,
+    ) -> (crate::database::IndexedDatabase, Parameters) {
+        let parameters = parameters(serde_json::json!({
+            "variable_mods": {
+                "Offset": {"mass": 42.010565, "sites": [sites], "search_mode": "mass_offset"}
+            }
+        }));
+        let fasta = Fasta::parse(fasta.into(), "rev_", true).unwrap();
+        (parameters.clone().build(fasta), parameters)
+    }
+
+    fn offset_sites(fasta: &str, sites: &str, sequence: &str) -> Vec<Site> {
+        let (database, parameters) = mass_offset_database(fasta, sites);
+        let offsets = parameters.mass_offset_modifications();
+        let peptides = database
+            .peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.sequence == sequence)
+            .collect::<Vec<_>>();
+        assert_eq!(peptides.len(), 1, "{fasta}");
+        database.mass_offset_sites(peptides[0], &offsets[0])
+    }
+
+    #[test]
+    fn protein_anchors_hold_when_shared_peptides_merge_positions() {
+        // GGGGCVLK is the whole of P1 (Full) and the N-terminal peptide of P2
+        // (Nterm). The merged peptide keeps one position; the C-anchor must
+        // still match through P1's coordinates.
+        let fasta = ">P1\nGGGGCVLK\n>P2\nGGGGCVLKAAAAAR\n";
+        assert_eq!(
+            offset_sites(fasta, "motif:C*-x(3)>", "GGGGCVLK"),
+            vec![Site::Sequence(4)]
+        );
+        // The same for an N-anchor: AEPTIDEK is N-terminal in P1 and internal
+        // in P2, in either FASTA order.
+        for fasta in [
+            ">P1\nAEPTIDEKGGGGGGGGR\n>P2\nGGGGGGRAEPTIDEKGGGGGR\n",
+            ">P2\nGGGGGGRAEPTIDEKGGGGGR\n>P1\nAEPTIDEKGGGGGGGGR\n",
+        ] {
+            assert_eq!(
+                offset_sites(fasta, "motif:<A-E*", "AEPTIDEK"),
+                vec![Site::Sequence(1)],
+                "{fasta}"
+            );
+        }
+        // Without a terminal occurrence the anchors do not match.
+        assert!(offset_sites(">P2\nGGGGCVLKAAAAAR\n", "motif:C*-x(3)>", "GGGGCVLK").is_empty());
+    }
+
+    #[test]
+    fn single_peptide_fasta_decoys_are_matched_literally() {
+        // rev_P2 is exactly one peptide. It must be matched literally, not
+        // reversed and mirrored as if it were a generated decoy.
+        let parameters = parameters(serde_json::json!({"generate_decoys": false}));
+        let peptides = expand(&parameters, ">P1\nMRGAANKSLLR\n>rev_P2\nGNGTAK\n", false);
+        let shown = rendered(&peptides);
+        assert!(
+            shown.contains(&(true, "GN[HexNAc]GTAK".into())),
+            "{shown:?}"
+        );
+        let decoy = peptides
+            .iter()
+            .find(|peptide| peptide.decoy && peptide.sequence == "GNGTAK")
+            .unwrap();
+        assert!(decoy.protein_sites[0].source.is_some());
+        assert_eq!(decoy.rule_sites(motif()), vec![Site::Sequence(1)]);
+    }
+
+    #[test]
+    fn standalone_sequences_do_not_pose_as_proteins() {
+        use crate::enzyme::{Digest, ProteinOccurrence};
+        // A reversed digest owns a fresh allocation the size of the peptide.
+        // It is not its protein, even at protein_start 0.
+        let target = Digest {
+            sequence: crate::sequence::ProteinSequence::from("GAANKSK")
+                .peptide(0..7)
+                .unwrap(),
+            protein: "P1".into(),
+            protein_start: Some(0),
+            position: Position::Full,
+            ..Default::default()
+        };
+        assert!(ProteinOccurrence::of_protein_digest(&target)
+            .source
+            .is_some());
+        let reversed = target.reverse();
+        assert!(ProteinOccurrence::of(&reversed).source.is_none());
+        let decoy = Peptide::try_from(reversed).unwrap();
+        assert!(decoy.protein_sites[0].source.is_none());
+    }
+
+    #[test]
+    fn peptide_list_decoys_are_treated_as_reversed_targets() {
+        // A decoy row has no protein and cannot be told apart from a decoy
+        // generated from a peptide-list target, so both use the mirrored
+        // sites of their reversed sequence (see DOCS.md, Motif sites).
+        let parameters = parameters(serde_json::json!({"generate_decoys": false}));
+        let peptides = parameters.peptides_from_tsv("sequence\tdecoy\nGTGNAK\ttrue\n");
+        let shown = rendered(&peptides);
+        assert!(
+            shown.contains(&(true, "GTGN[HexNAc]AK".into())),
+            "{shown:?}"
+        );
+        let peptides = parameters.peptides_from_tsv("sequence\tdecoy\nGANGTK\ttrue\n");
+        let shown = rendered(&peptides);
+        assert!(!shown.iter().any(|(_, p)| p.contains('[')), "{shown:?}");
     }
 }

@@ -1,6 +1,7 @@
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{
-    group_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position, ProteinOccurrence,
+    group_protein_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position,
+    ProteinOccurrence,
 };
 use crate::fasta::Fasta;
 use crate::ion_series::{IonGroupSeries, Kind};
@@ -653,7 +654,7 @@ impl Parameters {
             for digest in enzyme.digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
             {
                 let sequence_len = digest.sequence.len() as u64;
-                let origin = ProteinOccurrence::of(&digest);
+                let origin = ProteinOccurrence::of_protein_digest(&digest);
                 let variants = self
                     .variable_variant_count(&digest, std::slice::from_ref(&origin))
                     .saturating_mul(decoy_multiplier);
@@ -960,7 +961,7 @@ impl Parameters {
 
         log::trace!("grouping digests");
         let start_num = digests.len();
-        let digests = group_digests(digests);
+        let digests = group_protein_digests(digests);
         log::trace!(
             "grouped {} digests into {} groups",
             start_num,

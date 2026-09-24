@@ -1,3 +1,4 @@
+use crate::enzyme::group_digests;
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
