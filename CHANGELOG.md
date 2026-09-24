@@ -35,11 +35,15 @@ entries are retained below for provenance.
 - Ion-mobility residue-class features count the intended residues.
 - Thermo RAW MS levels and precursors come from the scan trailers wherever OpenTFRaw's scan
   event contradicts them, as on some Orbitrap Fusion files where events are decoded out of step
-  with the scans. Dependent scans follow their master scan chain; scans without a master keep an
-  MSn event only when it has a plausible precursor, as DIA and targeted scans do. An SPS-MS3 TMT file
+  with the scans. Once any scan is contradicted, every scan with a trailer master takes its level
+  and precursor from the trailer. Otherwise dependent scans follow their master scan chain, and
+  scans without a master keep an MSn event only when it has a plausible precursor, as DIA and
+  targeted scans do. The trailer chain uses only "Master Scan Number"; "Master Index", a 0/1 flag
+  on QE and LTQ Orbitrap files, is ignored. An SPS-MS3 TMT file
   previously read as 104,433 MS1 scans and 1 MS2 scan; it now matches msconvert (14,239 MS1,
   45,139 MS2, 45,056 MS3), and MS3 scans keep their MS2 parent for reporter ions. MS2 scans
-  whose trailer has no precursor m/z are reported with a warning and are not searched.
+  without a plausible precursor m/z (50-20,000) are reported with a warning and are not
+  searched.
 - Non-finite peak and precursor m/z values are dropped during spectrum processing, so they no
   longer abort prefiltered searches.
 - Calibrated 1/K0 finds `analysis.tdf` for Bruker inputs given as a path inside the `.d`

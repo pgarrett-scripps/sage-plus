@@ -51,6 +51,42 @@ fn converts_open_tf_raw_record() {
 }
 
 #[test]
+fn implausible_precursor_mz_is_not_searched() {
+    let record = |selected_mz: f64, target_mz: Option<f64>| SpectrumRecord {
+        index: 0,
+        scan_number: 217,
+        ms_level: 2,
+        is_ms1: false,
+        is_dia: false,
+        is_wideband: false,
+        polarity: None,
+        scan_mode: None,
+        filter: None,
+        retention_time_min: 1.0,
+        total_ion_current: 1.0,
+        base_peak_mz: 200.0,
+        base_peak_intensity: 1.0,
+        low_mz: 100.0,
+        high_mz: 1000.0,
+        ion_injection_time_ms: None,
+        faims_cv: None,
+        precursor: Some(PrecursorInfo {
+            selected_mz: Some(selected_mz),
+            target_mz,
+            ..Default::default()
+        }),
+        mz: vec![200.0],
+        intensity: vec![1.0],
+    };
+    let reader = ThermoRawReader::with_file_id(0);
+    // Misdecoded events can carry denormal precursor m/z values.
+    assert!(reader.convert(record(2.1e-314, None)).precursors.is_empty());
+    // A plausible isolation target is used when the selected m/z is not.
+    let spectrum = reader.convert(record(0.0, Some(810.16)));
+    assert_eq!(spectrum.precursors[0].mz, 810.16);
+}
+
+#[test]
 fn parses_real_raw_file() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/thermo/Angiotensin_325-CID.raw");

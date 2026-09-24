@@ -29,40 +29,53 @@ impl ThermoRawReader {
         let masters = (0..raw.num_scans)
             .map(|idx| {
                 raw.scan_params(first_scan + idx)
-                    .and_then(|params| params.master_scan_number())
-                    .map(|master| master.max(0) as u32)
+                    .and_then(|params| trailer_master_scan(&params))
             })
             .collect::<Vec<_>>();
         let levels = trailer_levels(first_scan, &masters);
+        let plausible_events = records
+            .iter()
+            .map(|record| {
+                raw.scan_events
+                    .get((record.scan_number - first_scan) as usize)
+                    .and_then(|event| event.reactions.first())
+                    .is_some_and(|reaction| plausible_precursor_mz(reaction.precursor_mz))
+            })
+            .collect::<Vec<_>>();
+        // Once any event contradicts its trailer, the events of the whole file
+        // are out of step: their precursors belong to other scans and a
+        // plausible-looking masterless MSn event is no evidence of DIA.
+        let misaligned = records
+            .iter()
+            .zip(&plausible_events)
+            .any(|(record, &plausible)| {
+                let idx = (record.scan_number - first_scan) as usize;
+                corrected_level(record.ms_level, levels[idx], plausible).is_some()
+            });
         let mut corrected = 0;
-        let mut unsearchable = 0;
-        for record in &mut records {
+        for (record, &plausible) in records.iter_mut().zip(&plausible_events) {
             let idx = (record.scan_number - first_scan) as usize;
-            let plausible = raw
-                .scan_events
-                .get(idx)
-                .and_then(|event| event.reactions.first())
-                .is_some_and(|reaction| plausible_precursor_mz(reaction.precursor_mz));
-            let Some(level) = corrected_level(record.ms_level, levels[idx], plausible) else {
+            let level = match misaligned {
+                true => levels[idx],
+                false => corrected_level(record.ms_level, levels[idx], plausible),
+            };
+            let Some(level) = level else {
                 continue;
             };
+            if level != record.ms_level {
+                corrected += 1;
+            }
             let params = raw.scan_params(record.scan_number);
             apply_trailer_level(record, level, params.as_ref());
-            corrected += 1;
-            if level == 2
-                && record
-                    .precursor
-                    .as_ref()
-                    .and_then(|precursor| precursor.selected_mz.or(precursor.target_mz))
-                    .is_none()
-            {
-                unsearchable += 1;
-            }
         }
+        let unsearchable = records
+            .iter()
+            .filter(|record| record.ms_level == 2 && precursor_mz(record).is_none())
+            .count();
         if corrected > 0 {
             log::warn!(
                 "OpenTFRaw scan events contradict the scan trailers of {} of {} scans in {}; \
-                 their MS levels and precursors come from the trailers",
+                 MS levels and precursors come from the trailers",
                 corrected,
                 records.len(),
                 path.display()
@@ -70,7 +83,7 @@ impl ThermoRawReader {
         }
         if unsearchable > 0 {
             log::warn!(
-                "{} MS2 scans in {} have no precursor m/z in their trailer and will not be \
+                "{} MS2 scans in {} have no plausible precursor m/z and will not be \
                  searched; convert the file to mzML with msconvert to search them",
                 unsearchable,
                 path.display()
@@ -96,7 +109,7 @@ impl ThermoRawReader {
         let precursor = record.precursor.and_then(|value| {
             // MS3 reporter-ion quantification needs only the link to the MS2
             // scan, which the trailer keeps even when the m/z is unknown.
-            let mz = match value.selected_mz.or(value.target_mz) {
+            let mz = match plausible_mz(&value) {
                 Some(mz) => mz as f32,
                 None if ms_level > 2 && value.master_scan_number.is_some() => 0.0,
                 None => return None,
@@ -167,7 +180,9 @@ pub(crate) fn trailer_levels(first_scan: u32, masters: &[Option<u32>]) -> Vec<Op
 /// Orbitrap Fusion files, while the trailer master scan numbers stay correct.
 /// A dependent scan (one with a master) takes its level from the master
 /// chain. A scan without a master is MS1 unless its event is an MSn scan with
-/// a plausible precursor, as DIA and targeted scans have no master scan.
+/// a plausible precursor, as DIA and targeted scans have no master scan. Once
+/// any scan is corrected, the reader applies the trailer levels to every scan
+/// instead, since the file's events can no longer be trusted.
 pub(crate) fn corrected_level(
     event_level: u32,
     trailer_level: Option<u32>,
@@ -184,6 +199,27 @@ pub(crate) fn plausible_precursor_mz(mz: f64) -> bool {
     (50.0..20_000.0).contains(&mz)
 }
 
+/// The selected m/z, or else the isolation target, when it is plausible.
+fn plausible_mz(precursor: &PrecursorInfo) -> Option<f64> {
+    [precursor.selected_mz, precursor.target_mz]
+        .into_iter()
+        .flatten()
+        .find(|&mz| plausible_precursor_mz(mz))
+}
+
+fn precursor_mz(record: &SpectrumRecord) -> Option<f64> {
+    record.precursor.as_ref().and_then(plausible_mz)
+}
+
+/// The trailer "Master Scan Number". OpenTFRaw falls back to "Master Index",
+/// which is a 0/1 flag on QE and LTQ Orbitrap files rather than a scan number.
+pub(crate) fn trailer_master_scan(params: &ScanParams<'_>) -> Option<u32> {
+    params
+        .record()
+        .get_i32("Master Scan Number:")
+        .map(|master| master.max(0) as u32)
+}
+
 /// Replace the event-derived MS level and precursor of `record` with values
 /// from its scan trailer, ignoring the event's reaction entirely.
 pub(crate) fn apply_trailer_level(
@@ -196,20 +232,21 @@ pub(crate) fn apply_trailer_level(
     record.precursor = match level {
         1 => None,
         _ => params.map(|params| {
-            let monoisotopic = params.monoisotopic_mz().filter(|&mz| mz > 0.0);
+            // `isolation_target_mz` can be an isolation offset, so only
+            // plausible m/z values are kept.
+            let monoisotopic = params
+                .monoisotopic_mz()
+                .filter(|&mz| plausible_precursor_mz(mz));
             let target = params
                 .isolation_target_mz()
-                .filter(|&mz| mz > 0.0)
+                .filter(|&mz| plausible_precursor_mz(mz))
                 .or(monoisotopic);
             PrecursorInfo {
                 target_mz: target,
                 selected_mz: monoisotopic.or(target),
                 isolation_width: params.isolation_width_mz(),
                 charge: params.charge_state().filter(|&charge| charge > 0),
-                master_scan_number: params
-                    .master_scan_number()
-                    .filter(|&scan| scan > 0)
-                    .map(|scan| scan as u32),
+                master_scan_number: trailer_master_scan(params).filter(|&scan| scan > 0),
                 ..Default::default()
             }
         }),
