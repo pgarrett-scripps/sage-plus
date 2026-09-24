@@ -872,6 +872,34 @@ pub fn select_group_models(
         .collect()
 }
 
+/// Indices, in ascending order, of a sample of at most about `cap` items,
+/// stratified by `keys` (one per item, in acquisition order).
+///
+/// Each key keeps its share of the items (at least one), and its members are
+/// taken at even positions across its own sequence, so the sample spans the
+/// whole gradient. A single stride over interleaved acquisitions would alias
+/// with the scan cycle: a stride of 4 over a strict 4-scan cycle samples one
+/// scan type only. All items are returned when there are at most `cap`.
+pub fn stratified_sample<K: Ord + Copy>(keys: &[K], cap: usize) -> Vec<usize> {
+    let total = keys.len();
+    if total <= cap {
+        return (0..total).collect();
+    }
+    let mut strata: std::collections::BTreeMap<K, Vec<usize>> = Default::default();
+    for (index, key) in keys.iter().enumerate() {
+        strata.entry(*key).or_default().push(index);
+    }
+    let mut sample = Vec::with_capacity(cap + strata.len());
+    for members in strata.values() {
+        let n = members.len();
+        let take = (n * cap / total).clamp(1, n);
+        // Centre of each of `take` equal slices of the stratum.
+        sample.extend((0..take).map(|i| members[(2 * i + 1) * n / (2 * take)]));
+    }
+    sample.sort_unstable();
+    sample
+}
+
 /// FNV-1a hash of a string, used to split PSMs deterministically.
 pub fn stable_hash(value: &str) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;

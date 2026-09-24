@@ -17,9 +17,10 @@ use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
 };
 use sage_core::mass_recalibration::{
-    auto_tolerance, select_group_models, select_model, stable_hash, AutoToleranceOptions,
-    FileMassCorrection, GroupMassCorrection, MassErrorPoint, MassModelKind, MassRecalibration,
-    MassRecalibrationMode, ModelSelection, RecalibrationOptions, ToleranceEstimate, ToleranceMode,
+    auto_tolerance, select_group_models, select_model, stable_hash, stratified_sample,
+    AutoToleranceOptions, FileMassCorrection, GroupMassCorrection, MassErrorPoint, MassModelKind,
+    MassRecalibration, MassRecalibrationMode, ModelSelection, RecalibrationOptions,
+    ToleranceEstimate, ToleranceMode,
 };
 use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature, Scorer};
