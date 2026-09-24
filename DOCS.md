@@ -771,7 +771,10 @@ alongside the library, because the location table does not embed chemical masses
   search uses the same FDR competition and produces the same results as a full database search.
   The spectrum index is limited to a quarter of `max_memory_gb`, or 8 GiB without a limit. Larger
   inputs are indexed in file batches, and the database is streamed once per batch. Set the
-  `SAGE_PREFILTER_INDEX_GB` environment variable to override the budget.
+  `SAGE_PREFILTER_INDEX_GB` environment variable to override the budget. Spectra read by the
+  prefilter are kept for the search, from the first file batch up to the same budget, so those
+  files are read and processed once. If keeping them would push the final fragment index past
+  the memory limit, they are released and read again by the search.
 - **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
   A value of zero selects the chunk size from the estimated number of modified peptides.
 - **prefilter_low_memory**: Deprecated and ignored. Exact prefiltering always uses compact survivor

@@ -14,12 +14,15 @@ impl Runner {
     /// fragment index is built until the final survivor database. When the
     /// spectra exceed the index budget, they are indexed in batches and the
     /// database is streamed once per batch.
-    pub fn prefilter_peptides(
+    ///
+    /// Processed spectra are also returned for the search, from the first
+    /// file batch until they would exceed the index budget.
+    pub(crate) fn prefilter_peptides(
         self,
         parallel: usize,
         fasta: Fasta,
         custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
-    ) -> anyhow::Result<Vec<Peptide>> {
+    ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
         let digests =
             db_params.digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
@@ -54,19 +57,37 @@ impl Runner {
             .mzml_paths
             .chunks(parallel.max(1))
             .collect::<Vec<_>>();
+        let mut retained = RetainedSpectra {
+            batch_size: parallel.max(1),
+            batches: Vec::with_capacity(batches.len()),
+        };
+        let mut retained_bytes = 0u64;
+        let mut retaining = true;
         for (batch_idx, batch) in batches.iter().enumerate() {
-            // The search reports per-file progress when it reads the spectra again.
-            let spectra = self
-                .read_processed_spectra_with_ms1(
-                    batch,
-                    batch_idx,
-                    parallel,
-                    self.requires_ms1(),
-                    false,
-                )?
-                .1;
-            builder.add(&spectra);
-            drop(spectra);
+            // The search reports per-file progress when it takes these spectra
+            // or reads them again.
+            let spectra = self.read_processed_spectra_with_ms1(
+                batch,
+                batch_idx,
+                parallel.max(1),
+                self.requires_ms1(),
+                false,
+            )?;
+            builder.add(&spectra.1);
+            let bytes = spectra
+                .0
+                .iter()
+                .chain(&spectra.1)
+                .map(spectrum_bytes)
+                .fold(0u64, u64::saturating_add);
+            retaining &= retained_bytes.saturating_add(bytes) <= budget;
+            if retaining {
+                retained_bytes += bytes;
+                retained.batches.push(Some(spectra));
+            } else {
+                retained.batches.push(None);
+                drop(spectra);
+            }
             let last = batch_idx + 1 == batches.len();
             if !last && (builder.allocated_bytes() as u64) < budget {
                 continue;
@@ -81,7 +102,16 @@ impl Runner {
 
         let mut all_peptides = pass.peptides;
         Parameters::reorder_peptides(&mut all_peptides);
-        Ok(all_peptides)
+        let kept = retained.batches.iter().flatten().count();
+        if kept > 0 {
+            info!(
+                "retained {} of {} file batches ({:.1} MiB of processed spectra) for the search",
+                kept,
+                batches.len(),
+                retained_bytes as f64 / (1024.0 * 1024.0)
+            );
+        }
+        Ok((all_peptides, retained))
     }
 
     fn spectrum_index_budget(&self) -> u64 {
@@ -133,6 +163,18 @@ impl Runner {
         );
         index
     }
+}
+
+/// Approximate heap and inline size of a processed spectrum.
+fn spectrum_bytes(spectrum: &ProcessedSpectrum) -> u64 {
+    (std::mem::size_of::<ProcessedSpectrum>()
+        + spectrum.id.capacity()
+        + spectrum.precursors.capacity() * std::mem::size_of::<sage_core::spectrum::Precursor>()
+        + spectrum.masses.capacity() * std::mem::size_of::<f32>()
+        + spectrum.intensities.capacity() * std::mem::size_of::<f32>()
+        + spectrum.charges.capacity()
+        + spectrum.charge_is_known.capacity()
+        + spectrum.mobilities.capacity() * std::mem::size_of::<f32>()) as u64
 }
 
 /// Survivor state shared by every spectrum batch.

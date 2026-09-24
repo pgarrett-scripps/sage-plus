@@ -79,6 +79,11 @@ entries are retained below for provenance.
   identical results.
 
 ### Changed
+- Prefiltered searches are 1.06 to 1.40 times faster, with byte-identical results. Spectra read
+  by the prefilter are kept for the search instead of being read and processed again, up to the
+  prefilter's spectrum index budget. The database memory estimate runs in parallel, and prefilter
+  survivors are no longer sorted a second time. On five PXD028735 LFQ files the search took
+  105-109 s instead of 133-140 s, and peak memory rose from 6.47 to 6.67 GiB.
 - Update timsrust from 0.6.5 to 0.6.6, with the vendored `filemanager` patch rebased on 0.6.6.
   timsrust 0.6.6 changed its uncalibrated scan-to-1/K0 conversion from linear in sqrt(1/K0)
   to linear in 1/K0. The default calibrated scale does not use it. `ion_mobility_scale:

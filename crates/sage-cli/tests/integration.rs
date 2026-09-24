@@ -344,6 +344,103 @@ fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Spectra read by the prefilter are searched without a second read. A tiny
+/// spectrum index budget retains nothing, so every batch is read again; both
+/// paths must produce the same results and progress events.
+#[test]
+fn prefilter_spectra_are_reused_by_the_search() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-prefilter-reuse-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+        workspace.join("tests/config.json"),
+    )?)?;
+    let fasta = root.join("two-proteins.fasta");
+    std::fs::write(
+        &fasta,
+        std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?
+            + "\n>sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n",
+    )?;
+    // Three files in batches of two: a full batch and a partial one.
+    let mzml = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let inputs = (0..3)
+        .map(|idx| {
+            let path = root.join(format!("run{idx}.mzML"));
+            std::fs::copy(&mzml, &path).map(|_| path.display().to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    config["database"]["fasta"] = serde_json::Value::String(fasta.display().to_string());
+    config["database"]["prefilter"] = serde_json::Value::Bool(true);
+    config["database"]["prefilter_chunk_size"] = serde_json::Value::from(1);
+    config["mzml_paths"] = serde_json::json!(inputs);
+    config["batch_size"] = serde_json::Value::from(2);
+    let config_path = root.join("prefilter.json");
+    std::fs::write(&config_path, serde_json::to_string(&config)?)?;
+
+    let run = |name: &str, index_gb: Option<&str>| -> anyhow::Result<_> {
+        let run_root = root.join(name);
+        std::fs::create_dir_all(&run_root)?;
+        let mut command = Command::new(env!("CARGO_BIN_EXE_sage"));
+        command
+            .current_dir(&workspace)
+            .arg(&config_path)
+            .arg("--output_directory")
+            .arg(run_root.join("output"))
+            .arg("--events-jsonl")
+            .arg(run_root.join("events.jsonl"))
+            .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+            .env("SAGE_LOG", "info");
+        match index_gb {
+            Some(gib) => command.env("SAGE_PREFILTER_INDEX_GB", gib),
+            None => command.env_remove("SAGE_PREFILTER_INDEX_GB"),
+        };
+        let result = command.output()?;
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        // Timestamps and job identity differ between runs.
+        let events = std::fs::read_to_string(run_root.join("events.jsonl"))?
+            .lines()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .map(|event| event.map(|event| event["event"].as_str().unwrap_or("").to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let results = ["results.sage.parquet", "matched_fragments.sage.parquet"]
+            .map(|file| std::fs::read(run_root.join("output").join(file)));
+        let results = results.into_iter().collect::<Result<Vec<_>, _>>()?;
+        Ok((
+            String::from_utf8_lossy(&result.stderr).into_owned(),
+            events,
+            results,
+        ))
+    };
+    // Files within a batch may be read in parallel, so only the events, not
+    // their order, are compared.
+    let (reused_log, mut reused_events, reused) = run("reused", None)?;
+    let (reread_log, mut reread_events, reread) = run("reread", Some("0.000000001"))?;
+    reused_events.sort();
+    reread_events.sort();
+
+    assert!(
+        reused_log.contains("retained 2 of 2 file batches"),
+        "{reused_log}"
+    );
+    assert!(!reread_log.contains("file batches"), "{reread_log}");
+    assert_eq!(reused, reread);
+    assert_eq!(reused_events, reread_events);
+    for kind in ["file_started", "file_completed"] {
+        let count = reused_events.iter().filter(|event| *event == kind).count();
+        assert_eq!(count, 3, "{kind} emitted {count} times");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// End-to-end N-glycosylation motif search on a synthetic spectrum. The sequon
 /// of the identified peptide is completed by the residue after it, so the
 /// search, localization, and reusable library all need protein context.

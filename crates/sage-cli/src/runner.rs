@@ -248,6 +248,20 @@ pub struct Runner {
     start: Instant,
     events: EventEmitter,
     cancellation: CancellationToken,
+    /// Spectra read by the prefilter, kept for the search so each file is
+    /// read and processed once.
+    retained_spectra: std::sync::Mutex<RetainedSpectra>,
+}
+
+/// Processed MS1 and MSn spectra of one file batch.
+pub(crate) type SpectrumBatch = (Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>);
+
+/// File batches retained from the prefilter, indexed by batch. They are only
+/// valid for a search that splits the files into batches of the same size.
+#[derive(Default)]
+pub(crate) struct RetainedSpectra {
+    batch_size: usize,
+    batches: Vec<Option<SpectrumBatch>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -612,6 +626,9 @@ impl Runner {
         events.emit(EventKind::DatabaseStarted);
         let limits =
             MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
+        let mut retained_spectra = RetainedSpectra::default();
+        // Prefilter survivors are already mass-ordered and deduplicated.
+        let mut reordered = false;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
             let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
@@ -802,8 +819,13 @@ impl Runner {
                             start,
                             events: events.clone(),
                             cancellation: cancellation.clone(),
+                            retained_spectra: Default::default(),
                         };
-                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?
+                        let (peptides, retained) =
+                            mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
+                        retained_spectra = retained;
+                        reordered = true;
+                        peptides
                     }
                 }
             }
@@ -819,10 +841,13 @@ impl Runner {
             let content = sage_cloudpath::util::read_text(&peptides_path)
                 .with_context(|| format!("Failed to read peptide file `{peptides_path}`"))?;
             all_peptides.extend(database_parameters.peptides_from_tsv(&content));
+            reordered = false;
         }
 
         // Merge, deduplicate, and build the index.
-        Parameters::reorder_peptides(&mut all_peptides);
+        if !reordered {
+            Parameters::reorder_peptides(&mut all_peptides);
+        }
         if limits.is_enabled() {
             let estimate = database_parameters.estimate_index_memory(&all_peptides);
             info!(
@@ -831,12 +856,20 @@ impl Runner {
                 estimate.fragments,
                 estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
             );
-            limits.check_estimate(
-                "final fragment-index",
-                estimate
-                    .fragment_peak_bytes
-                    .saturating_sub(estimate.modified_peak_bytes),
-            )?;
+            let additional = estimate
+                .fragment_peak_bytes
+                .saturating_sub(estimate.modified_peak_bytes);
+            if let Err(error) = limits.check_estimate("final fragment-index", additional) {
+                if retained_spectra.batches.is_empty() {
+                    return Err(error);
+                }
+                // Spectra are reread by the search rather than held through
+                // the index build.
+                info!("releasing prefilter spectra to fit the fragment index");
+                retained_spectra = RetainedSpectra::default();
+                let _ = trim_allocator();
+                limits.check_estimate("final fragment-index", additional)?;
+            }
         }
         let database = database_parameters
             .clone()
@@ -895,6 +928,7 @@ impl Runner {
             start,
             events,
             cancellation,
+            retained_spectra: std::sync::Mutex::new(retained_spectra),
         })
     }
 }
