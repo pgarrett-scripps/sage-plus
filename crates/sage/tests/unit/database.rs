@@ -163,6 +163,7 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
             start: reference.protein_start,
             prev_aa: reference.prev_aa,
             next_aa: reference.next_aa,
+            source: None,
         }],
         reference,
     }
@@ -414,6 +415,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
             start: digest.protein_start,
             prev_aa: None,
             next_aa: None,
+            source: None,
         }],
     }]);
     let heavy = peptides
@@ -979,7 +981,8 @@ fn internal_placement_static_variable_and_model_counts() {
         for static_mod in [false, true] {
             let parameters = positional_parameters(&["~K"], "database", static_mod);
             let digest = positional_digest(sequence, Position::Internal);
-            let estimate = parameters.variable_variant_count(&digest);
+            let estimate = parameters
+                .variable_variant_count(&digest, &[crate::enzyme::ProteinOccurrence::of(&digest)]);
             let variants = parameters.modify_digests(group_digests(vec![digest]));
             assert_eq!(
                 variants.len(),

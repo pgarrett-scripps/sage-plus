@@ -206,12 +206,14 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 start: Some(4),
                 prev_aa: Some(b'K'),
                 next_aa: Some(b'R'),
+                source: None,
             },
             ProteinOccurrence {
                 protein: Arc::from("P67890"),
                 start: Some(9),
                 prev_aa: None,
                 next_aa: None,
+                source: None,
             },
         ]),
         ..Peptide::default()

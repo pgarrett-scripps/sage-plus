@@ -30,6 +30,26 @@ pub fn preview_with_context(
     limit: usize,
     context: Option<(&str, u32)>,
 ) -> anyhow::Result<Value> {
+    preview_with_flanks(config, sequence, position, limit, context, ("", ""))
+}
+
+/// Preview with known protein residues before and after the peptide. Motif
+/// sites see these residues; residues beyond them are unknown and never match.
+pub fn preview_with_flanks(
+    config: &str,
+    sequence: &str,
+    position: &str,
+    limit: usize,
+    context: Option<(&str, u32)>,
+    (before, after): (&str, &str),
+) -> anyhow::Result<Value> {
+    ensure!(
+        before
+            .bytes()
+            .chain(after.bytes())
+            .all(|residue| residue.is_ascii_uppercase()),
+        "preview flanking residues must be uppercase one-letter codes"
+    );
     ensure!(
         (1..=10000).contains(&limit),
         "preview limit must be between 1 and 10000"
@@ -88,13 +108,35 @@ pub fn preview_with_context(
         "full" => Position::Full,
         _ => anyhow::bail!("unknown peptide position `{position}`"),
     };
+    let protein_start = context
+        .map(|(_, start)| start.checked_sub(1).context("preview-start is one-based"))
+        .transpose()?;
+    let (sequence_span, protein_start) = if before.is_empty() && after.is_empty() {
+        (sequence.into(), protein_start)
+    } else {
+        // Build a protein-backed span so motif rules see the flanks. Unknown
+        // residues before the supplied ones are padded with a non-residue byte.
+        let start = protein_start.unwrap_or(before.len() as u32) as usize;
+        ensure!(
+            before.len() <= start,
+            "--preview-before is longer than the residues before --preview-start"
+        );
+        let protein = format!(
+            "{}{before}{sequence}{after}",
+            "-".repeat(start - before.len())
+        );
+        let span = sage_core::sequence::ProteinSequence::from(protein)
+            .peptide(start..start + sequence.len())
+            .context("preview peptide span")?;
+        (span, Some(start as u32))
+    };
     let digest = Digest {
-        sequence: sequence.into(),
+        sequence: sequence_span,
         position: protein_position,
         protein: context.map_or("", |(protein, _)| protein).into(),
-        protein_start: context
-            .map(|(_, start)| start.checked_sub(1).context("preview-start is one-based"))
-            .transpose()?,
+        protein_start,
+        prev_aa: before.bytes().last(),
+        next_aa: after.bytes().next(),
         ..Default::default()
     };
     let peptide = Peptide::try_from(digest.clone()).map_err(anyhow::Error::msg)?;

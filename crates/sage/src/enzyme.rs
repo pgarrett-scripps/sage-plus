@@ -38,12 +38,70 @@ pub struct DigestGroup {
     pub origins: Vec<ProteinOccurrence>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone)]
 pub struct ProteinOccurrence {
     pub protein: Arc<str>,
     pub start: Option<u32>,
     pub prev_aa: Option<u8>,
     pub next_aa: Option<u8>,
+    /// Shared full source protein, when known, for motif site rules. This is a
+    /// reference to the FASTA allocation, not a copy, and it does not take part
+    /// in equality, ordering, or reporting.
+    pub source: Option<ProteinSequence>,
+}
+
+impl ProteinOccurrence {
+    /// Occurrence of a digest, keeping its source protein when the digest
+    /// sequence is a span of that protein at `protein_start`.
+    pub fn of(digest: &Digest) -> Self {
+        let (storage, offset) = digest.sequence.source();
+        let source = (digest.protein_start == Some(offset)
+            && storage.as_bytes().len() > digest.sequence.len())
+        .then_some(storage);
+        Self {
+            protein: digest.protein.clone(),
+            start: digest.protein_start,
+            prev_aa: digest.prev_aa,
+            next_aa: digest.next_aa,
+            source,
+        }
+    }
+
+    fn key(&self) -> (&str, Option<u32>, Option<u8>, Option<u8>) {
+        (&self.protein, self.start, self.prev_aa, self.next_aa)
+    }
+}
+
+impl std::fmt::Debug for ProteinOccurrence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProteinOccurrence")
+            .field("protein", &self.protein)
+            .field("start", &self.start)
+            .field("prev_aa", &self.prev_aa)
+            .field("next_aa", &self.next_aa)
+            .field("source", &self.source.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for ProteinOccurrence {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for ProteinOccurrence {}
+
+impl PartialOrd for ProteinOccurrence {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProteinOccurrence {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
 }
 
 fn normalize_origins(group: &mut DigestGroup) {
@@ -64,12 +122,7 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
     });
     let mut digests = digests.into_iter();
     let first = digests.next().expect("checked non-empty above");
-    let first_origin = ProteinOccurrence {
-        protein: first.protein.clone(),
-        start: first.protein_start,
-        prev_aa: first.prev_aa,
-        next_aa: first.next_aa,
-    };
+    let first_origin = ProteinOccurrence::of(&first);
     let mut curr_group = DigestGroup {
         reference: first,
         origins: vec![first_origin],
@@ -79,21 +132,11 @@ pub fn group_digests(mut digests: Vec<Digest>) -> Vec<DigestGroup> {
             && digest.position == curr_group.reference.position
             && digest.sequence == curr_group.reference.sequence
         {
-            curr_group.origins.push(ProteinOccurrence {
-                protein: digest.protein,
-                start: digest.protein_start,
-                prev_aa: digest.prev_aa,
-                next_aa: digest.next_aa,
-            });
+            curr_group.origins.push(ProteinOccurrence::of(&digest));
         } else {
             normalize_origins(&mut curr_group);
             groups.push(curr_group);
-            let origin = ProteinOccurrence {
-                protein: digest.protein.clone(),
-                start: digest.protein_start,
-                prev_aa: digest.prev_aa,
-                next_aa: digest.next_aa,
-            };
+            let origin = ProteinOccurrence::of(&digest);
             curr_group = DigestGroup {
                 reference: digest,
                 origins: vec![origin],

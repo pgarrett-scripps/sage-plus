@@ -176,8 +176,7 @@ pub trait LocalizationRule {
     fn mass(&self) -> f32;
     fn definition(&self) -> Option<Arc<ModificationDefinition>>;
     fn sites(&self, peptide: &Peptide) -> Vec<Site> {
-        self.specificity()
-            .sites(&peptide.sequence, peptide.position)
+        peptide.rule_sites(self.specificity())
     }
 }
 
@@ -267,14 +266,15 @@ impl ModificationGroup {
     fn residues(&self) -> Vec<u8> {
         self.specificities
             .iter()
-            .filter_map(|specificity| match specificity {
+            .flat_map(|specificity| match specificity {
                 ModificationSpecificity::Residue(r)
                 | ModificationSpecificity::Internal(r)
                 | ModificationSpecificity::PeptideN(Some(r))
                 | ModificationSpecificity::PeptideC(Some(r))
                 | ModificationSpecificity::ProteinN(Some(r))
-                | ModificationSpecificity::ProteinC(Some(r)) => Some(*r),
-                _ => None,
+                | ModificationSpecificity::ProteinC(Some(r)) => vec![*r],
+                ModificationSpecificity::Motif(motif) => motif.site_residues(),
+                _ => Vec::new(),
             })
             .collect()
     }

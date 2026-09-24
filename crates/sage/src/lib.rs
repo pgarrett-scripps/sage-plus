@@ -12,6 +12,7 @@ pub mod mass;
 pub mod mass_calibration;
 pub mod ml;
 pub mod modification;
+pub mod motif;
 pub mod peff;
 pub mod peptide;
 pub mod protein_grouping;

@@ -443,8 +443,8 @@ pub(crate) fn variable_mod_count(
     specificity: ModificationSpecificity,
     mass: f32,
 ) -> f64 {
-    specificity
-        .sites(&peptide.sequence, peptide.position)
+    peptide
+        .rule_sites(specificity)
         .into_iter()
         .filter(|site| {
             let observed = match site {

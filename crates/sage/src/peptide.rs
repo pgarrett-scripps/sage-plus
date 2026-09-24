@@ -715,9 +715,7 @@ impl Peptide {
 
     /// Append every site compatible with `specificity`, ignoring occupancy.
     pub fn compatible_sites(&self, specificity: ModificationSpecificity, sites: &mut Vec<Site>) {
-        let mut compatible = Vec::new();
-        self.push_resi(&mut compatible, specificity, 0.0, 0);
-        sites.extend(compatible.into_iter().map(|(site, _, _)| site));
+        sites.extend(self.rule_sites(specificity));
     }
 
     /// Return a copy carrying one additional modification at `site`. Used for
@@ -839,7 +837,7 @@ impl Peptide {
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
-        let sites = target.sites(&self.sequence, self.position);
+        let sites = self.rule_sites(target);
         if !self.modifications.is_empty() {
             return self
                 .applied_modifications()
@@ -985,6 +983,18 @@ impl Peptide {
         base.to_string()
     }
 
+    /// Physical sites selected by one rule. Motif rules are evaluated against
+    /// the source protein of every occurrence; see
+    /// [`ModificationSpecificity::sites_for_occurrences`].
+    pub fn rule_sites(&self, target: ModificationSpecificity) -> Vec<Site> {
+        target.sites_for_occurrences(
+            &self.sequence,
+            self.position,
+            self.decoy,
+            &self.protein_sites,
+        )
+    }
+
     fn push_resi(
         &self,
         acc: &mut Vec<(Site, f32, usize)>,
@@ -993,8 +1003,7 @@ impl Peptide {
         mod_idx: usize,
     ) {
         acc.extend(
-            target
-                .sites(&self.sequence, self.position)
+            self.rule_sites(target)
                 .into_iter()
                 .map(|site| (site, mass, mod_idx)),
         );
@@ -1020,8 +1029,8 @@ impl Peptide {
             } else {
                 ModificationKind::ChannelBase
             };
-            let sites = target
-                .sites(&self.sequence, self.position)
+            let sites = self
+                .rule_sites(*target)
                 .into_iter()
                 .filter(|site| {
                     let occupied = match site {
@@ -1389,13 +1398,9 @@ impl TryFrom<Digest> for Peptide {
         let protein_sites: Arc<[ProteinOccurrence]> = value
             .protein_start
             .map(|start| {
-                vec![ProteinOccurrence {
-                    protein: value.protein.clone(),
-                    start: Some(start),
-                    prev_aa: value.prev_aa,
-                    next_aa: value.next_aa,
-                }]
-                .into()
+                let mut occurrence = ProteinOccurrence::of(&value);
+                occurrence.start = Some(start);
+                vec![occurrence].into()
             })
             .unwrap_or_default();
         // This is an important invariant to enforce, that ensures safety

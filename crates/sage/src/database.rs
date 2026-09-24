@@ -432,7 +432,7 @@ impl Parameters {
             .flat_map(|(specificity, entries)| {
                 entries.iter().map(move |entry| {
                     let definition = Arc::new(entry.definition());
-                    let mut sites = specificity.sites(&peptide.sequence, peptide.position);
+                    let mut sites = peptide.rule_sites(*specificity);
                     if entry.site_mode() == SiteMode::Library {
                         sites.retain(|candidate| {
                             self.loaded_ptm_library.as_ref().is_some_and(|library| {
@@ -653,8 +653,9 @@ impl Parameters {
             for digest in enzyme.digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
             {
                 let sequence_len = digest.sequence.len() as u64;
+                let origin = ProteinOccurrence::of(&digest);
                 let variants = self
-                    .variable_variant_count(&digest)
+                    .variable_variant_count(&digest, std::slice::from_ref(&origin))
                     .saturating_mul(decoy_multiplier);
                 let fragments_per_variant = sequence_len
                     .saturating_sub(1)
@@ -773,11 +774,11 @@ impl Parameters {
                         reference.protein_start = origin.start;
                         reference.prev_aa = origin.prev_aa;
                         reference.next_aa = origin.next_aa;
-                        self.variable_variant_count(&reference)
+                        self.variable_variant_count(&reference, std::slice::from_ref(origin))
                     })
                     .fold(0u64, u64::saturating_add)
             } else {
-                self.variable_variant_count(&digest.reference)
+                self.variable_variant_count(&digest.reference, &digest.origins)
             }
             .saturating_mul(decoy_multiplier);
             estimate.modified_peptides = estimate.modified_peptides.saturating_add(variants);
@@ -824,7 +825,7 @@ impl Parameters {
         )
     }
 
-    fn variable_variant_count(&self, digest: &Digest) -> u64 {
+    fn variable_variant_count(&self, digest: &Digest, origins: &[ProteinOccurrence]) -> u64 {
         let sequence = digest.sequence.as_bytes();
         let rules = self.variable_modifications();
         let library_sites = self
@@ -874,7 +875,12 @@ impl Parameters {
                 }
             };
 
-            for site in rule.specificity.sites(sequence, digest.position) {
+            for site in rule.specificity.sites_for_occurrences(
+                sequence,
+                digest.position,
+                digest.decoy,
+                origins,
+            ) {
                 add_site(match site {
                     Site::Nterm => nterm,
                     Site::Cterm => cterm,
@@ -1070,6 +1076,9 @@ impl Parameters {
                                     return Vec::new();
                                 };
                                 peptide.proteins = smallvec::smallvec![origin.protein.clone()];
+                                // The reference sequence views another protein;
+                                // keep this origin's own source for motif rules.
+                                peptide.protein_sites = Arc::from([origin.clone()]);
                                 let start = origin.start.unwrap_or_default();
                                 let end = start.saturating_add(peptide.sequence.len() as u32);
                                 let library_sites = library
