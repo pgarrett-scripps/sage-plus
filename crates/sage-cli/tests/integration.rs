@@ -341,6 +341,55 @@ fn duplicate_spectrum_ids_are_annotated_against_their_own_spectrum() -> anyhow::
     Ok(())
 }
 
+/// MS2 scans without a precursor (Thermo RAW scans whose trailer has no
+/// plausible m/z) are skipped by the discovery pass, the spectrum index, and
+/// the search, instead of aborting with "missing MS1 precursor".
+#[test]
+fn ms2_spectra_without_precursors_are_not_searched() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-no-precursor-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+
+    let mzml = std::fs::read_to_string(workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML"))?;
+    let start = mzml.find("<spectrum index=\"0\"").unwrap();
+    let end = mzml.find("</spectrum>").unwrap() + "</spectrum>".len();
+    let copy = mzml[start..end]
+        .replacen("index=\"0\"", "index=\"1\"", 1)
+        .replacen("scan=30069", "scan=30070", 1);
+    let precursors = copy.find("<precursorList").unwrap();
+    let precursors_end = copy.find("</precursorList>").unwrap() + "</precursorList>".len();
+    let copy = format!("{}{}", &copy[..precursors], &copy[precursors_end..]);
+    let mzml = format!("{}\n{}{}", &mzml[..end], copy, &mzml[end..]);
+    std::fs::write(root.join("no-precursor.mzML"), mzml)?;
+
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["mzml_paths"] = serde_json::json!([root.join("no-precursor.mzML")]);
+    config["mass_recalibration"] = "auto".into();
+    config["database"]["prefilter"] = true.into();
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+
+    let events = run_sage_with_events(&workspace, &root.join("config.json"), &root)?;
+    let annotation = events
+        .iter()
+        .find(|event| event["event"] == "fragment_annotation_completed")
+        .expect("fragment annotation event");
+    assert_eq!(annotation["psms"], 1);
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(
+        summary["models"]["mass_recalibration"]["files"][0]["discovery_spectra"],
+        1
+    );
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 #[test]
 fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
