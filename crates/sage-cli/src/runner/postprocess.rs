@@ -143,7 +143,7 @@ impl Runner {
             }
 
             let spectra = self
-                .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false)?
+                .read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, false, false)?
                 .1;
             let occurrences = spectrum_id_occurrences(&spectra);
             let results = spectra

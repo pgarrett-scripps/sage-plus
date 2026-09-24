@@ -293,3 +293,25 @@ fn duplicate_spectrum_ids_are_annotated_against_their_own_spectrum() -> anyhow::
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-reread-events-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    // tests/config.json enables annotate_matches, which rereads the input.
+    let events = run_sage_with_events(&workspace, &workspace.join("tests/config.json"), &root)?;
+    assert!(events
+        .iter()
+        .any(|event| event["event"] == "fragment_annotation_completed"));
+    for kind in ["file_started", "file_completed", "spectra_processed"] {
+        let count = events.iter().filter(|event| event["event"] == kind).count();
+        assert_eq!(count, 1, "{kind} emitted {count} times");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

@@ -244,15 +244,26 @@ impl Runner {
         chunk_idx: usize,
         batch_size: usize,
     ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
-        self.read_processed_spectra_with_ms1(chunk, chunk_idx, batch_size, self.requires_ms1())
+        self.read_processed_spectra_with_ms1(
+            chunk,
+            chunk_idx,
+            batch_size,
+            self.requires_ms1(),
+            true,
+        )
     }
 
+    /// `search_events` controls the per-file progress events
+    /// (`file_started`, `file_completed`, `spectra_processed`). Rereads after
+    /// the search has reported completion pass `false`; read failures are
+    /// always reported.
     pub(super) fn read_processed_spectra_with_ms1(
         &self,
         chunk: &[Url],
         chunk_idx: usize,
         batch_size: usize,
         requires_ms1: bool,
+        search_events: bool,
     ) -> anyhow::Result<(Vec<ProcessedSpectrum>, Vec<ProcessedSpectrum>)> {
         // Read all of the spectra at once - this can help prevent memory over-consumption issues
         info!(
@@ -292,10 +303,12 @@ impl Runner {
         log::trace!("file serial read: {}", file_serial_read);
         let inner_closure = |(idx, path): (usize, &Url)| {
             let file_id = chunk_idx * batch_size + idx;
-            self.events.emit(EventKind::FileStarted {
-                file_id,
-                path: path.to_string(),
-            });
+            if search_events {
+                self.events.emit(EventKind::FileStarted {
+                    file_id,
+                    path: path.to_string(),
+                });
+            }
             let res = sage_cloudpath::util::read_spectra(
                 path,
                 file_id,
@@ -320,11 +333,13 @@ impl Runner {
                         .into_par_iter()
                         .map(|spectrum| sp.process(spectrum))
                         .collect::<SpectrumAccumulator>();
-                    self.events.emit(EventKind::FileCompleted {
-                        file_id,
-                        path: path.to_string(),
-                        spectra: spectra.ms1.len() + spectra.msn.len(),
-                    });
+                    if search_events {
+                        self.events.emit(EventKind::FileCompleted {
+                            file_id,
+                            path: path.to_string(),
+                            spectra: spectra.ms1.len() + spectra.msn.len(),
+                        });
+                    }
                     Ok(spectra)
                 }
                 Err(e) => {
@@ -368,10 +383,12 @@ impl Runner {
             }
         }
 
-        self.events.emit(EventKind::SpectraProcessed {
-            ms1_spectra: spectra.ms1.len(),
-            msn_spectra: spectra.msn.len(),
-        });
+        if search_events {
+            self.events.emit(EventKind::SpectraProcessed {
+                ms1_spectra: spectra.ms1.len(),
+                msn_spectra: spectra.msn.len(),
+            });
+        }
 
         let io_time = Instant::now() - start;
         info!("- file IO: {:8} ms", io_time.as_millis());
