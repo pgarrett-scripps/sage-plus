@@ -166,7 +166,7 @@ Every PSM row carries two additional columns, `ambiguity_sequence` and `mass_shi
   - `...T[+79.96633]...` — localized to a single residue,
   - `(...)[+mass]` — confined to a region but not a single residue,
   - a leading `{+mass}` — labile / cannot be localized (forward and reverse coverage overlap).
-- **mass_shift**: the residual `expmass - calcmass` (in Da) that was placed, or `0.0` when the precursor matches within `mass_shift_ppm`.
+- **mass_shift**: the residual `expmass - calcmass` (in Da) after removing the matched isotope error, or `0.0` when the precursor matches within `mass_shift_ppm`.
 
 These are computed for every search; mods are rendered in the same `[+mass]`/`[Name]` notation as the `peptide` column. The threshold used to decide whether a precursor delta mass is a real shift is configurable via the top-level **`mass_shift_ppm`** parameter (default: 50.0). It is deliberately independent of `precursor_tol`, so wide/open searches still surface and place real shifts.
 
@@ -379,8 +379,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.7
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.7 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.8
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.8 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 

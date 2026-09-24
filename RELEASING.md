@@ -84,8 +84,8 @@ Create and push exactly one annotated tag after the preparation commit is on `ma
 ```shell
 git switch main
 git pull --ff-only origin main
-git tag -a v0.1.0-beta.7 -m "Sage Plus v0.1.0-beta.7"
-git push origin v0.1.0-beta.7
+git tag -a v0.1.0-beta.8 -m "Sage Plus v0.1.0-beta.8"
+git push origin v0.1.0-beta.8
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark
