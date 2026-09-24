@@ -20,6 +20,29 @@ impl Runner {
         Ok(results.into_iter().collect())
     }
 
+    /// The 1/K0 scale applied to the Bruker inputs, or `mixed` when some
+    /// inputs have no calibration table and fall back to the linear scale.
+    fn bruker_mobility_scale(&self) -> Option<String> {
+        let configured = self.parameters.bruker_config.ion_mobility_scale;
+        let mut scales = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .filter(|path| matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
+            .map(|path| match path.to_file_path() {
+                Ok(path) => configured.effective_for(path).as_str(),
+                Err(()) => configured.as_str(),
+            })
+            .collect::<Vec<_>>();
+        scales.sort_unstable();
+        scales.dedup();
+        match scales.as_slice() {
+            [] => None,
+            [scale] => Some(scale.to_string()),
+            _ => Some("mixed".to_string()),
+        }
+    }
+
     fn scorer(&self) -> Scorer<'_> {
         Scorer {
             db: &self.database,
@@ -514,18 +537,7 @@ impl Runner {
                 ion_mobility_model_fitted,
                 ion_mobility_features: format!("{:?}", self.parameters.ion_mobility_model.features)
                     .to_lowercase(),
-                ion_mobility_scale: self
-                    .parameters
-                    .mzml_paths
-                    .iter()
-                    .any(|path| matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
-                    .then(|| {
-                        self.parameters
-                            .bruker_config
-                            .ion_mobility_scale
-                            .as_str()
-                            .to_string()
-                    }),
+                ion_mobility_scale: self.bruker_mobility_scale(),
             },
             quantification: QuantificationRunStats {
                 lfq_enabled: self.parameters.quant.lfq,
