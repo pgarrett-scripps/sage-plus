@@ -191,6 +191,9 @@ fn activation_flag(accession: &[u8]) -> Option<Activation> {
 fn analyzer_term(accession: &[u8]) -> Option<MassAnalyzer> {
     match accession {
         b"MS:1000484" => Some(MassAnalyzer::Orbitrap),
+        // Asymmetric track lossless (Astral) analyzer, written by msconvert
+        // and ThermoRawFileParser for Orbitrap Astral MS2 configurations.
+        b"MS:1003379" => Some(MassAnalyzer::Astral),
         b"MS:1000084" => Some(MassAnalyzer::Tof),
         b"MS:1000264" | b"MS:1000082" | b"MS:1000291" | b"MS:1000078" | b"MS:1000083" => {
             Some(MassAnalyzer::IonTrap)

@@ -24,7 +24,8 @@ entries are retained below for provenance.
   `models.mass_recalibration`.
 - Spectra now carry an acquisition group (MS2 mass analyzer and activation) read from Thermo
   filter strings, mzML instrument configurations and activation terms, or fixed as TOF/CID
-  for Bruker TDF. Activations are HCD, CID, ETD, EThcD, and ETciD (`etcid`, ETD with
+  for Bruker TDF. The Astral analyzer is read from the `ASTMS` filter or from mzML
+  `MS:1003379`, as msconvert and ThermoRawFileParser write it. Activations are HCD, CID, ETD, EThcD, and ETciD (`etcid`, ETD with
   supplemental CID, kept apart from ETD). `mass_recalibration` selects fragment models
   separately per group, never corrects ion-trap groups, and leaves groups with too few PSMs
   uncorrected; the run summary
