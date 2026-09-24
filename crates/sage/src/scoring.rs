@@ -302,8 +302,9 @@ pub struct Feature {
     /// flanking fragment-ion evidence wrapped in `(?...)`, plus any residual
     /// mass-shift placement.
     pub ambiguity_sequence: String,
-    /// Residual precursor mass shift (`expmass - calcmass`) placed during
-    /// ambiguity annotation; 0.0 when within the closed-search tolerance.
+    /// Residual precursor mass shift (`expmass - calcmass - isotope_error`)
+    /// placed during ambiguity annotation; 0.0 when within the closed-search
+    /// tolerance.
     pub mass_shift: f32,
 
     /// Per-modification PTM site localization, if localization is enabled
@@ -884,8 +885,10 @@ impl<'db> Scorer<'db> {
             // Sequence-ambiguity annotation. A residual precursor mass shift is
             // only placed when it exceeds the closed-search tolerance (a small
             // fixed ppm threshold, independent of the precursor search window so
-            // that wide/open searches still surface real shifts).
-            let raw_mass_shift = precursor_mass - peptide.monoisotopic;
+            // that wide/open searches still surface real shifts). The matched
+            // isotope error explains part of the precursor delta and is not a
+            // residual modification mass.
+            let raw_mass_shift = precursor_mass - isotope_error - peptide.monoisotopic;
             let mass_shift =
                 if (raw_mass_shift / peptide.monoisotopic * 1e6).abs() <= self.mass_shift_ppm {
                     None
