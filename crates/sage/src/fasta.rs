@@ -23,7 +23,7 @@ impl Fasta {
     ) -> Result<Fasta, FastaError> {
         let decoy_tag = decoy_tag.into();
 
-        let mut targets = Vec::new();
+        let mut targets: Vec<(Arc<str>, ProteinSequence)> = Vec::new();
         let mut last_id: Option<(&str, usize)> = None;
         let mut s = String::new();
 
@@ -49,7 +49,11 @@ impl Fasta {
                 if last_id.is_none() {
                     return Err(FastaError::MissingHeader { line: line_number });
                 }
-                if let Some(residue) = line.bytes().find(|residue| !VALID_AA.contains(residue)) {
+                // Ambiguous or unknown uppercase residues (X, B, Z, J) are kept
+                // so the rest of the protein remains searchable; peptides that
+                // contain a residue without a defined mass are dropped when
+                // digests are converted to peptides.
+                if let Some(residue) = line.bytes().find(|residue| !residue.is_ascii_uppercase()) {
                     return Err(FastaError::InvalidResidue {
                         line: line_number,
                         residue: residue as char,
@@ -71,6 +75,21 @@ impl Fasta {
 
         if targets.is_empty() {
             return Err(FastaError::NoSequences);
+        }
+
+        let nonstandard = targets
+            .iter()
+            .filter(|(_, sequence)| {
+                sequence
+                    .as_str()
+                    .bytes()
+                    .any(|residue| !VALID_AA.contains(&residue))
+            })
+            .count();
+        if nonstandard > 0 {
+            log::warn!(
+                "{nonstandard} FASTA protein(s) contain residues without a defined mass (e.g. X, B, Z, J); peptides containing them will not be searched"
+            );
         }
 
         Ok(Fasta {

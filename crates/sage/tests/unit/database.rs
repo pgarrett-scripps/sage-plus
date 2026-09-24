@@ -642,6 +642,68 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
 }
 
 #[test]
+fn peptides_with_massless_residues_are_skipped_at_digestion() {
+    let fasta = Fasta::parse(
+        ">P1\nPEPTIDEKAAXAWWWWWKGGBGGRSSZSSKTTJTTRLLLLLK\n>P2\nMSSWWHHK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    assert_eq!(fasta.targets.len(), 2);
+    let library = CustomCleavageLibrary::from_tsv("protein\tposition\tcontext\nP1\t11\tAAXA|WW\n")
+        .unwrap()
+        .validate(&fasta)
+        .unwrap();
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(1),
+            min_len: Some(2),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let parameters = builder.make_parameters();
+
+    let custom = parameters.digest_with_custom_cleavages(&fasta, Some(&library));
+    assert!(custom
+        .iter()
+        .any(|peptide| &peptide.sequence[..] == b"WWWWWK"));
+    for peptides in [parameters.digest(&fasta), custom] {
+        let sequences = peptides
+            .iter()
+            .map(|peptide| {
+                (
+                    std::str::from_utf8(&peptide.sequence).unwrap(),
+                    peptide.decoy,
+                )
+            })
+            .collect::<HashSet<_>>();
+        assert!(sequences.contains(&("PEPTIDEK", false)));
+        assert!(sequences.contains(&("LLLLLK", false)));
+        assert!(sequences.contains(&("MSSWWHHK", false)));
+        assert!(sequences.iter().any(|(_, decoy)| *decoy));
+        for peptide in &peptides {
+            assert!(
+                peptide
+                    .sequence
+                    .iter()
+                    .all(|residue| crate::mass::VALID_AA.contains(residue)),
+                "{peptide:?}"
+            );
+            assert!(peptide.monoisotopic > 0.0);
+        }
+    }
+
+    let database = parameters.build(fasta);
+    assert!(!database.peptides.is_empty());
+    assert!(database.peptides.iter().all(|peptide| peptide
+        .sequence
+        .iter()
+        .all(|residue| crate::mass::VALID_AA.contains(residue))));
+}
+
+#[test]
 fn estimates_variable_modification_expansion_before_allocation() {
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
@@ -783,7 +845,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
             modification: Arc::from("Phospho"),
         },
     ])));
-    let fasta = Fasta::parse(">P1\nMSSK\n>P2\nMSSK\n".into(), "rev_", false).unwrap();
+    let fasta = Fasta::parse(">P1\nMSSK\n>P2\nMSSWWHHK\n".into(), "rev_", false).unwrap();
 
     let peptides = parameters.digest(&fasta);
     assert!(!peptides
