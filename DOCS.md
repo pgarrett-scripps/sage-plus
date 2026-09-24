@@ -434,7 +434,7 @@ Example:
 
 - **peptide_min_mass**: Float. The minimum monoisotopic mass of peptides to fragment *in silico* (default: 500.0).
 - **peptide_max_mass**: Float. The maximum monoisotopic mass of peptides to fragment *in silico* (default: 5000.0).
-- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z". (default: ["b", "y"])
+- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. (default: ["b", "y"])
 - **min_ion_index**: Integer. Do not generate b1/bN/y1/yN ions for preliminary searching if `min_ion_index = N`. Does not affect full scoring of PSMs (default: 2).
 
 Example:

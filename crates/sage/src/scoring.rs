@@ -1289,7 +1289,7 @@ impl<'db> Scorer<'db> {
                             b_run.matched(group.series_index);
                             coverage.forward[group.series_index] += 1;
                         }
-                        Kind::X | Kind::Y | Kind::Z => {
+                        Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
                             score.matched_y += 1;
                             score.summed_y += peak_intensity;
                             y_run.matched(group.series_index);
@@ -1300,7 +1300,7 @@ impl<'db> Scorer<'db> {
                     if collect_fragments {
                         let idx = match frag.kind {
                             Kind::A | Kind::B | Kind::C => group.series_index as i32 + 1,
-                            Kind::X | Kind::Y | Kind::Z => {
+                            Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
                                 peptide.sequence.len().saturating_sub(1) as i32
                                     - group.series_index as i32
                             }

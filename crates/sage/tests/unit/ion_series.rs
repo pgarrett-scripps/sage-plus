@@ -137,7 +137,7 @@ fn index_filtering() {
             // Don't store b1, b2, y1, y2 ions for preliminary scoring
             match ion.kind {
                 Kind::A | Kind::B | Kind::C => (ion_idx + 1) > 2,
-                Kind::X | Kind::Y | Kind::Z => {
+                Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
                     peptide.sequence.len().saturating_sub(1) - ion_idx > 2
                 }
             }
@@ -376,4 +376,17 @@ fn terminal_required_losses_affect_only_containing_series() {
         .variants
         .iter()
         .all(|variant| variant.neutral_loss.is_none())));
+}
+
+#[test]
+fn z_dot_ions_are_one_hydrogen_heavier_than_z() {
+    // z• (radical z, from ETD/EThcD) = z + H; PEPTIDE z•1 (E) is 132.042.
+    let peptide = peptide("PEPTIDE");
+    let expected_z_dot = vec![687.296, 558.253, 461.201, 360.153, 247.069, 132.042];
+    check_within(ions!(&peptide, Kind::ZDot, 1.0), &expected_z_dot);
+
+    for label in ["\"z_dot\"", "\"zdot\"", "\"z.\""] {
+        assert_eq!(serde_json::from_str::<Kind>(label).unwrap(), Kind::ZDot);
+    }
+    assert_eq!(serde_json::to_string(&Kind::ZDot).unwrap(), "\"z_dot\"");
 }

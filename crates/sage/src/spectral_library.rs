@@ -170,12 +170,13 @@ pub struct LibraryFragment {
 impl LibraryFragment {
     pub fn annotation(&self) -> String {
         let kind = match self.kind {
-            Kind::A => 'a',
-            Kind::B => 'b',
-            Kind::C => 'c',
-            Kind::X => 'x',
-            Kind::Y => 'y',
-            Kind::Z => 'z',
+            Kind::A => "a",
+            Kind::B => "b",
+            Kind::C => "c",
+            Kind::X => "x",
+            Kind::Y => "y",
+            Kind::Z => "z",
+            Kind::ZDot => "z.",
         };
         let mut annotation = format!("{kind}{}", self.ordinal);
         if self.neutral_loss > 0.0 {
