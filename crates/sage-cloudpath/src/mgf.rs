@@ -50,6 +50,21 @@ pub struct QueryData {
     inverse_ion_mobility: Option<f32>,
     ion_mz_array: Vec<f32>,
     ion_intensity_array: Vec<f32>,
+
+    /// 1-based number of the line being parsed.
+    line: usize,
+    /// 1-based line of the current spectrum's BEGIN IONS.
+    begin_line: usize,
+    skipped: Option<SkippedSpectra>,
+}
+
+/// Spectra dropped from one MGF file because they cannot be searched.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SkippedSpectra {
+    pub count: usize,
+    /// 1-based BEGIN IONS line of the first skipped spectrum.
+    pub first_line: usize,
+    pub first_reason: &'static str,
 }
 
 impl QueryData {
@@ -121,35 +136,26 @@ impl QueryData {
         }
     }
 
-    pub fn check_spectrum(&self, spectrum: &RawSpectrum) -> Result<bool, MgfError> {
+    /// Why `spectrum` cannot be searched, if it cannot.
+    pub fn check_spectrum(&self, spectrum: &RawSpectrum) -> Result<(), &'static str> {
         if spectrum.id.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum is missing TITLE",
-            });
+            return Err("spectrum is missing TITLE");
         }
         if spectrum.precursors.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum is missing PEPMASS",
-            });
+            return Err("spectrum is missing PEPMASS");
         }
         if spectrum
             .precursors
             .iter()
             .any(|precursor| !precursor.mz.is_finite() || precursor.mz <= 0.0)
         {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains an invalid precursor mass",
-            });
+            return Err("spectrum contains an invalid precursor mass");
         }
         if spectrum.mz.is_empty() {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains no peaks",
-            });
+            return Err("spectrum contains no peaks");
         }
         if spectrum.mz.len() != spectrum.intensity.len() {
-            return Err(MgfError::Malformed {
-                message: "peak mass and intensity arrays have different lengths",
-            });
+            return Err("peak mass and intensity arrays have different lengths");
         }
         if spectrum
             .mz
@@ -157,11 +163,22 @@ impl QueryData {
             .chain(&spectrum.intensity)
             .any(|value| !value.is_finite())
         {
-            return Err(MgfError::Malformed {
-                message: "spectrum contains a nonfinite peak value",
-            });
+            return Err("spectrum contains a nonfinite peak value");
         }
-        Ok(true)
+        Ok(())
+    }
+
+    fn skip(&mut self, reason: &'static str) {
+        match &mut self.skipped {
+            Some(skipped) => skipped.count += 1,
+            None => {
+                self.skipped = Some(SkippedSpectra {
+                    count: 1,
+                    first_line: self.begin_line,
+                    first_reason: reason,
+                })
+            }
+        }
     }
 }
 
@@ -242,6 +259,7 @@ impl QueryParser {
                 });
             }
             query_data.in_spectrum = true;
+            query_data.begin_line = query_data.line;
             return Ok(true);
         }
         Ok(false)
@@ -372,8 +390,12 @@ impl QueryParser {
             spectrum.mz = std::mem::take(&mut query_data.ion_mz_array);
             spectrum.intensity = std::mem::take(&mut query_data.ion_intensity_array);
 
-            query_data.check_spectrum(&spectrum)?;
-            query_data.spectra.push(spectrum);
+            // Like upstream Sage, drop spectra that cannot be searched instead
+            // of failing the file. Unparseable values above remain errors.
+            match query_data.check_spectrum(&spectrum) {
+                Ok(()) => query_data.spectra.push(spectrum),
+                Err(reason) => query_data.skip(reason),
+            }
             query_data.init();
 
             return Ok(true);
@@ -403,14 +425,44 @@ fn parse_inverse_ion_mobility(title: &str) -> Option<f32> {
 
 pub struct MgfReader {
     file_id: usize,
+    source: Option<String>,
 }
 
 impl MgfReader {
     pub fn with_file_id(file_id: usize) -> Self {
-        Self { file_id }
+        Self {
+            file_id,
+            source: None,
+        }
     }
 
+    /// Name the file in the warning about skipped spectra.
+    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    /// Parse an MGF file. Spectra without a TITLE, PEPMASS, or peaks are
+    /// skipped with one warning for the file.
     pub fn parse(&self, contents: String) -> Result<Vec<RawSpectrum>, MgfError> {
+        let (spectra, skipped) = self.parse_counting_skipped(contents)?;
+        if let Some(skipped) = skipped {
+            log::warn!(
+                "{}: skipped {} MGF spectra that cannot be searched; first at line {}: {}",
+                self.source.as_deref().unwrap_or("MGF"),
+                skipped.count,
+                skipped.first_line,
+                skipped.first_reason
+            );
+        }
+        Ok(spectra)
+    }
+
+    /// [`MgfReader::parse`], returning the skipped spectra instead of logging them.
+    pub fn parse_counting_skipped(
+        &self,
+        contents: String,
+    ) -> Result<(Vec<RawSpectrum>, Option<SkippedSpectra>), MgfError> {
         let default_parsers = DefaultParser.get_parsers();
         let query_parsers = QueryParser.get_parsers();
 
@@ -418,9 +470,11 @@ impl MgfReader {
         let mut lines = contents.as_str().lines().enumerate();
 
         // embedded parameters
+        let mut begin_line = 0;
         while !default_params.is_query_start {
             let (line_index, line) = lines.next().ok_or(MgfError::MissingBeginIons)?;
             let line = line.trim();
+            begin_line = line_index + 1;
             for parser in &default_parsers {
                 match parser(line, &mut default_params) {
                     Ok(true) => break,
@@ -431,6 +485,7 @@ impl MgfReader {
         }
 
         let mut query_data = QueryData::default_with_params(default_params);
+        query_data.begin_line = begin_line;
 
         // query
         for (line_index, line) in lines {
@@ -438,6 +493,7 @@ impl MgfReader {
                 continue;
             }
             let line = line.trim();
+            query_data.line = line_index + 1;
             if !query_data.in_spectrum && !line.starts_with("BEGIN IONS") {
                 continue;
             }
@@ -452,7 +508,7 @@ impl MgfReader {
         if query_data.in_spectrum {
             return Err(MgfError::UnterminatedSpectrum);
         }
-        Ok(query_data.spectra)
+        Ok((query_data.spectra, query_data.skipped))
     }
 }
 

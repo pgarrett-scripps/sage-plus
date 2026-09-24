@@ -263,6 +263,33 @@ fn multi_digit_charges_are_parsed() -> Result<(), MgfError> {
 }
 
 #[test]
+fn invalid_spectra_are_skipped_and_counted() -> Result<(), MgfError> {
+    let s = "BEGIN IONS\nTITLE=good 1\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nPEPMASS=500\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=no peaks\nPEPMASS=500\nEND IONS\n\
+             BEGIN IONS\nTITLE=no pepmass\n100 20\nEND IONS\n\
+             BEGIN IONS\nTITLE=good 2\nPEPMASS=600\n100 20\nEND IONS\n";
+    assert_eq!(MgfReader::with_file_id(0).parse(s.to_string())?.len(), 2);
+    let (spectra, skipped) = MgfReader::with_file_id(0).parse_counting_skipped(s.to_string())?;
+    let ids = spectra.iter().map(|s| s.id.as_str()).collect::<Vec<_>>();
+    assert_eq!(ids, ["good 1", "good 2"]);
+    let skipped = skipped.unwrap();
+    assert_eq!(skipped.count, 3);
+    assert_eq!(skipped.first_line, 6);
+    assert_eq!(skipped.first_reason, "spectrum is missing TITLE");
+
+    let (_, skipped) = MgfReader::with_file_id(0)
+        .parse_counting_skipped("BEGIN IONS\nTITLE=a\nPEPMASS=1\n1 1\nEND IONS\n".into())?;
+    assert!(skipped.is_none());
+
+    // Unparseable structure is still an error.
+    assert!(MgfReader::with_file_id(0)
+        .parse("BEGIN IONS\nTITLE=a\nPEPMASS=1\n1 x\nEND IONS\n".into())
+        .is_err());
+    Ok(())
+}
+
+#[test]
 fn empty_charge_is_unknown_charge() -> Result<(), MgfError> {
     let s = "CHARGE=2+\n\
              BEGIN IONS\nTITLE=a\nPEPMASS=500\nCHARGE=\n100 20\nEND IONS\n";
