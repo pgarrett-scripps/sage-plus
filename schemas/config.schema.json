@@ -450,15 +450,28 @@
       ]
     },
     "Kind": {
-      "enum": [
-        "a",
-        "b",
-        "c",
-        "x",
-        "y",
-        "z"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "a",
+            "b",
+            "c",
+            "x",
+            "y"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "z",
+          "description": "Even-electron z ion, y - NH3.",
+          "type": "string"
+        },
+        {
+          "const": "z_dot",
+          "description": "Radical z-dot ion, z + H: the z ion ETD and EThcD produce.",
+          "type": "string"
+        }
+      ]
     },
     "LfqOptions": {
       "additionalProperties": false,

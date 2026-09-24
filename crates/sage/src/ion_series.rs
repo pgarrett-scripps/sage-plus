@@ -24,7 +24,11 @@ pub enum Kind {
     C,
     X,
     Y,
+    /// Even-electron z ion, y - NH3.
     Z,
+    /// Radical z-dot ion, z + H: the z ion ETD and EThcD produce.
+    #[serde(rename = "z_dot", alias = "zdot", alias = "z.")]
+    ZDot,
 }
 
 /// Theoretical B/Y ion
@@ -78,9 +82,11 @@ impl<'p> IonGroupSeries<'p> {
             (Kind::A | Kind::B | Kind::C, Site::Nterm) => true,
             (Kind::A | Kind::B | Kind::C, Site::Cterm) => false,
             (Kind::A | Kind::B | Kind::C, Site::Sequence(index)) => index as usize <= series_index,
-            (Kind::X | Kind::Y | Kind::Z, Site::Nterm) => false,
-            (Kind::X | Kind::Y | Kind::Z, Site::Cterm) => true,
-            (Kind::X | Kind::Y | Kind::Z, Site::Sequence(index)) => index as usize > series_index,
+            (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Nterm) => false,
+            (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Cterm) => true,
+            (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Sequence(index)) => {
+                index as usize > series_index
+            }
         }
     }
 
@@ -167,6 +173,7 @@ impl<'p> IonSeries<'p> {
             }
             Kind::Y => peptide.monoisotopic - peptide.nterm.unwrap_or_default(),
             Kind::Z => peptide.monoisotopic - peptide.nterm.unwrap_or_default() - NH3,
+            Kind::ZDot => peptide.monoisotopic - peptide.nterm.unwrap_or_default() - NH3 + H,
         };
         Self {
             kind,
@@ -195,7 +202,7 @@ impl<'p> Iterator for IonSeries<'p> {
 
         self.cumulative_mass += match self.kind {
             Kind::A | Kind::B | Kind::C => monoisotopic(r) + m,
-            Kind::X | Kind::Y | Kind::Z => -(monoisotopic(r) + m),
+            Kind::X | Kind::Y | Kind::Z | Kind::ZDot => -(monoisotopic(r) + m),
         };
         self.idx += 1;
 

@@ -664,7 +664,7 @@ fn score_arrangement(
                         .filter(|&&p| p <= idx || p == variant.sequence.len())
                         .count()
                 }
-                Kind::X | Kind::Y | Kind::Z => {
+                Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
                     // suffix [idx + 1, len - 1]
                     candidates
                         .iter()

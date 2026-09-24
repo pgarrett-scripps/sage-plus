@@ -1961,7 +1961,7 @@ pub fn preliminary_fragment_masses<'a>(
         .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
         .filter(|group| match group.kind {
             Kind::A | Kind::B | Kind::C => (group.series_index + 1) > parameters.min_ion_index,
-            Kind::X | Kind::Y | Kind::Z => {
+            Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
                 peptide.sequence.len().saturating_sub(1) - group.series_index
                     > parameters.min_ion_index
             }

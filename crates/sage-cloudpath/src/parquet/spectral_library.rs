@@ -222,6 +222,7 @@ pub fn serialize_spectral_library(
                     Kind::X => "x".into(),
                     Kind::Y => "y".into(),
                     Kind::Z => "z".into(),
+                    Kind::ZDot => "z_dot".into(),
                 })
                 .collect::<Vec<ByteArray>>(),
             ByteArrayType

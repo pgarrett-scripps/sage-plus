@@ -10,6 +10,9 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `"z_dot"` ion kind (aliases `"zdot"`, `"z."`): the radical z• ion (z + 1.007825 Da) produced by
+  ETD and EThcD. The existing `"z"` kind is the even-electron z ion (y − NH3). Parquet and
+  spectral-library outputs label it `z_dot`; library annotations use `z.`.
 - `mass_recalibration` (`"off"` by default; `"static"`, `"linear"`, or `"auto"`) corrects
   precursor and fragment m/z during the search. A sampled discovery search of each file (up to
   25,000 MS2 spectra, stratified by acquisition group so interleaved scan cycles do not alias
