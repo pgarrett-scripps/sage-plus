@@ -88,7 +88,8 @@ impl Runner {
                     spectrum.file_id == file_id && spectrum.is_searchable(self.parameters.min_peaks)
                 })
                 .collect::<Vec<_>>();
-            let stride = candidates.len().div_ceil(MAX_DISCOVERY_SPECTRA).max(1);
+            let searchable = candidates.len();
+            let stride = searchable.div_ceil(MAX_DISCOVERY_SPECTRA).max(1);
             let sample = candidates.into_iter().step_by(stride).collect::<Vec<_>>();
             let mut features = sample
                 .par_iter()
@@ -216,7 +217,7 @@ impl Runner {
                 "- file {} mass recalibration: {} of {} spectra searched, {} confident PSMs; precursor {}; fragment {} [{} ms]",
                 file_id,
                 sample.len(),
-                sample.len() * stride,
+                searchable,
                 confident.len(),
                 describe(&precursor),
                 fragment
