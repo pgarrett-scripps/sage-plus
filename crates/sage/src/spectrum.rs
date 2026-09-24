@@ -223,7 +223,10 @@ pub enum Activation {
     Hcd,
     Cid,
     Etd,
+    /// ETD with supplemental HCD activation.
     Ethcd,
+    /// ETD with supplemental CID activation.
+    Etcid,
     Other,
 }
 
@@ -255,6 +258,8 @@ impl AcquisitionGroup {
         let has = |method: &str| lower.contains(&format!("@{method}"));
         let activation = if has("etd") && has("hcd") {
             Activation::Ethcd
+        } else if has("etd") && has("cid") {
+            Activation::Etcid
         } else if has("etd") {
             Activation::Etd
         } else if has("hcd") {
@@ -299,6 +304,7 @@ impl Activation {
             Activation::Cid => "cid",
             Activation::Etd => "etd",
             Activation::Ethcd => "ethcd",
+            Activation::Etcid => "etcid",
             Activation::Other => "other",
         }
     }
