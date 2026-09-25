@@ -1,5 +1,6 @@
 use super::*;
 
+#[allow(clippy::needless_update)] // `crosslinks` exists only with the crosslink feature.
 fn result(index: usize) -> SageResults {
     SageResults {
         ms1: vec![ProcessedSpectrum {
@@ -18,6 +19,7 @@ fn result(index: usize) -> SageResults {
             peaks: vec![index as f32],
         }],
         repeated_spectrum_psms: HashMap::from([(index, index + 1)]),
+        ..Default::default()
     }
 }
 

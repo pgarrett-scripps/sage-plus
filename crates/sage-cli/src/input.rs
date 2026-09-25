@@ -102,6 +102,11 @@ pub struct Search {
     pub annotate_matches: bool,
 
     pub score_type: ScoreType,
+
+    /// MS-cleavable crosslink search (`crosslink` feature builds only).
+    #[cfg(feature = "crosslink")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crosslink: Option<sage_xlink::CrosslinkSettings>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -169,6 +174,12 @@ pub struct Input {
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
+
+    /// MS-cleavable crosslink search. Only accepted by builds with the
+    /// `crosslink` feature, and not part of the published schema.
+    #[cfg(feature = "crosslink")]
+    #[schemars(skip)]
+    pub crosslink: Option<sage_xlink::CrosslinkSettings>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
@@ -665,6 +676,19 @@ impl Input {
         let spectral_library = self.spectral_library.unwrap_or_default();
         spectral_library.validate().map_err(anyhow::Error::msg)?;
 
+        #[cfg(feature = "crosslink")]
+        if let Some(crosslink) = &self.crosslink {
+            crosslink.validate().map_err(anyhow::Error::msg)?;
+            ensure!(
+                !database.prefilter,
+                "crosslink search needs the full fragment index: set database.prefilter to false"
+            );
+            ensure!(
+                !self.wide_window.unwrap_or(false),
+                "crosslink search does not support wide_window"
+            );
+        }
+
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
         // Record the alignment method that will run, so results.json states it.
@@ -716,6 +740,8 @@ impl Input {
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             score_type,
+            #[cfg(feature = "crosslink")]
+            crosslink: self.crosslink,
         })
     }
 

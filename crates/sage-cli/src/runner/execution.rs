@@ -70,6 +70,38 @@ impl Runner {
             .map(|(telemetry, _summary)| telemetry)
     }
 
+    /// Score crosslink-spectrum matches, assign crosslink q-values and write
+    /// `crosslinks.sage.parquet`.
+    #[cfg(feature = "crosslink")]
+    fn write_crosslinks(
+        &mut self,
+        mut csms: Vec<sage_xlink::Csm>,
+        settings: &sage_xlink::CrosslinkSettings,
+        filenames: &[String],
+    ) -> anyhow::Result<()> {
+        let summary = sage_xlink::assign_q_values(&mut csms, &self.database);
+        info!(
+            "crosslinks at 1% FDR: {} intra + {} inter CSMs, {} intra + {} inter residue pairs ({} candidates)",
+            summary.intra_csms,
+            summary.inter_csms,
+            summary.intra_residue_pairs,
+            summary.inter_residue_pairs,
+            csms.len()
+        );
+        csms.sort_by(|a, b| b.discriminant_score.total_cmp(&a.discriminant_score));
+        let output: Vec<&sage_xlink::Csm> = csms
+            .iter()
+            .filter(|csm| csm.csm_q <= settings.output_q_value)
+            .collect();
+        let linker = settings.linker.resolve().map_err(anyhow::Error::msg)?;
+        let bytes =
+            sage_xlink::output::serialize(&output, &self.database, filenames, &linker.name)?;
+        let path = self.make_path("crosslinks.sage.parquet");
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
+        Ok(())
+    }
+
     pub fn run_with_summary(
         mut self,
         parallel: usize,
@@ -359,6 +391,15 @@ impl Runner {
         let path = self.make_path("results.sage.parquet");
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
+
+        #[cfg(feature = "crosslink")]
+        if let Some(settings) = self.parameters.crosslink.clone() {
+            self.write_crosslinks(
+                std::mem::take(&mut outputs.crosslinks),
+                &settings,
+                &filenames,
+            )?;
+        }
 
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(

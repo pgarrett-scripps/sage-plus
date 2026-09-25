@@ -24,6 +24,7 @@ pub(crate) fn prepare_local_directory(
         "results.sage.ptm-library.tsv",
         "results.sage.pin",
         "results.sage.report.html",
+        "crosslinks.sage.parquet",
     ];
     let existing = names
         .iter()
@@ -46,6 +47,9 @@ pub struct SageResults {
     /// within its file, recorded only for repeated IDs (e.g. MGF files with
     /// repeated `TITLE=` lines). Empty when every spectrum ID is unique.
     pub repeated_spectrum_psms: HashMap<usize, usize>,
+    /// Best crosslink-spectrum match per spectrum, before FDR.
+    #[cfg(feature = "crosslink")]
+    pub crosslinks: Vec<sage_xlink::Csm>,
 }
 
 impl SageResults {
@@ -55,6 +59,8 @@ impl SageResults {
         self.quant.extend(other.quant);
         self.repeated_spectrum_psms
             .extend(other.repeated_spectrum_psms);
+        #[cfg(feature = "crosslink")]
+        self.crosslinks.extend(other.crosslinks);
         self
     }
 }

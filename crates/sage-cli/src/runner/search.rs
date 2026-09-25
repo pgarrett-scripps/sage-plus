@@ -480,6 +480,8 @@ impl Runner {
             quant,
             ms1: ms1_spectra,
             repeated_spectrum_psms,
+            #[cfg(feature = "crosslink")]
+            crosslinks: Vec::new(),
         }
     }
 
@@ -501,17 +503,56 @@ impl Runner {
             }
             None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
         };
-        let (features, repeated_spectrum_psms) = if self.mass_recalibration_enabled() {
+        let recalibrated = self.mass_recalibration_enabled().then(|| {
             self.discover_mass_corrections(scorer, &spectra.1);
-            let recalibrated = Scorer {
+            Scorer {
                 mass_recalibration: self.mass_recalibration_models(),
                 ..*scorer
-            };
-            self.search_processed_spectra(&recalibrated, &spectra.1)
-        } else {
-            self.search_processed_spectra(scorer, &spectra.1)
+            }
+        });
+        let scorer = recalibrated.as_ref().unwrap_or(scorer);
+        let (features, repeated_spectrum_psms) = self.search_processed_spectra(scorer, &spectra.1);
+        #[cfg(feature = "crosslink")]
+        let crosslinks = self.search_crosslinks(scorer, &spectra.1)?;
+        #[allow(unused_mut)]
+        let mut results =
+            self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms);
+        #[cfg(feature = "crosslink")]
+        {
+            results.crosslinks = crosslinks;
+        }
+        Ok(results)
+    }
+
+    /// Best crosslink-spectrum match of each MS2 spectrum, when a crosslink
+    /// search is configured.
+    #[cfg(feature = "crosslink")]
+    fn search_crosslinks(
+        &self,
+        scorer: &Scorer,
+        msn_spectra: &[ProcessedSpectrum],
+    ) -> anyhow::Result<Vec<sage_xlink::Csm>> {
+        let Some(settings) = &self.parameters.crosslink else {
+            return Ok(Vec::new());
         };
-        Ok(self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms))
+        let search =
+            sage_xlink::CrosslinkSearch::new(settings.clone()).map_err(anyhow::Error::msg)?;
+        let start = Instant::now();
+        let csms: Vec<_> = msn_spectra
+            .par_iter()
+            .filter(|spec| {
+                !self.cancellation.is_cancelled()
+                    && spec.level == 2
+                    && spec.is_searchable(self.parameters.min_peaks)
+            })
+            .filter_map(|spec| search.search(scorer, spec))
+            .collect();
+        log::info!(
+            "- crosslink search: {:8} ms ({} spectra with a crosslink candidate)",
+            start.elapsed().as_millis(),
+            csms.len()
+        );
+        Ok(csms)
     }
 
     /// Take the prefilter's spectra for this file batch. Spectra retained

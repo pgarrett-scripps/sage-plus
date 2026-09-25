@@ -12,6 +12,8 @@ publish = false
 [features]
 default = ["mzmlb"]
 mzmlb = ["sage-cloudpath/mzmlb"]
+# MS-cleavable crosslink search, enabled at run time by a `crosslink` config block.
+crosslink = ["dep:sage-xlink"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -26,6 +28,7 @@ path = "src/main.rs"
 [dependencies]
 sage-core = { path = "../sage" }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
+sage-xlink = { path = "../sage-xlink", optional = true }
 
 anyhow = "1.0"
 csv = "1"
