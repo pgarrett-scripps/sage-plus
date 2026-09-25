@@ -831,6 +831,61 @@ PR #49 adds `Runner::write_sidecar` for per-feature output files. When it lands 
 `glyco.sage.parquet` should be written through it instead of the glyco-specific path in
 `sage-cli`.
 
+## 14. Milestone 8: Hex-ladder and sibling evidence (2026-09-25)
+
+### Release confirmation of the M7 defaults
+
+The release build reproduces the fast-release numbers exactly. Yeast has 1,328
+glycoPSMs, 2.7% non-high-mannose, and 24 mouse-protein hits. Mouse has 8,700 glycoPSMs.
+Plain searches are unchanged at 8,674 (mouse) and 7,940 (yeast). The binary contained
+the M8 ladder code switched off, which also shows that the three zero feature columns
+do not change the fit.
+
+### Offline analysis (r1 yeast rows)
+
+- The recoverable pool is the targets at 1% < peptide q ≤ 10%. They exceed the decoys
+  in that band by about 900: 414 complex, 287 high-mannose and 211 small (mostly
+  HexNAc(1)).
+- Y-ion counts alone do not separate the high-mannose part of this pool. The near-miss
+  high-mannose decoys match six or more Y ions as often as the targets do.
+- Hex-shift aliasing is a real effect but a small one. In this band, 11% of decoys
+  with three or more Y ions have a peptide mass that equals a confident peptide's mass
+  plus or minus k × Hex, against about 3% in a control. Only a trunk ladder with
+  consecutive rungs can test Y-ion consistency, and that needs the spectrum, so it
+  became a feature.
+- Siblings, meaning other spectra that picked the same peptide, looked strong. With
+  three or more siblings in the band: 70% of targets against 12% of decoys.
+
+### What changed (both opt-in, default off)
+
+- `glyco.ladder_feature` adds three features: the longest consecutive run of
+  peptide + HexNAc(2)Hex(k) rungs up to the explanation's Hex count (three for
+  complex glycans), and the run and matched count each minus a control ladder at
+  +7.37 Da. The ladder costs no measurable time.
+- `glyco.sibling_feature` adds ln(1 + siblings) from the glycan-score selection. It
+  is label-blind.
+
+### Results (fast-release; mouse+pombe entrapment FDP as in section 13)
+
+| variant | yeast | non-HM | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- |
+| M7 r1 (default) | 1,328 | 2.7% | 24 | 8,392 | 14 (0.7%) |
+| + ladder | 1,338 | 2.5% | 21 | 8,389 | 12 (0.6%) |
+| + siblings | 1,382 | 2.8% | 32 | 9,133 | 10 (0.5%) |
+| + both | 1,416 | 2.9% | 33 | 9,103 | 9 (0.4%) |
+
+### Decisions
+
+- The ladder stays opt-in. Its +10 yeast is inside the ±9 noise floor. Wrong glycans
+  and entrapment improve slightly, and mouse is flat.
+- Siblings stay opt-in and are not safe as a default. The yeast entrapment hits rise
+  by about a third (24 to 32) for +54 glycoPSMs. The new wrong hits come in clusters:
+  one wrong peptide picked across adjacent scans (ERNITR 12 spectra, NGTPERAGQSR 3,
+  NYTVSETSTTK 3). The feature rewards recurrence, and recurrence is exactly what a
+  repeated wrong pick produces. The mouse+pombe set cannot see this because the pombe
+  proteome is small. The feature would need a recurrence count that excludes adjacent
+  scans of the same precursor before it is retested.
+
 ## Appendix: code and measurements
 
 - `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):
