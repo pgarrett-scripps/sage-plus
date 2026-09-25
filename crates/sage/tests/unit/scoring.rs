@@ -534,6 +534,89 @@ fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
         .is_empty());
 }
 
+/// Two peptidoforms 0.984 Da apart (N vs D) that explain the same fragment
+/// peaks score identically. The heavier one fits the precursor at isotope 0;
+/// the lighter one fits only at isotope +1. The isotope-0 reading must win
+/// the tie instead of the lighter mass.
+#[test]
+fn exact_score_ties_prefer_isotope_zero() {
+    let peptide = |sequence: &str| {
+        crate::peptide::Peptide::try_from(Digest {
+            sequence: sequence.into(),
+            protein: Arc::from("protein"),
+            ..Digest::default()
+        })
+        .unwrap()
+    };
+    let deamidated = peptide("PEPTIDEDR");
+    let amidated = peptide("PEPTIDENR");
+    assert!(amidated.monoisotopic < deamidated.monoisotopic);
+
+    // Only fragments shared by both sequences: b1..b7 and y1.
+    let shared = |peptide: &Peptide| {
+        let mut masses = IonSeries::new(peptide, Kind::B)
+            .take(7)
+            .chain(IonSeries::new(peptide, Kind::Y).last())
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+        masses.sort_by(f32::total_cmp);
+        masses
+    };
+    let fragment_masses = shared(&deamidated);
+    assert_eq!(fragment_masses, shared(&amidated));
+
+    let mut peptides = vec![deamidated.clone(), amidated.clone()];
+    peptides.sort_by(|a, b| a.monoisotopic.total_cmp(&b.monoisotopic));
+    let database = Builder::default()
+        .make_parameters()
+        .build_from_peptides(peptides);
+    let precursor_charge = 2;
+    let query = ProcessedSpectrum {
+        level: 2,
+        id: "isotope-tie".into(),
+        precursors: vec![Precursor {
+            mz: deamidated.monoisotopic / precursor_charge as f32 + PROTON,
+            charge: Some(precursor_charge),
+            ..Precursor::default()
+        }],
+        intensities: vec![1.0; fragment_masses.len()],
+        charges: vec![1; fragment_masses.len()],
+        total_ion_current: fragment_masses.len() as f32,
+        masses: fragment_masses,
+        ..ProcessedSpectrum::default()
+    };
+
+    let scorer = Scorer {
+        db: &database,
+        // Wide enough that the amidated form at isotope +1 (0.019 Da off) is
+        // a candidate too.
+        precursor_tol: Tolerance::Da(-0.05, 0.05),
+        fragment_tol: Tolerance::Da(-0.01, 0.01),
+        min_matched_peaks: 1,
+        min_isotope_err: 0,
+        max_isotope_err: 1,
+        min_precursor_charge: 2,
+        max_precursor_charge: 2,
+        override_precursor_charge: false,
+        max_fragment_charge: Some(1),
+        chimera: false,
+        report_psms: 2,
+        wide_window: false,
+        annotate_matches: false,
+        mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+        score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
+    };
+
+    let features = scorer.score(&query);
+    assert_eq!(features.len(), 2);
+    assert_eq!(features[0].hyperscore, features[1].hyperscore);
+    assert_eq!(database[features[0].peptide_idx].to_string(), "PEPTIDEDR");
+    assert_eq!(features[0].isotope_error, 0.0);
+    assert_eq!(database[features[1].peptide_idx].to_string(), "PEPTIDENR");
+    assert_eq!(features[1].isotope_error, NEUTRON);
+}
+
 mod mass_offsets {
     use super::*;
     use crate::database::{MassOffsetAssignment, Parameters};

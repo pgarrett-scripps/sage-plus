@@ -9,6 +9,12 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Isotope tie-break: when two candidates for a spectrum have exactly the same hyperscore, the one
+  with the smaller absolute precursor isotope error now ranks first, before the lighter peptide
+  mass. A peptidoform 0.984 Da lighter (amidated vs hydrolyzed monolink, N vs D) read at isotope
+  +1 no longer displaces the isotope-0 match it ties with. Only exact ties are affected.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
