@@ -300,6 +300,10 @@ pub struct OxoniumEvidence {
     pub matched: Vec<bool>,
     /// Summed oxonium intensity over total ion current.
     pub intensity_fraction: f32,
+    /// ln((Hex 163 + HexHexNAc 366) / HexNAc 204) oxonium intensity, each
+    /// padded by 0.1% of the total ion current. High for oligomannose,
+    /// low for complex and sialylated glycans.
+    pub hex_ratio: f32,
 }
 
 impl OxoniumEvidence {
@@ -332,17 +336,26 @@ pub(crate) fn find_singly_charged(
 
 pub fn oxonium_evidence(query: &ProcessedSpectrum, tolerance: Tolerance) -> OxoniumEvidence {
     let mut summed = 0.0;
+    let (mut hex, mut hexnac) = (0.0, 0.0);
     let matched = OXONIUM_IONS
         .iter()
         .map(|ion| match find_singly_charged(query, ion.mz, tolerance) {
             Some(idx) => {
-                summed += query.intensities[idx];
+                let intensity = query.intensities[idx];
+                summed += intensity;
+                match ion.name {
+                    "Hex" | "HexHexNAc" => hex += intensity,
+                    "HexNAc" => hexnac += intensity,
+                    _ => {}
+                }
                 true
             }
             None => false,
         })
         .collect();
+    let pad = 1e-3 * query.total_ion_current.max(f32::MIN_POSITIVE);
     OxoniumEvidence {
+        hex_ratio: ((hex + pad) / (hexnac + pad)).ln(),
         matched,
         intensity_fraction: if query.total_ion_current > 0.0 {
             summed / query.total_ion_current

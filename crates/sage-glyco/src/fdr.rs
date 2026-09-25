@@ -267,7 +267,7 @@ pub struct FdrSummary {
     pub rates: [f64; CLASSES],
 }
 
-const PEPTIDE_FEATURES: usize = 22;
+const PEPTIDE_FEATURES: usize = 26;
 
 /// One spectrum's selected candidate: its index, and the lead of its glycan
 /// score over the next explained peptide candidate of the same spectrum
@@ -334,6 +334,11 @@ fn peptide_features(
         .iter()
         .map(|e| e.y_intensity as f64)
         .fold(0.0, f64::max);
+    let y_matched = candidate
+        .explanations
+        .iter()
+        .map(|e| e.target.y_matched() as f64)
+        .fold(0.0, f64::max);
     let ppm = candidate
         .explanations
         .iter()
@@ -362,6 +367,10 @@ fn peptide_features(
         (candidate.explanations.len() as f64).ln(),
         (feature.rank as f64).ln(),
         lead.clamp(-50.0, 50.0),
+        y_matched.ln_1p(),
+        (candidate.explanations[0].target.matched[0] as f64).ln_1p(),
+        f64::from(u8::from(candidate.y1)),
+        (candidate.hex_ratio as f64).clamp(-10.0, 10.0),
     ]
 }
 
@@ -601,6 +610,8 @@ mod tests {
             oxonium_ions: 3,
             oxonium_fraction: 0.1,
             anchored: true,
+            y1: true,
+            hex_ratio: 0.0,
             random_y: 0.1,
             random_oxonium: 0.1,
             explanations,
@@ -638,6 +649,8 @@ mod tests {
             oxonium_ions: 3,
             oxonium_fraction: 0.1,
             anchored: true,
+            y1: true,
+            hex_ratio: 0.0,
             random_y: 0.1,
             random_oxonium: 0.1,
             explanations: vec![explanation(1, 0)],

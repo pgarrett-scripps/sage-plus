@@ -102,6 +102,11 @@ pub struct GlycoCandidate {
     pub oxonium_fraction: f32,
     /// Y0 or Y1 (peptide + HexNAc) was matched.
     pub anchored: bool,
+    /// Y1 (peptide + HexNAc) was matched.
+    pub y1: bool,
+    /// Oxonium Hex/HexNAc intensity ratio, see
+    /// [`crate::composition::OxoniumEvidence::hex_ratio`].
+    pub hex_ratio: f32,
     /// Random match rates of Y-ion and oxonium lookups in this spectrum.
     pub random_y: f32,
     pub random_oxonium: f32,
@@ -304,6 +309,8 @@ impl GlycoSearch {
                 .collect::<Vec<_>>();
             let (random_y, random_oxonium) = evidence.random_rates(peptide_mass, delta as f32);
             candidates.push(GlycoCandidate {
+                y1: evidence.y_peak(peptide_mass, HEXNAC as f32).is_some(),
+                hex_ratio: oxonium.hex_ratio,
                 peptide_mass,
                 oxonium_ions: oxonium.count() as u8,
                 oxonium_fraction: oxonium.intensity_fraction,
