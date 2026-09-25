@@ -122,6 +122,7 @@ mod imp {
                 sage_glyco::fdr::ScoreOptions {
                     rescore: config.rescore_candidates,
                     siblings: config.sibling_feature,
+                    core_only_subgroup: config.core_only_subgroup,
                 },
             );
             log::info!(

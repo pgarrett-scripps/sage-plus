@@ -20,7 +20,7 @@
 use sage_core::ml::linear_discriminant::LinearDiscriminantAnalysis;
 
 use crate::evidence::{
-    ClassCounts, CLASSES, NEUAC_ABSENT, NEUAC_PRESENT, NEUGC_ABSENT, NEUGC_PRESENT,
+    ClassCounts, CLASSES, CORE, NEUAC_ABSENT, NEUAC_PRESENT, NEUGC_ABSENT, NEUGC_PRESENT,
 };
 use crate::search::{Explanation, GlycoCandidate};
 
@@ -573,29 +573,98 @@ pub struct ScoreOptions {
     pub rescore: bool,
     /// `glyco.sibling_feature`, see [`count_siblings`].
     pub siblings: bool,
+    /// `glyco.core_only_subgroup`, see [`grouped_discriminant`].
+    pub core_only_subgroup: bool,
 }
 
-/// Set each candidate's `siblings`: how many other spectra picked the same
-/// peptide (same database entry, so the same modifications) in the
-/// glycan-score selection `chosen`. True glycopeptides recur as several
-/// glycoforms and charge states. The count ignores labels and scores, so
-/// targets and decoys are treated alike.
-fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize]) {
-    let mut counts: std::collections::HashMap<u32, u16> = std::collections::HashMap::new();
-    let mut picked = vec![false; candidates.len()];
-    for &index in chosen {
-        picked[index] = true;
-        let count = counts
-            .entry(candidates[index].feature.peptide_idx.0)
-            .or_default();
-        *count = count.saturating_add(1);
+/// Whether every Y ion of an explanation is a core ion, as for HexNAc(1):
+/// then the glycan has no fragment evidence beyond the peptide's own.
+fn is_core_only(counts: &ClassCounts) -> bool {
+    counts.y_generated() == u32::from(counts.generated[CORE])
+}
+
+/// Peptide discriminant and q-values fitted and computed separately for
+/// the core-only candidates (`group`) and the rest. The grouping depends
+/// only on the assigned composition, never on the label, so each group
+/// keeps its own target-decoy estimate and the union stays at the
+/// threshold. A group whose fit fails falls back to hyperscore.
+fn grouped_discriminant(
+    rows: &[[f64; PEPTIDE_FEATURES]],
+    decoy: &[bool],
+    hyperscore: &[f64],
+    group: &[bool],
+) -> (Vec<f64>, &'static str, Vec<f32>) {
+    let mut scores = vec![0.0; rows.len()];
+    let mut q = vec![1.0f32; rows.len()];
+    let mut name = "lda";
+    for member in [false, true] {
+        let index: Vec<usize> = (0..rows.len()).filter(|&i| group[i] == member).collect();
+        if index.is_empty() {
+            continue;
+        }
+        let pick = |v: &[bool]| index.iter().map(|&i| v[i]).collect::<Vec<_>>();
+        let sub_rows: Vec<_> = index.iter().map(|&i| rows[i]).collect();
+        let sub_decoy = pick(decoy);
+        let sub_hyper: Vec<f64> = index.iter().map(|&i| hyperscore[i]).collect();
+        let (sub_scores, sub_name) = discriminant(&sub_rows, &sub_decoy, &sub_hyper);
+        if !member {
+            name = sub_name;
+        }
+        let sub_q = q_values(&sub_scores, &sub_decoy);
+        for (k, &i) in index.iter().enumerate() {
+            scores[i] = sub_scores[k];
+            q[i] = sub_q[k];
+        }
+        log::info!(
+            "glyco: peptide subgroup core_only={member}: {} candidates, {} targets at 1%",
+            index.len(),
+            (0..index.len())
+                .filter(|&k| !sub_decoy[k] && sub_q[k] <= 0.01)
+                .count()
+        );
     }
-    for (candidate, picked) in candidates.iter_mut().zip(picked) {
-        let count = counts
-            .get(&candidate.feature.peptide_idx.0)
-            .copied()
-            .unwrap_or(0);
-        candidate.siblings = count - u16::from(picked);
+    (scores, name, q)
+}
+
+/// Precursors of one peptide within this mass tolerance (ppm, any charge)
+/// and retention-time window (minutes) count as one sibling.
+const SIBLING_PPM: f32 = 10.0;
+const SIBLING_RT: f32 = 1.0;
+
+/// Set each candidate's `siblings`: how many other precursors picked the
+/// same peptide (same database entry, so the same modifications) in the
+/// glycan-score selection `chosen`. True glycopeptides recur as several
+/// glycoforms. Repeat scans of one precursor (same neutral mass within
+/// [`SIBLING_PPM`] at any charge, within [`SIBLING_RT`]) count once, so a
+/// wrong pick repeated across scans does not vouch for itself. The count
+/// ignores labels and scores, so targets and decoys are treated alike.
+fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize]) {
+    let same = |a: (f32, f32), b: (f32, f32)| {
+        (a.0 - b.0).abs() <= a.0.max(b.0) * SIBLING_PPM * 1e-6 && (a.1 - b.1).abs() <= SIBLING_RT
+    };
+    // Distinct precursors (mass, rt) per peptide, first pick of each.
+    let mut precursors: std::collections::HashMap<u32, Vec<(f32, f32)>> =
+        std::collections::HashMap::new();
+    let mut order = chosen.to_vec();
+    order.sort_by(|&a, &b| {
+        let (a, b) = (&candidates[a].feature, &candidates[b].feature);
+        a.rt.total_cmp(&b.rt)
+    });
+    for index in order {
+        let feature = &candidates[index].feature;
+        let key = (feature.expmass, feature.rt);
+        let list = precursors.entry(feature.peptide_idx.0).or_default();
+        if !list.iter().any(|&p| same(p, key)) {
+            list.push(key);
+        }
+    }
+    for candidate in candidates.iter_mut() {
+        let feature = &candidate.feature;
+        let key = (feature.expmass, feature.rt);
+        let others = precursors
+            .get(&feature.peptide_idx.0)
+            .map_or(0, |list| list.iter().filter(|&&p| !same(p, key)).count());
+        candidate.siblings = others.min(u16::MAX as usize) as u16;
     }
 }
 
@@ -648,9 +717,19 @@ pub fn score(
         .collect();
     let peptide_decoy: Vec<bool> = candidates.iter().map(|c| c.feature.label == -1).collect();
     let hyperscore: Vec<f64> = candidates.iter().map(|c| c.feature.hyperscore).collect();
-    let (discriminant, model_name) = discriminant(&rows, &peptide_decoy, &hyperscore);
+    let (discriminant, model_name, peptide_q) = if options.core_only_subgroup {
+        let core_only: Vec<bool> = candidates
+            .iter()
+            .zip(&assignments)
+            .map(|(c, a)| is_core_only(&c.explanations[a.explanation].target))
+            .collect();
+        grouped_discriminant(&rows, &peptide_decoy, &hyperscore, &core_only)
+    } else {
+        let (discriminant, name) = discriminant(&rows, &peptide_decoy, &hyperscore);
+        let q = q_values(&discriminant, &peptide_decoy);
+        (discriminant, name, q)
+    };
     drop(rows);
-    let peptide_q = q_values(&discriminant, &peptide_decoy);
 
     // Glycan level: refit on confident target peptides whose winner is a
     // target explanation clearly ahead of every alternative.
@@ -720,6 +799,17 @@ mod tests {
         let q = q_values(&scores, &decoy);
         // (1 + decoys) / targets, then cumulative minimum from the bottom.
         assert_eq!(q, vec![0.5, 0.5, 0.6666667, 0.6666667, 1.0]);
+    }
+
+    #[test]
+    fn core_only_means_no_y_ion_beyond_the_core() {
+        let mut counts = ClassCounts::default();
+        counts.generated[CORE] = 2;
+        // Oxonium classes do not count as Y ions.
+        counts.generated[NEUAC_ABSENT] = 2;
+        assert!(is_core_only(&counts));
+        counts.generated[crate::evidence::EXTENDED] = 1;
+        assert!(!is_core_only(&counts));
     }
 
     #[test]
@@ -866,13 +956,21 @@ mod tests {
 
         // Siblings: other spectra whose pick is the same peptide.
         let mut candidates = candidates.to_vec();
-        for (candidate, peptide) in candidates.iter_mut().zip([7, 8, 9, 8, 8, 7]) {
+        for (i, (candidate, peptide)) in candidates.iter_mut().zip([7, 8, 9, 8, 8, 7]).enumerate() {
             candidate.feature.peptide_idx = sage_core::database::PeptideIx(peptide);
+            candidate.feature.expmass = 1000.0 + 100.0 * i as f32;
+            candidate.feature.rt = i as f32 * 5.0;
         }
         let chosen: Vec<usize> = selected.iter().map(|s| s.index).collect();
         count_siblings(&mut candidates, &chosen);
         let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
-        // Picks 1, 3 and 4 are all peptide 8.
+        // Picks 1, 3 and 4 are all peptide 8, at three different precursors.
         assert_eq!(siblings, vec![0, 2, 0, 2, 2, 0]);
+        // A repeat scan of pick 3's precursor counts once.
+        candidates[4].feature.expmass = candidates[3].feature.expmass + 0.005;
+        candidates[4].feature.rt = candidates[3].feature.rt + 0.5;
+        count_siblings(&mut candidates, &chosen);
+        let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
+        assert_eq!(siblings, vec![0, 1, 0, 1, 1, 0]);
     }
 }

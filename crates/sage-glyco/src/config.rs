@@ -94,6 +94,9 @@ pub struct GlycoConfig {
     /// Add to the glyco peptide model how many other spectra picked the same
     /// peptide (glycoform and charge-state siblings).
     pub sibling_feature: bool,
+    /// Fit the glyco peptide model and its q-values separately for
+    /// candidates whose glycan has only core Y ions (such as HexNAc(1)).
+    pub core_only_subgroup: bool,
 }
 
 impl Default for GlycoConfig {
@@ -121,6 +124,7 @@ impl Default for GlycoConfig {
             rescore_candidates: true,
             ladder_feature: false,
             sibling_feature: false,
+            core_only_subgroup: false,
         }
     }
 }
