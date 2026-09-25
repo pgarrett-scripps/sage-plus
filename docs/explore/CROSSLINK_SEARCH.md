@@ -215,6 +215,91 @@ comes later. Its accession is not verified here.
   doublets into (alpha, beta) chain masses. Pairs where both chains were observed rank
   first, and symmetric duplicates are merged.
 
-Next step for the prototype: feed each chain mass through `db.query` +
-`page_search_shifted(peak, stub)` on PXD014337 DSSO files and measure how often the true
-chain is in the top 5.
+- `rank_chain_candidates(db, spectrum, chain_mass, shifts, ...)` runs a closed `db.query`
+  at one chain mass. It counts the preliminary fragment matches, both unshifted and shifted
+  by each stub (and by partner plus linker), keeps linkable (K-containing) peptides, and
+  returns the top k.
+
+Harness: `crates/sage-cli/examples/crosslink_doublets.rs`, which runs as
+`cargo run --release --example crosslink_doublets -- <raw> <fasta> <out.jsonl> DSSO`. It
+writes one JSON line per MS2 spectrum with:
+- the doublets;
+- doublet counts at four decoy spacings (real spacing −1.9, −0.7, +0.55, +1.3 Da);
+- up to 10 pair hypotheses, each with its top-5 alpha and beta candidates.
+
+## Results on PXD014337 (DSSO, Q Exactive HF-X, stepped HCD)
+
+Setup:
+- File: `XLpeplib_Beveridge_QEx-HFX_DSSO_stHCD.raw`, 36,568 MS2 spectra.
+- Database: `cas9_crapome.fasta` from the paper's Supplementary Data 2 (33,058 indexed
+  peptides with decoys).
+- Tolerances: ±10 ppm precursor, ±20 ppm fragment, isotopes 0–2.
+- Truth: 481 target CSMs from the paper's XlinkX 1% FDR list (`xlinkx_QExHFX_DSSO_1perFDR_crapome_CSMs.csv`),
+  joined by scan number. Each CSM is labelled correct or incorrect from the peptide groups
+  in SI Table 1: 423 correct, 58 incorrect.
+- Harness cost: 12.5 s wall time, 0.74 GB peak RSS.
+
+Scripts and outputs are in `explore-data/crosslink/runs/` on the data drive:
+`analysis/eval_doublets.py` and `analysis/eval_m0.py`.
+
+**Doublets.**
+- 97.6% of MS2 spectra carry at least one DSSO doublet, averaging 14.7 per spectrum.
+- 18.9% of spectra have a pair hypothesis in which both chains were seen as doublets.
+- This is a crosslink library, so almost every spectrum is a crosslink or monolink, and
+  both produce doublets. The prevalence is therefore not a specificity measure.
+
+**Chain lookup, correct XlinkX CSMs (n = 423):**
+
+| Metric | Count | Share |
+| --- | ---: | ---: |
+| Spectrum has any doublet | 423 | 100% |
+| Doublet at the alpha chain mass | 416 | 98.3% |
+| Doublet at the beta chain mass | 421 | 99.5% |
+| True (alpha, beta) pair among the ≤10 hypotheses | 377 | 89.1% |
+| True pair ranked first among the hypotheses | 368 | 87.0% |
+| True alpha in the top 5, given the true pair | 377 | 100% |
+| True alpha ranked first | 376 | 99.7% |
+| True beta in the top 5, given the true pair | 377 | 100% |
+| True beta ranked first | 368 | 97.6% |
+
+- End to end, both true chains are in the top 5 for 377 of 423 spectra (89.1%).
+- Most of the 46 misses trace to the precursor, not the doublets: 38 of the 481
+  truth CSMs do not match our precursor mass within isotopes 0–2 (mispicked monoisotope or
+  a larger isotope error).
+- The 58 incorrect (cross-group) XlinkX CSMs also get doublets: 44 have both chains in the
+  top 5. Doublets alone cannot catch those errors. They need chain scoring and FDR.
+
+**False doublets.**
+- *Chance doublets.* The three clean decoy spacings give 0.65–0.92 doublets per spectrum
+  against 14.7 at the true spacing, so about 5% of doublets are chance. Per spectrum, 18–36%
+  of spectra have at least one chance doublet.
+- *Rejected decoy spacing.* The −1.9 Da decoy spacing (30.07 Da) sits on a real mass
+  difference, near CH₂O (30.011 Da): 2.8 doublets per spectrum. It is excluded.
+- *Doublets away from the chain masses.* Inside correct CSMs, only 13.9% of doublets
+  (1,246 of 8,982; 21 per spectrum) sit at a true chain mass. The rest are mostly
+  stub-carrying b/y fragments, which also show the 31.97 Da spacing, plus chance pairs.
+- *Consequence.* Pair hypotheses must be capped and ranked. Ranking both-observed pairs
+  first, then by intensity, puts the true pair first 87% of the time. Only 9 true pairs
+  rank 2nd–7th.
+
+**M0 monolinks** (normal `sage` binary; configs in `runs/m0-*.json`). Each form is a K
+`mass_offset` with its stub neutral losses:
+
+| Config | Target PSMs at 1% | Monolink PSMs | Monolink peptidoforms |
+| --- | ---: | ---: | ---: |
+| Linear only (no K offsets) | 130 | – | – |
+| Hydrolyzed (+176.0143) | 791 | 666 | 76 (60 sequences) |
+| Hydrolyzed + Tris (+279.0777) + amidated (+175.0303) | 969 | 845 | 145 (74 sequences) |
+
+- Split of the 845 monolink PSMs in the three-form run: 536 hydrolyzed, 10 Tris, 299
+  amidated.
+- *Amidated is inflated.* The amidated and hydrolyzed forms differ by 0.984 Da. That is
+  within 10 ppm of one isotope step (1.003 Da), so with `isotope_errors` [0, 2], 135 of
+  the 299 amidated PSMs are hydrolyzed monolinks assigned as amidated plus an isotope
+  error. The M0 recipe should ship hydrolyzed plus Tris only, or amidated with
+  `isotope_errors` [0, 0].
+- *Peptide-level q.* It came out as 0 peptides in the one- and zero-offset runs but as 165
+  in the three-form run. The picked-peptide step looks unstable on a database this small.
+  Treat the PSM level as the M0 metric here.
+- *Conclusion.* The mass-offset path gives about 6× the linear IDs on this sample with no
+  code changes, which confirms M0.

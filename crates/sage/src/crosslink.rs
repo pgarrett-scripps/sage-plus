@@ -14,8 +14,60 @@
 //! Each pair hypothesis turns an n^2 pair search into two closed-window
 //! lookups against the ordinary fragment index, one per chain mass.
 
+use crate::database::{IndexedDatabase, PeptideIx};
 use crate::mass::Tolerance;
+use crate::peptide::Peptide;
+use crate::scoring::FragmentMatchIndex;
 use crate::spectrum::ProcessedSpectrum;
+use std::collections::HashMap;
+
+/// A chain candidate from a closed-window lookup at one chain mass.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ChainCandidate {
+    pub peptide: PeptideIx,
+    /// Preliminary matched fragments: unshifted plus every shifted lookup.
+    pub matched: u16,
+}
+
+/// Rank indexed peptides whose mass is within `precursor_tol` of
+/// `chain_mass` by preliminary fragment matches. Fragments not containing the
+/// link site match the indexed masses directly; fragments containing it match
+/// at the indexed mass plus one of `shifts` (a linker stub, or the intact
+/// partner plus linker). Only peptides accepted by `linkable` are kept.
+#[allow(clippy::too_many_arguments)]
+pub fn rank_chain_candidates(
+    db: &IndexedDatabase,
+    spectrum: &ProcessedSpectrum,
+    chain_mass: f32,
+    shifts: &[f32],
+    precursor_tol: Tolerance,
+    fragment_tol: Tolerance,
+    max_charge: u8,
+    linkable: impl Fn(&Peptide) -> bool,
+    k: usize,
+) -> Vec<ChainCandidate> {
+    let fragment_index = FragmentMatchIndex::new(spectrum, max_charge);
+    let query = db.query(chain_mass, precursor_tol, fragment_tol);
+    let mut counts: HashMap<PeptideIx, u16> = HashMap::new();
+    for peak in &fragment_index.peaks {
+        for fragment in query.page_search(peak.neutral_mass) {
+            *counts.entry(fragment.peptide_index).or_default() += 1;
+        }
+        for &shift in shifts {
+            for fragment in query.page_search_shifted(peak.neutral_mass, shift) {
+                *counts.entry(fragment.peptide_index).or_default() += 1;
+            }
+        }
+    }
+    let mut ranked: Vec<ChainCandidate> = counts
+        .into_iter()
+        .filter(|(ix, _)| linkable(&db[*ix]))
+        .map(|(peptide, matched)| ChainCandidate { peptide, matched })
+        .collect();
+    ranked.sort_by(|a, b| b.matched.cmp(&a.matched).then(a.peptide.cmp(&b.peptide)));
+    ranked.truncate(k);
+    ranked
+}
 
 /// An MS-cleavable crosslinker. Masses are monoisotopic and neutral.
 #[derive(Copy, Clone, Debug, PartialEq)]
