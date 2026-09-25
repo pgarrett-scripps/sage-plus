@@ -664,25 +664,22 @@ It trusts the supplied sequence and boundary context rather than loading a FASTA
 The limit ranges from 1 to 10000. `truncated` reports when returned variants were
 limited. Static and variable occupancy is reflected in generated variants.
 
-#### Migration from symbol keys
+#### Symbol-keyed configurations
 
-Existing residue-keyed numeric and structured configurations remain readable.
-New named definitions accept only explicit spellings in `sites`. Do not mix named
-and legacy entries within one section.
+Residue-keyed symbol configurations remain readable, for example
+`"static_mods": {"C": 57.021464}`. Named definitions accept only explicit spellings
+in `sites`. Do not mix named and symbol-keyed entries within one section. There is
+no automatic converter. To rewrite a symbol-keyed entry as a named definition, map
+its key to an explicit site:
 
-```shell
-sage old-config.json --migrate-modifications > new-config.json
-```
-
-The command prints a converted configuration and leaves its input untouched.
-Repeated named entries are grouped only when their definitions agree. Unnamed
-entries receive distinct deterministic `legacy_static_mods_N` or
-`legacy_variable_mods_N` identities, preserving separate occurrence limits.
-It does not infer chemical identity from mass.
-
-Legacy bare `^`, `$`, `[`, and `]` become the corresponding terminal-group names.
-Legacy `^K`, `$K`, `[K`, and `]K` become first/last residue rules, preserving their
-meaning. `~K` becomes `internal_residue:K`.
+| Symbol key | Explicit site |
+| --- | --- |
+| `K` | `K` |
+| `^`, `$` | `peptide_n_term`, `peptide_c_term` |
+| `[`, `]` | `protein_n_term`, `protein_c_term` |
+| `^K`, `$K` | `first_residue:K`, `last_residue:K` |
+| `[K`, `]K` | `protein_first:K`, `protein_last:K` |
+| `~K` | `internal_residue:K` |
 
 #### Modification channels
 

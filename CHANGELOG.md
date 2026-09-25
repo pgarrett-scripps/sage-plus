@@ -16,6 +16,10 @@ entries are retained below for provenance.
   the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
   warns when it is set without `quant.lfq` or for non-TDF inputs.
 
+### Removed
+- `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
+  explicit site for each symbol key for rewriting them as named definitions.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
