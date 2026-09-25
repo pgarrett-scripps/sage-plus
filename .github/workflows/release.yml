@@ -23,7 +23,7 @@ env:
 jobs:
   version:
     name: Validate release version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       release_tag: ${{ steps.version.outputs.release_tag }}
       release_version: ${{ steps.version.outputs.release_version }}
@@ -47,7 +47,7 @@ jobs:
 
   verify:
     name: Verify release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -89,7 +89,7 @@ jobs:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             builder: alpine
-          - runner: windows-latest
+          - runner: windows-2025
             target: x86_64-pc-windows-msvc
             builder: native
           - runner: macos-15-intel
@@ -170,7 +170,7 @@ jobs:
   assemble:
     name: Assemble release assets
     needs: [version, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Download platform archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -192,7 +192,7 @@ jobs:
   docker:
     name: Build AMD64 container
     needs: [version, verify, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
@@ -246,7 +246,7 @@ jobs:
     name: Publish GitHub release
     if: github.event_name == 'push'
     needs: [version, verify, assemble, docker]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:

@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed (CI runners)
+- CI, security and release workflows run on pinned runner images (`ubuntu-24.04`,
+  `windows-2025`) instead of `ubuntu-latest` and `windows-latest`, so a GitHub image rollover
+  cannot change release builds unannounced. macOS runners were already pinned.
+
 ### Added
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
