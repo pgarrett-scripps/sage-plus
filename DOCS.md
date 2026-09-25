@@ -645,6 +645,66 @@ The placed peptidoform supplies mass error, FDR, quantification, localization, a
 output identity. The offset is not reported as precursor mass error. Prefiltering
 uses the same offset-aware retrieval.
 
+##### Recipe: crosslinker monolinks (DSSO, DSBU)
+
+A monolink (dead-end) is a crosslinker with one arm on the peptide and the other
+arm quenched by water, ammonia or Tris. Each quenched form is a fixed mass on K or
+the protein N-terminus, so monolinks can be searched as mass offsets without a
+crosslink search. The cleavable spacer adds optional fragment losses that leave a
+stub on the peptide.
+
+```json
+{
+  "variable_mods": {
+    "DSSO_hydrolyzed": {
+      "mass": 176.014330,
+      "sites": ["K", "protein_n_term"],
+      "search_mode": "mass_offset",
+      "neutral_losses": [122.003770, 90.031700, 72.021135]
+    },
+    "DSSO_Tris": {
+      "mass": 279.077658,
+      "sites": ["K", "protein_n_term"],
+      "search_mode": "mass_offset",
+      "neutral_losses": [225.067098, 193.095028]
+    }
+  },
+  "isotope_errors": [0, 2]
+}
+```
+
+| Crosslinker | Quench | Mass | Neutral losses |
+| --- | --- | --- | --- |
+| DSSO | Hydrolyzed (water) | 176.014330 | 122.003770, 90.031700, 72.021135 |
+| DSSO | Amidated (ammonia) | 175.030314 | 121.019754, 89.047684 |
+| DSSO | Tris | 279.077658 | 225.067098, 193.095028 |
+| DSBU | Hydrolyzed (water) | 214.095357 | 129.042593, 103.063329 |
+| DSBU | Amidated (ammonia) | 213.111341 | 128.058577, 102.079313 |
+| DSBU | Tris | 317.158685 | 232.105921, 206.126657 |
+
+The DSBU losses leave the Bu (85.052764) or BuUr (111.032028) stub on the peptide.
+The losses are optional, so fragments that kept the whole monolink still match.
+The neutral losses can be dropped if the spectra do not show stub ions.
+
+Add the amidated form only if the sample was quenched with ammonia or ammonium
+bicarbonate. It is 0.984 Da lighter than the hydrolyzed form, which is
+close to one isotope spacing. With `isotope_errors: [0, 2]`, a hydrolyzed monolink
+picked on its second isotope can match as amidated: in one DSSO test, 135 of 299
+amidated PSMs were hydrolyzed monolinks. Either leave amidated out, or set
+`isotope_errors` to `[0, 0]` when it is included.
+
+On a DSSO crosslinked peptide library (Q Exactive HF-X, stepped HCD), searched
+with K sites only, the counts of target PSMs at 1% FDR were:
+
+| Search | PSMs | With a monolink |
+| --- | --- | --- |
+| No monolinks | 130 | 0 |
+| Hydrolyzed only | 791 | 666 |
+| Hydrolyzed, Tris, amidated | 973 | 849 |
+
+Monolink rows are ordinary PSMs: the modification name appears in `peptide`, and
+localization and site reports treat it like any other variable modification.
+
 #### Preview modification placement
 
 ```shell

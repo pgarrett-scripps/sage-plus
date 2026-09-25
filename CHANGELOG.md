@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Documentation (monolinks)
+- DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
+  forms) as mass offsets with optional stub neutral losses. It also covers the amidated vs
+  hydrolyzed isotope-error trap.
+
 ### Added
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
