@@ -68,6 +68,17 @@ Sage Plus can natively read and write files through AWS S3:
 - See [AWS docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) for configuring your credentials
 - Using S3 may incur data transfer charges as well as multi-part upload request charges.
 
+S3, Google Cloud Storage, and Azure support is the `cloud` Cargo feature. It is enabled in
+release binaries, the container image, and default source builds. A local-only build omits
+it, together with `object_store` and the cloud SDK clients:
+
+```shell
+cargo build --release -p sage-cli --no-default-features --features mzmlb
+```
+
+In that build, an `s3://`, `gs://`, or `az://` path fails with an error naming the
+`cloud` feature. Local paths work the same way in both builds.
+
 ## Usage 
 
 ```shell

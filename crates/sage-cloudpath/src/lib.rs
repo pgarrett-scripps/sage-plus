@@ -1,8 +1,11 @@
 use async_compression::tokio::bufread::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+#[cfg(feature = "cloud")]
 use futures::TryStreamExt;
+#[cfg(feature = "cloud")]
 use object_store::{ObjectStore, ObjectStoreExt};
 use std::io::Write;
+#[cfg(feature = "cloud")]
 use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 
@@ -69,6 +72,7 @@ pub fn filename(url: &Url) -> Option<&str> {
     }
 }
 
+#[cfg(feature = "cloud")]
 fn parse_url(url: &Url) -> Result<(Box<dyn ObjectStore>, object_store::path::Path), Error> {
     // AWS and Azure require lowercased config keys. By default, these aren't pulled from the env
     object_store::parse_url_opts(
@@ -83,11 +87,41 @@ fn parse_url(url: &Url) -> Result<(Box<dyn ObjectStore>, object_store::path::Pat
 /// CSV generation in the CLI is synchronous. This adapter buffers writes and
 /// drives the asynchronous object-store writer on an internal current-thread
 /// runtime, switching to multipart upload once its 10 MiB buffer is full.
+#[cfg(feature = "cloud")]
 pub struct CloudWriter {
     runtime: tokio::runtime::Runtime,
     writer: object_store::buffered::BufWriter,
 }
 
+/// Without the `cloud` feature, a remote writer cannot be constructed.
+#[cfg(not(feature = "cloud"))]
+pub struct CloudWriter {
+    _unconstructible: std::convert::Infallible,
+}
+
+#[cfg(not(feature = "cloud"))]
+impl CloudWriter {
+    pub fn new(url: &Url) -> Result<Self, Error> {
+        Err(Error::CloudDisabled(url.scheme().to_string()))
+    }
+
+    pub fn finish(self) -> Result<(), Error> {
+        match self._unconstructible {}
+    }
+}
+
+#[cfg(not(feature = "cloud"))]
+impl Write for CloudWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        match self._unconstructible {}
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self._unconstructible {}
+    }
+}
+
+#[cfg(feature = "cloud")]
 impl CloudWriter {
     pub fn new(url: &Url) -> Result<Self, Error> {
         let (store, path) = parse_url(url)?;
@@ -107,6 +141,7 @@ impl CloudWriter {
     }
 }
 
+#[cfg(feature = "cloud")]
 impl Write for CloudWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.runtime.block_on(self.writer.write(buf))
@@ -119,17 +154,36 @@ impl Write for CloudWriter {
 
 /// Open a streaming reader for the given URL.
 async fn read_url(url: &Url) -> Result<Box<dyn AsyncBufRead + Unpin + Send>, Error> {
-    let (store, obj_path) = parse_url(url)?;
-    let result = store.get(&obj_path).await.map_err(Error::ObjectStore)?;
-    let stream = result.into_stream().map_err(std::io::Error::other);
-    let reader: BufReader<Box<dyn AsyncRead + Unpin + Send>> =
-        BufReader::new(Box::new(tokio_util::io::StreamReader::new(stream)));
+    let reader: BufReader<Box<dyn AsyncRead + Unpin + Send>> = BufReader::new(open_url(url).await?);
 
     if gzip_heuristic(url) {
         Ok(Box::new(BufReader::new(GzipDecoder::new(reader))))
     } else {
         Ok(Box::new(reader))
     }
+}
+
+#[cfg(feature = "cloud")]
+async fn open_url(url: &Url) -> Result<Box<dyn AsyncRead + Unpin + Send>, Error> {
+    let (store, obj_path) = parse_url(url)?;
+    let result = store.get(&obj_path).await.map_err(Error::ObjectStore)?;
+    let stream = result.into_stream().map_err(std::io::Error::other);
+    Ok(Box::new(tokio_util::io::StreamReader::new(stream)))
+}
+
+#[cfg(not(feature = "cloud"))]
+async fn open_url(url: &Url) -> Result<Box<dyn AsyncRead + Unpin + Send>, Error> {
+    let path = local_path(url)?;
+    Ok(Box::new(tokio::fs::File::open(path).await?))
+}
+
+/// Resolve a `file://` URL, or explain that other schemes need the `cloud` feature.
+#[cfg(not(feature = "cloud"))]
+fn local_path(url: &Url) -> Result<std::path::PathBuf, Error> {
+    if url.scheme() != "file" {
+        return Err(Error::CloudDisabled(url.scheme().to_string()));
+    }
+    url.to_file_path().map_err(|_| Error::InvalidUri)
 }
 
 /// Write bytes to the given URL. Gzip-compresses if the path ends in `.gz`.
@@ -151,11 +205,33 @@ pub async fn write_bytes_async(url: &Url, bytes: Vec<u8>) -> Result<(), Error> {
         }
     }
 
+    put_bytes(url, bytes).await
+}
+
+#[cfg(feature = "cloud")]
+async fn put_bytes(url: &Url, bytes: Vec<u8>) -> Result<(), Error> {
     let (store, obj_path) = parse_url(url)?;
     store
         .put(&obj_path, bytes::Bytes::from(bytes).into())
         .await
         .map_err(Error::ObjectStore)?;
+    Ok(())
+}
+
+#[cfg(not(feature = "cloud"))]
+async fn put_bytes(url: &Url, bytes: Vec<u8>) -> Result<(), Error> {
+    let path = local_path(url)?;
+    // Write beside the target and rename, as object_store's local store does, so
+    // readers never observe a partially written file.
+    let file_name = path.file_name().ok_or(Error::InvalidUri)?;
+    let mut staging = file_name.to_os_string();
+    staging.push(format!(".{}.tmp", std::process::id()));
+    let staging = path.with_file_name(staging);
+    tokio::fs::write(&staging, bytes).await?;
+    if let Err(error) = tokio::fs::rename(&staging, &path).await {
+        let _ = tokio::fs::remove_file(&staging).await;
+        return Err(error.into());
+    }
     Ok(())
 }
 
@@ -201,8 +277,14 @@ pub enum Error {
     InvalidUri,
     #[error("unsupported input option: {0}")]
     Unsupported(String),
+    #[cfg(feature = "cloud")]
     #[error("object store error: {0}")]
     ObjectStore(#[from] object_store::Error),
+    #[error(
+        "`{0}://` paths need cloud storage support, which this build of Sage Plus omits. \
+         Use a local path, or build with the `cloud` feature (enabled by default)"
+    )]
+    CloudDisabled(String),
     #[error(transparent)]
     IO(#[from] tokio::io::Error),
     #[error(transparent)]

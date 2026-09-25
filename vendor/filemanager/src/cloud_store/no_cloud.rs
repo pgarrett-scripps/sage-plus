@@ -1,11 +1,21 @@
-use crate::{CloudError, CloudProvider};
+use crate::cloud_store::{CloudError, CloudProvider};
 
 impl CloudProvider {
+    /// Recognize cloud schemes even without the `cloud` feature, so cloud URIs
+    /// fail with `FeatureNotEnabled` instead of being treated as local paths.
     pub(crate) fn parse(url: impl AsRef<str>) -> Option<Self> {
-        None
+        let url = url.as_ref();
+        let scheme = url.find("://").map_or("", |pos| &url[..pos]);
+        match scheme {
+            "s3" | "s3a" => Some(Self::S3),
+            "az" | "adl" | "azure" | "abfs" | "abfss" => Some(Self::Azure),
+            "gs" => Some(Self::Gcs),
+            _ => None,
+        }
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CloudObject {}
 
 impl CloudObject {
@@ -38,14 +48,14 @@ impl CloudObject {
 
     pub(crate) fn upload_bytes(
         &self,
-        bytes: Vec<u8>,
+        _bytes: Vec<u8>,
     ) -> Result<(), CloudError> {
         Err(CloudError::FeatureNotEnabled)
     }
 
     pub(crate) fn upload_from(
         &self,
-        src: impl AsRef<std::path::Path>,
+        _src: impl AsRef<std::path::Path>,
     ) -> Result<(), CloudError> {
         Err(CloudError::FeatureNotEnabled)
     }

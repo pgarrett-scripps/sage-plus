@@ -18,10 +18,24 @@ to 59 and `serde_arrow` from 0.13 to 0.15 (`arrow-59`), and replaces the depreca
 the `thrift` crate, which removes the thrift < 0.23.0 excessive-allocation advisory. No
 advisory is suppressed.
 
+Sage Plus also removes `cloud` from the default features. `timsrust-core` depends on
+`filemanager` with `default-features = true`, so the default feature set is what every Sage
+Plus build compiles. Sage Plus reads Bruker `.d` directories only from local paths (see
+`read_tdf` in `sage-cloudpath`), and timsrust needs only the `sql` and `parquet` features
+(the binary reader and `Uri` are always built). With `cloud` off, no Sage Plus build compiles filemanager's
+`object_store` client. Sage Plus's own S3/GCS/Azure support is the separate `cloud`
+feature of `sage-cloudpath`. The upstream no-`cloud` path did not compile, so
+`src/cloud_store.rs` re-exports `CloudObject` as `pub(crate)`. `src/cloud_store/no_cloud.rs`
+also imports `CloudProvider` from its module, derives `Debug`, and recognizes S3, GCS,
+and Azure schemes, so those URIs fail with `FeatureNotEnabled` instead of being read as
+local paths. `parquet` stays enabled because `timsrust-minitdf` and
+`timsrust-parquet-spectra` use `formats::parquet::ParquetReader` unconditionally.
+
 The added tests cover upload, metadata, ranges, listing, buffered file upload,
 and download through the storage API. A local HTTP fixture also exercises S3
 XML listing and HTTP range responses without external credentials. These tests
-do not certify every provider's authentication. Workspace tests separately exercise
+do not certify every provider's authentication. They need the `cloud` feature, so they
+compile out of the shipped feature set that the command below tests. Workspace tests separately exercise
 the committed real Bruker TDF fixture.
 
 Run the patch tests from the repository root:

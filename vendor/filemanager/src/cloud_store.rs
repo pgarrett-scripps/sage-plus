@@ -6,7 +6,7 @@ mod no_cloud;
 #[cfg(feature = "cloud")]
 pub(crate) use cloud::CloudObject;
 #[cfg(not(feature = "cloud"))]
-pub use no_cloud::CloudObject;
+pub(crate) use no_cloud::CloudObject;
 
 /// Errors that can occur when working with cloud stores.
 #[non_exhaustive]

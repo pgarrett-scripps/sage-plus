@@ -16,6 +16,11 @@ entries are retained below for provenance.
   the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
   warns when it is set without `quant.lfq` or for non-TDF inputs.
 
+### Changed
+- S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
+  It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
+  drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
