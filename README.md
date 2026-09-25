@@ -147,8 +147,9 @@ cargo build --release --workspace
 ./target/release/sage config.json
 ```
 
-mzMLb support is included in standard builds and release binaries. Minimal source builds can omit
-the HDF5-based mzMLb reader with `cargo build --release --workspace --no-default-features`.
+mzMLb support and S3/GCS/Azure paths (the `mzmlb` and `cloud` features) are included in
+standard builds and release binaries. Minimal local-only source builds can omit both with
+`cargo build --release --workspace --no-default-features`.
 
 The release build produces the standard `sage` executable and the optional `sage-mcp` server.
 Run `sage --help` for CLI options.

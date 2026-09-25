@@ -211,12 +211,21 @@ fn csv_output_is_complete_after_finalization() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(feature = "cloud")]
 #[test]
 fn remote_output_target_flushes_through_cloud_writer() {
     let url = Url::parse("memory:///nested/result.txt").unwrap();
     let mut output = OutputTarget::new(&url).unwrap();
     output.write_all(b"remote sage output\n").unwrap();
     output.finish(&url).unwrap();
+}
+
+#[cfg(not(feature = "cloud"))]
+#[test]
+fn remote_output_target_requires_the_cloud_feature() {
+    let url = Url::parse("s3://bucket/results.sage.tsv").unwrap();
+    let message = OutputTarget::new(&url).err().unwrap().to_string();
+    assert!(message.contains("`cloud` feature"), "{message}");
 }
 
 #[test]

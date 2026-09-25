@@ -25,6 +25,11 @@ entries are retained below for provenance.
 - `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
   explicit site for each symbol key for rewriting them as named definitions.
 
+### Changed
+- S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
+  It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
+  drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
