@@ -886,6 +886,47 @@ do not change the fit.
   proteome is small. The feature would need a recurrence count that excludes adjacent
   scans of the same precursor before it is retested.
 
+## 15. Milestone 9: per-precursor siblings and a core-only subgroup (2026-09-25)
+
+### Siblings counted per precursor (default on)
+
+`glyco.sibling_feature` now counts distinct precursors rather than spectra. Two
+spectra are the same precursor when their neutral masses agree within 10 ppm (at any
+charge) and their retention times within 1 min. The count covers precursors of the
+same peptide among the glycan-score picks, excluding the candidate's own precursor.
+Repeat scans of one precursor therefore count once.
+
+| variant | yeast | non-HM | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- |
+| M7 r1 (previous default) | 1,328 | 2.7% | 24 | 8,392 | 14 (0.7%) |
+| siblings per spectrum (M8) | 1,382 | 2.8% | 32 | 9,133 | 10 (0.5%) |
+| siblings per precursor | 1,330 | 2.7% | 24 | 9,039 | 12 (0.6%) |
+
+The gate for a default was yeast entrapment at or below 24 and non-high-mannose at or
+below 2.8%, and it passes. Yeast is flat, and mouse gains 647 glycoPSMs at a lower
+estimated FDP. One wrong cluster remains: ERNITR across several glycoforms and
+charges (9 spectra). Those are distinct precursors, so deduplication cannot remove
+them. The feature is on by default from this milestone.
+
+### Core-only FDR subgroup (opt-in)
+
+- **Problem.** HexNAc(1) and other compositions with only core Y ions have no glycan
+  test power. Their target and glycan-decoy twins generate the same Y ions and tie,
+  and in the global peptide model they sit in the tail. At 1% < peptide q ≤ 10% there
+  are 259 HexNAc(1) targets against 60 decoys, but only one target passes at 1%.
+- **Change.** `glyco.core_only_subgroup` fits the peptide discriminant and q-values
+  separately for core-only candidates (every generated Y ion is a core ion) and for
+  the rest. The grouping depends only on the assigned composition, never on the
+  label.
+- **Policy.** Core-only glycoPSMs are reported as their own subgroup with their own
+  q-values. The glycan FDR is not skipped for them. The option stays off by default.
+- **Offline simulation (r1 yeast rows).** The subgroup, ranked by the existing
+  discriminant, gives 0 targets at 1% (the first decoy is at rank 37), 151 at 2% and
+  181 at 5%. Because of the glycan-level tie, the gain in glycoPSMs that pass both
+  FDRs is expected to be small.
+- **Measured run (`m9core`: yeast and mouse+pombe with the subgroup on).** Pending.
+  The run finished, but its numbers have not been read yet.
+
 ## Appendix: code and measurements
 
 - `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):
