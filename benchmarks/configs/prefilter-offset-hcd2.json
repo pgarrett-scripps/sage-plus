@@ -20,60 +20,31 @@
       "C": 57.021464
     },
     "variable_mods": {
-      "S": [
-        {
-          "mass": 79.966331,
-          "max_count": 1,
-          "name": "Phospho",
-          "search_mode": "mass_offset"
-        }
-      ],
-      "T": [
-        {
-          "mass": 79.966331,
-          "max_count": 1,
-          "name": "Phospho",
-          "search_mode": "mass_offset"
-        }
-      ],
-      "Y": [
-        {
-          "mass": 79.966331,
-          "max_count": 1,
-          "name": "Phospho",
-          "search_mode": "mass_offset"
-        }
-      ]
+      "Phospho": {
+        "mass": 79.966331,
+        "max_count": 1,
+        "search_mode": "mass_offset",
+        "sites": ["S", "T", "Y"]
+      }
     },
     "prefilter": true,
     "prefilter_chunk_size": 200
   },
   "deisotope": true,
   "fragment_tol": {
-    "ppm": [
-      -20.0,
-      20.0
-    ]
+    "ppm": [-20.0, 20.0]
   },
-  "isotope_errors": [
-    -1,
-    3
-  ],
+  "isotope_errors": [-1, 3],
   "max_fragment_charge": 2,
   "max_memory_gb": 22.0,
   "min_free_memory_gb": 2.0,
   "min_matched_peaks": 6,
-  "mzml_paths": [
-    "/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_2.raw.-1.mgf"
-  ],
+  "mzml_paths": ["/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_2.raw.-1.mgf"],
   "output_filter": {
     "psm_q_value": 1.0
   },
   "precursor_tol": {
-    "ppm": [
-      -10.0,
-      10.0
-    ]
+    "ppm": [-10.0, 10.0]
   },
   "ptm_localization": {
     "enabled": true,

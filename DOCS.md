@@ -721,11 +721,22 @@ limited. Static and variable occupancy is reflected in generated variants.
 
 #### Symbol-keyed configurations
 
-Residue-keyed symbol configurations remain readable, for example
-`"static_mods": {"C": 57.021464}`. Named definitions accept only explicit spellings
-in `sites`. Do not mix named and symbol-keyed entries within one section. There is
-no automatic converter. To rewrite a symbol-keyed entry as a named definition, map
-its key to an explicit site:
+Upstream Sage's symbol-keyed syntax still loads, so one configuration can drive both
+Sage and Sage Plus. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
+followed by a residue). Static values are masses; variable values are mass arrays,
+for example `"static_mods": {"C": 57.021464}` and `"variable_mods": {"M": [15.9949]}`.
+
+Sage Plus-only extensions of this syntax were replaced by named definitions in Beta 6
+and are rejected since Beta 10, with an error that suggests the named form:
+
+- `~K` keys and explicit-site keys such as `first_residue:K` in a symbol-keyed map.
+- Object values, such as `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}` or
+  `{"M": [{"mass": 15.9949, "max_count": 1}]}`. Move `name`, `max_count`, neutral
+  losses, channel offsets, and search or site modes into a named definition.
+
+Do not mix named and symbol-keyed entries within one section. There is no automatic
+converter. To rewrite a symbol-keyed entry as a named definition, map its key to an
+explicit site:
 
 | Symbol key | Explicit site |
 | --- | --- |
@@ -734,7 +745,7 @@ its key to an explicit site:
 | `[`, `]` | `protein_n_term`, `protein_c_term` |
 | `^K`, `$K` | `first_residue:K`, `last_residue:K` |
 | `[K`, `]K` | `protein_first:K`, `protein_last:K` |
-| `~K` | `internal_residue:K` |
+| `~K` (no longer accepted) | `internal_residue:K` |
 
 #### Modification channels
 

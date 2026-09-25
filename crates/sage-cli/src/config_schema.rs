@@ -26,9 +26,20 @@ pub fn generate_config_schema() -> String {
     }
 
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
-    let legacy = "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])";
-    for name in ["StaticModConfig", "VariableModConfig"] {
+    // Symbol-keyed maps accept upstream Sage syntax only: residue or terminal
+    // symbol keys mapped to masses (variable mods: a mass or a mass array).
+    let legacy = "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])";
+    let mass = serde_json::json!({"format": "float", "type": "number"});
+    let legacy_values = [
+        ("StaticModConfig", mass.clone()),
+        (
+            "VariableModConfig",
+            serde_json::json!({"anyOf": [mass.clone(), {"items": mass, "type": "array"}]}),
+        ),
+    ];
+    for (name, values) in legacy_values {
         value["$defs"][name]["anyOf"][1]["propertyNames"] = serde_json::json!({"pattern": legacy});
+        value["$defs"][name]["anyOf"][1]["additionalProperties"] = values;
         value["$defs"][name]["anyOf"][0]["propertyNames"] = serde_json::json!({"minLength":1});
     }
 

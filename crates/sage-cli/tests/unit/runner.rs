@@ -21,10 +21,10 @@ fn label_group_closure_keeps_every_channel_partner() {
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "SILAC-K": {
                 "mass": 0.0,
-                "name": "SILAC-K",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             }
         }
     }))

@@ -296,10 +296,10 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "R": {
+            "SILAC-R": {
                 "mass": 0.0,
-                "name": "SILAC-R",
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))

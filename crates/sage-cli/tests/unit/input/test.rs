@@ -213,9 +213,10 @@ fn modification_channel_offsets_are_validated_before_search() {
     let valid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }));
@@ -224,16 +225,18 @@ fn modification_channel_offsets_are_validated_before_search() {
     let invalid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         },
         "variable_mods": {
-            "K": [{
+            "Lys": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
-            }]
+                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199},
+                "sites": ["K"]
+            }
         }
     }));
     assert!(invalid

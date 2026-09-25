@@ -1138,10 +1138,11 @@
         },
         {
           "additionalProperties": {
-            "$ref": "#/$defs/StaticModEntry"
+            "format": "float",
+            "type": "number"
           },
           "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])"
           },
           "type": "object"
         }
@@ -1317,13 +1318,22 @@
         },
         {
           "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/VarModEntry"
-            },
-            "type": "array"
+            "anyOf": [
+              {
+                "format": "float",
+                "type": "number"
+              },
+              {
+                "items": {
+                  "format": "float",
+                  "type": "number"
+                },
+                "type": "array"
+              }
+            ]
           },
           "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])"
           },
           "type": "object"
         }
@@ -1580,7 +1590,7 @@
             }
           ],
           "default": null,
-          "description": "Named static definitions with mass and explicit sites.\nLegacy residue-keyed masses and objects remain readable."
+          "description": "Named static definitions with mass and explicit sites.\nUpstream Sage symbol-keyed masses (`{\"C\": 57.021464}`) remain readable."
         },
         "variable_mods": {
           "anyOf": [
@@ -1592,7 +1602,7 @@
             }
           ],
           "default": null,
-          "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nLegacy residue-keyed arrays remain readable."
+          "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
         }
       },
       "type": "object"

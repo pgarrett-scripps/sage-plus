@@ -131,9 +131,10 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))
@@ -259,9 +260,10 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))
