@@ -1,0 +1,22 @@
+[package]
+name = "sage-dia"
+version.workspace = true
+authors = ["Patrick Garrett <pgarrett@scripps.edu>"]
+edition = "2021"
+rust-version = "1.88"
+description = "Hill-based DIA rescoring for Sage Plus (exploration)"
+license = "MIT"
+publish = false
+
+[dependencies]
+sage-core = { path = "../sage" }
+# koth-core 0.11 is not on crates.io yet. When it is, replace this line with
+#   koth-core = "0.11"
+koth-core = { git = "https://github.com/pgarrett-scripps/koth", tag = "v0.11.0" }
+rayon = "1.5"
+
+[dev-dependencies]
+anyhow = "1.0"
+sage-cli = { path = "../sage-cli" }
+sage-cloudpath = { path = "../sage-cloudpath" }
+serde_json = "1.0"
