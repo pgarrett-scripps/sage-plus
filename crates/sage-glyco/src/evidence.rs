@@ -2,8 +2,12 @@
 //!
 //! Each explanation (composition, isotope error, adducts) is checked against
 //! an extended Y-ion set: every structurally plausible sub-composition that is
-//! either small (the core region, where most Y signal is) or close to the full
-//! composition (single and double residue losses from the precursor). Ions are
+//! small (the core region, where most Y signal is), close to the full
+//! composition (up to three residue losses from the precursor), or on the
+//! chitobiose-mannose trunk (HexNAc(2)Hex(n), with any core fucose) when the
+//! composition itself is oligomannose-type (at most two HexNAc, no sialic
+//! acid), which carries the long Hex ladders of high-mannose and yeast
+//! glycans. Ions are
 //! grouped into [`CLASSES`], and only per-class counts (generated, matched) are
 //! kept, which is all the likelihood score in [`crate::fdr`] needs. Spectra
 //! can therefore be released right after the search and the score model
@@ -188,8 +192,12 @@ pub fn ion_set(composition: &GlycanComposition) -> IonSet {
                     for neugc in 0..=full[4] {
                         let sub = GlycanComposition([hexnac, hex, fuc, neuac, neugc]);
                         let size: u8 = sub.0.iter().sum();
+                        // Only oligomannose-type parents have a Hex ladder on
+                        // the chitobiose trunk: in complex and hybrid glycans
+                        // extra Hex sits on the HexNAc antennae.
+                        let trunk = full[0] <= 2 && full[3] + full[4] == 0;
                         if sub == *composition
-                            || !(size <= SMALL_RESIDUES || total - size <= LARGE_LOSS)
+                            || !(size <= SMALL_RESIDUES || total - size <= LARGE_LOSS || trunk)
                             || !plausible(&sub)
                         {
                             continue;
