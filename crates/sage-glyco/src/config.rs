@@ -10,6 +10,9 @@ pub const HEXNAC: f64 = 203.079_373;
 /// Accepted `glyco.site_fragment_forms`.
 pub const SITE_FRAGMENT_FORMS: [&str; 4] = ["hexnac", "bare", "hexnac_fuc", "hexnac2"];
 
+/// Accepted `glyco.twin_feature`.
+pub const TWIN_FEATURES: [&str; 3] = ["off", "any", "opposite"];
+
 /// Intact N-glycopeptide search settings.
 ///
 /// Every field is optional. With no glycan list at all, a built-in
@@ -74,6 +77,12 @@ pub struct GlycoConfig {
     pub max_fragment_charge: Option<u8>,
     /// Add site-spanning fragment counts to the glyco peptide model.
     pub site_features: bool,
+    /// Same-mass competitor ("twin") feature for the glyco peptide model:
+    /// the hyperscore gap to the best other peptide candidate with the same
+    /// bare mass. `any` compares with every such peptide, `opposite` only
+    /// with those of the other target/decoy label (a target's reversed
+    /// twin), `off` leaves the feature at zero.
+    pub twin_feature: String,
 }
 
 impl Default for GlycoConfig {
@@ -97,6 +106,7 @@ impl Default for GlycoConfig {
             exclude_glycan_peaks: true,
             max_fragment_charge: Some(3),
             site_features: true,
+            twin_feature: "off".into(),
         }
     }
 }
@@ -150,6 +160,12 @@ impl GlycoConfig {
         }
         if !self.site_fragment_forms.iter().any(|form| form == "hexnac") {
             return Err("`glyco.site_fragment_forms` must include `hexnac`".into());
+        }
+        if !TWIN_FEATURES.contains(&self.twin_feature.as_str()) {
+            return Err(format!(
+                "`glyco.twin_feature` must be one of {TWIN_FEATURES:?}, not `{}`",
+                self.twin_feature
+            ));
         }
         if self.max_fragment_charge == Some(0) {
             return Err("`glyco.max_fragment_charge` must be at least 1".into());
@@ -256,6 +272,10 @@ mod tests {
         .unwrap();
         assert_eq!(forms.site_losses(), vec![-HEXNAC as f32, HEXNAC as f32]);
         assert_eq!(GlycoConfig::default().site_losses(), vec![HEXNAC as f32]);
+        assert!(GlycoConfig::from_value(serde_json::json!({"twin_feature": "decoy"})).is_err());
+        for mode in TWIN_FEATURES {
+            assert!(GlycoConfig::from_value(serde_json::json!({"twin_feature": mode})).is_ok());
+        }
     }
 
     #[test]

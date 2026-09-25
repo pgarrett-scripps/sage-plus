@@ -117,6 +117,9 @@ pub struct GlycoCandidate {
     pub explanations: Vec<Explanation>,
     /// Site-spanning fragment counts, when `glyco.site_features` is on.
     pub site: SiteFragments,
+    /// Hyperscore of the best same-mass competitor, see
+    /// `glyco.twin_feature`; `None` without one or when the feature is off.
+    pub twin_hyperscore: Option<f64>,
 }
 
 /// Matched b/y ions of a glyco candidate, from its fragment annotation.
@@ -426,7 +429,13 @@ impl GlycoSearch {
             return (false, Vec::new());
         }
         let mut candidates = Vec::new();
-        for feature in scorer.score(query) {
+        let features = scorer.score(query);
+        let masses: Vec<f32> = features
+            .iter()
+            .map(|f| self.db.peptides[f.peptide_idx.0 as usize].monoisotopic)
+            .collect();
+        for (index, feature) in features.iter().enumerate() {
+            let feature = feature.clone();
             if candidates.len() >= self.config.explain_candidates {
                 break;
             }
@@ -475,8 +484,11 @@ impl GlycoSearch {
             } else {
                 SiteFragments::default()
             };
+            let twin_hyperscore =
+                twin_hyperscore(&features, &masses, index, &self.config.twin_feature);
             candidates.push(GlycoCandidate {
                 site,
+                twin_hyperscore,
                 y1: evidence.y_peak(peptide_mass, HEXNAC as f32).is_some(),
                 hex_ratio: oxonium.hex_ratio,
                 peptide_mass,
@@ -493,10 +505,63 @@ impl GlycoSearch {
     }
 }
 
+/// Best hyperscore among the other reported peptides of a spectrum whose
+/// bare mass is within 10 ppm of candidate `index`'s, for
+/// `glyco.twin_feature` `mode`. `None` without one or when the mode is
+/// `off`.
+fn twin_hyperscore(features: &[Feature], masses: &[f32], index: usize, mode: &str) -> Option<f64> {
+    let own = &features[index];
+    let opposite = match mode {
+        "any" => false,
+        "opposite" => true,
+        _ => return None,
+    };
+    let mass = masses[index];
+    let tolerance = mass * 10e-6;
+    features
+        .iter()
+        .zip(masses)
+        .enumerate()
+        .filter(|&(i, (f, m))| {
+            i != index && (m - mass).abs() <= tolerance && (!opposite || f.label != own.label)
+        })
+        .map(|(_, (f, _))| f.hyperscore)
+        .reduce(f64::max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sage_core::spectrum::Precursor;
+
+    #[test]
+    fn twin_is_the_best_other_same_mass_peptide() {
+        let feature = |label: i32, hyperscore: f64| Feature {
+            label,
+            hyperscore,
+            ..Default::default()
+        };
+        // A target, its same-mass decoy, a same-mass target and an
+        // unrelated peptide that scores highest.
+        let features = [
+            feature(1, 30.0),
+            feature(-1, 20.0),
+            feature(1, 25.0),
+            feature(-1, 40.0),
+        ];
+        let masses = [1000.0, 1000.005, 999.995, 1100.0];
+        assert_eq!(twin_hyperscore(&features, &masses, 0, "any"), Some(25.0));
+        assert_eq!(
+            twin_hyperscore(&features, &masses, 0, "opposite"),
+            Some(20.0)
+        );
+        assert_eq!(
+            twin_hyperscore(&features, &masses, 1, "opposite"),
+            Some(30.0)
+        );
+        assert_eq!(twin_hyperscore(&features, &masses, 3, "any"), None);
+        assert_eq!(twin_hyperscore(&features, &masses, 0, "off"), None);
+    }
 
     #[test]
     fn glycan_peaks_are_excluded_and_peptide_peaks_kept() {

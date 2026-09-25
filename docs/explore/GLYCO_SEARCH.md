@@ -721,8 +721,55 @@ Plain searches are unchanged: 8,674 mouse and 7,940 yeast PSMs, re-checked.
 
 1. Yeast recall is now held back by decoy winners (the same-mass reversed twins in
    section 10), not missing fragment evidence. A twin-aware feature (for example the
-   score gap to the best same-mass decoy) is the next lever.
+   score gap to the best same-mass decoy) is the next lever. Section 12 tested this:
+   few yeast decoy winners have a twin, so it does not help.
 2. The non-yeast glycan rate edged up from 2.5% to 2.8%. Watch it as recall grows.
+
+## 12. Milestone 6: same-mass twin feature (2026-09-25)
+
+### What changed
+
+`glyco.twin_feature` (default `off`) adds two peptide-model features (30 to 32): whether
+another reported peptide of the spectrum has the same bare mass (within 10 ppm), and the
+ln-hyperscore gap to the best such peptide. `any` compares with every same-mass peptide;
+`opposite` only with the other target/decoy label, i.e. a target's reversed twin.
+
+### Results
+
+Fast-release builds. The first two rows used a single gap feature with no presence flag
+(a missing twin counted as score 0).
+
+| Variant | Yeast glycoPSMs | Non-yeast glycans | Decoy winners | Entrapment | Mouse glycoPSMs | Yeast CPU |
+| --- | --- | --- | --- | --- | --- | --- |
+| Off (M5 defaults) | 1,312 | 2.7% | 159 | 27 of 1,740 | 7,292 | 1,257 s |
+| Gap only, `any` | 1,301 | 2.8% | 154 | 29 of 1,715 | 7,267 | 1,292 s |
+| Gap only, `opposite` | 1,306 | 2.7% | 155 | 28 of 1,721 | 7,274 | 1,228 s |
+| Gap + flag, `any` | 1,308 | 2.8% | 155 | 28 of 1,725 | 7,289 | 1,166 s |
+| Gap + flag, `opposite` | 1,307 | 2.7% | 156 | 27 of 1,723 | 7,422 | 1,328 s |
+
+RSS stayed at 5.6 GB (yeast) and 4.5 GB (mouse). The M5 release run gave 1,303 yeast
+glycoPSMs with the same settings as "Off"; the 9-PSM spread comes from the LDA seeing a
+different number of (constant) columns, which sets the noise floor for these comparisons.
+
+### Why it does not help yeast
+
+Section 10 assumed that yeast decoy winners are mostly the reversed twin of the right
+peptide. The twin counts falsify that:
+
+| Yeast rows | Rows | With an opposite-label twin | Mean gap |
+| --- | --- | --- | --- |
+| Targets at 1% peptide q | 1,723 | 122 (7%) | +0.58 |
+| Other targets | 10,954 | 136 (1%) | +0.05 |
+| Decoys | 10,340 | 133 (1%) | -0.05 |
+
+Where a twin exists the gap separates well, but fewer than 1 in 70 decoys has one among
+the 50 reported peptides. Yeast decoy winners are ordinary random matches. In mouse, 805 of
+7,480 confident targets have a twin, which is where the `opposite` gain (+130) comes from.
+
+`opposite` is not the default: it uses the label, and a decoy twin of a correct target is
+penalized, while a wrong target that is the isomer of a correct target is not. That
+asymmetry can make the decoy count too low. The label-blind `any` mode is flat. Testing
+`opposite` needs an entrapment set with twins (the yeast search has too few).
 
 ### Output path
 
