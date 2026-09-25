@@ -415,6 +415,43 @@ IMP-X-FDR substring rule. Scripts are in `explore-data/crosslink/runs/`:
     single-spectrum pairs.
   - The remaining gap is mostly the CSM-level optimism carried through to the pairs.
 
+### Where the CSM-level excess comes from
+
+Wrong target CSMs at 1% estimated FDR fall into two kinds. Scripts:
+`analysis/random_fdr.py`, `analysis/tail.py` and `analysis/csm_variants.py`.
+
+- **Random:** at least one chain is outside the library (entrapment, crapome, or a
+  missed-cleavage extension). Target-decoy is built to estimate these.
+- **Cross-group:** both chains are library peptides, but from different groups.
+
+| Dataset | True FDR at 1% | Random | Cross-group |
+| --- | ---: | ---: | ---: |
+| Beveridge | 2.2% | 0.2% | 2.0% (36 CSMs, 16 peptide pairs, 27 CSMs in recurring pairs) |
+| Ribosome | 2.1% | 1.4% (entrapment estimate 1.5%) | 0.6% |
+
+- **Decoys match false targets in bulk.** In score bands, TD − DD matches the count and the
+  feature distributions of wrong TT on both files.
+- **The Beveridge excess is not random.** The same cross-group pairs recur with strong
+  scores on both chains. For example, MIAKSEQEIGK–LVDSTDKADLR (groups 1 and 10) appears
+  in 12 CSMs, with both chain hyperscores at 40 or above. This is consistent with cross-contamination
+  between groups, which no target-decoy model can see.
+  - Even at 0.2% estimated FDR, Beveridge is 1.8% true.
+- **Ribosome:** a stricter cutoff reaches the target. At 0.5% estimated FDR the true FDR is
+  1.0%, but correct CSMs fall from 2399 to 1658.
+- **Ranking variants tried offline, none calibrates better:**
+  - per-chain doublet flags;
+  - chain length and length per charge;
+  - an isotope ≥ 2 flag;
+  - the weak chain as the primary term.
+
+  Weak-chain-primary cuts Beveridge depth by about 70%.
+- **One variant adds depth.** "Weak-chain matched fragments per residue":
+  - At 1% estimated FDR: +7% correct CSMs on Beveridge and +23% on the ribosome file, but
+    true FDR rises to 2.6% and 2.5%.
+  - At 0.2% estimated FDR: 2343 correct at 1.14% true on the ribosome file (98% of the
+    current depth). On Beveridge it is 1189 correct at 2.0%.
+  - Whether to adopt it, and at which cutoff, is left as a decision.
+
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 
 | File | Linear: CPU, wall, RSS | Crosslink: CPU, wall, RSS |
