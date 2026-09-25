@@ -139,9 +139,6 @@ fn main() -> anyhow::Result<()> {
                 .help("Stream versioned JSONL job events to PATH (use '-' for stdout)")
                 .value_hint(ValueHint::FilePath),
         )
-        .arg(Arg::new("migrate-modifications").long("migrate-modifications").action(clap::ArgAction::SetTrue)
-            .conflicts_with_all(["preview-modifications", "validate-only", "write-config-schema"])
-            .help("Print a configuration with named modifications and explicit sites to stdout"))
         .arg(Arg::new("preview-modifications").long("preview-modifications")
             .value_name("PEPTIDE").conflicts_with_all(["validate-only", "write-config-schema"])
             .help("Print eligible modification sites and bounded peptide variants as JSON"))
@@ -180,15 +177,6 @@ fn main() -> anyhow::Result<()> {
         } else {
             std::fs::write(path, schema)?;
         }
-        return Ok(());
-    }
-
-    if matches.get_flag("migrate-modifications") {
-        let path = matches
-            .get_one::<String>("parameters")
-            .expect("config path is required");
-        let migrated = sage_cli::modification_migration::migrate(&std::fs::read_to_string(path)?)?;
-        println!("{}", serde_json::to_string_pretty(&migrated)?);
         return Ok(());
     }
 
