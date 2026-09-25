@@ -402,6 +402,26 @@ impl Runner {
             .expect("valid path segment")
     }
 
+    /// Write a sidecar output file into the output directory and record it in
+    /// `output_paths`. `name` must be listed in
+    /// [`crate::output::SIDECAR_OUTPUTS`], and each sidecar is written at most
+    /// once per run. Call it before `results.json` is written so the file is
+    /// listed there and in `run-summary.json`.
+    pub fn write_sidecar(&mut self, name: &str, bytes: Vec<u8>) -> anyhow::Result<Url> {
+        anyhow::ensure!(
+            crate::output::SIDECAR_OUTPUTS.contains(&name),
+            "sidecar output {name:?} is not registered in SIDECAR_OUTPUTS"
+        );
+        let path = self.make_path(name);
+        anyhow::ensure!(
+            !self.parameters.output_paths.contains(&path),
+            "sidecar output {name:?} was already written in this run"
+        );
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path.clone());
+        Ok(path)
+    }
+
     /// Score MS2 spectra. Also returns search-time `psm_id` -> occurrence for
     /// PSMs from spectra whose ID repeats within a file, so the post-FDR pass
     /// can match each PSM to the spectrum it was scored against.

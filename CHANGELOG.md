@@ -71,6 +71,15 @@ entries are retained below for provenance.
   now estimates `posterior_error` (log10 PEP) from the heuristic score when both targets and
   decoys are present, or reports 0 (PEP 1) otherwise. Previously it left the placeholder 1.0.
 
+### Added (sidecar outputs)
+- A shared path for optional search passes to write their own output file next to
+  `results.sage.parquet`. The file names are registered in `output::SIDECAR_OUTPUTS`
+  (`glyco.sage.parquet`, `crosslinks.sage.parquet`), and `Runner::write_sidecar` writes a
+  registered file once per run and adds it to `output_paths`, so it is listed in
+  `results.json` and `run-summary.json`. `--overwrite` now also removes stale sidecar files,
+  and a fresh run into a directory that holds one is refused. The `results.sage.parquet`
+  columns and the `results.json` schema are unchanged.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
