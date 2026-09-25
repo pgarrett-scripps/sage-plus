@@ -455,6 +455,7 @@ impl Score {
     }
 }
 
+#[derive(Clone)]
 pub struct Scorer<'db> {
     pub db: &'db IndexedDatabase,
     pub precursor_tol: Tolerance,

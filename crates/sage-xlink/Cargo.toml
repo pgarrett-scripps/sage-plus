@@ -1,0 +1,19 @@
+[package]
+name = "sage-xlink"
+version.workspace = true
+authors = ["Michael Lazear <michaellazear92@gmail.com"]
+edition = "2021"
+rust-version = "1.88"
+description = "MS-cleavable crosslink search for Sage"
+license = "MIT"
+publish = false
+
+[dependencies]
+sage-core = { path = "../sage" }
+log = "0.4.0"
+rayon = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
+
+[dev-dependencies]
+serde_json = "1.0"

@@ -1,6 +1,5 @@
 pub mod ambiguity;
 pub mod cleavage;
-pub mod crosslink;
 pub mod database;
 pub mod enzyme;
 pub mod fasta;

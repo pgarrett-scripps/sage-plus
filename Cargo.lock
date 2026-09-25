@@ -3275,6 +3275,7 @@ dependencies = [
  "ryu",
  "sage-cloudpath",
  "sage-core",
+ "sage-xlink",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -3347,6 +3348,18 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "sage-xlink"
+version = "0.1.0-beta.8"
+dependencies = [
+ "log",
+ "parquet",
+ "rayon",
+ "sage-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
