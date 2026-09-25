@@ -863,12 +863,22 @@ impl<'db> Scorer<'db> {
         }
         score_vector.retain(|s| (s.score.matched_b + s.score.matched_y) >= self.min_matched_peaks);
 
-        // Hyperscore is primary. Peptidoform identity, charge, and isotope make
+        // Hyperscore is primary. Among exact ties the smaller precursor isotope
+        // error wins: an isotope step must not turn one peptidoform into a
+        // lighter one that scores identically (for example a hydrolyzed DSSO
+        // monolink, 0.984 Da heavier than the amidated one, read as amidated
+        // at isotope +1). Peptidoform identity, charge, and isotope then make
         // exact ties deterministic across database layouts and chunk filtering.
         score_vector.sort_unstable_by(|a, b| {
             b.score
                 .hyperscore
                 .total_cmp(&a.score.hyperscore)
+                .then_with(|| {
+                    a.score
+                        .isotope_error
+                        .unsigned_abs()
+                        .cmp(&b.score.isotope_error.unsigned_abs())
+                })
                 .then_with(|| {
                     a.peptide
                         .monoisotopic

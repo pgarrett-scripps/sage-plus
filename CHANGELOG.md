@@ -31,6 +31,10 @@ entries are retained below for provenance.
   drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
 - The `sage-mcp` server crate and binary are removed; release archives and the container image no
   longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+- Isotope tie-break: when two candidates for a spectrum have exactly the same hyperscore, the one
+  with the smaller absolute precursor isotope error now ranks first, before the lighter peptide
+  mass. A peptidoform 0.984 Da lighter (amidated vs hydrolyzed monolink, N vs D) read at isotope
+  +1 no longer displaces the isotope-0 match it ties with. Only exact ties are affected.
 
 ## [v0.1.0-beta.9] - 2026-09-25
 
