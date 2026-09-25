@@ -3,6 +3,15 @@ use sage_core::spectrum::ProcessedSpectrum;
 use sage_core::{scoring::Feature, tmt::TmtQuant};
 use std::collections::HashMap;
 
+/// Output files that optional search passes write next to
+/// `results.sage.parquet`, through [`crate::runner::Runner::write_sidecar`].
+///
+/// A pass registers its file name here so that `--overwrite` clears a stale
+/// copy and a fresh run refuses to mix with an old one. Sidecars never
+/// change the columns of `results.sage.parquet` or the `results.json`
+/// schema; they are listed in `output_paths` like any other output.
+pub const SIDECAR_OUTPUTS: &[&str] = &["glyco.sage.parquet", "crosslinks.sage.parquet"];
+
 pub(crate) fn prepare_local_directory(
     url: &sage_cloudpath::Url,
     overwrite: bool,
@@ -27,6 +36,7 @@ pub(crate) fn prepare_local_directory(
     ];
     let existing = names
         .iter()
+        .chain(SIDECAR_OUTPUTS)
         .map(|name| directory.join(name))
         .filter(|path| path.symlink_metadata().is_ok())
         .collect::<Vec<_>>();

@@ -388,3 +388,38 @@ fn denoise_warns_about_inputs_it_cannot_change() {
     assert!(warnings[1].contains("quant.lfq"));
     std::fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+fn sidecar_outputs_are_registered_written_once_and_listed() {
+    let (directory, _) = temporary_output("sidecar");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let mut runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    let before = runner.parameters.output_paths.len();
+
+    let error = runner
+        .write_sidecar("unregistered.parquet", b"x".to_vec())
+        .unwrap_err();
+    assert!(error.to_string().contains("not registered"));
+    assert!(!directory.join("unregistered.parquet").exists());
+
+    let name = crate::output::SIDECAR_OUTPUTS[0];
+    let path = runner.write_sidecar(name, b"sidecar".to_vec()).unwrap();
+    assert_eq!(
+        std::fs::read(path.to_file_path().unwrap()).unwrap(),
+        b"sidecar"
+    );
+    assert_eq!(runner.parameters.output_paths.len(), before + 1);
+    assert_eq!(runner.parameters.output_paths.last(), Some(&path));
+
+    assert!(runner.write_sidecar(name, b"again".to_vec()).is_err());
+    assert_eq!(runner.parameters.output_paths.len(), before + 1);
+    std::fs::remove_dir_all(directory).unwrap();
+}
