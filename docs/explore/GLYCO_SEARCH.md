@@ -639,18 +639,16 @@ Diagnosis on the yeast rows, with 23,195 spectra each represented by one candida
 2. **Sequence evidence is underused.** The target list only grows from 1,576 to 2,041
    between 1% and 5% peptide q. Correct candidates therefore sit in a flat score
    region, not just past a threshold.
-3. **Full scoring places the HexNAc on the site.** Every b/y ion that spans the site is
-   scored only at +HexNAc. In sceHCD, most of those ions lose the whole glycan and appear
-   bare, so they count as misses. Preliminary retrieval counts both forms, but hyperscore,
-   matched peaks, longest run and Poisson do not.
+3. **Full scoring places the HexNAc on the site.** This point was wrong; see section 11.
+   Since milestone 1 the HexNAc offset carries HexNAc as an optional neutral loss, so
+   full scoring already tries each site-spanning b/y ion bare and at +HexNAc and counts
+   the better form once.
 
 A dedicated glyco peptide score (not built) would need:
 
 1. **Dual-form fragment scoring.** Score each site-spanning b/y ion as matched if either
-   its bare or its +HexNAc form (optionally +HexNAc2) is present, counting it once. This
-   is a new scoring mode in `sage-core` next to `score_peptide`, used only by the glyco
-   scorer. It is the largest expected gain, since it restores the ions behind items 2
-   and 3.
+   its bare or its +HexNAc form (optionally +HexNAc2) is present, counting it once.
+   Already in place (see item 3 above); section 11 measures it and the +HexNAc2 variant.
 2. **Y ions excluded from b/y matching.** Peaks assigned to Y ions or oxonium ions should
    not also count as b/y matches. Otherwise the shared Y-ion evidence inflates both
    the target and its same-mass decoy.
@@ -664,6 +662,67 @@ A dedicated glyco peptide score (not built) would need:
 5. **Validation.** The mouse-protein entrapment in the yeast search (27 of 1,576
    targets at 1% peptide q) should be watched so the recall gain is not a calibration
    loss.
+
+## 11. Milestone 5: site-spanning fragments and glycan-peak exclusion (2026-09-25)
+
+### What changed
+
+1. **Dual-form b/y was already live.** Section 10's point 3 was wrong. The HexNAc
+   offset's optional HexNAc neutral loss gives every site-spanning ion a bare and a
+   +HexNAc form, and the better one counts once. `site_fragment_forms` now makes this
+   configurable (`hexnac`, `bare`, `hexnac_fuc`, `hexnac2`); the default stays
+   `["hexnac", "bare"]`.
+2. **Glycan-peak exclusion** (`exclude_glycan_peaks`, now on). A new `sage-core` hook,
+   `IndexedDatabase::peak_exclusion`, masks peaks out of full scoring only; preliminary
+   retrieval is unchanged. The glyco search masks peaks that match a Y ion (up to the
+   precursor charge) or an oxonium ion. Plain searches leave the hook unset.
+3. **Fragment charge.** `glyco.max_fragment_charge` (default 3, `null` means no cap)
+   applies when the main `max_fragment_charge` is unset.
+4. **Site features** (`site_features`, now on). Four more LDA features (26 to 30):
+   matched site-spanning ions, their fraction of possible ones, how many matched bare,
+   and how many matched above charge 3.
+
+### Each change alone
+
+Fast-release builds; wall time is ±10 s noise. Entrapment = mouse-protein targets at 1%
+peptide q in the yeast run (the yeast FASTA is pombe plus mouse). RSS was 5.6 GB (yeast)
+and 4.5 GB (mouse) in every run.
+
+| Variant | Yeast glycoPSMs | Non-yeast glycans | Decoy winners | Entrapment | Mouse glycoPSMs | Yeast / mouse wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| Baseline (M4 settings) | 1,223 | 2.5% | 128 | 26 of 1,575 | 6,913 | 108 / 109 s |
+| +HexNAc form only | 1,303 | 2.5% | 150 | 37 of 1,700 | 6,660 | 110 / 117 s |
+| Add +HexNAc2 form | 1,205 | 2.0% | 133 | 26 of 1,551 | 6,494 | 110 / 119 s |
+| Add +HexNAc+Fuc form | 1,100 | 2.2% | 131 | 21 of 1,453 | 6,450 | 132 / 105 s |
+| Glycan-peak exclusion | 1,264 | 2.7% | 134 | 26 of 1,631 | 6,899 | 107 / 111 s |
+| No fragment charge cap | 1,223 | 2.5% | 123 | 25 of 1,558 | 6,911 | 113 / 101 s |
+| Site features | 1,274 | 2.7% | 151 | 22 of 1,683 | 7,203 | 118 / 98 s |
+| Exclusion + features | 1,303 | 2.8% | 155 | 26 of 1,720 | 7,263 | 176 / 109 s (host loaded) |
+| Exclusion + features + no cap | 1,310 | 2.7% | 151 | 25 of 1,726 | 7,250 | 108 / 98 s |
+
+Dropping the bare form buys yeast glycoPSMs with entrapment (2.2%, up from 1.7%) and
+costs 253 mouse glycoPSMs, so dual form stays. The extra forms lose on both datasets.
+The charge cap is noise either way and stays at 3.
+
+### Kept
+
+Exclusion and site features, now the defaults. Release-build result:
+
+| | Mouse glycoPSMs | Yeast glycoPSMs | Yeast non-yeast glycans | Yeast decoy winners | Entrapment | Yeast CPU / peak RSS |
+| --- | --- | --- | --- | --- | --- | --- |
+| Milestone 4 | 6,913 | 1,225 | 2.5% | 127 | 26 of 1,575 | 1,312 s / 5.6 GB |
+| Milestone 5 | **7,263** | **1,303** | 2.8% | 155 | 26 of 1,720 (1.5%) | 1,284 s / 5.6 GB |
+
+Wall time is not comparable here: the host was shared (load around 16), so the
+Milestone 5 yeast run got 9 cores instead of 12 and took 141 s. CPU time did not change.
+Plain searches are unchanged: 8,674 mouse and 7,940 yeast PSMs, re-checked.
+
+### What is left
+
+1. Yeast recall is now held back by decoy winners (the same-mass reversed twins in
+   section 10), not missing fragment evidence. A twin-aware feature (for example the
+   score gap to the best same-mass decoy) is the next lever.
+2. The non-yeast glycan rate edged up from 2.5% to 2.8%. Watch it as recall grows.
 
 ### Output path
 
