@@ -10,6 +10,15 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `dia` (off by default): DIA pseudo-spectrum search (`"dia": {"mode": "pseudo"}` or
+  `--dia pseudo`). The new `sage-dia` crate detects MS1 and per-window MS2 hills with koth-core
+  v0.11.0 and anchors on each charged MS1 isotope feature. Fragment hills whose apex and elution
+  profile match the precursor become one centroided MS2 spectrum. That spectrum is searched
+  closed at the feature's monoisotopic m/z and charge, and `wide_window` and `chimera` are
+  ignored. On an Orbitrap E. coli DIA run (PXD028735) it found 5,567 peptides at 1% FDR in
+  6 s and 2.3 GB. A wide-window chimeric search found 6,975 in 30 s and 3.0 GB, so wide-window
+  stays the default. With `dia` off, spectra and results are unchanged, and `results.json`
+  omits `dia`. See "DIA pseudo-spectrum search" in `DOCS.md`.
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with

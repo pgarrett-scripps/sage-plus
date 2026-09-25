@@ -16,6 +16,7 @@ use sage_core::{
     spectrum::{DeisotopeConfig, DeisotopeSettings},
     tmt::Isobaric,
 };
+use sage_dia::DiaSettings;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, schemars::JsonSchema)]
@@ -102,6 +103,10 @@ pub struct Search {
     pub annotate_matches: bool,
 
     pub score_type: ScoreType,
+
+    /// DIA search mode; omitted from results.json when off.
+    #[serde(skip_serializing_if = "DiaSettings::is_off")]
+    pub dia: DiaSettings,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -169,6 +174,10 @@ pub struct Input {
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
+    /// DIA search. `{"mode": "pseudo"}` builds MS1-anchored pseudo-MS2
+    /// spectra from co-eluting fragment hills and searches them closed (like
+    /// DDA); `wide_window` and `chimera` are ignored in that mode. Default off.
+    pub dia: Option<DiaSettings>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
@@ -361,6 +370,12 @@ impl Input {
         if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
             input.batch_size = Some(batch_size as usize);
         }
+        if let Some(mode) = matches.try_get_one::<String>("dia").ok().flatten() {
+            input.dia.get_or_insert_default().mode = match mode.as_str() {
+                "pseudo" => sage_dia::DiaMode::Pseudo,
+                _ => sage_dia::DiaMode::Off,
+            };
+        }
         if let Some(max_memory_gb) = matches.get_one::<f64>("max-memory").copied() {
             input.max_memory_gb = Some(max_memory_gb);
         }
@@ -417,6 +432,9 @@ impl Input {
 
     /// Validate logical configuration constraints without reading inputs or writing outputs.
     pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(dia) = &self.dia {
+            dia.validate().map_err(anyhow::Error::msg)?;
+        }
         for (name, tolerance) in [
             ("precursor_tol", self.precursor_tol),
             ("fragment_tol", self.fragment_tol),
@@ -668,6 +686,15 @@ impl Input {
         let spectral_library = self.spectral_library.unwrap_or_default();
         spectral_library.validate().map_err(anyhow::Error::msg)?;
 
+        let dia = self.dia.unwrap_or_default();
+        let pseudo = !dia.is_off();
+        if pseudo && self.wide_window == Some(true) {
+            log::warn!("`dia.mode = \"pseudo\"` searches closed; ignoring `wide_window`");
+        }
+        if pseudo && self.chimera == Some(true) {
+            log::warn!("`dia.mode = \"pseudo\"` ignores `chimera`");
+        }
+
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
         // Record the alignment method that will run, so results.json states it.
@@ -697,8 +724,8 @@ impl Input {
                 .deisotope
                 .unwrap_or(DeisotopeConfig::Enabled(true))
                 .resolve(),
-            chimera: self.chimera.unwrap_or(false),
-            wide_window: self.wide_window.unwrap_or(false),
+            chimera: self.chimera.unwrap_or(false) && !pseudo,
+            wide_window: self.wide_window.unwrap_or(false) && !pseudo,
             predict_rt,
             retention_time_model: self.retention_time_model.unwrap_or_default(),
             retention_time_alignment,
@@ -719,6 +746,7 @@ impl Input {
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             score_type,
+            dia,
         })
     }
 

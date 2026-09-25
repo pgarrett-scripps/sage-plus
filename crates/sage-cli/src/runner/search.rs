@@ -657,8 +657,18 @@ impl Runner {
                 file_id,
                 sn,
                 self.parameters.bruker_config,
-                requires_ms1,
+                requires_ms1 || !self.parameters.dia.is_off(),
             );
+            // DIA pseudo mode: replace the MS2 scans with MS1-anchored
+            // pseudo-MS2 spectra before the usual processing.
+            let res = match res {
+                Ok(s) if !self.parameters.dia.is_off() && !s.is_empty() => {
+                    sage_dia::prepare(s, file_id, requires_ms1, &self.parameters.dia).map_err(|e| {
+                        sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
+                    })
+                }
+                res => res,
+            };
 
             match res {
                 Ok(s) => {
