@@ -3,7 +3,6 @@ pub mod config_schema;
 pub mod events;
 pub mod input;
 pub mod memory;
-pub mod modification_migration;
 pub mod modification_preview;
 pub mod output;
 pub mod runner;
