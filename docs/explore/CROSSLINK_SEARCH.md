@@ -608,6 +608,33 @@ matches and the true FDR:
 - **Adoption:** the default stays `true`. Use `false` for chimera-prone samples like
   pooled libraries, or when residue-pair precision matters more than depth.
 
+**Both signals together, not adopted.** This test removes a CSM only when it is a window
+pair (|ppm| > 10, or isotope outside [-1, 3]) AND its weak chain appears with a different
+partner in a higher-scoring target CSM within 0.5 min. It was run offline on the default
+runs, recomputing the split CSM q-values the tool's way (script `analysis/combo.py`):
+
+| Dataset | CSMs at 1% | CSMs at 0.2% | Cross-group at 1% | Correct at 2% true FDR |
+| --- | ---: | ---: | ---: | ---: |
+| Beveridge, default | 1851 (2.7%) | 1172 (1.9%) | 44 | 1185 |
+| Beveridge, both signals dropped | 1780 (2.3%) | 1145 (1.7%) | 34 | 1430 |
+| Ribosome, default | 2875 (2.4%) | 2239 (1.1%) | 26 | 2801 |
+| Ribosome, both signals dropped | 2786 (2.4%) | 2189 (1.1%) | 24 | 2702 |
+
+- **Beveridge improves; the ribosome file does not.**
+  - On Beveridge the filter flags 9 cross-group and 63 correct CSMs.
+  - On the ribosome file it flags 2 cross-group and 89 correct CSMs. True FDR stays the
+    same and depth at matched true FDR falls 2–4%.
+- **The window condition is the weak link.** Most chimeric wrong chains on either
+  dataset are not window pairs: their precursor mass matches exactly. So the
+  combination catches few errors.
+- **Loosening the window to |ppm| > 20 changes nothing:** 8 cross-group vs 32 correct
+  flagged on Beveridge, and 1 vs 64 on ribosome.
+- **A separate q-value subgroup for flagged CSMs is worse.**
+  - The subgroup holds 183–241 TT against 29 TD, so it passes its own targets freely.
+  - True FDR at 1% rises to 3.8% on Beveridge and 2.8% on ribosome.
+- **Not implemented in the search.** Residue-pair numbers were not measured, because the
+  CSM-level result already fails on the ribosome file.
+
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 
 | File | Linear: CPU, wall, RSS | Crosslink: CPU, wall, RSS |
