@@ -9,12 +9,21 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed (CI runners)
+- CI, security and release workflows run on pinned runner images (`ubuntu-24.04`,
+  `windows-2025`) instead of `ubuntu-latest` and `windows-latest`, so a GitHub image rollover
+  cannot change release builds unannounced. macOS runners were already pinned.
+
 ### Added
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
   the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
   warns when it is set without `quant.lfq` or for non-TDF inputs.
+
+### Removed
+- `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
+  explicit site for each symbol key for rewriting them as named definitions.
 
 ## [v0.1.0-beta.9] - 2026-09-25
 
