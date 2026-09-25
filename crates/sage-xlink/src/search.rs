@@ -415,7 +415,7 @@ pub fn protein_position(peptide: &Peptide, site: Site) -> Option<(Arc<str>, u32)
     let offset = match site {
         Site::Nterm => 0,
         Site::Cterm => peptide.sequence.len().saturating_sub(1) as u32,
-        Site::Sequence(index) => index as u32,
+        Site::Sequence(index) => index,
     };
     Some((occurrence.protein.clone(), occurrence.start? + offset + 1))
 }
@@ -425,6 +425,6 @@ pub fn peptide_position(peptide: &Peptide, site: Site) -> u32 {
     match site {
         Site::Nterm => 1,
         Site::Cterm => peptide.sequence.len() as u32,
-        Site::Sequence(index) => index as u32 + 1,
+        Site::Sequence(index) => index + 1,
     }
 }
