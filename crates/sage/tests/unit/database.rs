@@ -120,6 +120,49 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
 }
 
 #[test]
+fn extra_fragments_follow_the_regular_ions_of_each_peptide() {
+    let parameters = Builder {
+        bucket_size: Some(2),
+        generate_decoys: Some(false),
+        ..Builder::default()
+    }
+    .make_parameters();
+    let mut peptides = parameters
+        .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
+    Parameters::reorder_peptides(&mut peptides);
+    let extra = |peptide: &Peptide, masses: &mut Vec<f32>| {
+        masses.push(peptide.monoisotopic);
+        masses.push(peptide.monoisotopic + 203.079_37);
+    };
+
+    let mut expected = BTreeMap::<u32, Vec<Theoretical>>::new();
+    let mut buffer = Vec::new();
+    for (peptide_index, peptide) in peptides.iter().enumerate() {
+        buffer.clear();
+        buffer.extend(preliminary_fragment_masses(&parameters, peptide));
+        extra(peptide, &mut buffer);
+        for &mass in &buffer {
+            expected
+                .entry(mass.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS)
+                .or_default()
+                .push(Theoretical {
+                    peptide_index: PeptideIx(peptide_index as u32),
+                    fragment_mz: mass,
+                });
+        }
+    }
+
+    let plain = parameters.clone().build_from_peptides(peptides.clone());
+    let database = parameters.build_from_peptides_with_extra_fragments(peptides, &extra);
+    let expected = expected.into_values().flatten().collect::<Vec<_>>();
+    let actual = (0..database.buckets().len())
+        .flat_map(|bucket| database.fragments.bucket(bucket))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
+    assert_eq!(database.fragments.len(), plain.fragments.len() + 4);
+}
+
+#[test]
 fn filtered_targets_receive_paired_decoys_after_selection() {
     let parameters = Builder::default().make_parameters();
     let targets = parameters

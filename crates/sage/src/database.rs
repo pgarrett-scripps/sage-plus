@@ -1435,7 +1435,24 @@ impl Parameters {
 
     pub fn build_from_peptides(self, target_decoys: Vec<Peptide>) -> IndexedDatabase {
         log::trace!("generating fragments");
-        let (compressed_fragments, min_value) = FragmentIndex::build(&self, &target_decoys);
+        let (compressed_fragments, min_value) = FragmentIndex::build(&self, &target_decoys, None);
+        self.assemble_database(target_decoys, compressed_fragments, min_value)
+    }
+
+    /// Like [`Parameters::build_from_peptides`], but `extra` adds neutral
+    /// fragment masses of each peptide to the preliminary fragment index,
+    /// after its regular ions. They only count toward preliminary candidate
+    /// retrieval (and, for mass-offset hypotheses, are also looked up with
+    /// the offset's fragment shift); full scoring is unchanged. `extra` must
+    /// be deterministic: it is called twice per peptide.
+    pub fn build_from_peptides_with_extra_fragments(
+        self,
+        target_decoys: Vec<Peptide>,
+        extra: &ExtraFragments,
+    ) -> IndexedDatabase {
+        log::trace!("generating fragments");
+        let (compressed_fragments, min_value) =
+            FragmentIndex::build(&self, &target_decoys, Some(extra));
         self.assemble_database(target_decoys, compressed_fragments, min_value)
     }
 
@@ -1702,6 +1719,10 @@ impl Default for PeptideIx {
     }
 }
 
+/// Extra preliminary fragment masses of a peptide, appended to the buffer.
+/// See [`Parameters::build_from_peptides_with_extra_fragments`].
+pub type ExtraFragments = dyn Fn(&Peptide, &mut Vec<f32>) + Sync;
+
 #[derive(Copy, Clone, Debug, PartialEq, Serialize)]
 pub struct Theoretical {
     pub peptide_index: PeptideIx,
@@ -1771,7 +1792,11 @@ impl SharedFragmentWriter {
 }
 
 impl FragmentIndex {
-    fn build(parameters: &Parameters, peptides: &[Peptide]) -> (Self, Vec<f32>) {
+    fn build(
+        parameters: &Parameters,
+        peptides: &[Peptide],
+        extra: Option<&ExtraFragments>,
+    ) -> (Self, Vec<f32>) {
         let suffix_bits = FRAGMENT_MASS_SUFFIX_BITS;
         let suffix_mask = (1u32 << suffix_bits) - 1;
         let bucket_size = parameters.bucket_size.max(1);
@@ -1786,10 +1811,19 @@ impl FragmentIndex {
             .par_iter()
             .map(|range| {
                 let mut counts = HashMap::<u32, u32>::new();
+                let mut buffer = Vec::new();
                 for peptide in &peptides[range.clone()] {
                     for mass in preliminary_fragment_masses(parameters, peptide) {
                         let prefix = mass.to_bits() >> suffix_bits;
                         *counts.entry(prefix).or_default() += 1;
+                    }
+                    if let Some(extra) = extra {
+                        buffer.clear();
+                        extra(peptide, &mut buffer);
+                        for mass in &buffer {
+                            let prefix = mass.to_bits() >> suffix_bits;
+                            *counts.entry(prefix).or_default() += 1;
+                        }
                     }
                 }
                 counts
@@ -1853,9 +1887,10 @@ impl FragmentIndex {
             .into_par_iter()
             .zip(positions.into_par_iter().zip(limits.into_par_iter()))
             .for_each(|(range, (mut positions, limits))| {
+                let mut buffer = Vec::new();
                 for (peptide_index, peptide) in peptides[range.clone()].iter().enumerate() {
                     let peptide_index = range.start + peptide_index;
-                    for mass in preliminary_fragment_masses(parameters, peptide) {
+                    let mut write = |mass: f32| {
                         let bits = mass.to_bits();
                         let prefix = bits >> suffix_bits;
                         let position = positions
@@ -1878,6 +1913,16 @@ impl FragmentIndex {
                             )
                         };
                         *position += 1;
+                    };
+                    for mass in preliminary_fragment_masses(parameters, peptide) {
+                        write(mass);
+                    }
+                    if let Some(extra) = extra {
+                        buffer.clear();
+                        extra(peptide, &mut buffer);
+                        for &mass in &buffer {
+                            write(mass);
+                        }
                     }
                 }
                 assert_eq!(
