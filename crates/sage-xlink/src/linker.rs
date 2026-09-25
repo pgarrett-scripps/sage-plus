@@ -149,8 +149,8 @@ impl Default for CrosslinkSettings {
             isolation_half_width: 1.0,
             min_chain_mass: 400.0,
             max_pairs: 12,
-            preliminary_candidates: 10,
-            chain_candidates: 5,
+            preliminary_candidates: 5,
+            chain_candidates: 3,
             min_chain_matched_peaks: 2,
             output_q_value: 1.0,
         }
