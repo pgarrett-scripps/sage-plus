@@ -29,6 +29,8 @@ entries are retained below for provenance.
 - S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
   It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
   drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
+- The `sage-mcp` server crate and binary are removed; release archives and the container image no
+  longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
 
 ## [v0.1.0-beta.9] - 2026-09-25
 

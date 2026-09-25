@@ -3,7 +3,6 @@ members = [
     "crates/sage",
     "crates/sage-cli",
     "crates/sage-cloudpath",
-    "crates/sage-mcp",
 ]
 
 exclude = ["vendor/filemanager"]

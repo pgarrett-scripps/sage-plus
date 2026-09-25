@@ -17,7 +17,6 @@ crate_manifests=(
   crates/sage/Cargo.toml
   crates/sage-cli/Cargo.toml
   crates/sage-cloudpath/Cargo.toml
-  crates/sage-mcp/Cargo.toml
 )
 
 for manifest in "${crate_manifests[@]}"; do

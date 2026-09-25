@@ -100,7 +100,6 @@ Other benefits describe the intended effect and have not all been validated inde
 |---|---|---|---|
 | Overwrite protection for existing outputs | beta.3 | Reruns could silently replace results | Replacing Sage outputs requires `--overwrite` |
 | Runner API, JSONL events, and `run-summary.json` | beta.1 | Runs could only be followed through logs | Validation-only runs, progress events, cancellation, and a machine-readable summary |
-| MCP server with isolated search workers | beta.1 | Agents needed safe, persistent search jobs | A failed or cancelled search affects only its own worker |
 
 ## Prefilter performance
 
@@ -151,7 +150,7 @@ mzMLb support and S3/GCS/Azure paths (the `mzmlb` and `cloud` features) are incl
 standard builds and release binaries. Minimal local-only source builds can omit both with
 `cargo build --release --workspace --no-default-features`.
 
-The release build produces the standard `sage` executable and the optional `sage-mcp` server.
+The release build produces the standard `sage` executable.
 Run `sage --help` for CLI options.
 
 Prebuilt binaries are available from [Sage Plus releases](https://github.com/pgarrett-scripps/sage-plus/releases),
@@ -164,7 +163,6 @@ upstream Sage releases.
 ## Documentation
 
 - [Sage Plus configuration and outputs](DOCS.md)
-- [Sage MCP server](crates/sage-mcp/README.md)
 - [Maintainer release procedure](RELEASING.md)
 - [Upstream relationship and synchronization](UPSTREAM.md)
 - [Developer benchmark pipeline and results](benchmarks/RESULTS.md)

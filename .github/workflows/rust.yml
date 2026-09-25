@@ -167,8 +167,8 @@ jobs:
         with:
           key: smoke-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build and test minimal CLI and isolated MCP workers
-        run: cargo test --locked --no-default-features -p sage-cli -p sage-mcp
+      - name: Build and test minimal CLI
+        run: cargo test --locked --no-default-features -p sage-cli
 
   dependency-review:
     name: Dependency review

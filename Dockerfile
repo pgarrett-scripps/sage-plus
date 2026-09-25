@@ -10,7 +10,6 @@ WORKDIR /app
 # The release workflow supplies statically linked musl binaries so the image does not depend on
 # the build runner's glibc version.
 COPY target/x86_64-unknown-linux-musl/release/sage /app/sage
-COPY target/x86_64-unknown-linux-musl/release/sage-mcp /app/sage-mcp
 
 COPY THIRD_PARTY_NOTICES.md /app/licenses/THIRD_PARTY_NOTICES.md
 COPY vendor/filemanager/LICENSE /app/licenses/filemanager.txt
