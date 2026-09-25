@@ -9,9 +9,7 @@
 #![cfg(feature = "parquet")]
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::hash::BuildHasher;
-use std::path::Path;
 
 use parquet::data_type::{BoolType, ByteArray, DoubleType, FloatType, Int64Type};
 use parquet::errors::ParquetError;
@@ -46,13 +44,11 @@ macro_rules! write_required_column {
 }
 
 mod lfq;
-mod query;
 mod results;
 mod sites;
 mod spectral_library;
 
 pub use lfq::{build_lfq_schema, serialize_lfq};
-pub use query::scan_json_rows;
 pub use results::{
     build_matched_fragment_schema, build_schema, serialize_features, serialize_matched_fragments,
 };

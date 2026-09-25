@@ -9,6 +9,10 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Removed
+- The `sage-mcp` server crate and binary are removed; release archives and the container image no
+  longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added

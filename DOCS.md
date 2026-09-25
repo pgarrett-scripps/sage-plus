@@ -142,7 +142,7 @@ cryptographically exact build identity. Benchmark manifests separately record SH
 inputs and binaries. Older summaries remain readable through defaults for the new fields.
 
 For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
-does not specify `batch_size`. It does not set the Rayon worker count. CLI and MCP batch overrides
+does not specify `batch_size`. It does not set the Rayon worker count. CLI batch overrides
 take precedence over the configuration.
 
 Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
@@ -205,24 +205,8 @@ that compatible events can be added to schema version 1.
 
 Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
 accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
-`RunSummary` alongside telemetry. This application layer is intended to be shared by future
-protocol servers and user interfaces.
-
-### MCP server for AI clients
-
-The `sage-mcp` binary exposes the runner to MCP-compatible coding agents and assistants over
-local standard input/output. Build it with `cargo build --release -p sage-mcp`, then configure
-the client to launch it with a directory that contains every allowed configuration and input:
-
-```shell
-sage-mcp --root /path/to/allowed/data
-```
-
-The server can inspect and validate configurations, estimate database expansion and memory,
-start approved background searches, monitor or cancel jobs, summarize completed runs, and make
-basic analysis from the portable run summary, and bounded queries over TSV PSM and PTM-site results. Searches require `approved: true`, remote URLs
-are disabled, local inputs cannot escape `--root`, and outputs are written beneath
-`ROOT/.sage/jobs`. See `crates/sage-mcp/README.md` for client configuration and tool details.
+`RunSummary` alongside telemetry. This application layer is intended to be shared by other
+front ends.
 
 ## Configuration file schema
 
