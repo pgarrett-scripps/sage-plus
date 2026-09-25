@@ -448,7 +448,7 @@ all targets and twins wins. Two choices made the FDR bite:
    glycoPSMs at 2.4% non-yeast glycans, against 708 at 1.3% for the score alone.
    The minimum of the two passed 875 but at 5.8%, so it was rejected.
 
-Peptide FDR is an LDA over 20 standardized features (22 from milestone 2). Glyco features include the core,
+Peptide FDR is an LDA over 20 standardized features (22 from milestone 2, 26 from milestone 4). Glyco features include the core,
 best-Y and Y-intensity fractions, Y0/Y1 anchoring, oxonium count and intensity, the
 best glycan score, precursor error and ambiguity. If the fit fails it is retried with
 ridge 1e-3, 1e-2 and 1e-1, and then falls back to the hyperscore, so a run always
@@ -599,6 +599,77 @@ Tried and not adopted (fast-release builds, yeast):
    candidates from wrong ones. Full scoring still ranks on b and y ions only. Y-ion counts
    in the hyperscore, or a glyco-specific peptide score, is the next lever.
 2. **Ties.** 143 yeast decoy winners pass peptide FDR, down from 219.
+
+## 10. Milestone 4: glyco evidence in the peptide model (2026-09-25)
+
+### What changed
+
+The glyco peptide LDA went from 22 to 26 features. It already had the Y-ion match and
+intensity fractions, Y0/Y1 anchoring and the oxonium count and intensity. New:
+
+1. Matched Y-ion count (best explanation), log scale.
+2. Matched core Y-ion count.
+3. Y1 (peptide + HexNAc) present.
+4. Oxonium Hex/HexNAc ratio: ln((Hex 163 + HexHexNAc 366) / HexNAc 204) intensity,
+   each padded by 0.1% of the total ion current.
+
+These live only in `sage-glyco`'s own discriminant, so normal searches never see them.
+Plain searches are unchanged: 8,674 mouse and 7,940 yeast PSMs, re-checked.
+
+### Before and after
+
+Release builds, same runs as section 9.
+
+| | Mouse glycoPSMs | Yeast glycoPSMs | Yeast non-yeast glycans | Yeast decoy winners | Yeast wall / peak RSS | Mouse wall / peak RSS |
+| --- | --- | --- | --- | --- | --- | --- |
+| Milestone 3 | 6,860 | 1,229 | 2.4% | 143 | 109 s / 5.6 GB | 97 s / 4.5 GB |
+| Milestone 4 | **6,913** | **1,225** | **2.5%** | 127 | 103 s / 5.6 GB | 94 s / 4.5 GB |
+
+Mouse gains 53 glycoPSMs, yeast is flat, and glycan decoy winners fall. Time and memory
+do not change.
+
+### Why yeast stalls, and what a glyco peptide score would need
+
+Diagnosis on the yeast rows, with 23,195 spectra each represented by one candidate:
+
+1. **Y ions no longer separate what is left.** About 700 targets that fail peptide FDR
+   match 7 or more Y ions. So do about 290 decoys. Those decoys are mostly the reversed
+   twin of the right peptide: same mass, so the same Y ions. Y evidence settles the
+   peptide mass, not the sequence.
+2. **Sequence evidence is underused.** The target list only grows from 1,576 to 2,041
+   between 1% and 5% peptide q. Correct candidates therefore sit in a flat score
+   region, not just past a threshold.
+3. **Full scoring places the HexNAc on the site.** Every b/y ion that spans the site is
+   scored only at +HexNAc. In sceHCD, most of those ions lose the whole glycan and appear
+   bare, so they count as misses. Preliminary retrieval counts both forms, but hyperscore,
+   matched peaks, longest run and Poisson do not.
+
+A dedicated glyco peptide score (not built) would need:
+
+1. **Dual-form fragment scoring.** Score each site-spanning b/y ion as matched if either
+   its bare or its +HexNAc form (optionally +HexNAc2) is present, counting it once. This
+   is a new scoring mode in `sage-core` next to `score_peptide`, used only by the glyco
+   scorer. It is the largest expected gain, since it restores the ions behind items 2
+   and 3.
+2. **Y ions excluded from b/y matching.** Peaks assigned to Y ions or oxonium ions should
+   not also count as b/y matches. Otherwise the shared Y-ion evidence inflates both
+   the target and its same-mass decoy.
+3. **Charge-aware Y ions.** Y ions at precursor charge minus 1 and minus 2 dominate
+   sceHCD. The glyco scorer caps fragment charge at 3 unless `max_fragment_charge` is set,
+   but 42% of explained yeast spectra
+   are charge 4 or higher.
+4. **Features from the new score** fed into the existing LDA: dual-form matched count,
+   longest run and coverage. Normal searches stay untouched because the mode is
+   glyco-only.
+5. **Validation.** The mouse-protein entrapment in the yeast search (27 of 1,576
+   targets at 1% peptide q) should be watched so the recall gain is not a calibration
+   loss.
+
+### Output path
+
+PR #49 adds `Runner::write_sidecar` for per-feature output files. When it lands on main,
+`glyco.sage.parquet` should be written through it instead of the glyco-specific path in
+`sage-cli`.
 
 ## Appendix: code and measurements
 
