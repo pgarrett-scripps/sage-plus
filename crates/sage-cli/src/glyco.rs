@@ -119,7 +119,10 @@ mod imp {
                 self.search.settings.explain_ppm,
                 config.peptide_fdr,
                 config.glycan_fdr,
-                config.rescore_candidates,
+                sage_glyco::fdr::ScoreOptions {
+                    rescore: config.rescore_candidates,
+                    siblings: config.sibling_feature,
+                },
             );
             log::info!(
                 "glyco: {} MS2 spectra, {} oxonium-gated, {} explained; searched in {:#?}",

@@ -122,6 +122,9 @@ pub struct GlycoCandidate {
     pub twin_hyperscore: Option<f64>,
     /// Trunk Hex ladder, when `glyco.ladder_feature` is on.
     pub ladder: Ladder,
+    /// Other spectra that picked the same peptide, set during scoring when
+    /// `glyco.sibling_feature` is on.
+    pub siblings: u16,
 }
 
 /// Matched b/y ions of a glyco candidate, from its fragment annotation.
@@ -512,6 +515,7 @@ impl GlycoSearch {
             };
             candidates.push(GlycoCandidate {
                 ladder,
+                siblings: 0,
                 site,
                 twin_hyperscore,
                 y1: evidence.y_peak(peptide_mass, HEXNAC as f32).is_some(),

@@ -267,7 +267,7 @@ pub struct FdrSummary {
     pub rates: [f64; CLASSES],
 }
 
-const PEPTIDE_FEATURES: usize = 35;
+const PEPTIDE_FEATURES: usize = 36;
 
 /// One spectrum's selected candidate: its index, and the lead of its glycan
 /// score over the next explained peptide candidate of the same spectrum
@@ -455,6 +455,7 @@ fn peptide_features(
         ladder.run as f64 / steps,
         (ladder.run as f64 - ladder.control_run as f64) / steps,
         (ladder.matched as f64 - ladder.control_matched as f64) / steps,
+        (candidate.siblings as f64).ln_1p(),
     ]
 }
 
@@ -565,6 +566,39 @@ fn fit(rows: &[[f64; PEPTIDE_FEATURES]], decoy: &[bool]) -> Option<(Discriminant
     None
 }
 
+/// Optional steps of [`score`].
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScoreOptions {
+    /// `glyco.rescore_candidates`, see [`rescore_selection`].
+    pub rescore: bool,
+    /// `glyco.sibling_feature`, see [`count_siblings`].
+    pub siblings: bool,
+}
+
+/// Set each candidate's `siblings`: how many other spectra picked the same
+/// peptide (same database entry, so the same modifications) in the
+/// glycan-score selection `chosen`. True glycopeptides recur as several
+/// glycoforms and charge states. The count ignores labels and scores, so
+/// targets and decoys are treated alike.
+fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize]) {
+    let mut counts: std::collections::HashMap<u32, u16> = std::collections::HashMap::new();
+    let mut picked = vec![false; candidates.len()];
+    for &index in chosen {
+        picked[index] = true;
+        let count = counts
+            .entry(candidates[index].feature.peptide_idx.0)
+            .or_default();
+        *count = count.saturating_add(1);
+    }
+    for (candidate, picked) in candidates.iter_mut().zip(picked) {
+        let count = counts
+            .get(&candidate.feature.peptide_idx.0)
+            .copied()
+            .unwrap_or(0);
+        candidate.siblings = count - u16::from(picked);
+    }
+}
+
 /// Score candidates at both levels. `explain_ppm` sets the initial mass
 /// error spread, `peptide_fdr` and `glycan_fdr` the reporting thresholds.
 pub fn score(
@@ -574,8 +608,9 @@ pub fn score(
     explain_ppm: f32,
     peptide_fdr: f32,
     glycan_fdr: f32,
-    rescore: bool,
+    options: ScoreOptions,
 ) -> (Vec<GlycoPsm>, GlycanModel, FdrSummary) {
+    let mut candidates = candidates;
     let mut model = GlycanModel::new(isotopes, max_adducts, explain_ppm);
     let explained = candidates.len();
     let assignments: Vec<Assignment> = candidates.iter().map(|c| model.assign(c)).collect();
@@ -585,8 +620,11 @@ pub fn score(
         .iter()
         .map(|s| s.index)
         .collect();
+    if options.siblings {
+        count_siblings(&mut candidates, &chosen);
+    }
     let leads_all = glycan_leads(&candidates, &assignments);
-    if rescore {
+    if options.rescore {
         chosen = rescore_selection(&candidates, &assignments, &leads_all, &chosen);
     }
     let mut keep = vec![false; candidates.len()];
@@ -731,6 +769,7 @@ mod tests {
             site: Default::default(),
             twin_hyperscore: None,
             ladder: Default::default(),
+            siblings: 0,
         };
         let a = model.assign(&candidate(vec![explanation(1, 6)]));
         assert!(a.decoy);
@@ -773,6 +812,7 @@ mod tests {
             site: Default::default(),
             twin_hyperscore: None,
             ladder: Default::default(),
+            siblings: 0,
         };
         let assignment = |score: f64| Assignment {
             explanation: 0,
@@ -823,5 +863,16 @@ mod tests {
             .map(|g| (g.start, g.end))
             .collect();
         assert_eq!(groups, vec![(0, 3), (3, 4), (4, 6)]);
+
+        // Siblings: other spectra whose pick is the same peptide.
+        let mut candidates = candidates.to_vec();
+        for (candidate, peptide) in candidates.iter_mut().zip([7, 8, 9, 8, 8, 7]) {
+            candidate.feature.peptide_idx = sage_core::database::PeptideIx(peptide);
+        }
+        let chosen: Vec<usize> = selected.iter().map(|s| s.index).collect();
+        count_siblings(&mut candidates, &chosen);
+        let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
+        // Picks 1, 3 and 4 are all peptide 8.
+        assert_eq!(siblings, vec![0, 2, 0, 2, 2, 0]);
     }
 }

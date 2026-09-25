@@ -91,6 +91,9 @@ pub struct GlycoConfig {
     /// consecutive run, and a control ladder at a fixed offset) to the glyco
     /// peptide model.
     pub ladder_feature: bool,
+    /// Add to the glyco peptide model how many other spectra picked the same
+    /// peptide (glycoform and charge-state siblings).
+    pub sibling_feature: bool,
 }
 
 impl Default for GlycoConfig {
@@ -117,6 +120,7 @@ impl Default for GlycoConfig {
             twin_feature: "off".into(),
             rescore_candidates: true,
             ladder_feature: false,
+            sibling_feature: false,
         }
     }
 }
