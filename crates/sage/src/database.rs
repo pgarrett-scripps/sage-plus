@@ -1587,6 +1587,7 @@ impl Parameters {
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
             offsets_only: false,
+            peak_exclusion: None,
         }
     }
 }
@@ -1722,6 +1723,13 @@ impl Default for PeptideIx {
 /// Extra preliminary fragment masses of a peptide, appended to the buffer.
 /// See [`Parameters::build_from_peptides_with_extra_fragments`].
 pub type ExtraFragments = dyn Fn(&Peptide, &mut Vec<f32>) + Sync;
+
+/// Marks the peaks of a spectrum that full scoring must not match as b/y
+/// ions of a candidate. Called with the resolved peptidoform, the precursor
+/// charge, the spectrum and a mask with one entry per peak (all false).
+/// See [`IndexedDatabase::peak_exclusion`].
+pub type PeakExclusion =
+    dyn Fn(&Peptide, u8, &crate::spectrum::ProcessedSpectrum, &mut [bool]) + Send + Sync;
 
 #[derive(Copy, Clone, Debug, PartialEq, Serialize)]
 pub struct Theoretical {
@@ -2055,6 +2063,10 @@ pub struct IndexedDatabase {
     /// already counts unshifted fragments, so the unmodified pass is
     /// redundant work. Ignored when no mass offsets are configured.
     pub offsets_only: bool,
+    /// Peaks each candidate may not claim as b/y ions in full scoring, for
+    /// example the Y and oxonium ions of a glycopeptide. Preliminary
+    /// retrieval is unaffected. `None` (the default) excludes nothing.
+    pub peak_exclusion: Option<Arc<PeakExclusion>>,
 }
 
 impl IndexedDatabase {

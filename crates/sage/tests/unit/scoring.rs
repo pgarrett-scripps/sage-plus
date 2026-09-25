@@ -782,6 +782,31 @@ mod mass_offsets {
     }
 
     #[test]
+    fn peak_exclusion_removes_peaks_from_full_scoring_only() {
+        let mut offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&database(SearchMode::Database)));
+        let before = scorer(&offset, false).score(&query);
+        // Excluding nothing changes nothing.
+        offset.peak_exclusion = Some(Arc::new(
+            |_: &Peptide, _: u8, _: &ProcessedSpectrum, _: &mut [bool]| {},
+        ));
+        let same = scorer(&offset, false).score(&query);
+        assert_eq!(same[0].matched_peaks, before[0].matched_peaks);
+        assert_eq!(same[0].hyperscore, before[0].hyperscore);
+        // Excluding the heavier half of the peaks removes their matches.
+        offset.peak_exclusion = Some(Arc::new(
+            |_: &Peptide, _: u8, query: &ProcessedSpectrum, excluded: &mut [bool]| {
+                let half = query.masses.len() / 2;
+                excluded[half..].fill(true);
+            },
+        ));
+        let after = scorer(&offset, false).score(&query);
+        assert_eq!(after[0].peptide_idx, before[0].peptide_idx);
+        assert!(after[0].matched_peaks < before[0].matched_peaks);
+        assert!(after[0].hyperscore < before[0].hyperscore);
+    }
+
+    #[test]
     fn exact_prefilter_keeps_offset_base_peptides() {
         let expanded = database(SearchMode::Database);
         let offset = database(SearchMode::MassOffset);

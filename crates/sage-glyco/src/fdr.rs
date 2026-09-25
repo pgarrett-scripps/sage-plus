@@ -267,7 +267,7 @@ pub struct FdrSummary {
     pub rates: [f64; CLASSES],
 }
 
-const PEPTIDE_FEATURES: usize = 26;
+const PEPTIDE_FEATURES: usize = 30;
 
 /// One spectrum's selected candidate: its index, and the lead of its glycan
 /// score over the next explained peptide candidate of the same spectrum
@@ -371,6 +371,10 @@ fn peptide_features(
         (candidate.explanations[0].target.matched[0] as f64).ln_1p(),
         f64::from(u8::from(candidate.y1)),
         (candidate.hex_ratio as f64).clamp(-10.0, 10.0),
+        (candidate.site.matched as f64).ln_1p(),
+        candidate.site.matched as f64 / candidate.site.possible.max(1) as f64,
+        (candidate.site.bare as f64).ln_1p(),
+        (candidate.site.high_charge as f64).ln_1p(),
     ]
 }
 
@@ -615,6 +619,7 @@ mod tests {
             random_y: 0.1,
             random_oxonium: 0.1,
             explanations,
+            site: Default::default(),
         };
         let a = model.assign(&candidate(vec![explanation(1, 6)]));
         assert!(a.decoy);
@@ -654,6 +659,7 @@ mod tests {
             random_y: 0.1,
             random_oxonium: 0.1,
             explanations: vec![explanation(1, 0)],
+            site: Default::default(),
         };
         let assignment = |score: f64| Assignment {
             explanation: 0,

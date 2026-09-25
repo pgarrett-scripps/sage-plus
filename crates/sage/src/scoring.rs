@@ -152,6 +152,19 @@ impl FragmentMatchIndex {
         Self { peaks }
     }
 
+    /// The same index without the peaks marked in `excluded` (indexed by
+    /// query peak).
+    pub(crate) fn without(&self, excluded: &[bool]) -> Self {
+        Self {
+            peaks: self
+                .peaks
+                .iter()
+                .filter(|peak| !excluded[peak.query_index])
+                .copied()
+                .collect(),
+        }
+    }
+
     fn select_peak(
         &self,
         query: &ProcessedSpectrum,
@@ -1205,6 +1218,17 @@ impl<'db> Scorer<'db> {
         let fragment_correction = self
             .correction(query.file_id)
             .and_then(|correction| correction.fragment_model(query.acquisition));
+
+        let masked;
+        let fragment_index = match self.db.peak_exclusion.as_deref() {
+            Some(exclude) => {
+                let mut excluded = vec![false; query.masses.len()];
+                exclude(peptide, score.precursor_charge, query, &mut excluded);
+                masked = fragment_index.without(&excluded);
+                &masked
+            }
+            None => fragment_index,
+        };
 
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)

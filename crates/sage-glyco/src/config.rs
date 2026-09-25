@@ -7,6 +7,9 @@ use crate::composition::{n_glycan_composition_space, GlycanComposition, GlycanLi
 /// Residue mass of HexNAc, the innermost glycan residue kept on fragments.
 pub const HEXNAC: f64 = 203.079_373;
 
+/// Accepted `glyco.site_fragment_forms`.
+pub const SITE_FRAGMENT_FORMS: [&str; 4] = ["hexnac", "bare", "hexnac_fuc", "hexnac2"];
+
 /// Intact N-glycopeptide search settings.
 ///
 /// Every field is optional. With no glycan list at all, a built-in
@@ -56,6 +59,21 @@ pub struct GlycoConfig {
     /// them next to b and y ions. Y ions fix the peptide mass, which the open
     /// glycan window leaves free.
     pub index_y_ions: bool,
+    /// Forms in which a b or y ion spanning the glycosylation site can
+    /// match, counted once per ion: `hexnac` (the innermost HexNAc kept,
+    /// required), `bare` (the glycan fully lost), `hexnac_fuc` (the core
+    /// fucose kept too) and `hexnac2` (the chitobiose kept).
+    pub site_fragment_forms: Vec<String>,
+    /// Peaks that match a Y ion (peptide plus a core-like glycan fragment,
+    /// at any charge up to the precursor's) or an oxonium ion are not
+    /// counted as b/y matches of the candidate.
+    pub exclude_glycan_peaks: bool,
+    /// Largest b/y fragment charge, below the precursor charge, when the
+    /// main `max_fragment_charge` is not set. `null` allows every charge
+    /// below the precursor's.
+    pub max_fragment_charge: Option<u8>,
+    /// Add site-spanning fragment counts to the glyco peptide model.
+    pub site_features: bool,
 }
 
 impl Default for GlycoConfig {
@@ -75,6 +93,10 @@ impl Default for GlycoConfig {
             bucket_size: 8192,
             variable_mods: false,
             index_y_ions: true,
+            site_fragment_forms: vec!["hexnac".into(), "bare".into()],
+            exclude_glycan_peaks: true,
+            max_fragment_charge: Some(3),
+            site_features: true,
         }
     }
 }
@@ -119,7 +141,40 @@ impl GlycoConfig {
         for glycan in &self.glycans {
             GlycanComposition::parse(glycan)?;
         }
+        for form in &self.site_fragment_forms {
+            if !SITE_FRAGMENT_FORMS.contains(&form.as_str()) {
+                return Err(format!(
+                    "`glyco.site_fragment_forms`: unknown form `{form}`, expected one of {SITE_FRAGMENT_FORMS:?}"
+                ));
+            }
+        }
+        if !self.site_fragment_forms.iter().any(|form| form == "hexnac") {
+            return Err("`glyco.site_fragment_forms` must include `hexnac`".into());
+        }
+        if self.max_fragment_charge == Some(0) {
+            return Err("`glyco.max_fragment_charge` must be at least 1".into());
+        }
         Ok(())
+    }
+
+    /// Neutral losses of the HexNAc offset that produce the configured
+    /// site-spanning fragment forms. A negative loss is a gain: the form
+    /// keeps more than the innermost HexNAc.
+    pub fn site_losses(&self) -> Vec<f32> {
+        let mut losses: Vec<f32> = self
+            .site_fragment_forms
+            .iter()
+            .filter_map(|form| match form.as_str() {
+                "bare" => Some(HEXNAC),
+                "hexnac_fuc" => Some(-crate::composition::Monosaccharide::Fuc.mass()),
+                "hexnac2" => Some(-HEXNAC),
+                _ => None,
+            })
+            .map(|loss| loss as f32)
+            .collect();
+        losses.sort_unstable_by(f32::total_cmp);
+        losses.dedup();
+        losses
     }
 
     /// Build the composition library from the inline list and the contents
@@ -188,6 +243,19 @@ mod tests {
         assert!(GlycoConfig::from_value(serde_json::json!({"glycans": ["Kdn(1)"]})).is_err());
         assert!(GlycoConfig::from_value(serde_json::json!({"unknown": 1})).is_err());
         assert!(GlycoConfig::from_value(serde_json::json!({"sequon": "N"})).is_err());
+        assert!(
+            GlycoConfig::from_value(serde_json::json!({"site_fragment_forms": ["bare"]})).is_err()
+        );
+        assert!(GlycoConfig::from_value(
+            serde_json::json!({"site_fragment_forms": ["hexnac", "x"]})
+        )
+        .is_err());
+        let forms = GlycoConfig::from_value(serde_json::json!({
+            "site_fragment_forms": ["hexnac", "bare", "hexnac2"]
+        }))
+        .unwrap();
+        assert_eq!(forms.site_losses(), vec![-HEXNAC as f32, HEXNAC as f32]);
+        assert_eq!(GlycoConfig::default().site_losses(), vec![HEXNAC as f32]);
     }
 
     #[test]

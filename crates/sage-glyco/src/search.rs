@@ -1,10 +1,14 @@
 //! The glyco pass: one open-window search of oxonium-gated spectra against
 //! sequon peptides, then glycan explanation of the precursor delta.
 
+use std::sync::Arc;
+
 use rayon::prelude::*;
-use sage_core::database::{Builder, IndexedDatabase, Parameters};
+use sage_core::database::{Builder, IndexedDatabase, Parameters, PeakExclusion};
 use sage_core::fasta::Fasta;
-use sage_core::mass::{Tolerance, NEUTRON};
+use sage_core::ion_series::Kind;
+use sage_core::mass::{Tolerance, NEUTRON, PROTON};
+use sage_core::peptide::{Peptide, Site};
 use sage_core::scoring::{Feature, ScoreType, Scorer};
 use sage_core::spectrum::ProcessedSpectrum;
 
@@ -111,9 +115,151 @@ pub struct GlycoCandidate {
     pub random_y: f32,
     pub random_oxonium: f32,
     pub explanations: Vec<Explanation>,
+    /// Site-spanning fragment counts, when `glyco.site_features` is on.
+    pub site: SiteFragments,
 }
 
-/// Counters for the run summary.
+/// Matched b/y ions of a glyco candidate, from its fragment annotation.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct SiteFragments {
+    /// Matched b/y ions that span the glycosylation site, in any form.
+    pub matched: u16,
+    /// The ones matched without the HexNAc.
+    pub bare: u16,
+    /// Site-spanning ion groups (cleavages) of the peptide.
+    pub possible: u16,
+    /// Matched b/y ions (any) at fragment charge 3 or more.
+    pub high_charge: u16,
+}
+
+impl SiteFragments {
+    fn new(scorer: &Scorer, query: &ProcessedSpectrum, feature: &Feature) -> Self {
+        let Some(Site::Sequence(site)) = feature.mass_offset.map(|assignment| assignment.site)
+        else {
+            return Self::default();
+        };
+        let site = site as i32;
+        let len = feature.peptide_len as i32;
+        let fragments = scorer.annotate_candidate(query, feature);
+        let mut out = SiteFragments {
+            possible: (len - 1).max(0) as u16,
+            ..Default::default()
+        };
+        for i in 0..fragments.kinds.len() {
+            let ordinal = fragments.fragment_ordinals[i];
+            let spans = match fragments.kinds[i] {
+                Kind::A | Kind::B | Kind::C => site < ordinal,
+                Kind::X | Kind::Y | Kind::Z | Kind::ZDot => ordinal >= len - site,
+            };
+            if spans {
+                out.matched += 1;
+                if fragments.neutral_losses[i] > 0.0 {
+                    out.bare += 1;
+                }
+            }
+            if fragments.charges[i] >= 3 {
+                out.high_charge += 1;
+            }
+        }
+        out
+    }
+}
+
+/// Glycan residue masses of the Y ions excluded from b/y matching: Y0, the
+/// 0,2X cross-ring ion, HexNAc(1) with and without fucose, and every
+/// HexNAc(2..=6)Hex(0..)Fuc(0..=1)NeuAc(0..=2) core-like fragment (up to 20
+/// Hex on the oligomannose trunk, 12 otherwise; sialic acid only with at
+/// least three HexNAc and three Hex). Sorted.
+fn excluded_y_deltas() -> Vec<f32> {
+    use crate::composition::Monosaccharide;
+    let (hex, fuc, neuac) = (
+        Monosaccharide::Hex.mass(),
+        Monosaccharide::Fuc.mass(),
+        Monosaccharide::NeuAc.mass(),
+    );
+    let mut deltas = vec![
+        0.0,
+        crate::composition::HEXNAC_CROSS_RING,
+        HEXNAC,
+        HEXNAC + fuc,
+    ];
+    for hexnac in 2..=6u8 {
+        let max_hex = if hexnac == 2 { 20 } else { 12 };
+        for h in 0..=max_hex {
+            for f in 0..=1u8 {
+                let max_neuac = if hexnac >= 3 && h >= 3 { 2 } else { 0 };
+                for s in 0..=max_neuac {
+                    deltas.push(
+                        hexnac as f64 * HEXNAC + h as f64 * hex + f as f64 * fuc + s as f64 * neuac,
+                    );
+                }
+            }
+        }
+    }
+    let mut deltas: Vec<f32> = deltas.into_iter().map(|d| d as f32).collect();
+    deltas.sort_unstable_by(f32::total_cmp);
+    deltas.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+    deltas
+}
+
+/// Oxonium m/z excluded from b/y matching: [`crate::composition::OXONIUM_IONS`]
+/// plus HexHexNAc (366.140) and NeuAcHexHexNAc (657.235).
+fn excluded_oxonium() -> Vec<f32> {
+    let mut mz: Vec<f32> = crate::composition::OXONIUM_IONS
+        .iter()
+        .map(|ion| ion.mz)
+        .collect();
+    mz.extend([366.139_5, 657.235]);
+    mz
+}
+
+/// Peak exclusion for full scoring: peaks at a Y ion of the candidate's
+/// bare peptide (any charge up to the precursor's) or at an oxonium ion.
+pub fn glycan_peak_exclusion(tolerance: Tolerance) -> Arc<PeakExclusion> {
+    let deltas = excluded_y_deltas();
+    let oxonium = excluded_oxonium();
+    let slack = 2.0 * NEUTRON + AMMONIA as f32;
+    Arc::new(
+        move |peptide: &Peptide, charge: u8, query: &ProcessedSpectrum, excluded: &mut [bool]| {
+            let bare = peptide.monoisotopic - HEXNAC as f32;
+            let max_delta = query
+                .precursors
+                .first()
+                .map(|precursor| (precursor.mz - PROTON) * charge as f32 - bare + slack)
+                .unwrap_or(f32::MAX);
+            for (idx, excluded) in excluded.iter_mut().enumerate() {
+                let mz = query.peak_mz(idx);
+                let known = query.has_known_charge(idx);
+                if !known || query.charges[idx] <= 1 {
+                    let (lo, hi) = tolerance.bounds(mz - PROTON);
+                    if oxonium.iter().any(|&o| (lo..=hi).contains(&(o - PROTON))) {
+                        *excluded = true;
+                        continue;
+                    }
+                }
+                let charges = if known {
+                    query.charges[idx]..=query.charges[idx]
+                } else {
+                    1..=charge
+                };
+                for z in charges {
+                    let neutral = (mz - PROTON) * z as f32;
+                    let (lo, hi) = tolerance.bounds(neutral);
+                    let (lo, hi) = (lo - bare, hi - bare);
+                    if hi < 0.0 || lo > max_delta {
+                        continue;
+                    }
+                    let start = deltas.partition_point(|&d| d < lo);
+                    if deltas.get(start).is_some_and(|&d| d <= hi) {
+                        *excluded = true;
+                        break;
+                    }
+                }
+            }
+        },
+    )
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchCounts {
     pub spectra: usize,
@@ -186,6 +332,19 @@ impl GlycoSearch {
         // hypothesis counts fragments with and without it, so the bare
         // hypothesis would repeat the same work.
         db.offsets_only = db.mass_offsets.len() == 1;
+        // Site-spanning fragments are matched in each configured form.
+        for offset in db
+            .mass_offsets
+            .iter_mut()
+            .filter(|offset| (offset.mass() as f64 - HEXNAC).abs() < 1e-3)
+        {
+            let mut definition = (*offset.definition).clone();
+            definition.neutral_losses = config.site_losses().into();
+            offset.definition = Arc::new(definition);
+        }
+        if config.exclude_glycan_peaks {
+            db.peak_exclusion = Some(glycan_peak_exclusion(settings.fragment_tol));
+        }
 
         // The HexNAc hypothesis searches bare peptides at precursor - HexNAc,
         // so the window covers explained deltas of glycan mass, isotope
@@ -221,7 +380,10 @@ impl GlycoSearch {
             min_precursor_charge: self.settings.precursor_charge.0,
             max_precursor_charge: self.settings.precursor_charge.1,
             override_precursor_charge: self.settings.override_precursor_charge,
-            max_fragment_charge: self.settings.max_fragment_charge.or(Some(3)),
+            max_fragment_charge: self
+                .settings
+                .max_fragment_charge
+                .or(self.config.max_fragment_charge),
             chimera: false,
             report_psms: self.config.report_candidates,
             wide_window: false,
@@ -308,7 +470,13 @@ impl GlycoSearch {
                 })
                 .collect::<Vec<_>>();
             let (random_y, random_oxonium) = evidence.random_rates(peptide_mass, delta as f32);
+            let site = if self.config.site_features {
+                SiteFragments::new(scorer, query, &feature)
+            } else {
+                SiteFragments::default()
+            };
             candidates.push(GlycoCandidate {
+                site,
                 y1: evidence.y_peak(peptide_mass, HEXNAC as f32).is_some(),
                 hex_ratio: oxonium.hex_ratio,
                 peptide_mass,
@@ -322,5 +490,48 @@ impl GlycoSearch {
             });
         }
         (true, candidates)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sage_core::spectrum::Precursor;
+
+    #[test]
+    fn glycan_peaks_are_excluded_and_peptide_peaks_kept() {
+        let mut placed = Peptide::try_from(sage_core::enzyme::Digest {
+            sequence: "AANGTK".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let bare = placed.monoisotopic;
+        placed.monoisotopic += HEXNAC as f32;
+        let hex = crate::composition::Monosaccharide::Hex.mass() as f32;
+        let glycan = 2.0 * HEXNAC as f32 + 5.0 * hex;
+        // Peaks of undetermined charge, stored as singly charged neutral masses.
+        let masses = [
+            204.086_6 - PROTON,                     // HexNAc oxonium
+            300.0,                                  // unrelated
+            (bare + HEXNAC as f32) / 2.0,           // Y1 at 2+
+            bare + 2.0 * HEXNAC as f32 + 3.0 * hex, // HexNAc(2)Hex(3) Y ion at 1+
+        ];
+        let query = ProcessedSpectrum {
+            level: 2,
+            masses: masses.to_vec(),
+            charges: vec![1; masses.len()],
+            charge_is_known: vec![false; masses.len()],
+            intensities: vec![1.0; masses.len()],
+            precursors: vec![Precursor {
+                mz: (bare + glycan) / 3.0 + PROTON,
+                charge: Some(3),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let exclusion = glycan_peak_exclusion(Tolerance::Ppm(-10.0, 10.0));
+        let mut excluded = vec![false; masses.len()];
+        exclusion(&placed, 3, &query, &mut excluded);
+        assert_eq!(excluded, vec![true, false, true, true]);
     }
 }
