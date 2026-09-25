@@ -24,6 +24,15 @@ pub struct PseudoSettings {
     pub max_peaks: usize,
     /// Drop pseudo-spectra with fewer peaks than this.
     pub min_peaks: usize,
+    /// Fragment and precursor ion mobility (1/K0) must agree within this
+    /// (ignored when either has no ion mobility).
+    pub im_tolerance: f32,
+}
+
+/// Do two ion mobilities agree within `tol`? Always true when either is 0
+/// (no ion mobility).
+pub fn im_match(a: f32, b: f32, tol: f32) -> bool {
+    a == 0.0 || b == 0.0 || (a - b).abs() <= tol
 }
 
 impl Default for PseudoSettings {
@@ -35,6 +44,7 @@ impl Default for PseudoSettings {
             min_overlap: 3,
             max_peaks: 150,
             min_peaks: 6,
+            im_tolerance: 0.03,
         }
     }
 }
@@ -45,6 +55,8 @@ pub struct PrecursorTrace {
     pub mz: f32,
     pub charge: u8,
     pub intensity: f32,
+    /// Ion mobility (1/K0) at the feature apex; 0 without ion mobility.
+    pub im: f32,
     /// MS1 cycle of the first profile value.
     pub start: u32,
     pub apex: u32,
@@ -66,6 +78,7 @@ impl PrecursorTrace {
             mz: feature.monoisotopic_mz() as f32,
             charge: feature.charge,
             intensity: max,
+            im: feature.im_apex() as f32,
             start: start as u32,
             apex: (start + apex_off) as u32,
             profile,
@@ -87,6 +100,8 @@ pub struct PseudoSpectrum {
     pub charge: u8,
     pub rt: f32,
     pub precursor_intensity: f32,
+    /// Precursor ion mobility (1/K0); 0 when unknown.
+    pub im: f32,
     /// Index of the isolation window the fragments came from.
     pub window: usize,
     /// (m/z, intensity), sorted by m/z.
@@ -118,7 +133,9 @@ pub fn build(
     for (idx, hill) in
         window.apex_between_indexed(c - settings.apex_tolerance, c + settings.apex_tolerance)
     {
-        if hill.mz > precursor.mz * precursor.charge as f32 {
+        if hill.mz > precursor.mz * precursor.charge as f32
+            || !im_match(hill.im, precursor.im, settings.im_tolerance)
+        {
             continue;
         }
         let from = lo.max(hill.start as i64);
@@ -141,6 +158,7 @@ pub fn build(
         charge: precursor.charge,
         rt: apex_rt,
         precursor_intensity: precursor.intensity,
+        im: precursor.im,
         window: window_index,
         peaks,
         hills,
@@ -197,7 +215,7 @@ pub fn build_orphans(
         for (idx, hill) in
             window.apex_between_indexed(c - settings.apex_tolerance, c + settings.apex_tolerance)
         {
-            if used[idx] || taken[idx] {
+            if used[idx] || taken[idx] || !im_match(hill.im, seed.im, settings.im_tolerance) {
                 continue;
             }
             let from = lo.max(hill.start as i64).max(seed.start as i64);
@@ -225,6 +243,7 @@ pub fn build_orphans(
                 charge: 0,
                 rt: window.rts[c.clamp(0, window.rts.len() as i64 - 1) as usize],
                 precursor_intensity: 0.0,
+                im: seed.im,
                 window: window_index,
                 peaks,
                 hills: hill_ids,

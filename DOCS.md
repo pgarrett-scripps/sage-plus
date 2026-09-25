@@ -1002,18 +1002,33 @@ settings and their defaults:
   "apex_tolerance": 2,    // fragment apex within this many cycles of the precursor apex
   "ms2_min_scans": 3,     // minimum consecutive scans for a fragment hill
   "min_peaks": 6,         // drop pseudo-spectra with fewer fragments
-  "max_peaks": 150        // keep the most intense fragments
+  "max_peaks": 150,       // keep the most intense fragments
+  "im_tolerance": 0.03    // timsTOF: max 1/K0 difference between fragment and precursor hills
 }
 ```
 
 Pseudo-spectrum ids are `pseudo=<n> window=<w>`. Precursors without an MS1 isotope feature
 are not searched. The mode supports Thermo RAW, mzML and mzMLb DIA files with m/z isolation
-windows; timsTOF diaPASEF is not supported yet.
+windows, and Bruker timsTOF diaPASEF `.d` directories.
+
+For diaPASEF, every frame is first processed like [dnoise](https://github.com/pgarrett-scripps/dnoise)
+v0.5.0 does, with dnoise's defaults. That means the vertical ion-mobility filter (using its MS/MS
+settings for MS2 frames), then the horizontal-halo filter, then watershed centroiding in
+(scan, TOF) space, so each centroid keeps its 1/K0. MS2 frames are processed per diaPASEF box:
+one m/z × 1/K0 rectangle of a window group, from `DiaFrameMsMsWindows`. koth links hills by m/z
+and 1/K0, and isotope features get a 1/K0 apex. A feature is paired only with boxes that contain
+both its m/z and its 1/K0, and fragment hills must be within `im_tolerance` (1/K0) of the
+feature's apex. MS1 frames are streamed, and MS2 frames are read one window group at a time.
+`im_tolerance` has no effect on files without ion mobility.
 
 On an Orbitrap E. coli DIA run (PRIDE PXD028735, `LFQ_Orbitrap_AIF_Ecoli_01`, 151 windows of
 8 m/z), pseudo mode found 5,567 peptides at 1% FDR in 6 s with 2.3 GB peak memory. The
 wide-window chimeric search found 6,975 in 30 s with 3.0 GB. The wide-window search
 therefore stays the default for DIA, and pseudo mode is the fast option.
+
+On a timsTOF diaPASEF E. coli run (PRIDE PXD070049, `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01`,
+50 ng, 15 min), pseudo mode found 6,403 peptides in 3 min 7 s with 6.1 GB peak memory. The
+wide-window chimeric search found 8,087 in 12 min 50 s with 16.6 GB.
 
 When `dia` is off or absent, spectra are read and searched exactly as before and
 `results.json` has no `dia` entry.
