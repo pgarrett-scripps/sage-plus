@@ -551,6 +551,55 @@ Mouse wall time is 130 s at 4.5 GB peak RSS with the new defaults. Plain searche
    only core ions. Oxonium intensity ratios (Hex versus HexNAc) could separate
    mannans from complex glycans without relying on Y ions.
 
+## 9. Milestone 3: Y ions in the fragment index (2026-09-25)
+
+Milestone 2 left 22,050 explained yeast spectra, of which only 1,579 passed peptide FDR.
+That pointed at retrieval. The glyco window spans about 3,000 Da, so the peptide mass is
+free, and preliminary retrieval ranked every sequon peptide in it on b and y ions alone.
+In sceHCD spectra, the strongest peaks are often the Y ions, which carry the whole peptide
+mass.
+
+### What changed
+
+1. **Core hook.** `Parameters::build_from_peptides_with_extra_fragments` appends
+   caller-supplied masses to each peptide's preliminary fragments. They only count toward
+   preliminary retrieval, and full scoring is unchanged. `build_from_peptides` passes no
+   extra masses, so normal searches are identical: 8,674 mouse and 7,940 yeast PSMs,
+   re-checked after the change.
+2. **Six Y ions per sequon peptide** (`glyco.index_y_ions`, on by default): Y0, Y1,
+   Y1+Fuc and HexNAc(2)Hex(1..=3). The HexNAc hypothesis also looks up every indexed
+   fragment at +HexNAc, so Y2 and Y2+Fuc count too. Decoys are reversed peptides with
+   the same mass, so they get the same Y ions, and target-decoy competition stays fair.
+
+### Before and after
+
+Release builds, same runs and machine as section 8, with `report_candidates: 50`.
+
+| | Mouse glycoPSMs | Yeast glycoPSMs | Yeast non-yeast glycans | Yeast peptide-FDR passes | Yeast wall / peak RSS | Mouse wall / peak RSS |
+| --- | --- | --- | --- | --- | --- | --- |
+| Milestone 2 | 5,909 | 992 | 2.6% | 1,579 | 139 s / 5.6 GB | 130 s / 4.5 GB |
+| Milestone 3, Y-ion index (**default**) | **6,860** | **1,229** | **2.4%** | 1,620 | 109 s / 5.6 GB | 97 s / 4.5 GB |
+
+Index cost: glyco fragments grow by 14%, from 22.7 to 25.9 million in yeast and from 17.0
+to 19.3 million in mouse. That is about 19 MB and 14 MB at 6 bytes per fragment. Peak
+RSS did not change measurably. Wall time went down, within machine noise.
+
+Tried and not adopted (fast-release builds, yeast):
+
+1. **Y ladder to HexNAc(2)Hex(6)**, nine ions: 1,227 yeast, 6,835 mouse. No gain for 6%
+   more fragments.
+2. **`report_candidates: 100`**: 1,217. **`explain_candidates: 20`**: 1,237. Retrieval
+   depth is no longer the limit.
+
+### What is left
+
+1. **Yeast is at 45% of MSFragger-Glyco** (1,229 against about 2,745). 23,195 yeast
+   spectra are explained, but only 1,620 pass peptide FDR, and deeper candidate lists no
+   longer help. So the limit is now how well the peptide model separates correct
+   candidates from wrong ones. Full scoring still ranks on b and y ions only. Y-ion counts
+   in the hyperscore, or a glyco-specific peptide score, is the next lever.
+2. **Ties.** 143 yeast decoy winners pass peptide FDR, down from 219.
+
 ## Appendix: code and measurements
 
 - `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):
