@@ -267,18 +267,18 @@ impl Runner {
 }
 
 impl Runner {
-    pub(super) fn spectrum_fdr(&self, features: &mut Vec<Feature>) -> usize {
-        if sage_core::ml::linear_discriminant::score_psms(features, self.parameters.precursor_tol)
-            .is_none()
-        {
-            log::warn!("linear model fitting failed, falling back to heuristic discriminant score");
+    pub(super) fn spectrum_fdr(&self, features: &mut [Feature]) -> usize {
+        use sage_core::ml::linear_discriminant::{score_psms, score_psms_fallback};
+        if let Err(failure) = score_psms(features, self.parameters.precursor_tol) {
+            let message = format!(
+                "linear discriminant model not used ({failure}); ranking PSMs by the heuristic score ln(1 - poisson) + longest_y_pct / 3"
+            );
+            log::warn!("{message}");
             self.events.emit(EventKind::Warning {
                 code: "discriminant_model_fallback".into(),
-                message: "linear model fitting failed; using heuristic discriminant score".into(),
+                message,
             });
-            features.par_iter_mut().for_each(|feat| {
-                feat.discriminant_score = (-feat.poisson as f32).ln_1p() + feat.longest_y_pct / 3.0
-            });
+            score_psms_fallback(features);
         }
         sort_features_by_discriminant(features);
         sage_core::ml::qvalue::spectrum_q_value(features)

@@ -9,6 +9,23 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed (discriminant fallback)
+- The linear discriminant model now gives zero weight to feature columns that are constant
+  across all PSMs (ion mobility on Orbitrap data, rank when only rank 1 is reported, model
+  deltas without a model) and solves over the rest. Before, these columns could make the solve
+  fail and silently drop scoring to the heuristic: on a DIA pseudo-spectrum search this raised
+  peptides at 1% FDR from 3,121 to 5,532. Scores on runs that already fitted change by rounding
+  only.
+- The linear discriminant model is now also rejected when there are fewer than 20 target or
+  20 decoy PSMs, when the within-class scatter matrix is singular (previously the solver's
+  ridge silently set the coefficients), or when the model does not separate targets from
+  decoys. NaN or infinite features are a warning, not an error asking for a bug report. The
+  warning and the `discriminant_model_fallback` event now say why the model was not used.
+- The heuristic fallback score `ln(1 - poisson) + longest_y_pct / 3` caps the Poisson term at 8,
+  so an underflowed match probability no longer produces an infinite score, and the fallback
+  now estimates `posterior_error` (log10 PEP) from the heuristic score when both targets and
+  decoys are present, or reports 0 (PEP 1) otherwise. Previously it left the placeholder 1.0.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
