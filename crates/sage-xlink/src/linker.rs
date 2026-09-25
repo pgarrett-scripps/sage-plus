@@ -136,9 +136,11 @@ pub struct CrosslinkSettings {
     /// written.
     pub output_q_value: f32,
     /// CSM and residue-pair q-value at which crosslinks are counted as
-    /// identified in the run summary. The estimate is `(TD - DD) / TT`; on
-    /// the two ground-truth sets, 0.01 gave about 2% true FDR and 0.002 about
-    /// 1% (see docs/explore/CROSSLINK_SEARCH.md, "Calibration").
+    /// identified in the run summary. The default is 0.01. The estimate
+    /// `(TD - DD) / TT` is optimistic for crosslinks: on the two ground-truth
+    /// sets, 0.01 gave 2.4-2.7% true FDR. Use 0.002 (and filter output at
+    /// `csm_q <= 0.002`) for about 1% true FDR; see
+    /// docs/explore/CROSSLINK_SEARCH.md, "Calibration".
     pub q_value_threshold: f32,
 }
 

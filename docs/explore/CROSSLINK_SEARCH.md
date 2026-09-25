@@ -375,8 +375,12 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
 - All other fields are optional; the values shown are the defaults.
 - `q_value_threshold` is the estimated CSM and residue-pair FDR at which the run summary
   counts crosslinks. `output_q_value` controls which CSMs are written. The search never
-  applies a stricter cutoff than the one set here. See "Calibration" for the cutoff that
-  gives about 1% true FDR.
+  applies a stricter cutoff than the one set here.
+- **Recommended for a true 1% FDR:** set `"q_value_threshold": 0.002`, and filter
+  `crosslinks.sage.parquet` at `csm_q <= 0.002` (CSMs) or `residue_pair_q <= 0.002`
+  (residue pairs).
+  - The default stays at 0.01, but at that value the true FDR is 2.4–2.7% on the
+    ground-truth sets (see "Calibration").
 - Keep the M0 monolink `mass_offset` mods in `variable_mods`, so that monolinks are not
   forced into crosslinks. Since Beta 10 they must be named definitions, e.g.
   `"DSSO_hydrolyzed": {"mass": 176.01433, "sites": ["K"], "search_mode": "mass_offset", ...}`
