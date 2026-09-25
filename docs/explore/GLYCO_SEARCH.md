@@ -12,7 +12,9 @@ hypothesis" to retrieval and resolves the composition afterwards.
 
 A prototype of the parts that do not depend on retrieval is in
 `crates/sage/src/glycan.rs`: composition parsing, the composition library, oxonium
-gating, and the Y-ion ladder, with tests. It is not wired into the search.
+gating, and the Y-ion ladder, with tests. It is not wired into the search. A harness,
+`crates/sage-cli/examples/glyco_explore.rs`, runs a milestone-1 approximation on real
+data using only existing search code. Section 6 has the results.
 
 ## 1. How established tools do it
 
@@ -166,8 +168,9 @@ Validate on:
   et al. 2017, sceHCD). Also reanalyzed in the MSFragger-Glyco paper, so published
   pGlyco2 and MSFragger-Glyco results give an external comparison at the peptide and
   site level. PXD005553 and PXD005555 are the same study's further mouse sets.
-- **PXD005565** (yeast glycoproteome, same study). Yeast N-glycans are high
-  mannose. Searching with the mammalian library makes every sialylated or fucosylated
+- **PXD005565** (fission yeast, *S. pombe*, same study; the runs pool unlabeled,
+  15N- and 13C-labeled cells, so only about a third of precursors have natural
+  isotopes). Yeast N-glycans are high mannose. Searching with the mammalian library makes every sialylated or fucosylated
   complex composition a known-false glycan assignment. This gives an empirical glycan
   FDP for free and is the main tool for milestone 2.
 - Peptide-level calibration: the existing FDRBench entrapment tooling
@@ -252,6 +255,140 @@ were checked. File lists and instrument methods were not.
    enriched data it is one open search of the glyco index per spectrum. Measure this in
    milestone 1 before committing to the open-window design over glycan-first retrieval.
 
+## 6. Real-data test (2026-09-25)
+
+One run from each study, searched with `glyco_explore`. Outputs are in
+`/mnt/data1/explore-data/glyco/runs/<run>/` (`summary.tsv`, `glyco_psms.tsv`,
+`config.json`).
+
+### What the harness does
+
+1. Reads the Thermo .raw directly, keeps the 300 most intense peaks, and deisotopes.
+2. Gate: the HexNAc oxonium ion 204.087 plus at least one other oxonium ion, at 20 ppm.
+3. Index: tryptic peptides with 2 missed cleavages, 5–50 aa and 500–5000 Da, keeping
+   only those with an `N-{P}-[ST]` sequon (`Peptide::compatible_sites`, then
+   `Parameters::build_from_peptides`). The index has target and decoy peptides.
+4. Search: the stock `Scorer` searches gated spectra with an asymmetric Da precursor
+   window that spans the glycan library, from −(Gmax + 1.5) to −(Gmin − HexNAc) + 0.1.
+   A labile HexNAc mass offset on the sequon (neutral loss of 203.079, optional) lets
+   fragments carry either nothing or the innermost HexNAc. This is milestone 1's single
+   open hypothesis, built from existing parts.
+5. Assignment: takes the best-ranked of 5 candidates whose precursor delta a library
+   composition explains within 20 ppm (isotope 0 or +1, optionally plus one NH3
+   adduct). Ties among compositions are broken in order by:
+   1. sialic-acid oxonium consistency (274/292 for NeuAc, 308 for NeuGc)
+   2. core Y-ion matches
+   3. no adduct, then isotope 0, then mass error
+6. FDR: the stock LDA (`score_psms`, Da mode) and spectrum q-values. This is
+   peptide-level only. There is no glycan FDR yet.
+
+### Gate and Y-ion ladder
+
+"Ladder" is a peptide-free measure: the longest chain of peaks, at one charge, separated
+by HexNAc, Hex or Fuc residue masses above 500 Da. Ungated spectra are the background.
+
+| Run | MS2 | Gated | Ladder ≥4 steps, gated | Ladder ≥4 steps, ungated | Y0/Y1 seen in 1% PSMs |
+| --- | --- | --- | --- | --- | --- |
+| MouseBrain-Z-T-1 | 53,102 | 96.2% | 34.7% | 4.2% | 89–93% |
+| cwq_mix2-1_726 (yeast) | 59,609 | 73.3% | 49.1% | 21.0% | 84–95% |
+| Human HCD, not glyco-enriched (control) | 60,676 | 0.002% (1 spectrum) | — | — | — |
+
+The gate is specific. On an ordinary human HCD run it passed 1 of 60,676 spectra. Both
+glyco datasets are enriched, so nearly everything passes and the gate saves little time
+here. The ladder of three or fewer steps is not specific (57–97% of ungated spectra show
+two steps). Four or more steps separates well in mouse. In yeast the background is
+higher: 21% of ungated spectra show a ladder of four or more steps, which suggests the
+gate misses some glycopeptides. After identification, the peptide-anchored Y0 or
+Y1 (peptide+HexNAc) ion is present in about 90% of glycoPSMs, which supports Y-ion
+evidence as the main composition feature.
+
+### Mouse brain (PXD005411, run 1 of 5, mouse Swiss-Prot)
+
+| Glycan list | NH3 adduct | GlycoPSMs at 1% | Decoys | Unique peptide+glycan | Unique peptides | Several compositions fit | Isotope +1 | Time |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 182 (FragPipe mouse) | no | 4,850 | 47 | 3,007 | 1,251 | 12.9% | 27.3% | 169 s |
+| 1670 (pGlyco mouse large) | no | 5,546 | 54 | 3,566 | 1,282 | 33.6% | 27.6% | 186 s |
+| 1670 | yes, sialic first | **6,168** | 60 | 3,785 | 1,347 | 47.4% | 29.0% | 184 s |
+
+The 182-list run with the adduct lost its LDA fit and fell back to ranking by
+hyperscore, which gave 1,966 PSMs. The fallback needs a more robust
+discriminant, such as regularization or the Poisson score, before this is productized.
+
+Top compositions (1670 list with adduct): HexNAc(2)Hex(5) 874, HexNAc(2)Hex(8) 422,
+HexNAc(2)Hex(9) 379, HexNAc(2)Hex(6) 342, HexNAc(4)Hex(3)Fuc(1) 235, HexNAc(2)Hex(7)
+227, HexNAc(5)Hex(3)Fuc(1) 200, HexNAc(5)Hex(3)Fuc(1)NeuAc(1) 167. High mannose makes up
+38% and fucosylated compositions 47%. Brain is known to be rich in fucosylated
+complex glycans.
+
+NeuGc works as an entrapment here, because brain carries almost none. It is assigned to
+2.3% of PSMs (139). That falls to 1.7% when two or more Y ions are required.
+MSFragger/PTM-Shepherd report 1.1% total entrapment for brain.
+
+Moving to sialic-first ranking with the adduct changed the composition mix. NeuAc rose
+from 23.6% to 38.4% and Fuc≥2 fell from 1,527 to 1,134. Two Fuc weigh 1.02 Da more
+than one NeuAc, so with isotope +1 allowed the two compositions are indistinguishable
+by precursor mass. That is the same Fuc-for-NeuAc error PTM-Shepherd attributes to
+pGlyco3. Oxonium evidence is the only thing that separates them.
+
+### Yeast (PXD005565, run 1 of 3)
+
+The provided `yeast_sp.fasta` is *S. cerevisiae*. The sample is *S. pombe*
+(Polasky et al. 2022), and the *S. cerevisiae* search gave **0** glycoPSMs at 1%. The
+runs below use reviewed *S. pombe* (UniProt, 5,129 entries) plus mouse Swiss-Prot as a
+peptide entrapment, following the published design.
+
+| Glycan list | NH3 | GlycoPSMs at 1% | Non-high-mannose (glycan FDP) | Non-HM with Y ≥2 | Isotope +1 | Adduct |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1670 + HexNAc(2)Hex(3–20) | no | 1,495 | **52.7%** | — | 23.5% | — |
+| 1670 + HexNAc(2)Hex(3–20) | yes | 1,682 | **28.5%** | 17.4% | 25.3% | 36.6% |
+| HexNAc(2)Hex(3–20) only (18) | yes | 1,437 | 0 by construction | — | 27.3% | 38.6% |
+
+- **Ammonium adducts dominate the errors.** Without adducts, the top false compositions
+  were HexNAc(4)Hex(3)Fuc(2)NeuAc(1) and HexNAc(4)Hex(5)Fuc(3)NeuGc(1). Each is exactly
+  HexNAc(2)Hex(n) + NH3 within 7 ppm (a 17.053 versus 17.027 Da difference). An adduct
+  explains 37% of assignments in yeast and 33% in mouse, so milestone 1 must include
+  the adduct.
+- **Y ions separate the remaining errors.** Of the assignments with 0–1 Y-ion matches,
+  82% (238/290) are non-high-mannose. At ≥4 Y ions the rate is 12.9%; at ≥7 it is
+  6.2%. The remaining top false assignments are HexNAc(4)Hex(5)Fuc(4) and
+  HexNAc(6)Hex(3–4). Those are the kinds of compositions a decoy-composition glycan
+  FDR (milestone 2) has to catch.
+- Labeled precursors (15N/13C, about two thirds of the pool) cannot be explained by
+  natural-isotope masses. Some of them probably survive as wrong compositions.
+
+### Comparison with published numbers
+
+Published counts are per dataset. The per-run figures divide by the number of runs
+(5 brain, 3 yeast).
+
+| | Mouse brain glycoPSMs/run | Yeast glycoPSMs/run | Yeast non-yeast glycans |
+| --- | --- | --- | --- |
+| MSFragger-Glyco + PTM-Shepherd, 1% peptide and glycan FDR, 1670 list, NH3 | ≈8,990 (44,931/5) | ≈2,745 (8,234/3) | 3.8% |
+| pGlyco3, same lists, NH3 | ≈5,400–6,400 (40–66% fewer than above) | ≈1,895 (5,684/3) | 7.5% |
+| pGlyco3, no NH3 | — | ≈1,135 (3,405/3) | 7.3% |
+| This harness, 1% peptide FDR only, 1670 list, NH3 | 6,168 | 1,682 | 28.5% (17.4% at Y≥2) |
+
+Sources: Polasky et al., MCP 2022 (PMC8933705), Tables 1 and 4; Polasky et al., Nat
+Methods 2020 (PMC7606558); Liu et al., Nat Commun 2017 (PMC5585273).
+
+### Conclusions
+
+1. **Retrieval is fine.** The sequon index plus the open window and labile HexNAc
+   offset is already at pGlyco3's per-run glycoPSM level in brain. It runs in about
+   3 minutes per 2 GB run on 16 cores, and needs no core changes. The open-window
+   design holds up. Glycan-first retrieval is not needed for milestone 1.
+2. **Composition assignment is the gap.** Assignment is about 4–8× worse than the
+   published tools on the yeast entrapment. It needs the three pieces the harness
+   lacks:
+   1. NH3 adducts, which already gave a 2× improvement
+   2. Y-ion and oxonium evidence as scored features, not tie-breaks
+   3. a glycan-level FDR with decoy compositions (milestone 2)
+   The yeast Y-ion bins show a combined score should separate true from false
+   compositions. Glycan FDR should move up to be part of milestone 1, not follow it.
+3. **The candidate budget limits recall.** Only 16,147 of 50,633 searched brain spectra
+   had an explainable candidate among the top 5. Composition-aware rescoring over more
+   candidates is the next recall lever.
+
 ## Appendix: prototype and measurements
 
 - `crates/sage/src/glycan.rs`: `GlycanComposition` (parse, mass, containment),
@@ -261,6 +398,10 @@ were checked. File lists and instrument methods were not.
   notations, the isomeric and near-isobaric pairs, the gate, and the Y ladder. Run the
   ambiguity numbers with
   `cargo test -p sage-core --lib glycan::tests::ambiguity_report -- --ignored --nocapture`.
+- `crates/sage-cli/examples/glyco_explore.rs`: real-data harness (section 6).
+  `cargo run --release -p sage-cli --example glyco_explore -- --raw X.raw --fasta X.fasta
+  --glycans list.glyc [--high-mannose] [--ammonium] --out DIR`. Glycan lists come from
+  FragPipe `tools/Glycan_Databases` (not vendored).
 - Sequon fraction: `docs/explore/sequon_fraction.py`, a tryptic digest of
   `/mnt/data1/sage-plus-scientific/20260914/references/human.fasta` counting peptides
   that overlap an `N[^P][ST]` match in protein context (K/R not before P, 7–50 aa, ≤2
