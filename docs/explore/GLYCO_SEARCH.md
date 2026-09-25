@@ -448,7 +448,7 @@ all targets and twins wins. Two choices made the FDR bite:
    glycoPSMs at 2.4% non-yeast glycans, against 708 at 1.3% for the score alone.
    The minimum of the two passed 875 but at 5.8%, so it was rejected.
 
-Peptide FDR is an LDA over 20 standardized features. Glyco features include the core,
+Peptide FDR is an LDA over 20 standardized features (22 from milestone 2). Glyco features include the core,
 best-Y and Y-intensity fractions, Y0/Y1 anchoring, oxonium count and intensity, the
 best glycan score, precursor error and ambiguity. If the fit fails it is retried with
 ridge 1e-3, 1e-2 and 1e-1, and then falls back to the hyperscore, so a run always
@@ -498,6 +498,58 @@ What moved the numbers:
    still applies.
 3. **Wall-time noise.** The machine was shared during these runs. Repeat on an idle
    machine before quoting a single number.
+
+## 8. Milestone 2: more candidates per spectrum (2026-09-25)
+
+Goal: recover yeast recall without raising the wrong-glycan rate above about 4%, and
+keep mouse at or above 5,458.
+
+### What changed
+
+1. **Top-N rescoring.** Each spectrum keeps up to `explain_candidates` (default 5)
+   explained peptide candidates, not just the first. Every candidate gets its glycan
+   assignment from the initial score model. The one with the best glycan score
+   represents the spectrum, and ties keep the better-ranked peptide. Two peptide
+   features were added (22 in total): the log peptide rank, and the lead of the
+   chosen candidate over the next one.
+2. **Deeper peptide list.** `report_candidates` went from 5 to 50. Most top-ranked
+   sequon peptides have no glycan that explains the precursor delta, so a deep list
+   is what lets more spectra reach an explained candidate. Yeast explained spectra
+   rose from 9,114 to 22,050 and mouse from 16,440 to 36,024, with no measurable time
+   or memory cost.
+3. **Trunk Y ladder for oligomannose.** For compositions with at most two HexNAc and
+   no sialic acid, every HexNAc(2)Hex(n) Y ion is generated, not just the core and the
+   ions near the precursor. This breaks target/twin ties on long yeast mannans. Applying
+   the ladder to every composition gave 920 yeast glycoPSMs but at 4.8% non-yeast
+   glycans, because complex compositions then shared the Hex ladder. So it is limited
+   to oligomannose parents.
+
+### Before and after
+
+Same runs, settings and machine as section 7. Each row adds to the one above it.
+
+| | Mouse glycoPSMs | Yeast glycoPSMs | Yeast non-yeast glycans | Yeast decoy winners | Yeast wall / peak RSS |
+| --- | --- | --- | --- | --- | --- |
+| Milestone 1 | 5,458 | 781 | 2.4% | 314 | 106–205 s / 5.6 GB |
+| Top-5 rescoring | 5,491 | 791 | 2.7% | 267 | 188 s / 5.6 GB |
+| Trunk ladder on all compositions (rejected) | 5,474 | 920 | 4.8% | 228 | 236 s / 5.5 GB |
+| Trunk ladder on oligomannose only | 5,490 | 881 | 2.5% | 246 | 160 s / 5.6 GB |
+| `report_candidates: 50` (**new default**) | **5,909** | **992** | **2.6%** | 219 | 139 s / 5.6 GB |
+
+Mouse wall time is 130 s at 4.5 GB peak RSS with the new defaults. Plain searches
+(no glyco block) are unchanged: 8,674 mouse and 7,940 yeast PSMs.
+
+### What is left
+
+1. **Yeast is still at about a third of MSFragger-Glyco** (992 against about 2,745).
+   Of 41,401 oxonium-gated yeast spectra, 22,050 get an explained candidate but only
+   1,579 pass peptide FDR.
+   The likely limit is retrieval (not yet measured): the right sequon peptide is often not in the top 50 by
+   peptide fragments alone. Glycan-aware candidate ranking, for example Y1-shifted
+   fragments in the index, is the next lever.
+2. **Ties remain.** 219 decoy winners pass peptide FDR in yeast. Most of them match
+   only core ions. Oxonium intensity ratios (Hex versus HexNAc) could separate
+   mannans from complex glycans without relying on Y ions.
 
 ## Appendix: code and measurements
 
