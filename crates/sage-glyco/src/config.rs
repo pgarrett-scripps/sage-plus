@@ -83,6 +83,10 @@ pub struct GlycoConfig {
     /// with those of the other target/decoy label (a target's reversed
     /// twin), `off` leaves the feature at zero.
     pub twin_feature: String,
+    /// Re-pick each spectrum's candidate among its explained peptides with
+    /// the peptide discriminant (b/y, Y-ion, oxonium and glycan evidence
+    /// together) instead of the glycan score alone.
+    pub rescore_candidates: bool,
 }
 
 impl Default for GlycoConfig {
@@ -107,6 +111,7 @@ impl Default for GlycoConfig {
             max_fragment_charge: Some(3),
             site_features: true,
             twin_feature: "off".into(),
+            rescore_candidates: true,
         }
     }
 }

@@ -119,6 +119,7 @@ mod imp {
                 self.search.settings.explain_ppm,
                 config.peptide_fdr,
                 config.glycan_fdr,
+                config.rescore_candidates,
             );
             log::info!(
                 "glyco: {} MS2 spectra, {} oxonium-gated, {} explained; searched in {:#?}",

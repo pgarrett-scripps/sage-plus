@@ -771,6 +771,60 @@ penalized, while a wrong target that is the isomer of a correct target is not. T
 asymmetry can make the decoy count too low. The label-blind `any` mode is flat. Testing
 `opposite` needs an entrapment set with twins (the yeast search has too few).
 
+## 13. Milestone 7: rescoring the explained candidates (2026-09-25)
+
+### What changed
+
+Each spectrum keeps up to 5 explained peptide candidates. Until now the one with the best
+glycan score won. That score already covers the Y-ion ladder (core, core-Fuc, extended
+and sialyl classes) and NeuAc/NeuGc oxonium presence or absence for each composition, so
+the missing piece was peptide b/y evidence.
+
+`glyco.rescore_candidates` (now on) fits the peptide discriminant on the glycan-score
+selection, applies it to every explained candidate, and keeps each spectrum's highest.
+Its features combine b/y evidence (hyperscore, matched peaks, runs, site coverage),
+Y-ion and oxonium evidence, and the glycan score. The model is then refitted on the new
+selection. Targets and decoys go through the same function, so competition stays fair.
+
+### Results
+
+Fast-release builds. Mouse entrapment is a new check: the mouse run searched against
+mouse plus *S. pombe* Swiss-Prot. It counts glycoPSMs whose proteins are all pombe;
+estimated FDP = entrapment × (1 + 17,277 / 5,129) / glycoPSMs.
+
+| Variant | Yeast glycoPSMs | Non-yeast glycans | Yeast entrapment | Mouse glycoPSMs | Mouse + pombe glycoPSMs | Pombe hits (est. FDP) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Glycan-score pick (M5/M6 defaults) | 1,312 | 2.7% | 27 of 1,740 | 7,292 | 7,313 | 16 (1.0%) |
+| Rescoring, 1 round | **1,328** | 2.7% | 24 of 1,882 | **8,700** | 8,392 | 14 (0.7%) |
+| Rescoring, 3 rounds | 1,341 | 2.8% | 26 of 1,904 | - | 8,438 | 14 (0.7%) |
+| Rescoring + twin `opposite` | 1,348 | 2.7% | 31 of 1,938 | - | 8,460 | 17 (0.9%) |
+| Twin `opposite` alone | 1,307 | 2.7% | 27 of 1,723 | 7,422 | 7,316 | 15 (0.9%) |
+
+Peak RSS is unchanged (5.6 GB yeast, 4.5 GB mouse), and CPU time is within noise
+(1,270 s yeast, 1,209 s mouse). Rescoring changes the pick in about a third of spectra:
+
+- In yeast it adds 45 glycoPSMs and drops 29.
+- In mouse it adds 1,160 and drops 81, and 1,036 of the gains come from a changed pick.
+
+Glycan decoy winners among peptide-passing yeast targets rise from 159 to 220; they are
+handled by glycan q, and the non-yeast glycan rate holds at 2.7%.
+
+### Decisions
+
+1. Rescoring is on, with one round. Mouse gains 19% (+1,408) with the pombe entrapment
+   rate falling, not rising. Yeast gains 16, only just above the ±9 noise floor.
+2. Extra rounds sit within noise, so they are not kept.
+3. `twin_feature: opposite` stays off. The pombe test settles section 12's question: on top
+   of rescoring it adds 68 mouse glycoPSMs but 3 pombe hits, and 6 yeast mouse-protein
+   hits. Most of its gain is false, as the label asymmetry predicted.
+
+### Why yeast still lags
+
+Rescoring moves a third of yeast picks but nets 16. Yeast targets that fail peptide FDR
+are not being out-ranked by a wrong candidate of the same spectrum. They score too low on
+their own. The next lever for yeast is spectrum-level evidence (for example Hex-ladder
+consistency for its long high-mannose chains), not candidate choice.
+
 ### Output path
 
 PR #49 adds `Runner::write_sidecar` for per-feature output files. When it lands on main,

@@ -313,6 +313,77 @@ pub fn select(candidates: &[GlycoCandidate], assignments: &[Assignment]) -> Vec<
     selected
 }
 
+/// Contiguous index ranges of the candidates of each spectrum.
+fn spectrum_groups(candidates: &[GlycoCandidate]) -> Vec<std::ops::Range<usize>> {
+    let mut groups = Vec::new();
+    let mut start = 0;
+    while start < candidates.len() {
+        let first = &candidates[start].feature;
+        let mut end = start + 1;
+        while end < candidates.len()
+            && candidates[end].feature.file_id == first.file_id
+            && candidates[end].feature.spec_id == first.spec_id
+        {
+            end += 1;
+        }
+        groups.push(start..end);
+        start = end;
+    }
+    groups
+}
+
+/// Every candidate's glycan-score lead over the best other explained
+/// candidate of its spectrum (over zero when it is the only one), as in
+/// [`select`].
+fn glycan_leads(candidates: &[GlycoCandidate], assignments: &[Assignment]) -> Vec<f64> {
+    let mut leads = vec![0.0; candidates.len()];
+    for group in spectrum_groups(candidates) {
+        for i in group.clone() {
+            let other = group
+                .clone()
+                .filter(|&j| j != i)
+                .map(|j| assignments[j].score)
+                .fold(None, |m: Option<f64>, s| Some(m.map_or(s, |m| m.max(s))))
+                .unwrap_or(0.0);
+            let lead = assignments[i].score - other;
+            leads[i] = if lead.is_finite() { lead } else { 0.0 };
+        }
+    }
+    leads
+}
+
+/// Re-pick each spectrum's candidate with the peptide discriminant. It is
+/// trained on the glycan-score selection (`first`) and then applied to all
+/// explained candidates, so peptide b/y evidence, Y-ion and oxonium
+/// consistency and the glycan score are weighed together instead of the
+/// glycan score alone. Targets and decoys are ranked by the same function,
+/// so target-decoy competition stays fair. Ties keep the better peptide
+/// rank.
+fn rescore_selection(
+    candidates: &[GlycoCandidate],
+    assignments: &[Assignment],
+    leads: &[f64],
+    first: &[usize],
+) -> Vec<usize> {
+    let row = |i: usize| peptide_features(&candidates[i], assignments[i].score, leads[i]);
+    let train: Vec<_> = first.iter().map(|&i| row(i)).collect();
+    let decoy: Vec<bool> = first
+        .iter()
+        .map(|&i| candidates[i].feature.label == -1)
+        .collect();
+    let Some(model) = fit_discriminant(&train, &decoy) else {
+        return first.to_vec();
+    };
+    let score: Vec<f64> = (0..candidates.len()).map(|i| model(&row(i))).collect();
+    spectrum_groups(candidates)
+        .into_iter()
+        .map(|group| {
+            let start = group.start;
+            group.fold(start, |b, i| if score[i] > score[b] { i } else { b })
+        })
+        .collect()
+}
+
 fn peptide_features(
     candidate: &GlycoCandidate,
     best_glycan: f64,
@@ -423,6 +494,23 @@ fn discriminant(
     decoy: &[bool],
     hyperscore: &[f64],
 ) -> (Vec<f64>, &'static str) {
+    if let Some((model, name)) = fit(rows, decoy) {
+        return (rows.iter().map(model).collect(), name);
+    }
+    log::warn!("glyco: peptide LDA failed, ranking by hyperscore");
+    (hyperscore.iter().map(|h| h.ln_1p()).collect(), "hyperscore")
+}
+
+/// The fitted peptide discriminant as a scoring function, if the fit works.
+type Discriminant = Box<dyn Fn(&[f64; PEPTIDE_FEATURES]) -> f64>;
+
+fn fit_discriminant(rows: &[[f64; PEPTIDE_FEATURES]], decoy: &[bool]) -> Option<Discriminant> {
+    fit(rows, decoy).map(|(model, _)| model)
+}
+
+/// LDA over standardized features, retried with increasing ridge
+/// regularization until every training score is finite.
+fn fit(rows: &[[f64; PEPTIDE_FEATURES]], decoy: &[bool]) -> Option<(Discriminant, &'static str)> {
     let n = rows.len().max(1) as f64;
     let mut mean = [0.0; PEPTIDE_FEATURES];
     let mut sd = [0.0; PEPTIDE_FEATURES];
@@ -456,16 +544,20 @@ fn discriminant(
         else {
             continue;
         };
-        let scores: Vec<f64> = rows
+        if rows
             .iter()
-            .map(|row| lda.score(&standardize(row)))
-            .collect();
-        if scores.iter().all(|s| s.is_finite()) {
-            return (scores, name);
+            .all(|row| lda.score(&standardize(row)).is_finite())
+        {
+            let scale = scale.clone();
+            let model = move |row: &[f64; PEPTIDE_FEATURES]| {
+                let row: [f64; PEPTIDE_FEATURES] =
+                    std::array::from_fn(|j| (row[j] - mean[j]) * scale[j]);
+                lda.score(&row)
+            };
+            return Some((Box::new(model), name));
         }
     }
-    log::warn!("glyco: peptide LDA failed, ranking by hyperscore");
-    (hyperscore.iter().map(|h| h.ln_1p()).collect(), "hyperscore")
+    None
 }
 
 /// Score candidates at both levels. `explain_ppm` sets the initial mass
@@ -477,19 +569,27 @@ pub fn score(
     explain_ppm: f32,
     peptide_fdr: f32,
     glycan_fdr: f32,
+    rescore: bool,
 ) -> (Vec<GlycoPsm>, GlycanModel, FdrSummary) {
     let mut model = GlycanModel::new(isotopes, max_adducts, explain_ppm);
     let explained = candidates.len();
     let assignments: Vec<Assignment> = candidates.iter().map(|c| model.assign(c)).collect();
 
     // One candidate per spectrum: the best-supported explained peptide.
-    let selection = select(&candidates, &assignments);
-    let mut keep = vec![false; candidates.len()];
-    for s in &selection {
-        keep[s.index] = true;
+    let mut chosen: Vec<usize> = select(&candidates, &assignments)
+        .iter()
+        .map(|s| s.index)
+        .collect();
+    let leads_all = glycan_leads(&candidates, &assignments);
+    if rescore {
+        chosen = rescore_selection(&candidates, &assignments, &leads_all, &chosen);
     }
-    let assignments: Vec<Assignment> = selection.iter().map(|s| assignments[s.index]).collect();
-    let leads: Vec<f64> = selection.iter().map(|s| s.lead).collect();
+    let mut keep = vec![false; candidates.len()];
+    for &index in &chosen {
+        keep[index] = true;
+    }
+    let assignments: Vec<Assignment> = chosen.iter().map(|&i| assignments[i]).collect();
+    let leads: Vec<f64> = chosen.iter().map(|&i| leads_all[i]).collect();
     let candidates: Vec<GlycoCandidate> = candidates
         .into_iter()
         .zip(keep)
@@ -706,5 +806,15 @@ mod tests {
                 },
             ]
         );
+        // Every candidate gets the lead its selection would have.
+        let leads = glycan_leads(&candidates, &assignments);
+        for s in &selected {
+            assert_eq!(leads[s.index], s.lead);
+        }
+        let groups: Vec<_> = spectrum_groups(&candidates)
+            .into_iter()
+            .map(|g| (g.start, g.end))
+            .collect();
+        assert_eq!(groups, vec![(0, 3), (3, 4), (4, 6)]);
     }
 }
