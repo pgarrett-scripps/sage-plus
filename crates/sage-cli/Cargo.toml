@@ -10,8 +10,9 @@ license = "MIT"
 publish = false
 
 [features]
-default = ["mzmlb"]
+default = ["mzmlb", "cloud"]
 mzmlb = ["sage-cloudpath/mzmlb"]
+cloud = ["sage-cloudpath/cloud"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

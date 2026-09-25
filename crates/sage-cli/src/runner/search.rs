@@ -267,18 +267,18 @@ impl Runner {
 }
 
 impl Runner {
-    pub(super) fn spectrum_fdr(&self, features: &mut Vec<Feature>) -> usize {
-        if sage_core::ml::linear_discriminant::score_psms(features, self.parameters.precursor_tol)
-            .is_none()
-        {
-            log::warn!("linear model fitting failed, falling back to heuristic discriminant score");
+    pub(super) fn spectrum_fdr(&self, features: &mut [Feature]) -> usize {
+        use sage_core::ml::linear_discriminant::{score_psms, score_psms_fallback};
+        if let Err(failure) = score_psms(features, self.parameters.precursor_tol) {
+            let message = format!(
+                "linear discriminant model not used ({failure}); ranking PSMs by the heuristic score ln(1 - poisson) + longest_y_pct / 3"
+            );
+            log::warn!("{message}");
             self.events.emit(EventKind::Warning {
                 code: "discriminant_model_fallback".into(),
-                message: "linear model fitting failed; using heuristic discriminant score".into(),
+                message,
             });
-            features.par_iter_mut().for_each(|feat| {
-                feat.discriminant_score = (-feat.poisson as f32).ln_1p() + feat.longest_y_pct / 3.0
-            });
+            score_psms_fallback(features);
         }
         sort_features_by_discriminant(features);
         sage_core::ml::qvalue::spectrum_q_value(features)
@@ -400,6 +400,26 @@ impl Runner {
             .output_directory
             .join(file_name.as_ref())
             .expect("valid path segment")
+    }
+
+    /// Write a sidecar output file into the output directory and record it in
+    /// `output_paths`. `name` must be listed in
+    /// [`crate::output::SIDECAR_OUTPUTS`], and each sidecar is written at most
+    /// once per run. Call it before `results.json` is written so the file is
+    /// listed there and in `run-summary.json`.
+    pub fn write_sidecar(&mut self, name: &str, bytes: Vec<u8>) -> anyhow::Result<Url> {
+        anyhow::ensure!(
+            crate::output::SIDECAR_OUTPUTS.contains(&name),
+            "sidecar output {name:?} is not registered in SIDECAR_OUTPUTS"
+        );
+        let path = self.make_path(name);
+        anyhow::ensure!(
+            !self.parameters.output_paths.contains(&path),
+            "sidecar output {name:?} was already written in this run"
+        );
+        sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path.clone());
+        Ok(path)
     }
 
     /// Score MS2 spectra. Also returns search-time `psm_id` -> occurrence for

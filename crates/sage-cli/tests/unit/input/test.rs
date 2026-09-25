@@ -213,9 +213,10 @@ fn modification_channel_offsets_are_validated_before_search() {
     let valid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }));
@@ -224,16 +225,18 @@ fn modification_channel_offsets_are_validated_before_search() {
     let invalid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         },
         "variable_mods": {
-            "K": [{
+            "Lys": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
-            }]
+                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199},
+                "sites": ["K"]
+            }
         }
     }));
     assert!(invalid
@@ -425,4 +428,23 @@ fn predict_rt_default_matches_documentation() {
         assert!(!line.contains("default: false"), "{line}");
         assert!(!line.contains("default=false"), "{line}");
     }
+}
+
+#[test]
+fn bruker_denoise_settings_are_validated() {
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": ["test.d"],
+        "bruker_config": { "denoise": { "enabled": true, "halo_peak_fraction": 2.0 } }
+    }))
+    .unwrap();
+    let error = input.validate().unwrap_err().to_string();
+    assert!(error.contains("bruker_config.denoise"), "{error}");
+
+    let input: Result<Input, _> = serde_json::from_value(serde_json::json!({
+        "bruker_config": { "denoise": { "enabled": true, "halo_fraction": 0.2 } }
+    }));
+    assert!(input.is_err());
 }

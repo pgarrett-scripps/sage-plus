@@ -38,7 +38,6 @@ default = [
     "json",
     "parquet",
     "sql",
-    "cloud",
 ]
 json = [
     "dep:serde_json",

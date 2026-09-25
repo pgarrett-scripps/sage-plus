@@ -1,9 +1,11 @@
 {
   "database": {
     "variable_mods": {
-      "^K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
-      "~K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}],
-      "]K": [{"mass": 42.0106, "name": "Acetyl", "max_count": 1}]
+      "Acetyl": {
+        "mass": 42.0106,
+        "max_count": 1,
+        "sites": ["first_residue:K", "internal_residue:K", "protein_last:K"]
+      }
     },
     "max_variable_mods": 1
   }

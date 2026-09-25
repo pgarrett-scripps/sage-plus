@@ -91,13 +91,13 @@ pub struct Builder {
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
     /// Named static definitions with mass and explicit sites.
-    /// Legacy residue-keyed masses and objects remain readable.
+    /// Upstream Sage symbol-keyed masses (`{"C": 57.021464}`) remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
     #[schemars(with = "Option<crate::modification::StaticModConfig>")]
     pub static_mods: Option<HashMap<String, StaticModEntry>>,
     /// Named variable definitions with mass, explicit sites, and optional
     /// per-modification limits, library policy, and fragment behavior.
-    /// Legacy residue-keyed arrays remain readable.
+    /// Upstream Sage symbol-keyed masses (`{"M": [15.9949]}`) remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
     #[schemars(with = "Option<crate::modification::VariableModConfig>")]
     pub variable_mods: Option<HashMap<String, Vec<VarModEntry>>>,

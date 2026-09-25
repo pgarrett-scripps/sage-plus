@@ -222,10 +222,8 @@ mod tests {
 
     #[test]
     fn preview_h3k9_and_protein_terminal_exception() {
-        let config = r#"{"database":{"variable_mods":{
-            "^K":[{"mass":42.0106,"name":"Acetyl","max_count":1}],
-            "~K":[{"mass":42.0106,"name":"Acetyl","max_count":1}],
-            "]K":[{"mass":42.0106,"name":"Acetyl","max_count":1}]}}}"#;
+        let config = r#"{"database":{"variable_mods":{"Acetyl":{"mass":42.0106,"max_count":1,
+            "sites":["first_residue:K","internal_residue:K","protein_last:K"]}}}}"#;
         let preview = preview(config, "KSTGGKAPR", "internal", 100).unwrap();
         assert_eq!(preview["variants"].as_array().unwrap().len(), 3);
         let terminal = super::preview(config, "KAK", "cterm", 100).unwrap();
@@ -235,7 +233,7 @@ mod tests {
 
     #[test]
     fn preview_is_bounded_and_validates_input() {
-        let config = r#"{"database":{"variable_mods":{"~K":[42.0]},"max_variable_mods":4}}"#;
+        let config = r#"{"database":{"variable_mods":{"Acetyl":{"mass":42.0,"sites":["internal_residue:K"]}},"max_variable_mods":4}}"#;
         let result = preview(config, "AKKKKA", "internal", 2).unwrap();
         assert_eq!(result["variants"].as_array().unwrap().len(), 2);
         assert_eq!(result["truncated"], true);
@@ -252,7 +250,7 @@ mod tests {
 
     #[test]
     fn preview_includes_search_time_offsets() {
-        let result = preview(r#"{"database":{"variable_mods":{"~K":[{"mass":42.0,"name":"Acetyl","max_count":1,"search_mode":"mass_offset"}]}}}"#,
+        let result = preview(r#"{"database":{"variable_mods":{"Acetyl":{"mass":42.0,"max_count":1,"search_mode":"mass_offset","sites":["internal_residue:K"]}}}}"#,
             "KAKAK", "internal", 100).unwrap();
         assert_eq!(result["variants"].as_array().unwrap().len(), 2);
         assert_eq!(

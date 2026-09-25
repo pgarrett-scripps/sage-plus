@@ -21,10 +21,10 @@ fn label_group_closure_keeps_every_channel_partner() {
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "SILAC-K": {
                 "mass": 0.0,
-                "name": "SILAC-K",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             }
         }
     }))
@@ -211,12 +211,21 @@ fn csv_output_is_complete_after_finalization() {
     std::fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(feature = "cloud")]
 #[test]
 fn remote_output_target_flushes_through_cloud_writer() {
     let url = Url::parse("memory:///nested/result.txt").unwrap();
     let mut output = OutputTarget::new(&url).unwrap();
     output.write_all(b"remote sage output\n").unwrap();
     output.finish(&url).unwrap();
+}
+
+#[cfg(not(feature = "cloud"))]
+#[test]
+fn remote_output_target_requires_the_cloud_feature() {
+    let url = Url::parse("s3://bucket/results.sage.tsv").unwrap();
+    let message = OutputTarget::new(&url).err().unwrap().to_string();
+    assert!(message.contains("`cloud` feature"), "{message}");
 }
 
 #[test]
@@ -356,4 +365,70 @@ fn report_keeps_same_basename_files_separate() {
     // PSM targets and average precursor charge are per input file.
     assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
     assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
+}
+
+#[test]
+fn denoise_warns_about_inputs_it_cannot_change() {
+    let (directory, _) = temporary_output("denoise");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let runner = |denoise: bool, lfq: bool| {
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [
+                format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML"),
+                format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d"),
+            ],
+            "quant": { "lfq": lfq },
+            "bruker_config": { "denoise": { "enabled": denoise } },
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        super::Runner::new(input.build().unwrap(), 1).unwrap()
+    };
+
+    assert!(runner(false, false).denoise_warnings().is_empty());
+    let warnings = runner(true, true).denoise_warnings();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("1 other input file"));
+    let warnings = runner(true, false).denoise_warnings();
+    assert_eq!(warnings.len(), 2);
+    assert!(warnings[1].contains("quant.lfq"));
+    std::fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn sidecar_outputs_are_registered_written_once_and_listed() {
+    let (directory, _) = temporary_output("sidecar");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let mut runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    let before = runner.parameters.output_paths.len();
+
+    let error = runner
+        .write_sidecar("unregistered.parquet", b"x".to_vec())
+        .unwrap_err();
+    assert!(error.to_string().contains("not registered"));
+    assert!(!directory.join("unregistered.parquet").exists());
+
+    let name = crate::output::SIDECAR_OUTPUTS[0];
+    let path = runner.write_sidecar(name, b"sidecar".to_vec()).unwrap();
+    assert_eq!(
+        std::fs::read(path.to_file_path().unwrap()).unwrap(),
+        b"sidecar"
+    );
+    assert_eq!(runner.parameters.output_paths.len(), before + 1);
+    assert_eq!(runner.parameters.output_paths.last(), Some(&path));
+
+    assert!(runner.write_sidecar(name, b"again".to_vec()).is_err());
+    assert_eq!(runner.parameters.output_paths.len(), before + 1);
+    std::fs::remove_dir_all(directory).unwrap();
 }

@@ -14,6 +14,134 @@
         }
       ]
     },
+    "BrukerDenoiseConfig": {
+      "additionalProperties": false,
+      "description": "dnoise settings for timsTOF MS1 frames. Off by default; every other key\ndefaults to the dnoise 0.5.0 CLI default and uses the same name as\n`dnoise.toml`.",
+      "properties": {
+        "dia_ms1_im_pad": {
+          "default": 0.015,
+          "description": "Isolation window mobility padding, in 1/K0.",
+          "format": "double",
+          "type": "number"
+        },
+        "dia_ms1_mz_pad": {
+          "default": 3.0,
+          "description": "Isolation window m/z padding, in Th.",
+          "format": "double",
+          "type": "number"
+        },
+        "dia_ms1_overlap": {
+          "default": true,
+          "description": "Keep a whole feature when any of its points is inside a window.",
+          "type": "boolean"
+        },
+        "dia_ms1_window": {
+          "default": true,
+          "description": "diaPASEF: drop MS1 signal outside every padded isolation window.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "description": "Denoise MS1 frames before centroiding. Needs an `analysis.tdf`.",
+          "type": "boolean"
+        },
+        "halo": {
+          "default": true,
+          "description": "Run the horizontal halo filter after the streak filter.",
+          "type": "boolean"
+        },
+        "halo_mz_idx_half_width": {
+          "default": 80,
+          "description": "Halo reference box half-width, in TOF indices.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "halo_peak_fraction": {
+          "default": 0.1,
+          "description": "Drop a point below this fraction of its off-column neighbourhood maximum.",
+          "format": "double",
+          "type": "number"
+        },
+        "halo_scan_half_width": {
+          "default": 2,
+          "description": "Halo reference box half-width, in mobility scans.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "iterations": {
+          "default": 2,
+          "description": "Number of streak filter passes.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_internal_gap": {
+          "default": 2,
+          "description": "Largest run of empty scans bridged inside a streak.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_feature_intensity": {
+          "default": 0,
+          "description": "Total intensity a streak needs to be kept.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_feature_length": {
+          "default": 5,
+          "description": "Minimum number of occupied mobility scans in a kept streak.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_window_intensity": {
+          "default": 0,
+          "description": "Per-scan summed-intensity floor for an occupied scan.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mobility_scale": {
+          "$ref": "#/$defs/BrukerMobilityScale",
+          "default": "calibrated",
+          "description": "Scan-to-1/K0 scale the gates are placed on."
+        },
+        "ms1_polygon": {
+          "default": true,
+          "description": "ddaPASEF: drop MS1 signal outside the padded precursor selection polygon.",
+          "type": "boolean"
+        },
+        "ms1_polygon_im_pad": {
+          "default": 0.015,
+          "description": "Polygon mobility padding, in 1/K0.",
+          "format": "double",
+          "type": "number"
+        },
+        "ms1_polygon_mz_pad": {
+          "default": 3.0,
+          "description": "Polygon m/z padding, in Th.",
+          "format": "double",
+          "type": "number"
+        },
+        "ms1_polygon_overlap": {
+          "default": true,
+          "description": "Keep a whole feature when any of its points is inside the polygon.",
+          "type": "boolean"
+        },
+        "mz_half_width": {
+          "default": 3,
+          "description": "Streak filter column half-width, in TOF indices.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "BrukerFrameWindowSplittingConfig": {
       "oneOf": [
         {
@@ -78,6 +206,32 @@
     "BrukerProcessingConfig": {
       "additionalProperties": false,
       "properties": {
+        "denoise": {
+          "$ref": "#/$defs/BrukerDenoiseConfig",
+          "default": {
+            "dia_ms1_im_pad": 0.015,
+            "dia_ms1_mz_pad": 3.0,
+            "dia_ms1_overlap": true,
+            "dia_ms1_window": true,
+            "enabled": false,
+            "halo": true,
+            "halo_mz_idx_half_width": 80,
+            "halo_peak_fraction": 0.1,
+            "halo_scan_half_width": 2,
+            "iterations": 2,
+            "max_internal_gap": 2,
+            "min_feature_intensity": 0,
+            "min_feature_length": 5,
+            "min_window_intensity": 0,
+            "mobility_scale": "calibrated",
+            "ms1_polygon": true,
+            "ms1_polygon_im_pad": 0.015,
+            "ms1_polygon_mz_pad": 3.0,
+            "ms1_polygon_overlap": true,
+            "mz_half_width": 3
+          },
+          "description": "Opt-in dnoise denoising of MS1 frames before centroiding. Off by default."
+        },
         "ion_mobility_scale": {
           "$ref": "#/$defs/BrukerMobilityScale",
           "default": "calibrated",
@@ -984,10 +1138,11 @@
         },
         {
           "additionalProperties": {
-            "$ref": "#/$defs/StaticModEntry"
+            "format": "float",
+            "type": "number"
           },
           "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])"
           },
           "type": "object"
         }
@@ -1163,13 +1318,22 @@
         },
         {
           "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/VarModEntry"
-            },
-            "type": "array"
+            "anyOf": [
+              {
+                "format": "float",
+                "type": "number"
+              },
+              {
+                "items": {
+                  "format": "float",
+                  "type": "number"
+                },
+                "type": "array"
+              }
+            ]
           },
           "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?|~[ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?)(?![\\s\\S])"
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])"
           },
           "type": "object"
         }
@@ -1426,7 +1590,7 @@
             }
           ],
           "default": null,
-          "description": "Named static definitions with mass and explicit sites.\nLegacy residue-keyed masses and objects remain readable."
+          "description": "Named static definitions with mass and explicit sites.\nUpstream Sage symbol-keyed masses (`{\"C\": 57.021464}`) remain readable."
         },
         "variable_mods": {
           "anyOf": [
@@ -1438,7 +1602,7 @@
             }
           ],
           "default": null,
-          "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nLegacy residue-keyed arrays remain readable."
+          "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
         }
       },
       "type": "object"

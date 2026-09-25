@@ -238,23 +238,18 @@ fn structured_variable_mod_config_round_trips() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "fasta": "none",
         "static_mods": {
-            "C": {
-                "mass": 57.0215,
-                "name": "Carbamidomethyl"
-            }
+            "Carbamidomethyl": {"mass": 57.0215, "sites": ["C"]}
         },
         "variable_mods": {
-            "M": [15.9949],
-            "K": [
-                {
-                    "mass": 42.0106,
-                    "max_count": 1,
-                    "name": "Acetyl",
-                    "neutral_losses": [17.0265],
-                    "neutral_loss_mode": "required"
-                },
-                {"mass": 14.0157}
-            ]
+            "Oxidation": {"mass": 15.9949, "sites": ["M"]},
+            "Acetyl": {
+                "mass": 42.0106,
+                "max_count": 1,
+                "neutral_losses": [17.0265],
+                "neutral_loss_mode": "required",
+                "sites": ["K"]
+            },
+            "Methyl": {"mass": 14.0157, "sites": ["K"]}
         },
         "max_variable_mods": 2,
         "max_combinations": 0
@@ -280,14 +275,17 @@ fn structured_variable_mod_config_round_trips() {
     assert_eq!(mods[2].max_count, None);
 
     let serialized = serde_json::to_value(params).unwrap();
-    let k_entries = &serialized["variable_mods"]["K"];
-    assert!(k_entries[0].is_object());
-    assert_eq!(k_entries[0]["max_count"], 1);
-    assert_eq!(k_entries[0]["name"], "Acetyl");
-    assert_eq!(k_entries[0]["neutral_loss_mode"], "required");
-    assert!(k_entries[1].is_object());
-    assert!(k_entries[1].get("max_count").is_none());
-    assert!(serialized["variable_mods"]["M"][0].is_number());
+    let acetyl = &serialized["variable_mods"]["Acetyl"];
+    assert_eq!(acetyl["max_count"], 1);
+    assert_eq!(acetyl["neutral_loss_mode"], "required");
+    assert_eq!(acetyl["sites"], serde_json::json!(["K"]));
+    assert!(serialized["variable_mods"]["Methyl"]
+        .get("max_count")
+        .is_none());
+    assert_eq!(
+        serialized["variable_mods"]["Oxidation"]["sites"],
+        serde_json::json!(["M"])
+    );
     assert_eq!(
         serialized["static_mods"]["Carbamidomethyl"]["sites"],
         serde_json::json!(["C"])
@@ -300,17 +298,17 @@ fn channel_offsets_generate_complete_static_channels() {
         "fasta": "none",
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "SILAC-K": {
                 "mass": 0.0,
-                "name": "SILAC-K",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             },
-            "R": {
+            "SILAC-R": {
                 "mass": 0.0,
-                "name": "SILAC-R",
                 "neutral_losses": [17.026549],
                 "neutral_loss_mode": "required",
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))
@@ -347,9 +345,10 @@ fn channels_deduplicate_peptides_without_channel_sites() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "SILAC-K": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             }
         }
     }))
@@ -367,11 +366,11 @@ fn variable_channel_offsets_preserve_site_variants_and_shared_light() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "max_variable_mods": 2,
-        "variable_mods": {"K": [{
+        "variable_mods": {"SILAC-K": {
             "mass": 0.0,
-            "name": "SILAC-K",
-            "channel_offsets": {"light": 0.0, "heavy": 8.014199}
-        }]}
+            "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+            "sites": ["K"]
+        }}
     }))
     .unwrap();
     let params = builder.make_parameters();
@@ -395,10 +394,10 @@ fn channel_offsets_add_to_the_modification_base_mass() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "TMT-SILAC-K": {
                 "mass": 229.162932,
-                "name": "TMT-SILAC-K",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             }
         }
     }))
@@ -438,12 +437,12 @@ fn channel_resolved_modification_definitions_are_interned() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "Labeled-K": {
                 "mass": 229.16293,
-                "name": "Labeled-K",
                 "neutral_losses": [17.02655],
                 "neutral_loss_mode": "required",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
             }
         }
     }))
@@ -498,13 +497,13 @@ fn channel_resolved_modification_definitions_are_interned() {
 fn ptm_library_configuration_round_trips() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "variable_mods": {
-            "S": [{
+            "Phospho": {
                 "mass": 79.96633,
-                "name": "Phospho",
                 "max_count": 2,
                 "site_mode": "both",
-                "neutral_losses": [97.9769]
-            }]
+                "neutral_losses": [97.9769],
+                "sites": ["S"]
+            }
         },
         "max_variable_mods": 1,
         "max_total_variable_mods": 3,
@@ -996,15 +995,19 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
 }
 
 fn positional_parameters(keys: &[&str], mode: &str, static_mod: bool) -> Parameters {
-    let mut modifications = serde_json::Map::new();
-    for key in keys {
-        let definition = if static_mod {
-            serde_json::json!({"mass": 42.0106, "name": "Acetyl"})
-        } else {
-            serde_json::json!([{"mass": 42.0106, "name": "Acetyl", "max_count": 1, "search_mode": mode}])
-        };
-        modifications.insert((*key).into(), definition);
-    }
+    let sites = keys
+        .iter()
+        .map(|key| {
+            key.parse::<ModificationSpecificity>()
+                .unwrap()
+                .explicit_name()
+        })
+        .collect::<Vec<_>>();
+    let modifications = if static_mod {
+        serde_json::json!({"Acetyl": {"mass": 42.0106, "sites": sites}})
+    } else {
+        serde_json::json!({"Acetyl": {"mass": 42.0106, "max_count": 1, "search_mode": mode, "sites": sites}})
+    };
     serde_json::from_value::<Builder>(serde_json::json!({
         if static_mod { "static_mods" } else { "variable_mods" }: modifications,
         "generate_decoys": false, "peptide_min_mass": 0, "peptide_max_mass": 100000,
@@ -1173,7 +1176,7 @@ fn internal_library_sites_respect_position_in_both_search_modes() {
 #[test]
 fn internal_label_channels_keep_terminal_residues_unmodified() {
     let parameters = serde_json::from_value::<Builder>(serde_json::json!({
-        "static_mods":{"~K":{"mass":0.0,"name":"Label","channel_offsets":{"light":0.0,"heavy":8.0}}},
+        "static_mods":{"Label":{"mass":0.0,"channel_offsets":{"light":0.0,"heavy":8.0},"sites":["internal_residue:K"]}},
         "generate_decoys":false,"peptide_min_mass":0
     })).unwrap().make_parameters();
     let variants = parameters.modify_digests(group_digests(vec![positional_digest(
@@ -1310,16 +1313,17 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
     for (residue, sequence, mass, heavy) in [
         ("K", "PEPKR", 28.0313_f32, 4.025107_f32),
         ("K", "PEPKR", 28.0313, 8.014199),
-        ("^", "PEPKR", 28.0313, 4.025107),
+        ("peptide_n_term", "PEPKR", 28.0313, 4.025107),
         ("C", "PEPCR", 57.021464, 10.008269),
         ("M", "PEPMR", 15.9949, 6.020129),
     ] {
         let builder: Builder = serde_json::from_value(serde_json::json!({
             "generate_decoys": false,
             "static_mods": {
-                residue: {
+                "Label": {
                     "mass": mass,
-                    "channel_offsets": {"light": 0.0, "heavy": heavy}
+                    "channel_offsets": {"light": 0.0, "heavy": heavy},
+                    "sites": [residue]
                 }
             }
         }))
@@ -1345,10 +1349,11 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "variable_mods": {
-            "M": [{
+            "Label": {
                 "mass": 15.9949,
-                "channel_offsets": {"light": 0.0, "heavy": 4.025107}
-            }]
+                "channel_offsets": {"light": 0.0, "heavy": 4.025107},
+                "sites": ["M"]
+            }
         }
     }))
     .unwrap();

@@ -68,6 +68,17 @@ Sage Plus can natively read and write files through AWS S3:
 - See [AWS docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) for configuring your credentials
 - Using S3 may incur data transfer charges as well as multi-part upload request charges.
 
+S3, Google Cloud Storage, and Azure support is the `cloud` Cargo feature. It is enabled in
+release binaries, the container image, and default source builds. A local-only build omits
+it, together with `object_store` and the cloud SDK clients:
+
+```shell
+cargo build --release -p sage-cli --no-default-features --features mzmlb
+```
+
+In that build, an `s3://`, `gs://`, or `az://` path fails with an error naming the
+`cloud` feature. Local paths work the same way in both builds.
+
 ## Usage 
 
 ```shell
@@ -142,7 +153,7 @@ cryptographically exact build identity. Benchmark manifests separately record SH
 inputs and binaries. Older summaries remain readable through defaults for the new fields.
 
 For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
-does not specify `batch_size`. It does not set the Rayon worker count. CLI and MCP batch overrides
+does not specify `batch_size`. It does not set the Rayon worker count. CLI batch overrides
 take precedence over the configuration.
 
 Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
@@ -205,24 +216,8 @@ that compatible events can be added to schema version 1.
 
 Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
 accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
-`RunSummary` alongside telemetry. This application layer is intended to be shared by future
-protocol servers and user interfaces.
-
-### MCP server for AI clients
-
-The `sage-mcp` binary exposes the runner to MCP-compatible coding agents and assistants over
-local standard input/output. Build it with `cargo build --release -p sage-mcp`, then configure
-the client to launch it with a directory that contains every allowed configuration and input:
-
-```shell
-sage-mcp --root /path/to/allowed/data
-```
-
-The server can inspect and validate configurations, estimate database expansion and memory,
-start approved background searches, monitor or cancel jobs, summarize completed runs, and make
-basic analysis from the portable run summary, and bounded queries over TSV PSM and PTM-site results. Searches require `approved: true`, remote URLs
-are disabled, local inputs cannot escape `--root`, and outputs are written beneath
-`ROOT/.sage/jobs`. See `crates/sage-mcp/README.md` for client configuration and tool details.
+`RunSummary` alongside telemetry. This application layer is intended to be shared by other
+front ends.
 
 ## Configuration file schema
 
@@ -645,6 +640,66 @@ The placed peptidoform supplies mass error, FDR, quantification, localization, a
 output identity. The offset is not reported as precursor mass error. Prefiltering
 uses the same offset-aware retrieval.
 
+##### Recipe: crosslinker monolinks (DSSO, DSBU)
+
+A monolink (dead-end) is a crosslinker with one arm on the peptide and the other
+arm quenched by water, ammonia or Tris. Each quenched form is a fixed mass on K or
+the protein N-terminus, so monolinks can be searched as mass offsets without a
+crosslink search. The cleavable spacer adds optional fragment losses that leave a
+stub on the peptide.
+
+```json
+{
+  "variable_mods": {
+    "DSSO_hydrolyzed": {
+      "mass": 176.014330,
+      "sites": ["K", "protein_n_term"],
+      "search_mode": "mass_offset",
+      "neutral_losses": [122.003770, 90.031700, 72.021135]
+    },
+    "DSSO_Tris": {
+      "mass": 279.077658,
+      "sites": ["K", "protein_n_term"],
+      "search_mode": "mass_offset",
+      "neutral_losses": [225.067098, 193.095028]
+    }
+  },
+  "isotope_errors": [0, 2]
+}
+```
+
+| Crosslinker | Quench | Mass | Neutral losses |
+| --- | --- | --- | --- |
+| DSSO | Hydrolyzed (water) | 176.014330 | 122.003770, 90.031700, 72.021135 |
+| DSSO | Amidated (ammonia) | 175.030314 | 121.019754, 89.047684 |
+| DSSO | Tris | 279.077658 | 225.067098, 193.095028 |
+| DSBU | Hydrolyzed (water) | 214.095357 | 129.042593, 103.063329 |
+| DSBU | Amidated (ammonia) | 213.111341 | 128.058577, 102.079313 |
+| DSBU | Tris | 317.158685 | 232.105921, 206.126657 |
+
+The DSBU losses leave the Bu (85.052764) or BuUr (111.032028) stub on the peptide.
+The losses are optional, so fragments that kept the whole monolink still match.
+The neutral losses can be dropped if the spectra do not show stub ions.
+
+Add the amidated form only if the sample was quenched with ammonia or ammonium
+bicarbonate. It is 0.984 Da lighter than the hydrolyzed form, which is
+close to one isotope spacing. With `isotope_errors: [0, 2]`, a hydrolyzed monolink
+picked on its second isotope can match as amidated: in one DSSO test, 135 of 299
+amidated PSMs were hydrolyzed monolinks. Either leave amidated out, or set
+`isotope_errors` to `[0, 0]` when it is included.
+
+On a DSSO crosslinked peptide library (Q Exactive HF-X, stepped HCD), searched
+with K sites only, the counts of target PSMs at 1% FDR were:
+
+| Search | PSMs | With a monolink |
+| --- | --- | --- |
+| No monolinks | 130 | 0 |
+| Hydrolyzed only | 791 | 666 |
+| Hydrolyzed, Tris, amidated | 973 | 849 |
+
+Monolink rows are ordinary PSMs: the modification name appears in `peptide`, and
+localization and site reports treat it like any other variable modification.
+
 #### Preview modification placement
 
 ```shell
@@ -664,25 +719,33 @@ It trusts the supplied sequence and boundary context rather than loading a FASTA
 The limit ranges from 1 to 10000. `truncated` reports when returned variants were
 limited. Static and variable occupancy is reflected in generated variants.
 
-#### Migration from symbol keys
+#### Symbol-keyed configurations
 
-Existing residue-keyed numeric and structured configurations remain readable.
-New named definitions accept only explicit spellings in `sites`. Do not mix named
-and legacy entries within one section.
+Upstream Sage's symbol-keyed syntax still loads, so one configuration can drive both
+Sage and Sage Plus. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
+followed by a residue). Static values are masses; variable values are mass arrays,
+for example `"static_mods": {"C": 57.021464}` and `"variable_mods": {"M": [15.9949]}`.
 
-```shell
-sage old-config.json --migrate-modifications > new-config.json
-```
+Sage Plus-only extensions of this syntax were replaced by named definitions in Beta 6
+and are rejected since Beta 10, with an error that suggests the named form:
 
-The command prints a converted configuration and leaves its input untouched.
-Repeated named entries are grouped only when their definitions agree. Unnamed
-entries receive distinct deterministic `legacy_static_mods_N` or
-`legacy_variable_mods_N` identities, preserving separate occurrence limits.
-It does not infer chemical identity from mass.
+- `~K` keys and explicit-site keys such as `first_residue:K` in a symbol-keyed map.
+- Object values, such as `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}` or
+  `{"M": [{"mass": 15.9949, "max_count": 1}]}`. Move `name`, `max_count`, neutral
+  losses, channel offsets, and search or site modes into a named definition.
 
-Legacy bare `^`, `$`, `[`, and `]` become the corresponding terminal-group names.
-Legacy `^K`, `$K`, `[K`, and `]K` become first/last residue rules, preserving their
-meaning. `~K` becomes `internal_residue:K`.
+Do not mix named and symbol-keyed entries within one section. There is no automatic
+converter. To rewrite a symbol-keyed entry as a named definition, map its key to an
+explicit site:
+
+| Symbol key | Explicit site |
+| --- | --- |
+| `K` | `K` |
+| `^`, `$` | `peptide_n_term`, `peptide_c_term` |
+| `[`, `]` | `protein_n_term`, `protein_c_term` |
+| `^K`, `$K` | `first_residue:K`, `last_residue:K` |
+| `[K`, `]K` | `protein_first:K`, `protein_last:K` |
+| `~K` (no longer accepted) | `internal_residue:K` |
 
 #### Modification channels
 
@@ -1012,6 +1075,14 @@ Notes:
 - **mzml_paths**: List of strings. Despite the legacy field name, Sage accepts mzML, mzMLb, MGF, Bruker TDF, and Thermo Fisher RAW inputs. mzML and MGF paths may be local or use a configured object-store URL. mzMLb, Thermo RAW, and Bruker TDF inputs must be local because their readers require seekable files. mzMLb support is included in standard builds and release binaries. Minimal source builds created with `--no-default-features` omit it. Files ending in ".gz" or ".gzip" are inferred to be compressed. MGF spectra that cannot be searched (no TITLE, no PEPMASS, an invalid precursor mass, no peaks, mismatched peak arrays, or non-finite peak values) are skipped with one warning per file; unparseable values and missing BEGIN IONS/END IONS markers stop the search.
   - Thermo RAW input uses centroid peak lists directly. TMT signal-to-noise mode (`quant.tmt_settings.sn: true`) still requires mzML containing a noise array.
   - Bruker TDF ion mobility (1/K0) uses each frame's `TimsCalibration` model from `analysis.tdf`, matching the Bruker SDK. Every scan is converted before MS1 centroiding, and DDA precursors convert their fractional average scan. DIA window centers use the calibration row shared by most frames. Inputs that point at a file inside the `.d` directory, such as `analysis.tdf_bin`, read the same `analysis.tdf`. Inputs without an `analysis.tdf`, such as miniTDF `.ms2` directories, have no calibration table and fall back to the linear scale with a warning. Only ModelType 2 is supported; other models stop the search. Set `"bruker_config": {"ion_mobility_scale": "linear"}` to reproduce the uncalibrated scale of Beta 6 and earlier, which interpolates between the acquisition limits. `run-summary.json` records the scale applied as `models.ion_mobility_scale`, or `mixed` when only some inputs fell back to the linear scale. Mobility tolerances are relative and apply unchanged.
+  - **bruker_config.denoise**: optional timsTOF MS1 denoising with [dnoise](https://github.com/pgarrett-scripps/dnoise) v0.5.0. It is off by default. When `enabled` is true, every MS1 frame of a Bruker TDF input is filtered before MS1 centroiding. The filter keeps runs of points that persist across adjacent mobility scans, removes halos around intense peaks, and keeps points inside the MS/MS isolation region: the PASEF selection polygon for DDA, or the DIA window boxes for DIA. MS2 spectra are not changed, and neither is the dnoise CLI's default output. Sage reads MS1 frames only for LFQ, so the setting has no effect unless `quant.lfq` is true. Non-TDF inputs ignore it, and Sage logs a warning in both cases. The log reports how many MS1 points were kept. Keys and defaults, which match the dnoise CLI:
+    - `enabled` (false).
+    - Streak filter: `mz_half_width` (3 TOF indices), `min_feature_length` (5 scans), `max_internal_gap` (2 scans), `min_window_intensity` (0), `min_feature_intensity` (0), and `iterations` (2).
+    - Halo removal: `halo` (true), `halo_peak_fraction` (0.10), `halo_mz_idx_half_width` (80), and `halo_scan_half_width` (2).
+    - DDA selection-polygon gate: `ms1_polygon` (true), `ms1_polygon_overlap` (true: keep a whole streak feature if any part of it touches the gate, rather than gating point by point), `ms1_polygon_mz_pad` (3.0 Th), and `ms1_polygon_im_pad` (0.015 1/K0).
+    - DIA window gate: `dia_ms1_window` (true), `dia_ms1_overlap` (true), `dia_ms1_mz_pad` (3.0 Th), and `dia_ms1_im_pad` (0.015 1/K0).
+    - `mobility_scale` (`"calibrated"` or `"linear"`): the 1/K0 scale used to place the gates.
+    - Invalid values, such as `halo_peak_fraction` outside 0 to 1 or a negative pad, stop the search before any file is read. A gate is built only when the file has the tables it needs.
   - Example:
     ```json
     "mzml_paths": [

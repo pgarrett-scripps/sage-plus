@@ -997,7 +997,40 @@ impl ModMapValue for Vec<VarModEntry> {
     }
 }
 
-/// Normalize named definitions and legacy configurations into one engine model.
+/// Symbol-keyed maps accept only upstream Sage syntax: a residue or a terminal
+/// symbol (`^ $ [ ]`, optionally followed by a residue) mapped to masses. The
+/// Sage Plus-only extensions that named definitions replaced in Beta 6 (`~K`
+/// and explicit-site keys, and object values) are rejected.
+fn reject_legacy_extension(
+    id: &str,
+    value: &serde_json::Value,
+    specificity: ModificationSpecificity,
+) -> Result<(), String> {
+    const SEE: &str = "See \"Modifications\" in DOCS.md";
+    let site = specificity.explicit_name();
+    let upstream_key = matches!(id.as_bytes(), [_] | [b'^' | b'$' | b'[' | b']', _]);
+    if !upstream_key {
+        return Err(format!(
+            "modification key `{id}` is no longer supported in symbol-keyed maps. \
+             Use a named definition, e.g. {{\"MyMod\": {{\"mass\": 42.0106, \"sites\": [\"{site}\"]}}}}. {SEE}"
+        ));
+    }
+    let has_object = match value {
+        serde_json::Value::Object(_) => true,
+        serde_json::Value::Array(items) => items.iter().any(serde_json::Value::is_object),
+        _ => false,
+    };
+    if has_object {
+        return Err(format!(
+            "symbol key `{id}` must map to a mass, not an object. Move `name`, `max_count`, \
+             neutral losses and other fields into a named definition, e.g. \
+             {{\"MyMod\": {{\"mass\": 42.0106, \"sites\": [\"{site}\"]}}}}. {SEE}"
+        ));
+    }
+    Ok(())
+}
+
+/// Normalize named definitions and upstream symbol-keyed configurations into one engine model.
 pub fn deserialize_mod_map<'de, D, T>(
     deserializer: D,
 ) -> Result<Option<HashMap<String, T>>, D::Error>
@@ -1019,6 +1052,7 @@ where
                 )));
             }
             let specificity = id.parse::<ModificationSpecificity>().map_err(|_| de::Error::custom(format!("invalid modification key `{id}`. Named definitions require a nonempty `sites` array")))?;
+            reject_legacy_extension(&id, &value, specificity).map_err(de::Error::custom)?;
             let entry: T = serde_json::from_value(value).map_err(de::Error::custom)?;
             let key = specificity.to_string();
             if let Some(existing) = result.get_mut(&key) {
