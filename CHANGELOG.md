@@ -9,52 +9,36 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
-### Changed (CI runners)
-- CI, security and release workflows run on pinned runner images (`ubuntu-24.04`,
-  `windows-2025`) instead of `ubuntu-latest` and `windows-latest`, so a GitHub image rollover
-  cannot change release builds unannounced. macOS runners were already pinned.
-
-### Documentation (monolinks)
-- DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
-  forms) as mass offsets with optional stub neutral losses. It also covers the amidated vs
-  hydrolyzed isotope-error trap.
-
 ### Added
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
   the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
   warns when it is set without `quant.lfq` or for non-TDF inputs.
-
-### Removed
-- `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
-  explicit site for each symbol key for rewriting them as named definitions.
-- Symbol-keyed modification maps accept only upstream Sage syntax: residue or terminal-symbol
-  keys (`^ $ [ ]`, optionally with a residue) mapped to masses. The Sage Plus-only extensions that
-  named definitions replaced in Beta 6 are rejected with an error suggesting the named form:
-  `~K` and explicit-site keys (such as `first_residue:K`), and object values (such as
-  `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}`). Benchmark configurations and scripts
-  now use named definitions.
-
-### Changed
-- S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
-  It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
-  drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
-- The `sage-mcp` server crate and binary are removed; release archives and the container image no
-  longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
-- Isotope tie-break: when two candidates for a spectrum have exactly the same hyperscore, the one
-  with the smaller absolute precursor isotope error now ranks first, before the lighter peptide
-  mass. A peptidoform 0.984 Da lighter (amidated vs hydrolyzed monolink, N vs D) read at isotope
-  +1 no longer displaces the isotope-0 match it ties with. Only exact ties are affected.
-
-### Added (library)
 - Offset hook: `Scorer::score_offset_hypotheses` scores peptides against caller-supplied precursor
   masses and mass offsets (`OffsetHypothesis`, `OffsetMatch`), for modules that derive offsets
   from each spectrum. Configured mass offsets now share its preliminary-matching helper.
   `Fragments` records matched peak indices (not serialized) and `Scorer` is `Clone`. Normal
   searches do not call the hook and their results are unchanged.
+- A shared path for optional search passes to write their own output file next to
+  `results.sage.parquet`. The file names are registered in `output::SIDECAR_OUTPUTS`
+  (`glyco.sage.parquet`, `crosslinks.sage.parquet`), and `Runner::write_sidecar` writes a
+  registered file once per run and adds it to `output_paths`, so it is listed in
+  `results.json` and `run-summary.json`. `--overwrite` now also removes stale sidecar files,
+  and a fresh run into a directory that holds one is refused. The `results.sage.parquet`
+  columns and the `results.json` schema are unchanged.
 
-### Changed (discriminant fallback)
+### Changed
+- CI, security and release workflows run on pinned runner images (`ubuntu-24.04`,
+  `windows-2025`) instead of `ubuntu-latest` and `windows-latest`, so a GitHub image rollover
+  cannot change release builds unannounced. macOS runners were already pinned.
+- S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
+  It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
+  drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
+- Isotope tie-break: when two candidates for a spectrum have exactly the same hyperscore, the one
+  with the smaller absolute precursor isotope error now ranks first, before the lighter peptide
+  mass. A peptidoform 0.984 Da lighter (amidated vs hydrolyzed monolink, N vs D) read at isotope
+  +1 no longer displaces the isotope-0 match it ties with. Only exact ties are affected.
 - The linear discriminant model now gives zero weight to feature columns that are constant
   across all PSMs (ion mobility on Orbitrap data, rank when only rank 1 is reported, model
   deltas without a model) and solves over the rest. Before, these columns could make the solve
@@ -71,14 +55,22 @@ entries are retained below for provenance.
   now estimates `posterior_error` (log10 PEP) from the heuristic score when both targets and
   decoys are present, or reports 0 (PEP 1) otherwise. Previously it left the placeholder 1.0.
 
-### Added (sidecar outputs)
-- A shared path for optional search passes to write their own output file next to
-  `results.sage.parquet`. The file names are registered in `output::SIDECAR_OUTPUTS`
-  (`glyco.sage.parquet`, `crosslinks.sage.parquet`), and `Runner::write_sidecar` writes a
-  registered file once per run and adds it to `output_paths`, so it is listed in
-  `results.json` and `run-summary.json`. `--overwrite` now also removes stale sidecar files,
-  and a fresh run into a directory that holds one is refused. The `results.sage.parquet`
-  columns and the `results.json` schema are unchanged.
+### Removed
+- `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
+  explicit site for each symbol key for rewriting them as named definitions.
+- Symbol-keyed modification maps accept only upstream Sage syntax: residue or terminal-symbol
+  keys (`^ $ [ ]`, optionally with a residue) mapped to masses. The Sage Plus-only extensions that
+  named definitions replaced in Beta 6 are rejected with an error suggesting the named form:
+  `~K` and explicit-site keys (such as `first_residue:K`), and object values (such as
+  `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}`). Benchmark configurations and scripts
+  now use named definitions.
+- The `sage-mcp` server crate and binary are removed; release archives and the container image no
+  longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+
+### Documentation
+- DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
+  forms) as mass offsets with optional stub neutral losses. It also covers the amidated vs
+  hydrolyzed isotope-error trap.
 
 ## [v0.1.0-beta.9] - 2026-09-25
 
