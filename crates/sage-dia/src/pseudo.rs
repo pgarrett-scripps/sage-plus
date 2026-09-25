@@ -27,6 +27,20 @@ pub struct PseudoSettings {
     /// Fragment and precursor ion mobility (1/K0) must agree within this
     /// (ignored when either has no ion mobility).
     pub im_tolerance: f32,
+    /// Which peaks survive the `max_peaks` cap.
+    pub rank: PeakRank,
+}
+
+/// Order in which fragment hills are kept when a pseudo-spectrum has more
+/// than `max_peaks` of them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PeakRank {
+    /// Most intense apex first.
+    Intensity,
+    /// Best elution-profile correlation with the precursor first.
+    Correlation,
+    /// Apex intensity times `corr^p` (clamped at 0).
+    Weighted(f32),
 }
 
 /// Do two ion mobilities agree within `tol`? Always true when either is 0
@@ -45,6 +59,7 @@ impl Default for PseudoSettings {
             max_peaks: 150,
             min_peaks: 6,
             im_tolerance: 0.03,
+            rank: PeakRank::Intensity,
         }
     }
 }
@@ -127,7 +142,7 @@ pub fn build(
         .map(|j| precursor.at(ms1.cycle_at(window.rts[j as usize]) as i64))
         .collect();
 
-    let mut peaks: Vec<(f32, f32, u32)> = Vec::new();
+    let mut peaks: Vec<(f32, f32, u32, f32)> = Vec::new();
     let mut a = Vec::with_capacity(prec.len());
     let mut b = Vec::with_capacity(prec.len());
     for (idx, hill) in
@@ -149,8 +164,15 @@ pub fn build(
             a.push(window.intensity(hill, j));
             b.push(prec[(j - lo) as usize]);
         }
-        if pearson(&a, &b) >= settings.min_corr {
-            peaks.push((hill.mz, apex_intensity(window, hill), idx as u32));
+        let r = pearson(&a, &b);
+        if r >= settings.min_corr {
+            let intensity = apex_intensity(window, hill);
+            let key = match settings.rank {
+                PeakRank::Intensity => intensity,
+                PeakRank::Correlation => r,
+                PeakRank::Weighted(p) => intensity * r.max(0.0).powf(p),
+            };
+            peaks.push((hill.mz, intensity, idx as u32, key));
         }
     }
     finish(peaks, settings).map(|(peaks, hills)| PseudoSpectrum {
@@ -167,12 +189,14 @@ pub fn build(
 
 type Peaks = (Vec<(f32, f32)>, Vec<u32>);
 
-fn finish(mut peaks: Vec<(f32, f32, u32)>, settings: &PseudoSettings) -> Option<Peaks> {
+/// `peaks` are (m/z, intensity, hill index, rank key); the `max_peaks`
+/// highest rank keys are kept.
+fn finish(mut peaks: Vec<(f32, f32, u32, f32)>, settings: &PseudoSettings) -> Option<Peaks> {
     if peaks.len() < settings.min_peaks {
         return None;
     }
     if peaks.len() > settings.max_peaks {
-        peaks.sort_by(|x, y| y.1.total_cmp(&x.1));
+        peaks.sort_by(|x, y| y.3.total_cmp(&x.3));
         peaks.truncate(settings.max_peaks);
     }
     peaks.sort_by(|x, y| x.0.total_cmp(&y.0));
@@ -230,7 +254,8 @@ pub fn build_orphans(
                 b.push(window.intensity(seed, j));
             }
             if idx == seed_idx || pearson(&a, &b) >= settings.min_corr {
-                peaks.push((hill.mz, apex_intensity(window, hill), idx as u32));
+                let intensity = apex_intensity(window, hill);
+                peaks.push((hill.mz, intensity, idx as u32, intensity));
                 members.push(idx);
             }
         }

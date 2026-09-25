@@ -70,6 +70,8 @@ struct Args {
     t2_corr: f32,
     t2_apex: i64,
     t2_psms: usize,
+    /// Diagnose mode: TSV of target precursors.
+    targets: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -86,6 +88,7 @@ fn parse_args() -> Args {
         t2_corr: 0.3,
         t2_apex: 2,
         t2_psms: 1,
+        targets: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -103,6 +106,7 @@ fn parse_args() -> Args {
             "--t2-corr" => args.t2_corr = value().parse().unwrap(),
             "--t2-apex" => args.t2_apex = value().parse().unwrap(),
             "--t2-psms" => args.t2_psms = value().parse().unwrap(),
+            "--targets" => args.targets = Some(value()),
             other => panic!("unknown flag {other}"),
         }
     }
@@ -716,6 +720,273 @@ fn tiered(args: &Args, raw: Vec<RawSpectrum>, lap: &dyn Fn(&str)) -> anyhow::Res
     Ok(report)
 }
 
+/// Gap diagnosis: for each target precursor (`--targets` TSV: key, charge,
+/// precursor m/z, RT in minutes, comma-separated theoretical fragment m/z),
+/// find its MS1 isotope feature and count the theoretical fragments present in
+/// its pseudo-spectrum under the shipped settings and with each grouping
+/// threshold relaxed. Writes `diagnose.tsv` in `--out`.
+fn diagnose(args: &Args, raw: Vec<RawSpectrum>, lap: &dyn Fn(&str)) -> anyhow::Result<String> {
+    let tims = TIMS.load(Ordering::Relaxed);
+    let (prec_ppm, frag_ppm) = if tims {
+        (15.0f32, 20.0f32)
+    } else {
+        (10.0, 15.0)
+    };
+    let hills = run_hills(args, &raw)?;
+    drop(raw);
+    lap(&format!(
+        "hills: {} MS1 precursor features, {} windows",
+        hills.precursors.len(),
+        hills.windows.len()
+    ));
+    let ms1 = &hills.ms1;
+    let precs = &hills.precursors;
+    let mut by_mz: Vec<u32> = (0..precs.len() as u32).collect();
+    by_mz.sort_by(|&a, &b| precs[a as usize].mz.total_cmp(&precs[b as usize].mz));
+    let sorted_mz: Vec<f32> = by_mz.iter().map(|&i| precs[i as usize].mz).collect();
+    let rt_span = |p: &PrecursorTrace| {
+        let last = (p.start as usize + p.profile.len()).saturating_sub(1);
+        (
+            ms1.rts[p.start as usize],
+            ms1.rts[last.min(ms1.rts.len() - 1)],
+        )
+    };
+    // Features at `mz` (± prec_ppm) whose RT span covers `rt` (± 0.05 min).
+    let near = |mz: f32, rt: f32| -> Vec<usize> {
+        let tol = mz * prec_ppm * 1e-6;
+        let lo = sorted_mz.partition_point(|&m| m < mz - tol);
+        let hi = sorted_mz.partition_point(|&m| m <= mz + tol);
+        by_mz[lo..hi]
+            .iter()
+            .map(|&i| i as usize)
+            .filter(|&i| {
+                let (a, b) = rt_span(&precs[i]);
+                rt >= a - 0.05 && rt <= b + 0.05
+            })
+            .collect()
+    };
+    let strict = PseudoSettings::default();
+    use pseudo::PeakRank;
+    let variants: Vec<(&str, PseudoSettings)> = vec![
+        ("strict", strict),
+        (
+            "corr0",
+            PseudoSettings {
+                min_corr: 0.0,
+                ..strict
+            },
+        ),
+        (
+            "corr07",
+            PseudoSettings {
+                min_corr: 0.7,
+                ..strict
+            },
+        ),
+        (
+            "apex4",
+            PseudoSettings {
+                apex_tolerance: 4,
+                ..strict
+            },
+        ),
+        (
+            "im015",
+            PseudoSettings {
+                im_tolerance: 0.015,
+                ..strict
+            },
+        ),
+        (
+            "im_any",
+            PseudoSettings {
+                im_tolerance: 100.0,
+                ..strict
+            },
+        ),
+        (
+            "rk_corr",
+            PseudoSettings {
+                rank: PeakRank::Correlation,
+                ..strict
+            },
+        ),
+        (
+            "rk_w2",
+            PseudoSettings {
+                rank: PeakRank::Weighted(2.0),
+                ..strict
+            },
+        ),
+        (
+            "rk_w4",
+            PseudoSettings {
+                rank: PeakRank::Weighted(4.0),
+                ..strict
+            },
+        ),
+        (
+            "cap300",
+            PseudoSettings {
+                max_peaks: 300,
+                ..strict
+            },
+        ),
+        (
+            "cap1k",
+            PseudoSettings {
+                max_peaks: 1000,
+                ..strict
+            },
+        ),
+        (
+            "all",
+            PseudoSettings {
+                min_corr: -2.0,
+                apex_tolerance: 6,
+                im_tolerance: 100.0,
+                min_peaks: 0,
+                max_peaks: 100_000,
+                min_overlap: 1,
+                ..strict
+            },
+        ),
+    ];
+    let count = |peaks: &[(f32, f32)], frags: &[f32]| -> usize {
+        frags
+            .iter()
+            .filter(|&&f| {
+                let tol = f * frag_ppm * 1e-6;
+                let i = peaks.partition_point(|p| p.0 < f - tol);
+                i < peaks.len() && peaks[i].0 <= f + tol
+            })
+            .count()
+    };
+    let text = std::fs::read_to_string(args.targets.as_deref().expect("--targets"))?;
+    let targets: Vec<(String, u8, f32, f32, Vec<f32>)> = text
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let c: Vec<&str> = l.split('\t').collect();
+            (
+                c[0].to_string(),
+                c[1].parse().unwrap(),
+                c[2].parse().unwrap(),
+                c[3].parse().unwrap(),
+                c[4].split(',').map(|x| x.parse().unwrap()).collect(),
+            )
+        })
+        .collect();
+    let rows: Vec<String> = targets
+        .par_iter()
+        .map(|(key, z, mz, rt, frags)| {
+            let zf = *z as f32;
+            // Classify the best feature: exact, isotope offset k, other charge.
+            let mut kind = "none".to_string();
+            let mut pick: Option<usize> = None;
+            let exact: Vec<usize> = near(*mz, *rt)
+                .into_iter()
+                .filter(|&i| precs[i].charge == *z)
+                .collect();
+            let closest = |v: &[usize]| {
+                v.iter().copied().min_by(|&a, &b| {
+                    let da = (ms1.rts[precs[a].apex as usize] - rt).abs();
+                    let db = (ms1.rts[precs[b].apex as usize] - rt).abs();
+                    da.total_cmp(&db)
+                })
+            };
+            if let Some(i) = closest(&exact) {
+                kind = "exact".into();
+                pick = Some(i);
+            } else {
+                for k in [-1i32, 1, -2, 2] {
+                    let m = mz + k as f32 * 1.003_355 / zf;
+                    let v: Vec<usize> = near(m, *rt)
+                        .into_iter()
+                        .filter(|&i| precs[i].charge == *z)
+                        .collect();
+                    if let Some(i) = closest(&v) {
+                        kind = format!("iso{k:+}");
+                        pick = Some(i);
+                        break;
+                    }
+                }
+                if pick.is_none() {
+                    let mut other: Vec<usize> = near(*mz, *rt);
+                    for k in [-1i32, 1] {
+                        other.extend(near(mz + k as f32 * 1.003_355 / zf, *rt));
+                    }
+                    if let Some(i) = closest(&other) {
+                        kind = format!("charge{}", precs[i].charge);
+                        pick = Some(i);
+                    }
+                }
+            }
+            // An MS1 hill at the precursor m/z covering this RT?
+            let c1 = ms1.cycle_at(*rt) as u32;
+            let hill = ms1
+                .find(*mz, prec_ppm)
+                .iter()
+                .any(|h| h.start <= c1 + 2 && c1 <= h.end() + 2);
+            let mut cols = vec![key.clone(), z.to_string(), kind, (hill as u8).to_string()];
+            match pick {
+                Some(i) => {
+                    let p = &precs[i];
+                    let boxes: Vec<usize> = hills
+                        .windows
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, w)| w.contains(p.mz as f64, p.im as f64))
+                        .map(|(k, _)| k)
+                        .collect();
+                    cols.push(format!("{:.2}", (p.mz - mz) / mz * 1e6));
+                    cols.push(format!("{:.3}", ms1.rts[p.apex as usize] - rt));
+                    cols.push(format!("{:.3}", p.im));
+                    cols.push(boxes.len().to_string());
+                    for (_, s) in &variants {
+                        // Best over boxes: (matched theoretical, peaks); -1 if not built.
+                        let best = boxes
+                            .iter()
+                            .filter_map(|&k| pseudo::build(p, ms1, &hills.windows[k], k, s))
+                            .map(|ps| {
+                                // Null: the same fragments shifted by +11 Th.
+                                let null: Vec<f32> = frags.iter().map(|f| f + 11.0).collect();
+                                (
+                                    count(&ps.peaks, frags),
+                                    ps.peaks.len(),
+                                    count(&ps.peaks, &null),
+                                )
+                            })
+                            .max();
+                        match best {
+                            Some((n, np, nn)) => cols.push(format!("{n}/{np}/{nn}")),
+                            None => cols.push("-1/0/0".into()),
+                        }
+                    }
+                }
+                None => {
+                    cols.extend(["", "", "", "0"].iter().map(|s| s.to_string()));
+                    cols.extend(variants.iter().map(|_| "-1/0/0".to_string()));
+                }
+            }
+            cols.push(frags.len().to_string());
+            cols.join("\t")
+        })
+        .collect();
+    let mut header = vec![
+        "key", "charge", "kind", "ms1_hill", "dppm", "drt", "im", "boxes",
+    ];
+    header.extend(variants.iter().map(|v| v.0));
+    header.push("n_frags");
+    let mut out = header.join("\t") + "\n";
+    for r in rows {
+        out += &r;
+        out.push('\n');
+    }
+    std::fs::write(format!("{}/diagnose.tsv", args.out), out)?;
+    Ok(format!("diagnosed {} targets\n", targets.len()))
+}
+
 fn hill_filtered(
     args: &Args,
     mut raw: Vec<RawSpectrum>,
@@ -822,7 +1093,7 @@ fn main() -> anyhow::Result<()> {
     } else if matches!(args.mode.as_str(), "wide" | "hillfilter") {
         sage_cloudpath::util::read_spectra(&url, 0, None, Default::default(), false)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?
-    } else if args.mode == "tiered" {
+    } else if matches!(args.mode.as_str(), "tiered" | "diagnose") {
         Vec::new()
     } else {
         anyhow::bail!("mode {} does not support timsTOF input", args.mode);
@@ -978,6 +1249,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         "tiered" => report += &tiered(&args, raw, &lap)?,
+        "diagnose" => report += &diagnose(&args, raw, &lap)?,
         "hillfilter" => report += &hill_filtered(&args, raw, &lap)?,
         "rescore" => {
             let hills = detect_hills(&raw, &args, &lap)?;
