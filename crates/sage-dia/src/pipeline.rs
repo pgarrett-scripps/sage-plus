@@ -46,6 +46,10 @@ pub struct DiaSettings {
     /// Keep at most this many fragment peaks (by intensity) per pseudo-spectrum.
     #[schemars(range(min = 1))]
     pub max_peaks: u32,
+    /// timsTOF only: fragment hills must lie within this ion mobility (1/K0)
+    /// of the precursor feature's apex mobility.
+    #[schemars(range(min = 0.0))]
+    pub im_tolerance: f32,
 }
 
 impl Default for DiaSettings {
@@ -58,6 +62,7 @@ impl Default for DiaSettings {
             ms2_min_scans: 3,
             min_peaks: p.min_peaks as u32,
             max_peaks: p.max_peaks as u32,
+            im_tolerance: p.im_tolerance,
         }
     }
 }
@@ -74,15 +79,19 @@ impl DiaSettings {
         if self.ms2_min_scans == 0 || self.max_peaks == 0 {
             return Err("dia.ms2_min_scans and dia.max_peaks must be at least 1".into());
         }
+        if !(self.im_tolerance.is_finite() && self.im_tolerance >= 0.0) {
+            return Err("dia.im_tolerance must be a non-negative number".into());
+        }
         Ok(())
     }
 
-    fn pseudo(&self) -> PseudoSettings {
+    pub fn pseudo(&self) -> PseudoSettings {
         PseudoSettings {
             apex_tolerance: self.apex_tolerance as i64,
             min_corr: self.min_corr,
             min_peaks: self.min_peaks as usize,
             max_peaks: self.max_peaks as usize,
+            im_tolerance: self.im_tolerance,
             ..Default::default()
         }
     }
@@ -218,12 +227,12 @@ pub fn build_pseudo(hills: &RunHills, settings: &PseudoSettings) -> Vec<PseudoSp
         .precursors
         .par_iter()
         .flat_map_iter(|p| {
-            let mz = p.mz as f64;
+            let (mz, im) = (p.mz as f64, p.im as f64);
             hills
                 .windows
                 .iter()
                 .enumerate()
-                .filter(move |(_, w)| w.lower <= mz && mz <= w.upper)
+                .filter(move |(_, w)| w.contains(mz, im))
                 .filter_map(move |(i, w)| pseudo::build(p, &hills.ms1, w, i, settings))
         })
         .collect()
@@ -338,6 +347,7 @@ pub fn to_raw(
         charge: (p.charge > 0).then_some(p.charge),
         isolation_window: window
             .map(|(lo, hi)| Tolerance::Da(lo as f32 - p.precursor_mz, hi as f32 - p.precursor_mz)),
+        inverse_ion_mobility: (p.im > 0.0).then_some(p.im),
         ..Default::default()
     }];
     raw.mz = p.peaks.iter().map(|x| x.0).collect();
@@ -372,6 +382,23 @@ pub fn pseudo_spectra(
 ) -> anyhow::Result<Vec<RawSpectrum>> {
     raw.sort_by(|a, b| a.scan_start_time.total_cmp(&b.scan_start_time));
     let hills = detect_hills(&raw, settings.ms2_min_scans)?;
+    raw.retain(|s| keep_ms1 && s.ms_level == 1);
+    raw.extend(from_hills(hills, file_id, settings));
+    Ok(raw)
+}
+
+/// Pseudo-MS2 spectra of a timsTOF diaPASEF `.d` directory (see
+/// [`crate::tims`]). MS1 spectra are not included.
+pub fn pseudo_spectra_tdf(
+    path: &std::path::Path,
+    file_id: usize,
+    settings: &DiaSettings,
+) -> anyhow::Result<Vec<RawSpectrum>> {
+    let hills = crate::tims::detect_hills(path, settings.ms2_min_scans)?;
+    Ok(from_hills(hills, file_id, settings))
+}
+
+fn from_hills(hills: RunHills, file_id: usize, settings: &DiaSettings) -> Vec<RawSpectrum> {
     let pseudo = build_pseudo(&hills, &settings.pseudo());
     log::info!(
         "DIA pseudo-spectra: {} from {} MS1 precursor features in {} isolation windows",
@@ -383,14 +410,11 @@ pub fn pseudo_spectra(
         log::warn!("DIA pseudo mode: no MS2 isolation windows found; is this a DIA file?");
     }
     drop(hills);
-    raw.retain(|s| keep_ms1 && s.ms_level == 1);
-    raw.extend(
-        pseudo
-            .iter()
-            .enumerate()
-            .map(|(i, p)| to_raw(file_id, i, p, None)),
-    );
-    Ok(raw)
+    pseudo
+        .iter()
+        .enumerate()
+        .map(|(i, p)| to_raw(file_id, i, p, None))
+        .collect()
 }
 
 #[cfg(test)]
@@ -497,5 +521,26 @@ mod tests {
         assert!(DiaSettings::default().is_off());
         assert!(serde_json::from_str::<DiaSettings>(r#"{"mode": "wide"}"#).is_err());
         assert!(serde_json::from_str::<DiaSettings>(r#"{"q3": true}"#).is_err());
+        let bad = DiaSettings {
+            im_tolerance: -0.1,
+            ..Default::default()
+        };
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn ion_mobility_gates_boxes_and_fragments() {
+        use crate::pseudo::im_match;
+        let b = Channel::from_hills(400.0, 425.0, vec![], vec![]).with_im(0.9, 1.1);
+        assert!(b.contains(410.0, 1.0));
+        assert!(!b.contains(410.0, 1.2), "outside the box's 1/K0 range");
+        assert!(!b.contains(430.0, 1.0), "outside the box's m/z range");
+        assert!(b.contains(410.0, 0.0), "no ion mobility: m/z only");
+        assert!(im_match(1.00, 1.02, 0.03));
+        assert!(!im_match(1.00, 1.05, 0.03));
+        assert!(
+            im_match(0.0, 1.05, 0.03),
+            "IM-less hills are never rejected"
+        );
     }
 }

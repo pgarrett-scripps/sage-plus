@@ -481,6 +481,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "im_tolerance": {
+          "default": 0.029999999329447746,
+          "description": "timsTOF only: fragment hills must lie within this ion mobility (1/K0)\nof the precursor feature's apex mobility.",
+          "format": "float",
+          "minimum": 0.0,
+          "type": "number"
+        },
         "max_peaks": {
           "default": 150,
           "description": "Keep at most this many fragment peaks (by intensity) per pseudo-spectrum.",

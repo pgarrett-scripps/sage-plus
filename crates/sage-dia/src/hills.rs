@@ -13,6 +13,8 @@ use koth_core::Hill;
 pub struct CompactHill {
     pub mz: f32,
     pub intensity_max: f32,
+    /// Intensity-weighted ion mobility (1/K0); 0 when the run has none.
+    pub im: f32,
     /// First cycle of the profile.
     pub start: u32,
     /// Cycle of the highest point.
@@ -35,6 +37,9 @@ pub struct Channel {
     /// Isolation window bounds in m/z (`0..inf` for MS1).
     pub lower: f64,
     pub upper: f64,
+    /// Ion-mobility bounds (1/K0) of a diaPASEF box; `0..inf` without IM.
+    pub im_lower: f64,
+    pub im_upper: f64,
     /// Retention time (minutes) of each cycle of this channel.
     pub rts: Vec<f32>,
     hills: Vec<CompactHill>,
@@ -58,6 +63,7 @@ impl Channel {
             compact.push(CompactHill {
                 mz: hill.mz as f32,
                 intensity_max: hill.intensity_max as f32,
+                im: hill.im as f32,
                 start: hill.scan_start as u32,
                 apex: hill.scan_apex as u32,
                 offset: arena.len() as u32,
@@ -72,12 +78,28 @@ impl Channel {
         Channel {
             lower,
             upper,
+            im_lower: 0.0,
+            im_upper: f64::INFINITY,
             rts,
             hills: compact,
             mzs,
             by_apex,
             arena,
         }
+    }
+
+    /// Restrict the channel to an ion-mobility range (a diaPASEF box).
+    pub fn with_im(mut self, im_lower: f64, im_upper: f64) -> Self {
+        self.im_lower = im_lower;
+        self.im_upper = im_upper;
+        self
+    }
+
+    /// Does this channel isolate a precursor at `mz` (and `im`, when known)?
+    pub fn contains(&self, mz: f64, im: f64) -> bool {
+        self.lower <= mz
+            && mz <= self.upper
+            && (im == 0.0 || (self.im_lower <= im && im <= self.im_upper))
     }
 
     pub fn len(&self) -> usize {

@@ -3273,6 +3273,7 @@ name = "sage-dia"
 version = "0.1.0-beta.9"
 dependencies = [
  "anyhow",
+ "dnoise-core",
  "koth-core",
  "log",
  "rayon",
@@ -3280,6 +3281,7 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+ "timsrust",
 ]
 
 [[package]]

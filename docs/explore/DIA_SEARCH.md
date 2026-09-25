@@ -4,6 +4,8 @@ Status: M1 (tier-1 pseudo-spectrum mode) is wired into the CLI as the opt-in
 `"dia": {"mode": "pseudo"}` / `--dia pseudo` (crate `crates/sage-dia`; user docs in
 `DOCS.md`, "DIA pseudo-spectrum search"). The tier-2 and hill-filter experiments live in
 the spike `crates/sage-cli/examples/dia_explore.rs` (see section 9) and are not shipped.
+M2 (timsTOF diaPASEF in pseudo mode, ion-mobility-aware grouping) is also shipped; see
+section 10.
 
 Goal: a fast, memory-light DIA mode. It sits between spectrum-centric and
 peptide-centric search, in the spirit of DIA-Umpire and MSFragger-DIA. It uses
@@ -503,3 +505,36 @@ the same search but its own FDR plumbing.
   FDR. That is about 1–2 h of agent time, for about 2% more peptides.
 - **DDA unchanged.** With `dia` off, a DDA timsTOF search gives a byte-identical
   `results.sage.parquet` and `lfq.parquet` against origin/main.
+
+## 10. M2 timsTOF diaPASEF benchmark (E. coli, PXD070049)
+
+Run: `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01.d` (50 ng, 15 min gradient, 1,673 MS1 frames,
+8 window groups × 3 boxes = 24 m/z × 1/K0 boxes of 25 m/z). Precursor ±15 ppm (pseudo),
+fragment ±20 ppm, same FASTA and search settings as section 9.
+
+| Variant | Path | Peptides | Runtime | Peak RAM |
+|---|---|---|---|---|
+| (a) raw wide-window, chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
+| (b) tier 1 (`dia.mode = "pseudo"`) | CLI | 6,403 | 3 min 7 s | 6.1 GB |
+| (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,847 (tier 1 alone 5,773; tier 2 +74, about +1.3%) | 3 min 4 s | 5.8 GB |
+| (c) tier 1 + tier 2, pooled, tier as an LDA feature | example | 5,355 | 3 min 4 s | 5.8 GB |
+| (d) wide-window on hill-filtered scans | example | pending | | |
+
+- **Centroiding.** dnoise-core 0.5.0 watershed (`watershed::watershed_centroid`, the mode
+  dnoise and koth's validated Bruker path use), after dnoise's vertical ion-mobility filter
+  (MS/MS knobs for MS2) and horizontal-halo filter, all with dnoise defaults (tuned on this
+  dataset). MS2 frames are processed per box. Without the two filters, watershed alone
+  gave 3.16M MS1 features, 1.19M pseudo-spectra, 6,475 peptides, 19 min and 11.6 GB. With
+  them: 1.60M MS1 hills, 138k features, 5.5M MS2 hills, 94k pseudo-spectra, 6,403
+  peptides. Hill detection takes about 165 s (MS1 100 s, MS2 65 s); the search takes 5 s.
+- **Ion mobility.** koth links hills by m/z and 1/K0 and gives features a 1/K0 apex. A
+  feature is paired only with boxes that contain its m/z and its 1/K0, and fragment hills
+  must be within `dia.im_tolerance` (default 0.03 1/K0) of it.
+- **Memory.** MS1 frames are streamed in chunks of 64, and MS2 frames one window group at
+  a time. The wide-window baseline holds every per-scan-split raw MS2 spectrum
+  (524k spectra, 1.39 billion peaks), which is where its 16.6 GB comes from.
+- **Decision.** Same as Orbitrap: (b) finds 79% of (a)'s peptides in a quarter of the
+  time and at 37% of the memory. Tier 2 adds about 1%. Wide-window stays the default.
+- **DDA unchanged.** Checked on the denoised ddaPASEF twin of this run
+  (`LFQ_Ultra2_PASEF_15min_50ng_Ecoli_01.d`; the raw twin was not on disk). Results were
+  byte-identical to origin/main, with 8,872 peptides.

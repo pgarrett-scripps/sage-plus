@@ -652,22 +652,56 @@ impl Runner {
                     path: path.to_string(),
                 });
             }
-            let res = sage_cloudpath::util::read_spectra(
-                path,
-                file_id,
-                sn,
-                self.parameters.bruker_config,
-                requires_ms1 || !self.parameters.dia.is_off(),
-            );
-            // DIA pseudo mode: replace the MS2 scans with MS1-anchored
-            // pseudo-MS2 spectra before the usual processing.
-            let res = match res {
-                Ok(s) if !self.parameters.dia.is_off() && !s.is_empty() => {
-                    sage_dia::prepare(s, file_id, requires_ms1, &self.parameters.dia).map_err(|e| {
-                        sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
-                    })
+            let dia = &self.parameters.dia;
+            let tdf = !dia.is_off()
+                && FileFormat::from(path.as_ref()) == FileFormat::TDF
+                && path
+                    .to_file_path()
+                    .is_ok_and(|p| sage_dia::tims::is_tdf(&p));
+            let res = if tdf {
+                // timsTOF diaPASEF: pseudo-spectra come straight from the
+                // frames; the regular reader only supplies MS1 when needed.
+                let pseudo = sage_dia::pseudo_spectra_tdf(
+                    &path.to_file_path().expect("checked above"),
+                    file_id,
+                    dia,
+                )
+                .map_err(|e| {
+                    sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
+                });
+                match pseudo {
+                    Ok(mut pseudo) if requires_ms1 => sage_cloudpath::util::read_spectra(
+                        path,
+                        file_id,
+                        sn,
+                        self.parameters.bruker_config,
+                        true,
+                    )
+                    .map(|mut s| {
+                        s.retain(|x| x.ms_level == 1);
+                        s.append(&mut pseudo);
+                        s
+                    }),
+                    res => res,
                 }
-                res => res,
+            } else {
+                let res = sage_cloudpath::util::read_spectra(
+                    path,
+                    file_id,
+                    sn,
+                    self.parameters.bruker_config,
+                    requires_ms1 || !dia.is_off(),
+                );
+                // DIA pseudo mode: replace the MS2 scans with MS1-anchored
+                // pseudo-MS2 spectra before the usual processing.
+                match res {
+                    Ok(s) if !dia.is_off() && !s.is_empty() => {
+                        sage_dia::prepare(s, file_id, requires_ms1, dia).map_err(|e| {
+                            sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
+                        })
+                    }
+                    res => res,
+                }
             };
 
             match res {
