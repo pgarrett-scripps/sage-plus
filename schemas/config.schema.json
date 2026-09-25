@@ -455,6 +455,69 @@
       },
       "type": "object"
     },
+    "DiaMode": {
+      "description": "How DIA spectra are searched.",
+      "oneOf": [
+        {
+          "const": "off",
+          "description": "Search spectra as they are read (DDA, or DIA with `wide_window`).",
+          "type": "string"
+        },
+        {
+          "const": "pseudo",
+          "description": "Build MS1-anchored pseudo-MS2 spectra and search them closed.",
+          "type": "string"
+        }
+      ]
+    },
+    "DiaSettings": {
+      "additionalProperties": false,
+      "description": "DIA pseudo-spectrum settings (`\"dia\"` in the search configuration).",
+      "properties": {
+        "apex_tolerance": {
+          "default": 2,
+          "description": "Fragment apex must lie within this many cycles of the precursor apex.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_peaks": {
+          "default": 150,
+          "description": "Keep at most this many fragment peaks (by intensity) per pseudo-spectrum.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "min_corr": {
+          "default": 0.5,
+          "description": "Minimum Pearson correlation between a fragment hill and its precursor.",
+          "format": "float",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "type": "number"
+        },
+        "min_peaks": {
+          "default": 6,
+          "description": "Drop pseudo-spectra with fewer fragment peaks than this.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "$ref": "#/$defs/DiaMode",
+          "default": "off",
+          "description": "`\"off\"` (default) or `\"pseudo\"`."
+        },
+        "ms2_min_scans": {
+          "default": 3,
+          "description": "Minimum consecutive MS2 scans for a fragment hill.",
+          "format": "uint32",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
     "EnzymeBuilder": {
       "additionalProperties": false,
       "properties": {
@@ -1616,6 +1679,17 @@
           "type": "null"
         }
       ]
+    },
+    "dia": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiaSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "DIA search. `{\"mode\": \"pseudo\"}` builds MS1-anchored pseudo-MS2\nspectra from co-eluting fragment hills and searches them closed (like\nDDA); `wide_window` and `chimera` are ignored in that mode. Default off."
     },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"

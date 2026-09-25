@@ -79,6 +79,16 @@ fn main() -> anyhow::Result<()> {
                 .value_hint(ValueHint::Other),
         )
         .arg(
+            Arg::new("dia")
+                .long("dia")
+                .value_parser(["off", "pseudo"])
+                .help(
+                    "DIA search mode; overrides `dia.mode` from the configuration file. \
+                     `pseudo` searches MS1-anchored pseudo-MS2 spectra built from co-eluting fragment hills.",
+                )
+                .value_hint(ValueHint::Other),
+        )
+        .arg(
             Arg::new("annotate-matches")
                 .long("annotate-matches")
                 .action(clap::ArgAction::SetTrue)

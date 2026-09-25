@@ -26,6 +26,7 @@ path = "src/main.rs"
 
 [dependencies]
 sage-core = { path = "../sage" }
+sage-dia = { path = "../sage-dia" }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 
 anyhow = "1.0"

@@ -15,12 +15,18 @@
 //!   +-10 ppm on that mass with isotope errors -1..=1, not with the isolation
 //!   window as the precursor tolerance. `--q3` adds a DIA-Umpire Q3-style
 //!   tier: fragment groups with no MS1 feature, searched wide-window.
+//! * `tiered`: `pseudo` (tier 1), then subtract the fragment hills matched by
+//!   tier-1 PSMs at 1% FDR (ions b/y 3+ only), group the remaining hills per
+//!   window by loose co-elution (tier 2) and search those wide-window. Reports
+//!   tier 1 alone, tiers FDR-controlled separately, and one LDA with the tier
+//!   as a feature.
+//! * `hillfilter`: `wide` on raw scans that keep only peaks on a fragment hill.
 //! * `rescore`: `wide` plus fragment-hill co-elution features for every
 //!   candidate, and LDA refits with those features.
 //!
 //! ```text
-//! cargo run --release -p sage-dia --example dia_explore -- \
-//!     --raw FILE.raw --fasta FILE.fasta --out DIR [--mode wide|pseudo|rescore]
+//! cargo run --release -p sage-cli --example dia_explore -- \
+//!     --raw FILE.raw --fasta FILE.fasta --out DIR [--mode wide|pseudo|tiered|hillfilter|rescore]
 //! ```
 
 use rayon::prelude::*;
@@ -30,10 +36,11 @@ use sage_core::ion_series::{IonSeries, Kind};
 use sage_core::mass::{Tolerance, PROTON};
 use sage_core::ml::linear_discriminant::LinearDiscriminantAnalysis;
 use sage_core::scoring::{Feature, ScoreType, Scorer};
-use sage_core::spectrum::{Precursor, ProcessedSpectrum, Representation};
+use sage_core::spectrum::ProcessedSpectrum;
 use sage_core::spectrum::{RawSpectrum, SpectrumProcessor};
 use sage_dia::coelution::{self, CoelutionFeatures, CoelutionSettings};
 use sage_dia::hills::Channel;
+use sage_dia::pipeline::{self as dia, to_koth, window_of};
 use sage_dia::pseudo::{self, PrecursorTrace, PseudoSettings};
 use std::collections::HashMap;
 use std::io::Write;
@@ -50,6 +57,9 @@ struct Args {
     apex_tolerance: i64,
     /// Also search DIA-Umpire Q3-style groups with no MS1 feature (wide window).
     q3: bool,
+    t2_corr: f32,
+    t2_apex: i64,
+    t2_psms: usize,
 }
 
 fn parse_args() -> Args {
@@ -63,6 +73,9 @@ fn parse_args() -> Args {
         min_corr: 0.5,
         apex_tolerance: 2,
         q3: false,
+        t2_corr: 0.3,
+        t2_apex: 2,
+        t2_psms: 1,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -77,6 +90,9 @@ fn parse_args() -> Args {
             "--min-corr" => args.min_corr = value().parse().unwrap(),
             "--apex-tolerance" => args.apex_tolerance = value().parse().unwrap(),
             "--q3" => args.q3 = true,
+            "--t2-corr" => args.t2_corr = value().parse().unwrap(),
+            "--t2-apex" => args.t2_apex = value().parse().unwrap(),
+            "--t2-psms" => args.t2_psms = value().parse().unwrap(),
             other => panic!("unknown flag {other}"),
         }
     }
@@ -98,52 +114,13 @@ fn peak_rss_mb() -> f64 {
         / 1024.0
 }
 
-fn window_of(s: &RawSpectrum) -> Option<(f64, f64, f64)> {
-    let p = s.precursors.first()?;
-    let (lo, hi) = match p.isolation_window? {
-        Tolerance::Da(lo, hi) => (lo, hi),
-        _ => return None,
-    };
-    Some((p.mz as f64, (p.mz + lo) as f64, (p.mz + hi) as f64))
-}
-
 fn window_key(w: (f64, f64, f64)) -> (i64, i64, i64) {
-    koth_core::IsolationWindow {
+    sage_dia::koth_core::IsolationWindow {
         target: w.0,
         lower: w.1,
         upper: w.2,
     }
     .key()
-}
-
-fn to_koth(s: &RawSpectrum, index: usize) -> koth_core::Spectrum {
-    let mut peaks: Vec<koth_core::Peak> =
-        s.mz.iter()
-            .zip(&s.intensity)
-            .filter(|(_, i)| **i > 0.0)
-            .map(|(&mz, &intensity)| koth_core::Peak {
-                mz,
-                intensity,
-                ion_mobility: 0.0,
-            })
-            .collect();
-    peaks.sort_by(|a, b| a.mz.total_cmp(&b.mz));
-    koth_core::Spectrum {
-        scan_index: index,
-        retention_time: s.scan_start_time as f64,
-        peaks,
-        ms_level: s.ms_level,
-        isolation_window: if s.ms_level == 2 {
-            window_of(s).map(|(target, lower, upper)| koth_core::IsolationWindow {
-                target,
-                lower,
-                upper,
-            })
-        } else {
-            None
-        },
-        faims_cv: None,
-    }
 }
 
 /// Target-decoy q-values for `(score, is_decoy)`; returns targets at q <= 1%.
@@ -172,6 +149,7 @@ fn q_values(rows: &mut [(f64, bool, f32)]) -> usize {
 
 struct Psm {
     feature: Feature,
+    tier: u8,
     peptide: String,
     coel: CoelutionFeatures,
 }
@@ -244,7 +222,7 @@ fn semi_supervised<const D: usize>(
             .collect();
         let items: Vec<&Psm> = train.iter().map(|&i| &psms[i]).collect();
         let decoy: Vec<bool> = items.iter().map(|p| p.feature.label == -1).collect();
-        let Some(lda) =
+        let Ok(lda) =
             LinearDiscriminantAnalysis::train_regularized(&items, &decoy, |p| row(p), 1e-3)
         else {
             break;
@@ -291,13 +269,15 @@ fn detect_hills(raw: &[RawSpectrum], args: &Args, lap: &dyn Fn(&str)) -> anyhow:
         }
     }
 
-    let mut kcfg = koth_core::KothConfig::default();
-    kcfg.hills_ms2 = Some(koth_core::config::HillsMs2Overrides {
-        min_scans: Some(args.ms2_min_scans),
+    let kcfg = sage_dia::koth_core::KothConfig {
+        hills_ms2: Some(sage_dia::koth_core::config::HillsMs2Overrides {
+            min_scans: Some(args.ms2_min_scans),
+            ..Default::default()
+        }),
         ..Default::default()
-    });
+    };
     let t = Instant::now();
-    let ms1_hills = koth_core::hills::detect_hills_from_iter(
+    let ms1_hills = sage_dia::koth_core::hills::detect_hills_from_iter(
         raw.iter()
             .filter(|s| s.ms_level == 1)
             .enumerate()
@@ -308,7 +288,7 @@ fn detect_hills(raw: &[RawSpectrum], args: &Args, lap: &dyn Fn(&str)) -> anyhow:
     let t_ms1 = t.elapsed().as_secs_f64();
     let n_ms1_hills = ms1_hills.len();
     let t = Instant::now();
-    let features = koth_core::run_features(&ms1_hills, &kcfg.features, &kcfg.file)?;
+    let features = sage_dia::koth_core::run_features(&ms1_hills, &kcfg.features, &kcfg.file)?;
     let precursors: Vec<PrecursorTrace> = features
         .iter()
         .filter_map(PrecursorTrace::from_koth)
@@ -331,10 +311,10 @@ fn detect_hills(raw: &[RawSpectrum], args: &Args, lap: &dyn Fn(&str)) -> anyhow:
         }
     }
     let ms2_cfg = kcfg.ms2_hills();
-    let ms2_hills: Vec<koth_core::Hill> = by_window
+    let ms2_hills: Vec<sage_dia::koth_core::Hill> = by_window
         .into_par_iter()
         .flat_map_iter(|(_, spectra)| {
-            koth_core::hills::detect_ms2_hills_from_iter(
+            sage_dia::koth_core::hills::detect_ms2_hills_from_iter(
                 spectra.into_iter().enumerate().map(|(i, s)| to_koth(s, i)),
                 &ms2_cfg,
                 &kcfg.file,
@@ -349,7 +329,7 @@ fn detect_hills(raw: &[RawSpectrum], args: &Args, lap: &dyn Fn(&str)) -> anyhow:
         .sum();
     let mut windows = Vec::new();
     let mut index: HashMap<WindowKey, usize> = HashMap::new();
-    for (iw, hills) in koth_core::group_ms2_hills_by_window(ms2_hills) {
+    for (iw, hills) in sage_dia::koth_core::group_ms2_hills_by_window(ms2_hills) {
         let rts = cycles.remove(&iw.key()).unwrap_or_default();
         index.insert(iw.key(), windows.len());
         windows.push(Channel::from_hills(iw.lower, iw.upper, rts, hills));
@@ -440,7 +420,7 @@ fn search(
         chimera: wide,
         report_psms,
         wide_window: wide,
-        annotate_matches: false,
+        annotate_matches: !wide,
         mass_shift_ppm: 20.0,
         score_type: ScoreType::SageHyperScore,
         mass_recalibration: None,
@@ -448,15 +428,12 @@ fn search(
     let t = Instant::now();
     let mut features: Vec<Feature> = spectra.par_iter().flat_map(|q| scorer.score(q)).collect();
     let secs = t.elapsed().as_secs_f64();
-    if sage_core::ml::linear_discriminant::score_psms(&mut features, precursor_tol).is_none() {
+    if sage_core::ml::linear_discriminant::score_psms(&mut features, precursor_tol).is_err() {
         eprintln!("WARNING: Sage LDA failed; falling back to hyperscore");
         let bad = |name: &str, f: &dyn Fn(&Feature) -> f64| {
             let n = features.iter().filter(|x| !f(x).is_finite()).count();
-            let lo = features.iter().map(|x| f(x)).fold(f64::INFINITY, f64::min);
-            let hi = features
-                .iter()
-                .map(|x| f(x))
-                .fold(f64::NEG_INFINITY, f64::max);
+            let lo = features.iter().map(f).fold(f64::INFINITY, f64::min);
+            let hi = features.iter().map(f).fold(f64::NEG_INFINITY, f64::max);
             eprintln!("  {name}: {n} non-finite, range {lo}..{hi}");
         };
         bad("hyperscore", &|x| x.hyperscore);
@@ -493,6 +470,7 @@ fn to_psms(db: &IndexedDatabase, features: Vec<Feature>) -> Vec<Psm> {
             peptide: db.resolve_peptide(&feature).to_string(),
             feature,
             coel: CoelutionFeatures::default(),
+            tier: 1,
         })
         .collect()
 }
@@ -518,26 +496,6 @@ fn passing_peptides(psms: &[Psm], score: &[f64]) -> std::collections::HashSet<St
         .filter(|(r, q)| !r.1 && q.2 <= 0.01)
         .map(|(r, _)| r.3.to_string())
         .collect()
-}
-
-fn to_raw(i: usize, p: &pseudo::PseudoSpectrum, window: Option<(f64, f64)>) -> RawSpectrum {
-    let mut raw = RawSpectrum::default_with_file_id(0);
-    raw.ms_level = 2;
-    raw.id = format!("pseudo={i} window={}", p.window);
-    raw.scan_start_time = p.rt;
-    raw.representation = Representation::Centroid;
-    raw.precursors = vec![Precursor {
-        mz: p.precursor_mz,
-        intensity: Some(p.precursor_intensity),
-        charge: (p.charge > 0).then_some(p.charge),
-        isolation_window: window
-            .map(|(lo, hi)| Tolerance::Da(lo as f32 - p.precursor_mz, hi as f32 - p.precursor_mz)),
-        ..Default::default()
-    }];
-    raw.mz = p.peaks.iter().map(|x| x.0).collect();
-    raw.intensity = p.peaks.iter().map(|x| x.1).collect();
-    raw.total_ion_current = raw.intensity.iter().sum();
-    raw
 }
 
 /// Sage-like PSM features for a regularized LDA (Sage's `score_psms` is
@@ -579,6 +537,206 @@ fn lda_scores(psms: &[Psm]) -> Vec<f64> {
 fn fdr_line(name: &str, psms: &[Psm], score: &[f64]) -> String {
     let (a, b, c) = fdr_counts(psms, score);
     format!("{name}\tPSMs@1% {a}\tprecursors@1% {b}\tpeptides@1% {c}\n")
+}
+
+/// Per-PSM q-values under `score`, aligned with `psms`.
+fn psm_q_values(psms: &[Psm], score: &[f64]) -> Vec<f32> {
+    let mut order: Vec<usize> = (0..psms.len()).collect();
+    order.sort_by(|&a, &b| score[b].total_cmp(&score[a]));
+    let mut rows: Vec<(f64, bool, f32)> = order
+        .iter()
+        .map(|&i| (score[i], psms[i].feature.label == -1, 1.0))
+        .collect();
+    q_values(&mut rows);
+    let mut q = vec![1.0; psms.len()];
+    for (&i, r) in order.iter().zip(&rows) {
+        q[i] = r.2;
+    }
+    q
+}
+
+/// Tier-aware LDA row: Sage-like features plus a tier-2 indicator.
+fn tier_row(p: &Psm) -> [f64; 14] {
+    let r = sage_row(p);
+    let mut out = [0.0; 14];
+    out[..13].copy_from_slice(&r);
+    out[13] = (p.tier == 2) as u8 as f64;
+    out
+}
+
+fn tiered(args: &Args, raw: Vec<RawSpectrum>, lap: &dyn Fn(&str)) -> anyhow::Result<String> {
+    let hills = dia::detect_hills(&raw, args.ms2_min_scans as u32)?;
+    drop(raw);
+    let n_hills: usize = hills.windows.iter().map(Channel::len).sum();
+    let t1 = PseudoSettings {
+        min_corr: args.min_corr,
+        apex_tolerance: args.apex_tolerance,
+        ..Default::default()
+    };
+    let t = Instant::now();
+    let tier1 = dia::build_pseudo(&hills, &t1);
+    let t_build1 = t.elapsed().as_secs_f64();
+    lap(&format!(
+        "tier 1: {} pseudo-spectra from {} precursors, {n_hills} fragment hills",
+        tier1.len(),
+        hills.precursors.len()
+    ));
+    let processor = SpectrumProcessor::new(150, false, 0.0);
+    let spectra: Vec<ProcessedSpectrum> = tier1
+        .par_iter()
+        .enumerate()
+        .map(|(i, p)| processor.process(dia::to_raw(0, i, p, None)))
+        .collect();
+    let stats1 = spectrum_stats(&spectra);
+    let db = build_db(args)?;
+    let (features, secs1) = search(&db, &spectra, false, 1);
+    drop(spectra);
+    let mut psms1 = to_psms(&db, features);
+    let score1 = regularized_scores(&psms1);
+    let q1 = psm_q_values(&psms1, &score1);
+    // Subtract fragment hills matched by confident tier-1 PSMs. Short ions
+    // (b1/b2/y1/y2) are shared by many peptides, so they stay.
+    let matches: Vec<(usize, Vec<f32>)> = psms1
+        .iter()
+        .zip(&q1)
+        .filter(|(p, &q)| p.feature.label == 1 && p.feature.rank == 1 && q <= 0.01)
+        .filter_map(|(p, _)| {
+            let i: usize = p
+                .feature
+                .spec_id
+                .strip_prefix("pseudo=")?
+                .split(' ')
+                .next()?
+                .parse()
+                .ok()?;
+            let f = p.feature.fragments.as_ref()?;
+            let mzs = f
+                .fragment_ordinals
+                .iter()
+                .zip(&f.mz_experimental)
+                .filter(|(&o, _)| o >= 3)
+                .map(|(_, &mz)| mz)
+                .collect();
+            Some((i, mzs))
+        })
+        .collect();
+    let used = dia::subtract(
+        &hills,
+        &tier1,
+        matches.iter().map(|(i, m)| (*i, m.as_slice())),
+        15.0,
+    );
+    let n_used: usize = used.iter().map(|u| u.iter().filter(|&&x| x).count()).sum();
+    let t2 = PseudoSettings {
+        min_corr: args.t2_corr,
+        apex_tolerance: args.t2_apex,
+        max_peaks: 100,
+        ..Default::default()
+    };
+    let t = Instant::now();
+    let tier2 = dia::build_tier2(&hills, &used, &t2);
+    let t_build2 = t.elapsed().as_secs_f64();
+    drop(hills);
+    lap(&format!(
+        "subtracted {n_used} hills using {} tier-1 PSMs; tier 2: {} groups",
+        matches.len(),
+        tier2.len()
+    ));
+    let spectra: Vec<ProcessedSpectrum> = tier2
+        .par_iter()
+        .enumerate()
+        .map(|(i, (p, w))| processor.process(dia::to_raw(0, i, p, Some(*w))))
+        .collect();
+    let stats2 = spectrum_stats(&spectra);
+    let (features, secs2) = search(&db, &spectra, true, args.t2_psms);
+    drop(spectra);
+    let mut psms2 = to_psms(&db, features);
+    for p in &mut psms2 {
+        p.tier = 2;
+    }
+    let score2 = regularized_scores(&psms2);
+    lap("tier 2 searched");
+
+    let mut report = format!(
+        "tier 1: min_corr {} apex_tolerance {}; {stats1}; build {t_build1:.1}s, search {secs1:.1}s\n",
+        args.min_corr, args.apex_tolerance
+    );
+    report += &fdr_line("tier 1 alone, regularized LDA", &psms1, &score1);
+    report += &format!(
+        "subtracted {n_used} of {n_hills} fragment hills ({} tier-1 target PSMs at 1%)\n",
+        matches.len()
+    );
+    report += &format!(
+        "tier 2: min_corr {} apex_tolerance {} max_peaks 100 report_psms {}; {stats2}; build {t_build2:.1}s, search {secs2:.1}s\n",
+        args.t2_corr, args.t2_apex, args.t2_psms
+    );
+    report += &fdr_line("tier 2 alone, regularized LDA", &psms2, &score2);
+    let lda2 = lda_scores(&psms2);
+    report += &fdr_line("tier 2 alone, Sage LDA", &psms2, &lda2);
+    let a = passing_peptides(&psms1, &score1);
+    for (name, s2) in [("regularized", &score2), ("Sage", &lda2)] {
+        let b = passing_peptides(&psms2, s2);
+        let added = b.difference(&a).count();
+        report += &format!(
+            "separate FDR per tier (tier 2 {name} LDA): peptides tier1 {} + tier2 new {added} = {}\n",
+            a.len(),
+            a.len() + added
+        );
+    }
+    psms1.append(&mut psms2);
+    let init: Vec<f64> = psms1.iter().map(|p| p.feature.hyperscore).collect();
+    let score = semi_supervised::<14>(&psms1, &init, tier_row);
+    report += &fdr_line("tiers pooled, tier as LDA feature", &psms1, &score);
+    Ok(report)
+}
+
+fn hill_filtered(
+    args: &Args,
+    mut raw: Vec<RawSpectrum>,
+    lap: &dyn Fn(&str),
+) -> anyhow::Result<String> {
+    let hills = dia::detect_hills(&raw, args.ms2_min_scans as u32)?;
+    let before: usize = raw
+        .iter()
+        .filter(|s| s.ms_level == 2)
+        .map(|s| s.mz.len())
+        .sum();
+    let t = Instant::now();
+    dia::hill_filter(&mut raw, &hills, 15.0);
+    drop(hills);
+    let after: usize = raw
+        .iter()
+        .filter(|s| s.ms_level == 2)
+        .map(|s| s.mz.len())
+        .sum();
+    lap(&format!(
+        "hill filter kept {after} of {before} MS2 peaks in {:.1}s",
+        t.elapsed().as_secs_f64()
+    ));
+    let db = build_db(args)?;
+    let processor = SpectrumProcessor::new(150, false, 0.0);
+    let spectra: Vec<ProcessedSpectrum> = raw
+        .into_par_iter()
+        .filter(|s| s.ms_level == 2 && !s.precursors.is_empty() && !s.mz.is_empty())
+        .map(|s| processor.process(s))
+        .collect();
+    let stats = spectrum_stats(&spectra);
+    let (features, secs) = search(&db, &spectra, true, args.report_psms);
+    drop(spectra);
+    let psms = to_psms(&db, features);
+    let mut report =
+        format!("hill-filtered MS2: kept {after} of {before} peaks; {stats}; search {secs:.1}s\n");
+    report += &fdr_line(
+        "hill-filtered wide-window chimeric, Sage LDA",
+        &psms,
+        &lda_scores(&psms),
+    );
+    report += &fdr_line(
+        "hill-filtered wide-window chimeric, regularized LDA",
+        &psms,
+        &regularized_scores(&psms),
+    );
+    Ok(report)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -694,7 +852,7 @@ fn main() -> anyhow::Result<()> {
             let spectra: Vec<ProcessedSpectrum> = pseudo_spectra
                 .into_par_iter()
                 .enumerate()
-                .map(|(i, p)| processor.process(to_raw(i, &p, None)))
+                .map(|(i, p)| processor.process(dia::to_raw(0, i, &p, None)))
                 .collect();
             let stats = spectrum_stats(&spectra);
             let db = build_db(&args)?;
@@ -725,7 +883,7 @@ fn main() -> anyhow::Result<()> {
                 let q3: Vec<ProcessedSpectrum> = orphans
                     .into_par_iter()
                     .enumerate()
-                    .map(|(i, (p, w))| processor.process(to_raw(i, &p, Some(w))))
+                    .map(|(i, (p, w))| processor.process(dia::to_raw(0, i, &p, Some(w))))
                     .collect();
                 let q3_stats = spectrum_stats(&q3);
                 let (features, q3_secs) = search(&db, &q3, true, 1);
@@ -745,6 +903,8 @@ fn main() -> anyhow::Result<()> {
                 );
             }
         }
+        "tiered" => report += &tiered(&args, raw, &lap)?,
+        "hillfilter" => report += &hill_filtered(&args, raw, &lap)?,
         "rescore" => {
             let hills = detect_hills(&raw, &args, &lap)?;
             let db = build_db(&args)?;
@@ -808,6 +968,7 @@ fn rescore(
             let coel = coelution::score(&frags, window, cycle, precursor_mz, &hills.ms1, &settings);
             let peptide = peptide.to_string();
             Some(Psm {
+                tier: 1,
                 peptide,
                 feature,
                 coel,

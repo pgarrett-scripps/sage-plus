@@ -3210,6 +3210,7 @@ dependencies = [
  "ryu",
  "sage-cloudpath",
  "sage-core",
+ "sage-dia",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -3273,10 +3274,11 @@ version = "0.1.0-beta.9"
 dependencies = [
  "anyhow",
  "koth-core",
+ "log",
  "rayon",
- "sage-cli",
- "sage-cloudpath",
  "sage-core",
+ "schemars 1.2.2",
+ "serde",
  "serde_json",
 ]
 

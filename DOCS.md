@@ -938,6 +938,7 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
   `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above. When mzML or mzMLb provides the fragment charge binary array `MS:1000516`, positive values constrain isotope-envelope assignment and are used directly for charge-aware fragment matching. Zero values remain unknown and use scored inference.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
+- **dia**: Object. Opt-in DIA pseudo-spectrum search (default: off). See [DIA pseudo-spectrum search](#dia-pseudo-spectrum-search).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: true).
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
@@ -966,6 +967,56 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
 
 When either memory limit is enabled, Sage estimates the unmodified digest, variable-modification expansion, and fragment/index sizes before allocating them. Unsafe database searches return an error before expansion begins. Estimates are conservative and are backed by a runtime memory monitor for allocations outside database construction.
+
+## DIA pseudo-spectrum search
+
+DIA files can be searched in two ways. The default is the wide-window search: set
+`wide_window` (and usually `chimera`) and every MS2 scan is searched with its isolation
+window as the precursor tolerance. The opt-in pseudo-spectrum mode instead turns each
+file into DDA-like spectra before the search:
+
+```json
+"dia": { "mode": "pseudo" }
+```
+
+or `--dia pseudo` on the command line. For each file Sage Plus:
+
+1. detects chromatographic hills on MS1 and, per isolation window, on MS2 with
+   [koth](https://github.com/pgarrett-scripps/koth), and groups MS1 hills into charged
+   isotope features;
+2. for every feature and every window that contains its monoisotopic m/z, collects the
+   fragment hills whose apex is within `apex_tolerance` cycles of the precursor apex and
+   whose elution profile correlates with the precursor's at `min_corr` or better;
+3. writes one centroided MS2 spectrum per (feature, window) with the feature's monoisotopic
+   m/z, charge and apex retention time, and searches it closed, like DDA, with
+   `precursor_tol`, `isotope_errors` and the other settings as configured.
+
+`wide_window` and `chimera` are ignored in this mode (Sage logs a warning). Use a DDA-style
+precursor tolerance such as `{"ppm": [-10, 10]}` and `"isotope_errors": [-1, 1]`. The
+settings and their defaults:
+
+```json
+"dia": {
+  "mode": "pseudo",       // "off" (default) or "pseudo"
+  "min_corr": 0.5,        // fragment-precursor profile Pearson correlation
+  "apex_tolerance": 2,    // fragment apex within this many cycles of the precursor apex
+  "ms2_min_scans": 3,     // minimum consecutive scans for a fragment hill
+  "min_peaks": 6,         // drop pseudo-spectra with fewer fragments
+  "max_peaks": 150        // keep the most intense fragments
+}
+```
+
+Pseudo-spectrum ids are `pseudo=<n> window=<w>`. Precursors without an MS1 isotope feature
+are not searched. The mode supports Thermo RAW, mzML and mzMLb DIA files with m/z isolation
+windows; timsTOF diaPASEF is not supported yet.
+
+On an Orbitrap E. coli DIA run (PRIDE PXD028735, `LFQ_Orbitrap_AIF_Ecoli_01`, 151 windows of
+8 m/z), pseudo mode found 5,567 peptides at 1% FDR in 6 s with 2.3 GB peak memory. The
+wide-window chimeric search found 6,975 in 30 s with 3.0 GB. The wide-window search
+therefore stays the default for DIA, and pseudo mode is the fast option.
+
+When `dia` is off or absent, spectra are read and searched exactly as before and
+`results.json` has no `dia` entry.
 
 ## Empirical Spectral Libraries
 

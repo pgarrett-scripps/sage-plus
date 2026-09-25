@@ -1,8 +1,9 @@
 # DIA search for Sage Plus
 
-Status: exploration on branch `feat/dia` (crate `crates/sage-dia`, spike
-`crates/sage-dia/examples/dia_explore.rs`). Nothing here is wired into the CLI
-yet.
+Status: M1 (tier-1 pseudo-spectrum mode) is wired into the CLI as the opt-in
+`"dia": {"mode": "pseudo"}` / `--dia pseudo` (crate `crates/sage-dia`; user docs in
+`DOCS.md`, "DIA pseudo-spectrum search"). The tier-2 and hill-filter experiments live in
+the spike `crates/sage-cli/examples/dia_explore.rs` (see section 9) and are not shipped.
 
 Goal: a fast, memory-light DIA mode. It sits between spectrum-centric and
 peptide-centric search, in the spirit of DIA-Umpire and MSFragger-DIA. It uses
@@ -469,9 +470,36 @@ gain still has to be measured once the features are wired into core LDA (M3).
 ### Reproduce
 
 ```text
-CARGO_TARGET_DIR=/mnt/data1/build-cache/feat-dia cargo build --release -p sage-dia --example dia_explore
+CARGO_TARGET_DIR=/mnt/data1/build-cache/feat-dia cargo build --profile fast-release -p sage-cli --example dia_explore
 dia_explore --raw LFQ_Orbitrap_AIF_Ecoli_01.raw --fasta ecoli.fasta --out DIR \
-    --mode wide|pseudo|rescore [--min-corr 0.5 --apex-tolerance 2 --ms2-min-scans 3 --q3]
+    --mode wide|pseudo|rescore|tiered|hillfilter [--min-corr 0.5 --apex-tolerance 2 --ms2-min-scans 3 --q3]
 ```
 
 Outputs from the runs are in `/mnt/data1/explore-data/dia/runs/`.
+
+## 9. M1 two-tier benchmark (Orbitrap AIF E. coli, PXD028735)
+
+Peptides at 1% FDR. "CLI" rows are `sage` runs; "example" rows are `dia_explore`, which uses
+the same search but its own FDR plumbing.
+
+| Variant | Path | Peptides | Runtime | Peak RAM |
+|---|---|---|---|---|
+| (a) raw wide-window, chimeric | CLI | 6,975 | 30 s | 3.0 GB |
+| (b) tier 1 (`dia.mode = "pseudo"`) | CLI | 5,567 | 6 s | 2.3 GB |
+| (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,546 (tier 2 +121, about +2%) | 9 s | 2.1 GB |
+| (c) tier 1 + tier 2, pooled, tier as an LDA feature | example | 4,749 | 9 s | 2.1 GB |
+| (d) wide-window on hill-filtered scans | CLI | 5,299 | 21 s | 2.8 GB |
+
+- **Tier 2.** Hills matched by tier-1 IDs at 1% q are subtracted, with tolerance for b1/b2/y1/y2. This
+  removed 93k of 2.16M hills. The remaining hills are grouped per window by co-elution
+  (at most 100 peaks) and searched wide-window.
+- **Pooled FDR.** Pooling tier 2 with tier 1 behind a tier feature lets tier-1 targets hide
+  tier-2 decoys, and the result has fewer peptides than tier 1 alone. Separate q-values are
+  safe but only add about 2%.
+- **Hill filter.** Keeping only peaks on hills (14.6M of 23.5M) loses about 24% of the
+  wide-window peptides.
+- **Decision.** (c) does not beat (a), so M1 ships tier 1 only. Wide-window stays the default
+  for DIA. Tier 2 would need a per-spectrum wide/closed switch in the scorer and per-tier
+  FDR. That is about 1–2 h of agent time, for about 2% more peptides.
+- **DDA unchanged.** With `dia` off, a DDA timsTOF search gives a byte-identical
+  `results.sage.parquet` and `lfq.parquet` against origin/main.
