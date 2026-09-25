@@ -8,6 +8,7 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 
 pub use url::Url;
 
+pub mod denoise;
 pub mod mgf;
 pub mod mzml;
 #[cfg(feature = "mzmlb")]
@@ -212,6 +213,8 @@ pub enum Error {
     TDF(#[from] timsrust::TimsRustError),
     #[error(transparent)]
     MobilityCalibration(#[from] tims_mobility::MobilityCalibrationError),
+    #[error(transparent)]
+    Denoise(#[from] denoise::DenoiseError),
     #[error("Thermo RAW error: {0}")]
     ThermoRaw(#[from] opentfraw::Error),
     #[error("MGF error: {0}")]

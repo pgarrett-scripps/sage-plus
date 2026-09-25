@@ -426,3 +426,22 @@ fn predict_rt_default_matches_documentation() {
         assert!(!line.contains("default=false"), "{line}");
     }
 }
+
+#[test]
+fn bruker_denoise_settings_are_validated() {
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": ["test.d"],
+        "bruker_config": { "denoise": { "enabled": true, "halo_peak_fraction": 2.0 } }
+    }))
+    .unwrap();
+    let error = input.validate().unwrap_err().to_string();
+    assert!(error.contains("bruker_config.denoise"), "{error}");
+
+    let input: Result<Input, _> = serde_json::from_value(serde_json::json!({
+        "bruker_config": { "denoise": { "enabled": true, "halo_fraction": 0.2 } }
+    }));
+    assert!(input.is_err());
+}

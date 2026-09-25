@@ -540,6 +540,9 @@ impl Input {
         );
         self.memory_limits()?;
         resolve_batch_size(self.batch_size)?;
+        if let Some(bruker) = &self.bruker_config {
+            bruker.denoise.validate()?;
+        }
         if let Some(lfq) = self
             .quant
             .as_ref()

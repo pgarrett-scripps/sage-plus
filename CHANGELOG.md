@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
+  (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
+  mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
+  the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
+  warns when it is set without `quant.lfq` or for non-TDF inputs.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added

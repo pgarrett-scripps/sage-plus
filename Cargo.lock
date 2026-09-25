@@ -994,6 +994,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dnoise-core"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d51a5ec6cdc5e3fe059ee0db38d6c565117f4ffe87ec7e1f6fd3f1f11aa0109"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3289,6 +3299,7 @@ dependencies = [
  "async-compression",
  "base64 0.13.1",
  "bytes",
+ "dnoise-core",
  "futures",
  "log",
  "mzdata",

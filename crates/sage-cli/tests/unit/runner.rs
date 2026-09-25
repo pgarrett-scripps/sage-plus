@@ -357,3 +357,34 @@ fn report_keeps_same_basename_files_separate() {
     assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
     assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
 }
+
+#[test]
+fn denoise_warns_about_inputs_it_cannot_change() {
+    let (directory, _) = temporary_output("denoise");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let runner = |denoise: bool, lfq: bool| {
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [
+                format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML"),
+                format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d"),
+            ],
+            "quant": { "lfq": lfq },
+            "bruker_config": { "denoise": { "enabled": denoise } },
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        super::Runner::new(input.build().unwrap(), 1).unwrap()
+    };
+
+    assert!(runner(false, false).denoise_warnings().is_empty());
+    let warnings = runner(true, true).denoise_warnings();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("1 other input file"));
+    let warnings = runner(true, false).denoise_warnings();
+    assert_eq!(warnings.len(), 2);
+    assert!(warnings[1].contains("quant.lfq"));
+    std::fs::remove_dir_all(directory).ok();
+}
