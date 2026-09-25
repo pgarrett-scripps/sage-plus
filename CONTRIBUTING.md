@@ -36,6 +36,10 @@ General guidelines before submitting a PR:
 - If it makes sense to do so, please add additional tests that cover any new features
 - Document code as needed
 
+For local experiments that need optimized binaries, `cargo build --profile fast-release` uses thin
+LTO and incremental compilation, so rebuilds after a change are much faster than `--release`.
+Use `--release` for shipped binaries and for any timings you publish.
+
 Keep test implementations outside production source files. Unit tests belong in
 `crates/<crate>/tests/unit/` and are connected to their source module with a
 `#[cfg(test)]` and `#[path = "..."]` declaration. Black-box integration tests

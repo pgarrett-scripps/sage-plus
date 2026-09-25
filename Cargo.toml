@@ -18,6 +18,16 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
+# Optimized builds for local experiments and benchmarks-in-progress:
+# `cargo build --profile fast-release`. Rebuilds after a code change take
+# seconds instead of minutes; runtime is a few percent slower than `release`,
+# which remains the profile for shipped binaries and published numbers.
+[profile.fast-release]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
+
 [patch.crates-io]
 filemanager = { path = "vendor/filemanager" }
 
