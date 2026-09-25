@@ -1,7 +1,7 @@
 # Intact glycopeptide search: design exploration
 
-Status: exploration for a future beta. Nothing here is scheduled or released. Branch
-`worktree-agent-a4498022d70b5b3e7`, based on `release/beta9` at `0ebb881`.
+Status: milestone 1 is implemented on branch `feat/glyco` as the opt-in `glyco` Cargo
+feature (section 7). Nothing here is released. Based on `release/beta9` at `0ebb881`.
 
 The README roadmap already lists "Glycopeptide search ... builds on mass offsets,
 neutral losses, and motif modification sites". This document checks that claim against
@@ -10,11 +10,12 @@ glycan library as it stands, though: one offset per composition costs about one 
 search pass per composition. The recommended design therefore adds a single open "glycan
 hypothesis" to retrieval and resolves the composition afterwards.
 
-A prototype of the parts that do not depend on retrieval is in
-`crates/sage/src/glycan.rs`: composition parsing, the composition library, oxonium
-gating, and the Y-ion ladder, with tests. It is not wired into the search. A harness,
-`crates/sage-cli/examples/glyco_explore.rs`, runs a milestone-1 approximation on real
-data using only existing search code. Section 6 has the results.
+Sections 1 to 6 are the design exploration. It used a prototype in
+`crates/sage/src/glycan.rs` and a real-data harness,
+`crates/sage-cli/examples/glyco_explore.rs` (both at commit `fe742af`). Milestone 1
+moved the prototype to `crates/sage-glyco/src/composition.rs` and replaced the harness
+with the `sage` binary itself. Section 7 has the implementation and its before/after
+numbers.
 
 ## 1. How established tools do it
 
@@ -257,7 +258,8 @@ were checked. File lists and instrument methods were not.
 
 ## 6. Real-data test (2026-09-25)
 
-One run from each study, searched with `glyco_explore`. Outputs are in
+One run from each study, searched with the `glyco_explore` harness (commit `fe742af`).
+Outputs are in
 `/mnt/data1/explore-data/glyco/runs/<run>/` (`summary.tsv`, `glyco_psms.tsv`,
 `config.json`).
 
@@ -389,19 +391,128 @@ Methods 2020 (PMC7606558); Liu et al., Nat Commun 2017 (PMC5585273).
    had an explainable candidate among the top 5. Composition-aware rescoring over more
    candidates is the next recall lever.
 
-## Appendix: prototype and measurements
+## 7. Milestone 1 implementation (2026-09-25)
 
-- `crates/sage/src/glycan.rs`: `GlycanComposition` (parse, mass, containment),
-  `GlycanLibrary` (`explain`, `indistinguishable_pairs`), `OXONIUM_IONS`,
-  `oxonium_evidence`, `n_glycan_core_y_ions`, `y_ion_evidence`, and
-  `n_glycan_composition_space`. Tests check the residue and oxonium masses, both
-  notations, the isomeric and near-isobaric pairs, the gate, and the Y ladder. Run the
-  ambiguity numbers with
-  `cargo test -p sage-core --lib glycan::tests::ambiguity_report -- --ignored --nocapture`.
-- `crates/sage-cli/examples/glyco_explore.rs`: real-data harness (section 6).
-  `cargo run --release -p sage-cli --example glyco_explore -- --raw X.raw --fasta X.fasta
-  --glycans list.glyc [--high-mannose] [--ammonium] --out DIR`. Glycan lists come from
-  FragPipe `tools/Glycan_Databases` (not vendored).
+### How to run it
+
+Build with `cargo build --release -p sage-cli --features glyco` and add a block to a
+normal config:
+
+```json
+"glyco": {
+  "glycan_files": ["Mouse_N-glycans-1670-pGlyco.glyc"],
+  "high_mannose": false,
+  "ammonium_adducts": 1
+}
+```
+
+Every field is optional. Without a glycan list the built-in mammalian composition space
+is used. The normal search runs as before and writes its usual outputs. The glyco pass
+adds `glyco.sage.parquet`, with one row per explained candidate (schema
+`schemas/glyco.sage.v1.parquet.schema`, marked experimental). A build without the
+feature rejects a config that has the block. Without the block nothing changes.
+
+### Where the code lives
+
+1. **Core (`crates/sage`), two hooks.**
+   1. `IndexedDatabase::offsets_only` skips the unshifted hypothesis when every
+      precursor carries a mass offset.
+   2. `glycan.rs` moved out to `sage-glyco`.
+   Normal searches are bit-identical: 8,674 mouse and 7,940 yeast PSMs, before and
+   after.
+2. **`crates/sage-glyco`.** Config, sequon index build, oxonium gate, glycan
+   explanation, Y-ion and oxonium evidence with decoy twins, two-level FDR, and Parquet
+   output.
+3. **`sage-cli`.** Behind the `glyco` feature. The glyco index is built next to the
+   main one. Each spectrum chunk is searched once more with the glyco scorer, in the
+   same single pass over the files, and the spectra are released as usual. The
+   candidates carry only per-class ion counts, so FDR runs at the end without keeping
+   spectra.
+
+### Glycan FDR
+
+Each candidate explanation (composition, isotope error, NH3 adducts) gets a decoy
+twin. The twin has the same precursor mass and the same core Y ions, but its other
+Y ions and its sialic-acid oxonium ions are moved by a pseudo-random 4.5–12.5 Da. Each
+explanation is scored by a per-class log-likelihood ratio against the spectrum's own
+random match rate. The class rates are refitted once from confident PSMs. The best of
+all targets and twins wins. Two choices made the FDR bite:
+
+1. **Exact ties are a coin flip, not a target win.** When nothing beyond the shared
+   core matches, a target and its twin score the same. The first version gave such
+   ties to the target, so only 2 of 5,355 mouse candidates ever lost to a decoy, and
+   the yeast non-yeast rate stayed at 8.8%.
+2. **Competition on score plus lead.** Target-decoy competition ranks by the winner's
+   score plus its lead over the best explanation of the other label. Both terms are
+   symmetric when a wrong composition swaps with its twin. On yeast this passes 781
+   glycoPSMs at 2.4% non-yeast glycans, against 708 at 1.3% for the score alone.
+   The minimum of the two passed 875 but at 5.8%, so it was rejected.
+
+Peptide FDR is an LDA over 20 standardized features. Glyco features include the core,
+best-Y and Y-intensity fractions, Y0/Y1 anchoring, oxonium count and intensity, the
+best glycan score, precursor error and ambiguity. If the fit fails it is retried with
+ridge 1e-3, 1e-2 and 1e-1, and then falls back to the hyperscore, so a run always
+produces q-values.
+
+### Before and after
+
+Same runs as section 6. All numbers are at 1% peptide FDR and 1% glycan FDR unless noted.
+Machine: 16 cores, shared with other jobs, so wall times vary by about ±50% between
+repeats. Glyco search time is the time spent in the glyco scorer.
+
+| | Mouse glycoPSMs | Yeast glycoPSMs | Yeast non-yeast glycans | Mouse wall / peak RSS | Mouse glyco search |
+| --- | --- | --- | --- | --- | --- |
+| Plain Sage, no glyco block | — | — | — | 18–25 s / 3.9 GB | — |
+| Section 6 harness (peptide FDR only, 300 peaks) | 6,168 | 1,682 | 28.5% | about 184 s, separate program | — |
+| First integration (ties to target, Met-ox in glyco index) | 5,353 | 1,160 | 8.8% | 580 s / 5.07 GB | 489 s |
+| Milestone 1 (defaults, 150 peaks) | **5,458** | **781** | **2.4%** | 97–154 s / 4.4 GB | 88–129 s |
+| Milestone 1, `max_peaks: 300` | 6,024 | 900 | 4.2% | 239 s / 4.5 GB | 191 s |
+| MSFragger-Glyco + PTM-Shepherd (per run) | ≈8,990 | ≈2,745 | 3.8% | — | — |
+| pGlyco3 (per run) | ≈5,400–6,400 | ≈1,895 | 7.5% | — | — |
+
+Yeast wall time is 106–205 s against 20–30 s plain, with 5.6 GB against 4.9 GB peak
+RSS.
+
+What moved the numbers:
+
+1. **Speed: glyco index without user variable mods.** The open glyco window spans
+   about 3,000 Da, so every peptide variant is a candidate for every spectrum. Met-ox
+   with `max_variable_mods: 2` gave 634,667 sequon peptides. Dropping it gives 393,009,
+   and glyco search time fell from 489 s to under 130 s. Mouse glycoPSMs held (5,346
+   against 5,353) even though the stricter tie rule landed in the same run. `glyco.variable_mods: true` turns them back on.
+2. **Error: the two FDR choices above.** They took yeast from 8.8% to 2.4% non-yeast
+   glycans, and mouse went up by 105 glycoPSMs.
+3. **Recall: peaks.** `max_peaks: 300` recovers most of the harness count in mouse
+   (6,024). In yeast it gives 900 glycoPSMs, but at 4.2% non-yeast glycans. The
+   default stays at Sage's 150.
+
+### Gaps
+
+1. **Yeast recall is well below MSFragger-Glyco** (781 against about 2,745 per run).
+   Only 1,553 yeast candidates pass peptide FDR, and the glycan FDR then drops half of
+   them. Most decoy winners (256 of 314) are coin-flip ties, where no ion beyond the
+   core tells target from twin. Composition-aware rescoring of more
+   than the first explained candidate is the next lever. So is an EM refit of the Hex
+   ladder for long yeast mannans.
+2. **Mouse is at pGlyco3's level, not MSFragger's.** The candidate budget from section 6
+   still applies.
+3. **Wall-time noise.** The machine was shared during these runs. Repeat on an idle
+   machine before quoting a single number.
+
+## Appendix: code and measurements
+
+- `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):
+  `GlycanComposition` (parse, mass, containment), `GlycanLibrary` (`explain`,
+  `indistinguishable_pairs`), `OXONIUM_IONS`, `oxonium_evidence`,
+  `n_glycan_core_y_ions`, `y_ion_evidence`, and `n_glycan_composition_space`. Tests
+  check the residue and oxonium masses, both notations, the isomeric and near-isobaric
+  pairs, the gate, and the Y ladder. Run the ambiguity numbers with
+  `cargo test -p sage-glyco --lib composition::tests::ambiguity_report -- --ignored --nocapture`.
+- `crates/sage-glyco/examples/glyco_summary.rs`: counts, non-high-mannose share and top
+  compositions of a `glyco.sage.parquet`, optionally dumping every row as TSV.
+  `cargo run --release -p sage-glyco --example glyco_summary -- glyco.sage.parquet [rows.tsv]`.
+- The section 6 harness, `glyco_explore`, is at commit `fe742af`. Glycan lists come
+  from FragPipe `tools/Glycan_Databases` (not vendored).
 - Sequon fraction: `docs/explore/sequon_fraction.py`, a tryptic digest of
   `/mnt/data1/sage-plus-scientific/20260914/references/human.fasta` counting peptides
   that overlap an `N[^P][ST]` match in protein context (K/R not before P, 7–50 aa, ≤2
