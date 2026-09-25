@@ -1,8 +1,10 @@
 # Crosslink search: exploration and design recommendation
 
-Status: exploration for a future beta. Nothing here ships in Beta 9. A prototype of the
-MS-cleavable signature-doublet step is in `crates/sage/src/crosslink.rs` (not wired into
-the search, unit-tested only).
+Status: milestone 1 (cleavable DSSO/DSBU) is implemented on the `feat/crosslink` branch.
+The search lives in `crates/sage-xlink`. It is built into `sage` only with the `crosslink`
+Cargo feature and runs only when the config has a `"crosslink"` block. See
+[Milestone 1](#milestone-1-implementation) at the end of this document. Nothing here ships
+in Beta 9.
 
 ## Recommendation in one paragraph
 
@@ -204,7 +206,8 @@ comes later. Its accession is not verified here.
 
 ## Prototype
 
-`crates/sage/src/crosslink.rs` (5 unit tests, `cargo test -p sage-core --lib crosslink`):
+The prototype has been superseded by milestone 1. The doublet code now lives in
+`crates/sage-xlink/src/doublets.rs`. The prototype had these parts:
 
 - `CleavableLinker` with `DSSO` and `DSBU` constants. A test checks the stub masses sum to
   the linker mass.
@@ -220,9 +223,8 @@ comes later. Its accession is not verified here.
   by each stub (and by partner plus linker), keeps linkable (K-containing) peptides, and
   returns the top k.
 
-Harness: `crates/sage-cli/examples/crosslink_doublets.rs`, which runs as
-`cargo run --release --example crosslink_doublets -- <raw> <fasta> <out.jsonl> DSSO`. It
-writes one JSON line per MS2 spectrum with:
+The harness `crosslink_doublets` example has been removed. It wrote one JSON line per MS2
+spectrum with:
 - the doublets;
 - doublet counts at four decoy spacings (real spacing −1.9, −0.7, +0.55, +1.3 Da);
 - up to 10 pair hypotheses, each with its top-5 alpha and beta candidates.
@@ -298,8 +300,112 @@ Scripts and outputs are in `explore-data/crosslink/runs/` on the data drive:
   the 299 amidated PSMs are hydrolyzed monolinks assigned as amidated plus an isotope
   error. The M0 recipe should ship hydrolyzed plus Tris only, or amidated with
   `isotope_errors` [0, 0].
+  - *Fixed in milestone 1.* On exact hyperscore ties the scorer now prefers the smaller
+    isotope error. That cuts isotope-shifted amidated PSMs from 177 to 74, and the linear
+    search is unchanged at 130 PSMs.
 - *Peptide-level q.* It came out as 0 peptides in the one- and zero-offset runs but as 165
   in the three-form run. The picked-peptide step looks unstable on a database this small.
   Treat the PSM level as the M0 metric here.
 - *Conclusion.* The mass-offset path gives about 6× the linear IDs on this sample with no
   code changes, which confirms M0.
+
+## Milestone 1 implementation
+
+Branch `feat/crosslink`. The search handles cleavable DSSO and DSBU crosslinks, end to end,
+from the normal `sage` binary.
+
+### Architecture
+
+- **Core (`crates/sage`), generic hooks only.** Normal searches are unchanged: 568 of 568
+  workspace tests pass with and without the feature.
+  - `Scorer::score_offset_hypotheses` scores peptides against caller-supplied precursor
+    masses and mass offsets. Each offset has its own neutral losses and preliminary
+    shifts.
+  - Fragments carry matched peak indices.
+  - On exact score ties, isotope 0 is preferred.
+  - `Scorer` derives `Clone`.
+- **`crates/sage-xlink`:**
+  - `doublets.rs`: signature doublets.
+  - `linker.rs`: linkers and settings.
+  - `search.rs`: the per-spectrum search.
+  - `fdr.rs`: the discriminant and q-values.
+  - `output.rs`: parquet output.
+- **`sage-cli`:** a `crosslink` Cargo feature (off by default). When on:
+  - `process_chunk` runs the crosslink search over MS2 spectra after the linear search,
+    reusing the recalibrated scorer.
+  - The run writes `crosslinks.sage.parquet` next to `results.sage.parquet`.
+- **Per spectrum:**
+  1. Doublets and the precursor give up to `max_pairs` chain-mass pairs. Precursor
+     isotopes −1..3 are tried. A pair of observed chains is also accepted inside the
+     isolation window.
+  2. Each chain is looked up as a peptide carrying a spectrum-specific mass offset
+     (partner + linker, on a linkable residue), with the stubs as optional neutral losses.
+     Preliminary matching uses the stub shifts only.
+  3. Chain candidates are combined, and the hyperscore is computed over the union of
+     matched peaks.
+- **FDR:**
+  - A 12-feature LDA scores each CSM.
+  - q = (TD − DD) / TT, made monotone, computed separately for intra- and inter-protein
+    links.
+  - It is applied at the CSM level and at the residue-pair level (best CSM per unordered
+    protein:position pair).
+
+### Config
+
+The `"crosslink"` block is valid only in builds with the feature. `prefilter` and
+`wide_window` must be off.
+
+```json
+"crosslink": {
+  "linker": "DSSO",
+  "residues": "K", "protein_n_term": true,
+  "isotope_errors": [-1, 3], "missing_charges": [3, 6], "isolation_half_width": 1.0,
+  "min_chain_mass": 400.0, "max_pairs": 12,
+  "preliminary_candidates": 5, "chain_candidates": 3,
+  "min_chain_matched_peaks": 2, "output_q_value": 1.0
+}
+```
+
+- `linker` is `"DSSO"`, `"DSBU"`, or a custom object.
+- All other fields are optional; the values shown are the defaults.
+- Keep the M0 monolink `mass_offset` mods in `variable_mods`, so that monolinks are not
+  forced into crosslinks.
+
+### Results, true FDR at 1% estimated CSM FDR
+
+"Wrong" means the two chains come from different synthetic peptide groups, using the
+IMP-X-FDR substring rule. Scripts are in `explore-data/crosslink/runs/`:
+`analysis/eval_xl.py` and `analysis/xi_mzid.py`.
+
+| Dataset / tool | CSMs (true FDR) | Residue pairs (true FDR) |
+| --- | ---: | ---: |
+| PXD014337 Beveridge Cas9, **Sage Plus** | 1828 (2.2%) | 189 (6.3%) |
+| PXD014337, XlinkX (paper) | 481 (12.1%) | 181 crosslinks (29%) |
+| PXD014337, MeroX Rise / Riseup (paper) | – | 125 (0.8%) / 168 (11%) |
+| PXD029252 ribosome rep1, **Sage Plus** | 2322 (2.1%) | 475 (1.9%) |
+| PXD029252 rep1, xiSEARCH (deposited mzid) | 1415 (2.1%) | 805 peptide pairs (3.4%) |
+
+- PXD029252 was searched against the 671-sequence entrapment FASTA: 171 E. coli proteins
+  plus 500 abundant human proteins. 28 of the 2322 CSMs involve a human chain. Those 28 are
+  included in the 48 wrong CSMs.
+- xiSEARCH searched only the 171 E. coli proteins, with 1% link-level and CSM-level FDR.
+- PXD014337 is intra-protein only (Cas9). PXD029252 is 92% inter-protein.
+- On Beveridge the estimate is slightly optimistic at the CSM level (2.2% true at 1%) and
+  more so at the residue-pair level (6.3%).
+  - Most wrong residue pairs have only 1–2 supporting CSMs.
+  - Requiring 3 or more supporting CSMs gives 140 correct and 2 wrong. That could become a
+    feature or a filter, which is a design choice left open.
+
+### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
+
+| File | Linear: CPU, wall, RSS | Crosslink: CPU, wall, RSS |
+| --- | --- | --- |
+| PXD014337 (36.6k MS2) | 47 s, 16 s, 754 MB | 200 s, 37 s, 753 MB (crosslink step 21 s) |
+| PXD029252 rep1 | 151 s, 38 s, 961 MB | 395 s, 41 s, 963 MB (crosslink step 21 s) |
+
+- Peak RSS does not change, because chain lookups reuse the fragment index.
+- CPU scales with the number of pair hypotheses:
+  - `max_pairs` 4 costs half the CPU but loses 10% of CSMs.
+  - Candidate caps of 5/3 match 10/5 at about 5% less CPU.
+  - Dropping the intact-linker preliminary shift saved about 13% CPU with no loss.
+- Wall times are noisy; the load average was 12–50 during these runs.
