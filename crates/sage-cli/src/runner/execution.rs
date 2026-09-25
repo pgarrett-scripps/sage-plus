@@ -123,9 +123,7 @@ impl Runner {
         let linker = settings.linker.resolve().map_err(anyhow::Error::msg)?;
         let bytes =
             sage_xlink::output::serialize(&output, &self.database, filenames, &linker.name)?;
-        let path = self.make_path("crosslinks.sage.parquet");
-        sage_cloudpath::write_bytes_sync(&path, bytes)?;
-        self.parameters.output_paths.push(path);
+        self.write_sidecar("crosslinks.sage.parquet", bytes)?;
         Ok(())
     }
 

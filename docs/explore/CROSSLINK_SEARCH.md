@@ -333,7 +333,7 @@ from the normal `sage` binary.
 - **`sage-cli`:** a `crosslink` Cargo feature (off by default). When on:
   - `process_chunk` runs the crosslink search over MS2 spectra after the linear search,
     reusing the recalibrated scorer.
-  - The run writes `crosslinks.sage.parquet` next to `results.sage.parquet`.
+  - The run writes `crosslinks.sage.parquet` next to `results.sage.parquet` through `Runner::write_sidecar` (registered in `SIDECAR_OUTPUTS`, listed in `results.json` `output_paths`).
 - **Per spectrum:**
   1. Doublets and the precursor give up to `max_pairs` chain-mass pairs. Precursor
      isotopes −1..3 are tried. A pair of observed chains is also accepted inside the
@@ -378,7 +378,10 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
   applies a stricter cutoff than the one set here. See "Calibration" for the cutoff that
   gives about 1% true FDR.
 - Keep the M0 monolink `mass_offset` mods in `variable_mods`, so that monolinks are not
-  forced into crosslinks.
+  forced into crosslinks. Since Beta 10 they must be named definitions, e.g.
+  `"DSSO_hydrolyzed": {"mass": 176.01433, "sites": ["K"], "search_mode": "mass_offset", ...}`
+  (see "Monolinks" in DOCS.md). The benchmark configs were converted with
+  `runs/modernize_mods.py`, and the results are unchanged.
 
 ### Results, true FDR at 1% estimated CSM FDR
 
@@ -491,6 +494,40 @@ target matches and the true FDR.
     target-decoy cannot see them.
   - The random-match FDR on Beveridge is 0.2–0.4%.
   - Beveridge should not drive the cutoff.
+
+### FDR estimation variants (xiFDR-style subgroups)
+
+These variants re-estimate q-values on the same 13-feature scores. The intra/inter
+("self/between") split is already the default at both levels. Decoys count as intra when
+their target accession matches, as in xiFDR. Script: `analysis/fdr_variants.py`. The
+pair-level rows use a Python copy of the pair LDA, so they differ slightly from the Rust
+numbers in "Calibration".
+
+Correct matches and true FDR at a nominal 1%:
+
+| Variant | Ribosome CSMs | Ribosome pairs | Beveridge CSMs | Beveridge pairs |
+| --- | ---: | ---: | ---: | ---: |
+| Pooled, one FDR | 2869 (2.3%) | 579 (3.5%) | 1623 (3.1%) | 171 (2.8%) |
+| **Intra/inter split (current)** | 2875 (2.4%) | 578 (3.8%) | 1851 (2.7%) | 171 (2.8%) |
+| Split, TD/TT with no DD subtraction | same | same | same | same |
+| Split, then inter by protein-pair support | 3455 (2.7%) | 589 (4.9%) | same | same |
+
+- **Splitting mainly protects intra links from inter decoys.**
+  - On the ribosome file, true FDR at 1% is 0.8% for intra and 2.6% for inter.
+  - On Beveridge, pooling lets 1–2 wrong inter matches through at 100% true FDR, which
+    lowers depth.
+- **No DD reaches the 1% boundary,** so TD/TT and (TD − DD)/TT agree there.
+- **The protein-pair-support subgroup (the heteromeric boost-off idea) is worse.**
+  - Supported inter pairs are mostly targets: 600 TT, 124 TD and 3 DD on the ribosome
+    file. The subgroup passes more targets than its decoys justify.
+  - Not adopted.
+- **What is left is not an estimation problem.** At 1% on the ribosome file:
+  - wrong matches are 1.5% random plus 0.9% cross-group, so the random part is about 1.5×
+    the estimate;
+  - Beveridge is 0.4% random plus 2.3% cross-group.
+
+  Cross-group matches look like real links, so a decoy model cannot count them. The
+  practical control is the cutoff: `q_value_threshold` 0.002 (see "Calibration").
 
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 

@@ -33,7 +33,6 @@ pub(crate) fn prepare_local_directory(
         "results.sage.ptm-library.tsv",
         "results.sage.pin",
         "results.sage.report.html",
-        "crosslinks.sage.parquet",
     ];
     let existing = names
         .iter()
