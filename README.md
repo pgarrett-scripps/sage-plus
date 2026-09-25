@@ -62,10 +62,13 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Search-time mass recalibration (`mass_recalibration`) | beta.9 | Precursor and fragment mass error drifts with retention time and m/z within a run, and differs by analyzer | A validated per-file precursor model and per-analyzer fragment models correct masses before the final search; held-out median precursor error fell from 1.48 to 1.29 ppm with unchanged identifications and entrapment FDP |
+| Radical z-dot fragment ions (`"z_dot"`) | beta.9 | Sage's `z` ion is y − NH3, not the z• ion that ETD and EThcD produce | 43% more ETD PSMs with `b,y,c,z_dot` than with `b,y,c,z` on PXD018176; HCD scans unchanged |
 | Count-based confidence fallback | beta.4 | The density model can fail on small or unusual score distributions | Peptide and protein q-values remain defined |
 | Averagine-scored isotope envelopes and charge-aware fragment matching | beta.2 | Deisotoping could assign peaks to several envelopes | Each peak belongs to one envelope, and fragment charges constrain matching |
 | Per-file precursor and fragment mass-error alignment | beta.1 | Systematic mass error differs between files | Mass errors are corrected before final rescoring |
-| Enriched retention-time model and nonlinear cross-run alignment | beta.1 | A linear model misses modification effects and nonlinear drift | Better retention-time features for rescoring and LFQ |
+| Nonlinear cross-run retention-time alignment by default | beta.9 | Linear alignment misses nonlinear chromatographic drift between runs | 31% more LFQ precursors at 1% q-value on five PXD028735 runs, with a smaller spread of human log2 ratios; `"retention_time_alignment": "linear"` restores the old default |
+| Enriched retention-time model | beta.1 | A linear model misses modification effects | Better retention-time features for rescoring and LFQ |
 | PTM-aware ion-mobility prediction | beta.1 | Mobility features ignored modifications | Cross-validated mobility features for rescoring |
 
 ### Quantification and libraries
@@ -82,6 +85,7 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Acquisition groups (MS2 analyzer and activation) | beta.9 | Hybrid methods mix Orbitrap, ion-trap, Astral, and TOF scans with HCD, CID, ETD, EThcD, and ETciD activation | Each spectrum carries its analyzer and activation from Thermo filters, mzML/mzMLb terms, or Bruker TDF, so fragment recalibration never pools groups |
 | Calibrated timsTOF ion mobility | beta.7 | timsrust interpolates 1/K0 between the acquisition limits instead of applying the instrument calibration | Reported 1/K0 equals the Bruker SDK value; the old scale was off by up to 0.054 1/K0 on a PXD070049 run, with nearly unchanged identifications ([validation](benchmarks/BETA7_RELEASE.md)). `bruker_config.ion_mobility_scale: "linear"` restores the old scale |
 | mzMLb input | beta.2 | Compressed HDF5 spectra required conversion | Read directly in standard builds |
 | Typed protein occurrences in Parquet output | beta.2 | Protein positions required re-mapping | One-based coordinates and flanking residues for each protein |
