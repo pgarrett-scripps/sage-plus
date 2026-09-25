@@ -50,6 +50,52 @@ impl std::fmt::Debug for Features<'_> {
     }
 }
 
+/// Fewest target and fewest decoy PSMs [`score_psms`] fits a model on: one
+/// per feature. With fewer, the within-class scatter is rank deficient and
+/// the fit is driven by the solver's ridge rather than the data.
+pub const MIN_CLASS_PSMS: usize = FEATURES;
+
+/// Largest accepted residual of the scatter solve, relative to the largest
+/// class-mean difference. A larger residual means the scatter matrix was
+/// singular in a direction the classes differ in, and the solver's ridge,
+/// not the data, set the coefficients.
+const MAX_RELATIVE_RESIDUAL: f64 = 1e-3;
+
+/// A feature column whose within-class standard deviation is below this
+/// fraction of `1 + |mean|` counts as constant: it only differs by rounding.
+const CONSTANT_TOLERANCE: f64 = 1e-9;
+
+/// Why a linear discriminant model could not be used.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LdaFailure {
+    /// Too few target or decoy PSMs to estimate class means and scatter.
+    TooFewPsms { targets: usize, decoys: usize },
+    /// A feature row, the scatter matrix, or the fitted coefficients held
+    /// NaN or infinite values.
+    NonFinite,
+    /// The within-class scatter matrix could not be solved.
+    SingularScatter,
+    /// The model does not separate the classes: identical class means, or
+    /// the same score for every PSM.
+    Degenerate,
+}
+
+impl std::fmt::Display for LdaFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LdaFailure::TooFewPsms { targets, decoys } => write!(
+                f,
+                "too few PSMs to fit ({targets} targets, {decoys} decoys; need {MIN_CLASS_PSMS} of each)"
+            ),
+            LdaFailure::NonFinite => write!(f, "features or coefficients are not finite"),
+            LdaFailure::SingularScatter => write!(f, "within-class scatter matrix is singular"),
+            LdaFailure::Degenerate => write!(f, "model does not separate targets from decoys"),
+        }
+    }
+}
+
+impl std::error::Error for LdaFailure {}
+
 pub struct LinearDiscriminantAnalysis {
     coef: Vec<f64>,
 }
@@ -64,7 +110,7 @@ impl LinearDiscriminantAnalysis {
         items: &[T],
         decoy: &[bool],
         feat_fn: impl Fn(&T) -> [f64; D],
-    ) -> Option<LinearDiscriminantAnalysis> {
+    ) -> Result<LinearDiscriminantAnalysis, LdaFailure> {
         Self::train_regularized(items, decoy, feat_fn, 0.0)
     }
 
@@ -74,7 +120,7 @@ impl LinearDiscriminantAnalysis {
         decoy: &[bool],
         feat_fn: impl Fn(&T) -> [f64; D],
         regularization: f64,
-    ) -> Option<LinearDiscriminantAnalysis> {
+    ) -> Result<LinearDiscriminantAnalysis, LdaFailure> {
         assert_eq!(items.len(), decoy.len());
 
         // Pass 1: per-class sums -> per-class means.
@@ -83,6 +129,9 @@ impl LinearDiscriminantAnalysis {
         let mut class_count = [0usize; 2];
         for (item, &is_decoy) in items.iter().zip(decoy) {
             let row = feat_fn(item);
+            if row.iter().any(|x| !x.is_finite()) {
+                return Err(LdaFailure::NonFinite);
+            }
             let cls = if is_decoy { 0 } else { 1 };
             for j in 0..D {
                 class_sum[cls][j] += row[j];
@@ -90,7 +139,10 @@ impl LinearDiscriminantAnalysis {
             class_count[cls] += 1;
         }
         if class_count[0] == 0 || class_count[1] == 0 {
-            return None;
+            return Err(LdaFailure::TooFewPsms {
+                targets: class_count[1],
+                decoys: class_count[0],
+            });
         }
         let mut class_mean = [[0.0f64; D]; 2];
         for c in 0..2 {
@@ -118,6 +170,7 @@ impl LinearDiscriminantAnalysis {
         for c in 0..2 {
             scatter_within += scatter_per_class[c].clone() / class_count[c] as f64;
         }
+        let within_variance: [f64; D] = std::array::from_fn(|j| scatter_within[(j, j)]);
         if regularization > 0.0 {
             let scale = (0..D)
                 .map(|index| scatter_within[(index, index)])
@@ -136,11 +189,83 @@ impl LinearDiscriminantAnalysis {
         let mu_diff: Vec<f64> = (0..D)
             .map(|j| class_mean[1][j] - class_mean[0][j])
             .collect();
-        let coef = Gauss::solve(scatter_within, Matrix::col_vector(mu_diff))?.take();
+        if mu_diff.iter().any(|x| !x.is_finite())
+            || (0..D).any(|j| !scatter_within[(j, j)].is_finite())
+        {
+            return Err(LdaFailure::NonFinite);
+        }
+
+        // A column that is constant across all PSMs (ion mobility on Orbitrap
+        // data, rank when only rank 1 is reported, model deltas without a
+        // model) has no within-class variance and no class-mean difference.
+        // It carries no information but makes the scatter matrix singular, so
+        // it gets zero weight and the model is solved over the other columns.
+        // A column constant within each class but differing between them
+        // separates the classes perfectly; no finite model exists.
+        let total = (class_count[0] + class_count[1]) as f64;
+        let mut active = Vec::with_capacity(D);
+        for j in 0..D {
+            let mean = (class_sum[0][j] + class_sum[1][j]) / total;
+            let scale = 1.0 + mean.abs();
+            if within_variance[j] > (CONSTANT_TOLERANCE * scale).powi(2) {
+                active.push(j);
+            } else if mu_diff[j].abs() > CONSTANT_TOLERANCE * scale {
+                return Err(LdaFailure::SingularScatter);
+            }
+        }
+        if active.len() < D {
+            log::debug!(
+                "linear model ignores {} constant feature column(s): {:?}",
+                D - active.len(),
+                (0..D).filter(|j| !active.contains(j)).collect::<Vec<_>>()
+            );
+        }
+
+        let n = active.len();
+        let mut scatter = Matrix::zeros(n, n);
+        for (a, &j) in active.iter().enumerate() {
+            for (b, &k) in active.iter().enumerate() {
+                scatter[(a, b)] = scatter_within[(j, k)];
+            }
+        }
+        let target: Vec<f64> = active.iter().map(|&j| mu_diff[j]).collect();
+        let max_diff = target.iter().fold(0.0f64, |acc, x| acc.max(x.abs()));
+        if max_diff == 0.0 {
+            return Err(LdaFailure::Degenerate);
+        }
+        let solved = Gauss::solve(scatter.clone(), Matrix::col_vector(target.clone()))
+            .ok_or(LdaFailure::SingularScatter)?
+            .take();
+        if solved.iter().any(|w| !w.is_finite()) {
+            return Err(LdaFailure::NonFinite);
+        }
+        // The solver adds a growing ridge until elimination succeeds, so it
+        // "solves" singular systems too. Accept the fit only if it solves the
+        // unridged system.
+        let residual = scatter
+            .dotv(&solved)
+            .iter()
+            .zip(&target)
+            .fold(0.0f64, |acc, (fitted, target)| {
+                acc.max((fitted - target).abs())
+            });
+        let mut coef = vec![0.0; D];
+        for (&j, &w) in active.iter().zip(&solved) {
+            coef[j] = w;
+        }
+        if residual.is_nan() || residual > MAX_RELATIVE_RESIDUAL * max_diff {
+            log::debug!(
+                "linear model residual {:e} exceeds {:e} of the class-mean difference {:e}",
+                residual,
+                MAX_RELATIVE_RESIDUAL,
+                max_diff
+            );
+            return Err(LdaFailure::SingularScatter);
+        }
 
         log::trace!("- linear model fit with {:?}", Features(&coef));
 
-        Some(LinearDiscriminantAnalysis { coef })
+        Ok(LinearDiscriminantAnalysis { coef })
     }
 
     /// Project a single feature row.
@@ -150,12 +275,25 @@ impl LinearDiscriminantAnalysis {
     }
 }
 
-pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()> {
+/// Fit the linear discriminant on `scores` and set each PSM's
+/// `discriminant_score` and `posterior_error`.
+///
+/// On failure `scores` are left untouched and the reason is returned; callers
+/// then rank PSMs with [`score_psms_fallback`].
+pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<(), LdaFailure> {
     log::trace!("fitting linear discriminant model...");
     let decoys = scores
         .par_iter()
         .map(|sc| sc.label == -1)
         .collect::<Vec<_>>();
+    let decoy_count = decoys.iter().filter(|&&decoy| decoy).count();
+    let target_count = decoys.len() - decoy_count;
+    if target_count < MIN_CLASS_PSMS || decoy_count < MIN_CLASS_PSMS {
+        return Err(LdaFailure::TooFewPsms {
+            targets: target_count,
+            decoys: decoy_count,
+        });
+    }
 
     let mass_error = match precursor_tol {
         Tolerance::Ppm(_, _) => |feat: &Feature| feat.aligned_delta_mass as f64,
@@ -212,24 +350,33 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()
         ]
     };
 
-    let lda = LinearDiscriminantAnalysis::train::<_, FEATURES>(scores, &decoys, &compute_features)?;
-    if !lda.coef.iter().all(|f| f.is_finite()) {
-        log::error!(
-            "linear model coefficients include NaN: this likely indicates a bug, please report!"
-        );
-        for perc in scores.iter() {
-            let row = compute_features(perc);
-            if row.iter().any(|f| !f.is_finite()) {
-                log::error!("example feature vector with NaN: {:?}", row);
-                break;
+    let lda = LinearDiscriminantAnalysis::train::<_, FEATURES>(scores, &decoys, &compute_features)
+        .inspect_err(|failure| {
+            if *failure == LdaFailure::NonFinite {
+                if let Some(row) = scores
+                    .iter()
+                    .map(&compute_features)
+                    .find(|row| row.iter().any(|f| !f.is_finite()))
+                {
+                    log::warn!("example feature vector with NaN: {:?}", Features(&row));
+                }
             }
-        }
-        return None;
-    }
+        })?;
     let discriminants: Vec<f64> = scores
         .par_iter()
         .map(|perc| lda.score(&compute_features(perc)))
         .collect();
+    if discriminants.iter().any(|score| !score.is_finite()) {
+        return Err(LdaFailure::NonFinite);
+    }
+    let (lo, hi) = discriminants
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| {
+            (lo.min(x), hi.max(x))
+        });
+    if lo >= hi {
+        return Err(LdaFailure::Degenerate);
+    }
 
     log::trace!("- fitting non-parametric model for posterior error probabilities");
     let kde = super::kde::Builder::default().build(&discriminants, &decoys);
@@ -247,7 +394,65 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Option<()
             }
         });
 
-    Some(())
+    Ok(())
+}
+
+/// Heuristic discriminant used when [`score_psms`] cannot fit a model:
+/// `ln(1 - poisson) + longest_y_pct / 3`. A non-finite Poisson term (an
+/// underflowed match probability) counts as [`FALLBACK_POISSON_CAP`] so the
+/// strongest matches rank first, and NaN counts as zero.
+pub fn fallback_discriminant(feature: &Feature) -> f32 {
+    let poisson = (-feature.poisson as f32).ln_1p();
+    let poisson = if poisson.is_nan() {
+        0.0
+    } else {
+        poisson.min(FALLBACK_POISSON_CAP)
+    };
+    let longest_y = if feature.longest_y_pct.is_finite() {
+        feature.longest_y_pct
+    } else {
+        0.0
+    };
+    poisson + longest_y / 3.0
+}
+
+/// Above `ln(1 + x)` for any finite f64 Poisson log-probability (at most
+/// about 745 in magnitude).
+pub const FALLBACK_POISSON_CAP: f32 = 8.0;
+
+/// Rank PSMs with [`fallback_discriminant`] and estimate posterior error
+/// probabilities from it. Where no estimate is possible (no decoys or no
+/// targets, or a non-finite density) `posterior_error` is 0, a PEP of 1.
+pub fn score_psms_fallback(scores: &mut [Feature]) {
+    scores.par_iter_mut().for_each(|feat| {
+        feat.discriminant_score = fallback_discriminant(feat);
+        feat.posterior_error = 0.0;
+    });
+    let decoys = scores
+        .iter()
+        .map(|feat| feat.label == -1)
+        .collect::<Vec<_>>();
+    if decoys.iter().all(|&decoy| decoy) || !decoys.iter().any(|&decoy| decoy) {
+        return;
+    }
+    let discriminants = scores
+        .iter()
+        .map(|feat| feat.discriminant_score as f64)
+        .collect::<Vec<_>>();
+    let kde = super::kde::Builder::default().build(&discriminants, &decoys);
+    scores
+        .par_iter_mut()
+        .zip(&discriminants)
+        .for_each(|(feat, score)| {
+            let pep = kde.posterior_error(*score).log10() as f32;
+            feat.posterior_error = if pep.is_nan() {
+                0.0
+            } else if pep.is_infinite() {
+                -324.0
+            } else {
+                pep
+            };
+        });
 }
 
 #[cfg(test)]

@@ -12,6 +12,9 @@ publish = false
 [features]
 default = []
 mzmlb = ["dep:mzdata"]
+# S3, GCS, and Azure paths through object_store. Without it, only local paths work
+# and cloud URLs fail with an error that names this feature.
+cloud = ["dep:object_store"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -22,7 +25,7 @@ base64 = "0.13"
 bytes = "1.0"
 futures = "0.3"
 log = "0.4.0"
-object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"] }
+object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"], optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 quick-xml = { version = "0.41.0", features = ["async-tokio"] }
@@ -30,6 +33,8 @@ timsrust = { version = "0.6.6" }
 # Same version and features as timsrust; reads TimsCalibration from analysis.tdf.
 rusqlite = { version = "0.35", features = ["bundled"] }
 opentfraw = "1.4.1"
+# Opt-in timsTOF MS1 denoising (bruker_config.denoise).
+dnoise-core = "0.5.0"
 rayon = "1.5"
 reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 regex = "1.6"

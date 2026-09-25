@@ -10,6 +10,80 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `dia` (off by default): DIA pseudo-spectrum search (`"dia": {"mode": "pseudo"}` or
+  `--dia pseudo`). The new `sage-dia` crate detects MS1 and per-window MS2 hills with koth-core
+  v0.11.0 and anchors on each charged MS1 isotope feature. Fragment hills whose apex and elution
+  profile match the precursor become one centroided MS2 spectrum. That spectrum is searched
+  closed at the feature's monoisotopic m/z and charge, and `wide_window` and `chimera` are
+  ignored. On an Orbitrap E. coli DIA run (PXD028735) it found 5,567 peptides at 1% FDR in
+  6 s and 2.3 GB. A wide-window chimeric search found 6,975 in 30 s and 3.0 GB, so wide-window
+  stays the default. With `dia` off, spectra and results are unchanged, and `results.json`
+  omits `dia`. See "DIA pseudo-spectrum search" in `DOCS.md`.
+- `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
+  (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
+  mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
+  the dnoise CLI defaults. MS2 spectra are unchanged. The setting affects LFQ only, and Sage
+  warns when it is set without `quant.lfq` or for non-TDF inputs.
+- Offset hook: `Scorer::score_offset_hypotheses` scores peptides against caller-supplied precursor
+  masses and mass offsets (`OffsetHypothesis`, `OffsetMatch`), for modules that derive offsets
+  from each spectrum. Configured mass offsets now share its preliminary-matching helper.
+  `Fragments` records matched peak indices (not serialized) and `Scorer` is `Clone`. Normal
+  searches do not call the hook and their results are unchanged.
+- A shared path for optional search passes to write their own output file next to
+  `results.sage.parquet`. The file names are registered in `output::SIDECAR_OUTPUTS`
+  (`glyco.sage.parquet`, `crosslinks.sage.parquet`), and `Runner::write_sidecar` writes a
+  registered file once per run and adds it to `output_paths`, so it is listed in
+  `results.json` and `run-summary.json`. `--overwrite` now also removes stale sidecar files,
+  and a fresh run into a directory that holds one is refused. The `results.sage.parquet`
+  columns and the `results.json` schema are unchanged.
+
+### Changed
+- CI, security and release workflows run on pinned runner images (`ubuntu-24.04`,
+  `windows-2025`) instead of `ubuntu-latest` and `windows-latest`, so a GitHub image rollover
+  cannot change release builds unannounced. macOS runners were already pinned.
+- S3, GCS, and Azure storage is now the `cloud` Cargo feature of `sage-cli` and `sage-cloudpath`.
+  It stays on in default builds and release binaries. `--no-default-features` builds are local-only,
+  drop `object_store` and the cloud SDK clients, and reject cloud URLs with an error naming the feature.
+- Isotope tie-break: when two candidates for a spectrum have exactly the same hyperscore, the one
+  with the smaller absolute precursor isotope error now ranks first, before the lighter peptide
+  mass. A peptidoform 0.984 Da lighter (amidated vs hydrolyzed monolink, N vs D) read at isotope
+  +1 no longer displaces the isotope-0 match it ties with. Only exact ties are affected.
+- The linear discriminant model now gives zero weight to feature columns that are constant
+  across all PSMs (ion mobility on Orbitrap data, rank when only rank 1 is reported, model
+  deltas without a model) and solves over the rest. Before, these columns could make the solve
+  fail and silently drop scoring to the heuristic: on a DIA pseudo-spectrum search this raised
+  peptides at 1% FDR from 3,121 to 5,532. Scores on runs that already fitted change by rounding
+  only.
+- The linear discriminant model is now also rejected when there are fewer than 20 target or
+  20 decoy PSMs, when the within-class scatter matrix is singular (previously the solver's
+  ridge silently set the coefficients), or when the model does not separate targets from
+  decoys. NaN or infinite features are a warning, not an error asking for a bug report. The
+  warning and the `discriminant_model_fallback` event now say why the model was not used.
+- The heuristic fallback score `ln(1 - poisson) + longest_y_pct / 3` caps the Poisson term at 8,
+  so an underflowed match probability no longer produces an infinite score, and the fallback
+  now estimates `posterior_error` (log10 PEP) from the heuristic score when both targets and
+  decoys are present, or reports 0 (PEP 1) otherwise. Previously it left the placeholder 1.0.
+
+### Removed
+- `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
+  explicit site for each symbol key for rewriting them as named definitions.
+- Symbol-keyed modification maps accept only upstream Sage syntax: residue or terminal-symbol
+  keys (`^ $ [ ]`, optionally with a residue) mapped to masses. The Sage Plus-only extensions that
+  named definitions replaced in Beta 6 are rejected with an error suggesting the named form:
+  `~K` and explicit-site keys (such as `first_residue:K`), and object values (such as
+  `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}`). Benchmark configurations and scripts
+  now use named definitions.
+- The `sage-mcp` server crate and binary are removed; release archives and the container image no
+  longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+
+### Documentation
+- DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
+  forms) as mass offsets with optional stub neutral losses. It also covers the amidated vs
+  hydrolyzed isotope-error trap.
+
+## [v0.1.0-beta.9] - 2026-09-25
+
+### Added
 - `"z_dot"` ion kind (aliases `"zdot"`, `"z."`): the radical z• ion (z + 1.007825 Da) produced by
   ETD and EThcD. The existing `"z"` kind is the even-electron z ion (y − NH3). Parquet and
   spectral-library outputs label it `z_dot`; library annotations use `z.`.

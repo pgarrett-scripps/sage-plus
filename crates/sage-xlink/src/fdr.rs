@@ -60,6 +60,8 @@ pub fn assign_q_values(
 ) -> FdrSummary {
     let decoy: Vec<bool> = csms.iter().map(|c| c.class != Class::TT).collect();
     let lda = LinearDiscriminantAnalysis::train_regularized(csms, &decoy, features, REGULARIZATION)
+        .map_err(|failure| log::warn!("crosslink discriminant: {failure}"))
+        .ok()
         .filter(|lda| {
             csms.iter()
                 .take(1)
@@ -121,6 +123,12 @@ pub fn assign_q_values(
         |e: &&PairEvidence| e.features(),
         REGULARIZATION,
     )
+    .map_err(|failure| {
+        if !pairs.is_empty() {
+            log::warn!("residue-pair discriminant: {failure}");
+        }
+    })
+    .ok()
     .filter(|lda| {
         evidence
             .iter()

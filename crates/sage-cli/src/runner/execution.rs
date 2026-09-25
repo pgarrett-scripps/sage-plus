@@ -43,6 +43,32 @@ impl Runner {
         }
     }
 
+    /// Explain where `bruker_config.denoise` has no effect: it denoises MS1
+    /// frames of TDF inputs, which are read only for LFQ.
+    pub(super) fn denoise_warnings(&self) -> Vec<String> {
+        if !self.parameters.bruker_config.denoise.enabled {
+            return Vec::new();
+        }
+        let mut warnings = Vec::new();
+        let others = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .filter(|path| !matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
+            .count();
+        if others > 0 {
+            warnings.push(format!(
+                "bruker_config.denoise only applies to Bruker TDF input; ignoring it for {others} other input file(s)"
+            ));
+        }
+        if !self.requires_ms1() {
+            warnings.push(
+                "bruker_config.denoise denoises MS1 frames, which are only read for LFQ; it has no effect without `quant.lfq`".into(),
+            );
+        }
+        warnings
+    }
+
     pub(super) fn scorer(&self) -> Scorer<'_> {
         Scorer {
             db: &self.database,
@@ -108,6 +134,9 @@ impl Runner {
         parallel: usize,
     ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        for warning in self.denoise_warnings() {
+            log::warn!("{warning}");
+        }
         self.cancellation.check()?;
         self.events.check()?;
         //Collect all results into a single container

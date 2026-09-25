@@ -1,3 +1,4 @@
+use crate::denoise::{BrukerDenoiseConfig, DenoiseError, Ms1Denoiser};
 use crate::tims_mobility::{
     analysis_tdf, BrukerMobilityScale, LinearMobilityScale, MobilityCalibration,
 };
@@ -8,6 +9,7 @@ use sage_core::{
         AcquisitionGroup, Activation, MassAnalyzer, Precursor, RawSpectrum, Representation,
     },
 };
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 /// timsTOF spectra are all measured by the TOF analyzer after CID.
 const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
@@ -17,7 +19,7 @@ const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap, path::Path};
 use timsrust::{
-    core::{Converter, Frame, MSLevel, Precursor as TimsrustPrecursor, ScanIndex},
+    core::{Converter, Frame, MSLevel, Precursor as TimsrustPrecursor, ScanIndex, TofIndex},
     tdf::{
         FrameWindowSplittingConfiguration, QuadWindowExpansionStrategy, SpectrumProcessingParams,
         SpectrumReaderConfig,
@@ -142,6 +144,9 @@ pub struct BrukerProcessingConfig {
     /// between the acquisition range limits, as in Beta 6 and earlier.
     #[serde(default)]
     pub ion_mobility_scale: BrukerMobilityScale,
+    /// Opt-in dnoise denoising of MS1 frames before centroiding. Off by default.
+    #[serde(default)]
+    pub denoise: BrukerDenoiseConfig,
 }
 
 /// Scan-to-1/K0 conversion for one acquisition.
@@ -226,7 +231,8 @@ impl TdfReader {
             .map_err(|error| tims(error.into()))?;
         let mut spectra = self.read_msn_spectra(file_id, &spectrum_reader, &scale)?;
         if requires_ms1 {
-            let ms1s = self.read_ms1_spectra(&path_name, file_id, config.ms1, &scale)?;
+            let ms1s =
+                self.read_ms1_spectra(&path_name, file_id, config.ms1, config.denoise, &scale)?;
             spectra.extend(ms1s);
         }
 
@@ -238,16 +244,35 @@ impl TdfReader {
         path_name: impl AsRef<Path>,
         file_id: usize,
         config: BrukerMS1CentoidingConfig,
+        denoise: BrukerDenoiseConfig,
         scale: &MobilityScale,
-    ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
+    ) -> Result<Vec<RawSpectrum>, crate::Error> {
         let start = std::time::Instant::now();
-        let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())?;
+        let tims = |error: timsrust::TimsRustError| crate::Error::TDF(error);
+        let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())
+            .map_err(|error| tims(error.into()))?;
         let frame_reader = path.frame_reader().map_err(|error| match error {
-            timsrust::TimsTofFrameReaderError::FrameReaderError(error) => error,
+            timsrust::TimsTofFrameReaderError::FrameReaderError(error) => tims(error.into()),
             timsrust::TimsTofFrameReaderError::NotSupported => {
                 unreachable!("TimsTofPath recognized a non-TDF path as a Bruker directory")
             }
         })?;
+        // The denoiser borrows its parameters, so both live for the whole read.
+        let denoise_params = denoise.enabled.then(|| denoise.params());
+        let denoiser = match &denoise_params {
+            Some(params) => {
+                let tdf = analysis_tdf(path_name.as_ref()).ok_or_else(|| {
+                    crate::Error::Unsupported(format!(
+                        "{}: MS1 denoising needs an analysis.tdf",
+                        path_name.as_ref().display()
+                    ))
+                })?;
+                Some(params.denoiser(&tdf)?)
+            }
+            None => None,
+        };
+        let raw_points = AtomicU64::new(0);
+        let kept_points = AtomicU64::new(0);
         let mz_converter = path
             .mz_converter()
             .expect("TDF paths always provide an m/z converter");
@@ -264,19 +289,32 @@ impl TdfReader {
                 |buffer, frame| match frame {
                     Ok(frame) => {
                         buffer.clear();
+                        let survivors = match &denoiser {
+                            Some(denoiser) => {
+                                let survivors = denoise_frame(denoiser, &frame)?;
+                                raw_points.fetch_add(frame.len() as u64, AtomicOrdering::Relaxed);
+                                kept_points
+                                    .fetch_add(survivors.len() as u64, AtomicOrdering::Relaxed);
+                                Some(survivors)
+                            }
+                            None => None,
+                        };
+                        let survivors = survivors.as_deref();
                         // Convert every scan before centroiding so the reported
                         // mobility is an average of calibrated values.
                         match scale {
                             MobilityScale::Calibrated { calibration, .. } => {
                                 let model = calibration.frame(frame.index());
-                                buffer.with_frame(
+                                buffer.load(
                                     &frame,
+                                    survivors,
                                     |scan| model.one_over_k0(scan as f64) as f32,
                                     &mz_converter,
                                 )
                             }
-                            MobilityScale::Linear(Some(linear)) => buffer.with_frame(
+                            MobilityScale::Linear(Some(linear)) => buffer.load(
                                 &frame,
+                                survivors,
                                 |scan| {
                                     let scan =
                                         u32::try_from(scan).expect("scan index exceeds u32 range");
@@ -284,8 +322,9 @@ impl TdfReader {
                                 },
                                 &mz_converter,
                             ),
-                            MobilityScale::Linear(None) => buffer.with_frame(
+                            MobilityScale::Linear(None) => buffer.load(
                                 &frame,
+                                survivors,
                                 |scan| {
                                     let scan = ScanIndex::try_from(scan)
                                         .expect("scan index exceeds u32 range");
@@ -320,21 +359,30 @@ impl TdfReader {
                             mobility: Some(mobility),
                             acquisition: TIMS_TOF,
                         };
-                        Some(spec)
+                        Ok(Some(spec))
                     }
                     Err(x) => {
                         log::error!("error parsing spectrum: {:?}", x);
-                        None
+                        Ok(None)
                     }
                 },
             )
-            .flatten()
-            .collect();
+            .filter_map(Result::transpose)
+            .collect::<Result<_, DenoiseError>>()?;
         log::info!(
             "read {} ms1 spectra in {:#?}",
             ms1_spectra.len(),
             start.elapsed()
         );
+        if denoiser.is_some() {
+            let raw = raw_points.into_inner();
+            let kept = kept_points.into_inner();
+            log::info!(
+                "{}: denoising kept {kept} of {raw} MS1 points ({:.1}%)",
+                path_name.as_ref().display(),
+                100.0 * kept as f64 / raw.max(1) as f64
+            );
+        }
         Ok(ms1_spectra)
     }
 
@@ -404,6 +452,29 @@ impl TdfReader {
     }
 }
 
+/// Denoise one MS1 frame, returning its surviving `(scan, tof, intensity)` points.
+fn denoise_frame(
+    denoiser: &Ms1Denoiser<'_>,
+    frame: &Frame,
+) -> Result<Vec<(u32, u32, u32)>, DenoiseError> {
+    if frame.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ions = frame.ions();
+    denoiser.denoise(
+        frame.index(),
+        ions.scan_offsets(),
+        ions.tof_indices()
+            .iter()
+            .map(|&tof| u32::from(tof))
+            .collect(),
+        ions.intensities()
+            .iter()
+            .map(|&intensity| u32::from(intensity))
+            .collect(),
+    )
+}
+
 #[derive(Clone, Copy)]
 struct ImsPeak {
     mz: f32,
@@ -457,7 +528,49 @@ impl PeakBuffer {
             .map(|((mz, intensity), im)| ImsPeak { mz, intensity, im });
         self.peaks.extend(peak_iter);
         assert_eq!(self.peaks.len(), expect_len);
+        self.sort_and_order();
+    }
 
+    /// Load the frame's raw points, or only `survivors` of denoising when set.
+    fn load(
+        &mut self,
+        frame: &Frame,
+        survivors: Option<&[(u32, u32, u32)]>,
+        scan_to_im: impl Fn(usize) -> f32,
+        mz_converter: &MzConverter,
+    ) {
+        match survivors {
+            Some(survivors) => self.with_survivors(survivors, scan_to_im, mz_converter),
+            None => self.with_frame(frame, scan_to_im, mz_converter),
+        }
+    }
+
+    /// Load denoised `(scan, tof, intensity)` points, which arrive in scan order.
+    fn with_survivors(
+        &mut self,
+        survivors: &[(u32, u32, u32)],
+        scan_to_im: impl Fn(usize) -> f32,
+        mz_converter: &MzConverter,
+    ) {
+        self.expand_to_capacity(survivors.len());
+        let mut current = None;
+        let mut im = 0.0;
+        for &(scan, tof, intensity) in survivors {
+            if current != Some(scan) {
+                current = Some(scan);
+                im = scan_to_im(scan as usize);
+            }
+            let tof = TofIndex::try_from(tof).expect("TOF index exceeds the timsrust range");
+            self.peaks.push(ImsPeak {
+                mz: f64::from(mz_converter.convert(tof)) as f32,
+                intensity: intensity as f32,
+                im,
+            });
+        }
+        self.sort_and_order();
+    }
+
+    fn sort_and_order(&mut self) {
         // sort by mz ... bc binary searching on the mz space
         // for neighbors is the fastest way to find neighbors that I have tried.
         self.peaks.sort_by(|a, b| a.mz.partial_cmp(&b.mz).unwrap());

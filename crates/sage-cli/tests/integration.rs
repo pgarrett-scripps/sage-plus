@@ -242,7 +242,7 @@ fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
     let config = root.join("config.json");
     std::fs::write(
         &config,
-        r#"{"database":{"variable_mods":{"~K":[42.0106]}}}"#,
+        r#"{"database":{"variable_mods":{"Acetyl":{"mass":42.0106,"sites":["internal_residue:K"]}}}}"#,
     )?;
     let output = Command::new(env!("CARGO_BIN_EXE_sage"))
         .arg(&config)

@@ -9,26 +9,22 @@
       "max_len": 50
     },
     "static_mods": {
-      "C": {
+      "Carbamidomethyl": {
         "mass": 57.021464,
-        "name": "Carbamidomethyl"
+        "sites": ["C"]
       }
     },
     "variable_mods": {
-      "M": [
-        {
-          "mass": 15.994915,
-          "max_count": 1,
-          "name": "Oxidation"
-        }
-      ],
-      "^": [
-        {
-          "mass": 42.010565,
-          "max_count": 1,
-          "name": "Acetyl"
-        }
-      ]
+      "Oxidation": {
+        "mass": 15.994915,
+        "max_count": 1,
+        "sites": ["M"]
+      },
+      "Acetyl": {
+        "mass": 42.010565,
+        "max_count": 1,
+        "sites": ["peptide_n_term"]
+      }
     },
     "max_variable_mods": 2,
     "max_total_variable_mods": 2,
@@ -55,8 +51,6 @@
   "max_memory_gb": 14.0,
   "min_free_memory_gb": 2.0,
   "batch_size": 1,
-  "mzml_paths": [
-    "data/silac-k6r6/HEK_SILAC-K6R6.mzML"
-  ],
+  "mzml_paths": ["data/silac-k6r6/HEK_SILAC-K6R6.mzML"],
   "score_type": "SageHyperScore"
 }

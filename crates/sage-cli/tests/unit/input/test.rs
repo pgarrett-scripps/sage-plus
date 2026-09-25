@@ -213,9 +213,10 @@ fn modification_channel_offsets_are_validated_before_search() {
     let valid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }));
@@ -224,16 +225,18 @@ fn modification_channel_offsets_are_validated_before_search() {
     let invalid = base_search_space(serde_json::json!({
         "fasta": "test.fasta",
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         },
         "variable_mods": {
-            "K": [{
+            "Lys": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199}
-            }]
+                "channel_offsets": {"light": 0.0, "medium": 4.025107, "heavy": 8.014199},
+                "sites": ["K"]
+            }
         }
     }));
     assert!(invalid
@@ -425,4 +428,100 @@ fn predict_rt_default_matches_documentation() {
         assert!(!line.contains("default: false"), "{line}");
         assert!(!line.contains("default=false"), "{line}");
     }
+}
+
+#[test]
+fn bruker_denoise_settings_are_validated() {
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": ["test.d"],
+        "bruker_config": { "denoise": { "enabled": true, "halo_peak_fraction": 2.0 } }
+    }))
+    .unwrap();
+    let error = input.validate().unwrap_err().to_string();
+    assert!(error.contains("bruker_config.denoise"), "{error}");
+
+    let input: Result<Input, _> = serde_json::from_value(serde_json::json!({
+        "bruker_config": { "denoise": { "enabled": true, "halo_fraction": 0.2 } }
+    }));
+    assert!(input.is_err());
+}
+
+fn build_lqsr(dia: Option<serde_json::Value>, name: &str) -> super::Search {
+    let output = std::env::temp_dir().join(format!(
+        "sage-cli-dia-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut config = serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "wide_window": true,
+        "chimera": true,
+        "output_directory": output.to_string_lossy(),
+        "mzml_paths": [concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/LQSRPAAPPAPGPGQLTLR.mzML"
+        )]
+    });
+    if let Some(dia) = dia {
+        config["dia"] = dia;
+    }
+    let input: Input = serde_json::from_value(config).unwrap();
+    let search = input.build().unwrap();
+    std::fs::remove_dir_all(output).unwrap();
+    search
+}
+
+#[test]
+fn dia_defaults_off_and_is_omitted_from_results_json() {
+    let search = build_lqsr(None, "off");
+    assert!(search.dia.is_off());
+    assert!(search.wide_window && search.chimera);
+    let json = serde_json::to_value(&search).unwrap();
+    assert!(json.get("dia").is_none());
+    let explicit = build_lqsr(Some(serde_json::json!({ "mode": "off" })), "off-explicit");
+    assert!(serde_json::to_value(&explicit)
+        .unwrap()
+        .get("dia")
+        .is_none());
+}
+
+#[test]
+fn dia_pseudo_searches_closed_and_is_recorded() {
+    let search = build_lqsr(
+        Some(serde_json::json!({ "mode": "pseudo", "min_corr": 0.6 })),
+        "pseudo",
+    );
+    assert_eq!(search.dia.mode, sage_dia::DiaMode::Pseudo);
+    assert!(!search.wide_window && !search.chimera);
+    let json = serde_json::to_value(&search).unwrap();
+    assert_eq!(json["dia"]["mode"], "pseudo");
+    assert_eq!(json["dia"]["min_corr"], 0.6f32 as f64);
+}
+
+#[test]
+fn dia_settings_are_validated() {
+    let input: Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": ["test.mzML"],
+        "dia": { "mode": "pseudo", "min_corr": 1.5 }
+    }))
+    .unwrap();
+    let error = input.validate().unwrap_err().to_string();
+    assert!(error.contains("dia.min_corr"));
+    assert!(serde_json::from_value::<Input>(serde_json::json!({
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "dia": { "mode": "tiered" }
+    }))
+    .is_err());
 }

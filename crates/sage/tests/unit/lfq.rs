@@ -59,9 +59,10 @@ fn one_identified_label_channel_seeds_all_channel_precursors() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "R": {
+            "Arg10": {
                 "mass": 0.0,
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))
@@ -102,11 +103,11 @@ fn shared_light_variable_channel_seeds_every_heavy_site_pattern() {
         "generate_decoys": false,
         "max_variable_mods": 2,
         "variable_mods": {
-            "K": [{
+            "Optional-Lys8": {
                 "mass": 0.0,
-                "name": "Optional-Lys8",
-                "channel_offsets": {"light": 0.0, "heavy": 8.014199}
-            }]
+                "channel_offsets": {"light": 0.0, "heavy": 8.014199},
+                "sites": ["K"]
+            }
         }
     }))
     .unwrap();

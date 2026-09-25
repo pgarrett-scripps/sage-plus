@@ -10,8 +10,9 @@ license = "MIT"
 publish = false
 
 [features]
-default = ["mzmlb"]
+default = ["mzmlb", "cloud"]
 mzmlb = ["sage-cloudpath/mzmlb"]
+cloud = ["sage-cloudpath/cloud"]
 # MS-cleavable crosslink search, enabled at run time by a `crosslink` config block.
 crosslink = ["dep:sage-xlink"]
 
@@ -27,6 +28,7 @@ path = "src/main.rs"
 
 [dependencies]
 sage-core = { path = "../sage" }
+sage-dia = { path = "../sage-dia" }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 sage-xlink = { path = "../sage-xlink", optional = true }
 

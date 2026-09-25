@@ -67,38 +67,33 @@ def sample_sites(fasta: Path, count: int, seed: int) -> tuple[list[tuple[str, in
     return selected, eligible
 
 
-def variable_modifications(site_mode: str = "library") -> dict[str, list[dict[str, object]]]:
-    phospho = {
-        "mass": 79.966331,
-        "name": "Phospho",
-        "max_count": 3,
-        "site_mode": site_mode,
-        "neutral_losses": [97.976896],
-    }
-    deamidated = {
-        "mass": 0.984016,
-        "name": "Deamidated",
-        "max_count": 2,
-        "site_mode": site_mode,
-    }
+def variable_modifications(site_mode: str = "library") -> dict[str, dict[str, object]]:
     return {
-        "S": [phospho],
-        "T": [phospho],
-        "Y": [phospho],
-        "M": [{
+        "Phospho": {
+            "mass": 79.966331,
+            "max_count": 3,
+            "site_mode": site_mode,
+            "neutral_losses": [97.976896],
+            "sites": ["S", "T", "Y"],
+        },
+        "Oxidation": {
             "mass": 15.994915,
-            "name": "Oxidation",
             "max_count": 2,
             "site_mode": site_mode,
-        }],
-        "K": [{
+            "sites": ["M"],
+        },
+        "Acetyl": {
             "mass": 42.010565,
-            "name": "Acetyl",
             "max_count": 2,
             "site_mode": site_mode,
-        }],
-        "N": [deamidated],
-        "Q": [deamidated],
+            "sites": ["K"],
+        },
+        "Deamidated": {
+            "mass": 0.984016,
+            "max_count": 2,
+            "site_mode": site_mode,
+            "sites": ["N", "Q"],
+        },
     }
 
 
@@ -114,7 +109,7 @@ def search_config(fasta: Path, mzml: Path, library: Path) -> dict[str, object]:
                 "max_len": 50,
             },
             "static_mods": {
-                "C": {"mass": 57.021464, "name": "Carbamidomethyl"},
+                "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
             },
             "variable_mods": variable_modifications(),
             "max_variable_mods": 1,
