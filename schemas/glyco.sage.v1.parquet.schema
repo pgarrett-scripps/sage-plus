@@ -1,0 +1,30 @@
+message schema {
+    required byte_array filename (utf8);
+    required byte_array scannr (utf8);
+    required int32 label;
+    required byte_array peptide (utf8);
+    required byte_array stripped_peptide (utf8);
+    required byte_array proteins (utf8);
+    required int32 glycosite;
+    required int32 charge;
+    required float expmass;
+    required float peptide_mass;
+    required byte_array glycan (utf8);
+    required double glycan_mass;
+    required int32 isotope_error;
+    required int32 ammonium_adducts;
+    required float glycan_ppm;
+    required int32 explanations;
+    required double hyperscore;
+    required double discriminant;
+    required float peptide_q;
+    required double glycan_score;
+    required double glycan_score_margin;
+    required float glycan_q;
+    required boolean glycan_decoy;
+    required int32 y_ions_matched;
+    required int32 y_ions_generated;
+    required int32 oxonium_ions;
+    required float rt;
+    required boolean passes_fdr;
+}

@@ -4,7 +4,6 @@ pub mod database;
 pub mod enzyme;
 pub mod fasta;
 pub mod fdr;
-pub mod glycan;
 pub mod heap;
 pub mod ion_series;
 pub mod isotopes;

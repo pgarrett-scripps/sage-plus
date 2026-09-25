@@ -14,6 +14,9 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.
+- `glyco.sage.v1.parquet.schema` (experimental, may change without a major version) describes
+  `glyco.sage.parquet`, written by builds with the `glyco` feature when the config has a `glyco` block.
+  One row per oxonium-gated spectrum with a glycan-explained candidate; see `docs/explore/GLYCO_SEARCH.md`.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.

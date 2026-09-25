@@ -3275,6 +3275,7 @@ dependencies = [
  "ryu",
  "sage-cloudpath",
  "sage-core",
+ "sage-glyco",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -3329,6 +3330,20 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+]
+
+[[package]]
+name = "sage-glyco"
+version = "0.1.0-beta.8"
+dependencies = [
+ "anyhow",
+ "log",
+ "parquet",
+ "rayon",
+ "sage-cloudpath",
+ "sage-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,0 +1,20 @@
+[package]
+name = "sage-glyco"
+version.workspace = true
+edition = "2021"
+rust-version = "1.88"
+description = "Experimental intact N-glycopeptide search for Sage Plus"
+license = "MIT"
+publish = false
+
+[dependencies]
+sage-core = { path = "../sage" }
+log = "0.4.0"
+parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
+rayon = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+anyhow = "1.0"
+sage-cloudpath = { path = "../sage-cloudpath" }

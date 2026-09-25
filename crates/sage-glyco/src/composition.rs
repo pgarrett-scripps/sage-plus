@@ -1,8 +1,5 @@
-//! Prototype glycan composition support for intact glycopeptide search.
-//!
-//! Exploration code for `docs/explore/GLYCO_SEARCH.md`. Nothing in the search
-//! pipeline calls this module yet. It covers the pieces that do not depend on
-//! how retrieval is restructured:
+//! Glycan compositions, the composition library, and oxonium and core Y-ion
+//! evidence:
 //!
 //! * parsing glycan compositions (`HexNAc(4)Hex(5)Fuc(1)NeuAc(2)`, and the
 //!   pGlyco-style one-letter form `N(4)H(5)F(1)A(2)`),
@@ -17,8 +14,8 @@
 
 use std::fmt::{Display, Write as _};
 
-use crate::mass::{Tolerance, NEUTRON, PROTON};
-use crate::spectrum::ProcessedSpectrum;
+use sage_core::mass::{Tolerance, NEUTRON, PROTON};
+use sage_core::spectrum::ProcessedSpectrum;
 
 /// Monosaccharide residues searched in N- and mucin-type O-glycans.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -319,7 +316,11 @@ impl OxoniumEvidence {
 
 /// Most intense peak whose singly charged m/z matches `mz`. Oxonium ions
 /// are 1+, so peaks the deisotoper assigned a higher charge are skipped.
-fn find_singly_charged(query: &ProcessedSpectrum, mz: f32, tolerance: Tolerance) -> Option<usize> {
+pub(crate) fn find_singly_charged(
+    query: &ProcessedSpectrum,
+    mz: f32,
+    tolerance: Tolerance,
+) -> Option<usize> {
     let neutral = mz - PROTON;
     let (lo, hi) = tolerance.bounds(neutral);
     let start = query.masses.partition_point(|mass| *mass < lo);
@@ -443,7 +444,7 @@ pub fn y_ion_evidence(
 
 /// Peak at `mz` for `charge`: a deisotoped peak of that charge, or a peak of
 /// unknown charge (stored as singly charged) at that m/z.
-fn find_at_charge(
+pub(crate) fn find_at_charge(
     query: &ProcessedSpectrum,
     mz: f32,
     charge: u8,
@@ -595,7 +596,7 @@ mod tests {
     }
 
     /// Sizes the composition ambiguity problem for the design doc:
-    /// `cargo test -p sage glycan::tests::ambiguity_report -- --ignored --nocapture`
+    /// `cargo test -p sage-glyco composition::tests::ambiguity_report -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn ambiguity_report() {
