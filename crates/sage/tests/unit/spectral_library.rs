@@ -25,6 +25,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
             mz_calculated: vec![200.0, 300.0, 400.0],
             mz_experimental: vec![200.01, 300.01, 400.01],
             intensities: vec![25.0, 100.0, 0.5],
+            peak_indices: vec![0, 1, 2],
         }),
         ..Feature::default()
     }
