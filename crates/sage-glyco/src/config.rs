@@ -91,8 +91,9 @@ pub struct GlycoConfig {
     /// consecutive run, and a control ladder at a fixed offset) to the glyco
     /// peptide model.
     pub ladder_feature: bool,
-    /// Add to the glyco peptide model how many other spectra picked the same
-    /// peptide (glycoform and charge-state siblings).
+    /// Add to the glyco peptide model how many other precursors picked the same
+    /// peptide (glycoform and charge-state siblings), counting each
+    /// precursor once. On by default.
     pub sibling_feature: bool,
     /// Fit the glyco peptide model and its q-values separately for
     /// candidates whose glycan has only core Y ions (such as HexNAc(1)).
@@ -123,7 +124,7 @@ impl Default for GlycoConfig {
             twin_feature: "off".into(),
             rescore_candidates: true,
             ladder_feature: false,
-            sibling_feature: false,
+            sibling_feature: true,
             core_only_subgroup: false,
         }
     }
