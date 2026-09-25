@@ -365,7 +365,7 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
   "linker": "DSSO",
   "residues": "K", "protein_n_term": true,
   "isotope_errors": [-1, 3], "missing_charges": [3, 6], "isolation_half_width": 1.0,
-  "min_chain_mass": 400.0, "max_pairs": 12,
+  "precursor_window_pairs": true, "min_chain_mass": 400.0, "max_pairs": 12,
   "preliminary_candidates": 5, "chain_candidates": 3,
   "min_chain_matched_peaks": 2, "output_q_value": 1.0, "q_value_threshold": 0.01
 }
@@ -381,6 +381,9 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
   (residue pairs).
   - The default stays at 0.01, but at that value the true FDR is 2.4–2.7% on the
     ground-truth sets (see "Calibration").
+- `precursor_window_pairs: false` requires two observed chains to match the precursor
+  exactly, at an allowed isotope error. It roughly halves cross-group errors, at a cost
+  in depth that depends on the dataset (see "Cross-group errors").
 - Keep the M0 monolink `mass_offset` mods in `variable_mods`, so that monolinks are not
   forced into crosslinks. Since Beta 10 they must be named definitions, e.g.
   `"DSSO_hydrolyzed": {"mass": 176.01433, "sites": ["K"], "search_mode": "mass_offset", ...}`
@@ -532,6 +535,78 @@ Correct matches and true FDR at a nominal 1%:
 
   Cross-group matches look like real links, so a decoy model cannot count them. The
   practical control is the cutoff: `q_value_threshold` 0.002 (see "Calibration").
+
+### Cross-group errors
+
+These are the cross-group target CSMs that pass 1%: 44 on Beveridge and 26 on the
+ribosome file. The weaker chain was taken as the wrong one; in every case it is the beta
+chain. Each CSM gets the first cause that applies. Scripts:
+`analysis/crossgroup_causes.py`, `crossgroup_dig.py`, `strata.py`, `rank_eval.py` and
+`xg_xlinkx.py`.
+
+| Cause | Beveridge | Ribosome |
+| --- | ---: | ---: |
+| Wrong chain co-isolated with a correct crosslink (±0.7 m/z, ±0.5 min) | 3 | 0 |
+| Precursor mass off: an isolation-window pair, \|ppm\| > 20 or isotope outside [-1, 3] | 14 | 7 |
+| Wrong chain found in a correct crosslink within 0.5 min, outside the window | 21 | 9 |
+| Isobaric (3) or one isotope off (1) from a true partner | 4 | 2 |
+| Shared or short sequence (the peptide is in several groups) | 0 | 8 |
+| Other | 2 | 0 |
+
+- **Not linear chimeras.** None of the wrong chains are co-isolated linear or dead-end
+  PSMs, and only 2 of 44 are seen as a linear peptide within 0.5 min.
+- **Crosslink chimeras.** 34 of 44 wrong Beveridge chains, and 12 of 26 ribosome chains,
+  are correctly crosslinked to a different partner within 0.5 min.
+  - In the precursor-off cases, the both-observed pairing combines one chain from each
+    of two co-eluting crosslinks, and their summed mass lands inside the isolation window.
+- **Isolation-window pairs have a high error rate that decoys miss.**
+
+  | Dataset | True FDR, window pairs | Decoy estimate, window pairs | True FDR, exact precursor |
+  | --- | ---: | ---: | ---: |
+  | Beveridge | 8.3% | 0.6% | 2.1% |
+  | Ribosome | 5.4% | 1.0% | 2.2% |
+
+- **The top Beveridge errors are probably real.** MIAKSEQEIGK–LVDSTDKADLR has 12 CSMs,
+  both chains have hyperscores of 40 or more and 12 to 15 fragments each, and XlinkX
+  reports the same pair. It is a side product, not a search error.
+- **Filters on the existing results, not adopted:**
+  - **Penalising a stolen chain** (the weak chain is paired with another partner in a
+    better CSM nearby). This flags 18–38% of correct CSMs, because library peptides
+    really do link to several partners, and it lowers depth at matched true FDR on
+    the ribosome file.
+  - **As an LDA feature.** Decoys rarely carry it, so the LDA would weight it as target
+    evidence.
+  - **Unique fragments for the weak chain.** The wrong weak chains have the same
+    fragment coverage as correct beta chains (median 7.5 vs 8 peaks), so there is
+    nothing to separate them on.
+
+`precursor_window_pairs: false` makes a pair of observed chains match the precursor within
+`precursor_tol` at one of `isotope_errors`, instead of anywhere in the isolation window.
+Runs `m1-xl-strict` and `ribo-xl-strict`, script `strict.sh`. Each cell gives correct
+matches and the true FDR:
+
+| Dataset, level | Estimated FDR | Window pairs (default) | Exact pairs |
+| --- | ---: | ---: | ---: |
+| Beveridge, CSMs | 1% | 1851 (2.7%) | 1670 (1.9%) |
+| Beveridge, CSMs | 0.2% | 1172 (1.9%) | **1393 (1.8%)** |
+| Beveridge, residue pairs | 1% | 171 (3.4%) | 167 (2.9%) |
+| Beveridge, residue pairs | 0.2% | 146 (2.0%) | 122 (1.6%) |
+| Ribosome, CSMs | 1% | 2875 (2.4%) | 2508 (2.0%) |
+| Ribosome, CSMs | 0.2% | 2239 (1.1%) | 1808 (0.6%) |
+| Ribosome, residue pairs | 1% | 575 (3.0%) | 557 (1.9%) |
+| Ribosome, residue pairs | 0.2% | 385 (0.5%) | 350 (0.3%) |
+
+- **Cross-group CSMs at 1% nearly halve:** 44 → 25 on Beveridge and 26 → 14 on the
+  ribosome file.
+- **At matched true FDR it is a trade-off.** These are correct CSMs in the score-ranked
+  prefix, from `analysis/matched_fdr.py`:
+  - Beveridge at 2% true: 1185 → 1329 (+12%).
+  - Ribosome at 1% true: 2203 → 2034 (−8%).
+  - Ribosome at 2% true: 2801 → 2547 (−9%).
+- **What exact pairs lose:** correct window matches, where the monoisotopic peak is
+  misassigned beyond the isotope range. These are 9–10% of correct CSMs.
+- **Adoption:** the default stays `true`. Use `false` for chimera-prone samples like
+  pooled libraries, or when residue-pair precision matters more than depth.
 
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 

@@ -122,6 +122,13 @@ pub struct CrosslinkSettings {
     /// a misassigned monoisotopic peak). Used when the spectrum does not
     /// record its isolation window.
     pub isolation_half_width: f32,
+    /// Whether two observed chains may pair anywhere inside the isolation
+    /// window. When false, their summed mass must match the precursor within
+    /// `precursor_tol` at one of `isotope_errors`. Window pairs rescue
+    /// misassigned monoisotopic peaks but also combine chains from two
+    /// co-isolated crosslinks (see docs/explore/CROSSLINK_SEARCH.md,
+    /// "Cross-group errors").
+    pub precursor_window_pairs: bool,
     /// Lightest chain considered.
     pub min_chain_mass: f32,
     /// Chain-mass pair hypotheses scored per spectrum.
@@ -154,6 +161,7 @@ impl Default for CrosslinkSettings {
             isotope_errors: (-1, 3),
             missing_charges: (3, 6),
             isolation_half_width: 1.0,
+            precursor_window_pairs: true,
             min_chain_mass: 400.0,
             max_pairs: 12,
             preliminary_candidates: 5,

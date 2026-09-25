@@ -158,7 +158,8 @@ pub struct PairingSettings {
 ///   inside the precursor window: within the isolation half width of the
 ///   reported mass, extended by the isotope range. This tolerates a
 ///   misassigned monoisotopic peak; the remaining precursor error is left to
-///   scoring.
+///   scoring. With a zero half width the sum must instead match the
+///   precursor within tolerance at one of the isotope errors.
 /// * Each doublet also proposes `precursor - isotope * neutron - crosslink -
 ///   chain` as its partner, for every isotope error.
 ///
@@ -202,6 +203,14 @@ pub fn pair_hypotheses(
                 let sum = first.chain_mass + second.chain_mass + linker.crosslink_mass;
                 let delta = precursor.mass - sum;
                 if delta < lo || delta > hi {
+                    continue;
+                }
+                // With no isolation slack the pair must match the precursor
+                // at one of the isotope errors.
+                if precursor.half_width == 0.0
+                    && !(iso_lo..=iso_hi)
+                        .any(|k| tol.contains(precursor.mass - k as f32 * NEUTRON, sum))
+                {
                     continue;
                 }
                 let (alpha, beta) = ordered(first.chain_mass, second.chain_mass);
@@ -399,6 +408,19 @@ mod tests {
         let wide = pair_hypotheses(&doublets, &window, &linker, settings());
         assert!(wide[0].both_observed());
         assert!(TOL.contains(BETA, wide[0].beta_mass));
+
+        // Without a window, an isotope-shifted precursor still pairs the
+        // observed chains; the 0.4 Da offset does not, even inside the
+        // isotope span.
+        let shifted = precursor(ALPHA + BETA + linker.crosslink_mass + NEUTRON);
+        let isotopes = PairingSettings {
+            isotope_errors: (-1, 3),
+            ..settings()
+        };
+        let exact = pair_hypotheses(&doublets, &shifted, &linker, isotopes);
+        assert!(exact[0].both_observed());
+        let off = pair_hypotheses(&doublets, &precursor(mass), &linker, isotopes);
+        assert!(off.iter().all(|p| !p.both_observed()));
     }
 
     #[test]

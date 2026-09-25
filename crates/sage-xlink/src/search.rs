@@ -188,6 +188,7 @@ impl CrosslinkSearch {
             return Vec::new();
         };
         let half_width = match precursor.isolation_window {
+            _ if !self.settings.precursor_window_pairs => 0.0,
             Some(Tolerance::Da(lo, hi)) if hi > lo => (hi - lo) / 2.0,
             _ => self.settings.isolation_half_width,
         };
