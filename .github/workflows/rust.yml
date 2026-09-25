@@ -66,9 +66,11 @@ jobs:
           key: test-${{ matrix.rust }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build
-        run: cargo build --workspace --locked --verbose
+        # Build tests and examples once; the steps below reuse these binaries
+        # instead of `cargo run -p ...`, which rebuilds with a different feature set.
+        run: cargo build --workspace --all-targets --locked
       - name: Run tests
-        run: cargo test --workspace --locked --verbose
+        run: cargo test --workspace --locked
       - name: Test patched storage compatibility
         if: matrix.rust == '1.97.1'
         run: cargo test -p filemanager --locked
@@ -76,16 +78,16 @@ jobs:
         if: matrix.rust == '1.97.1'
         run: python3 -m unittest discover -s benchmarks/tests -v
       - name: Run positional modification regression
-        run: cargo run --locked -p sage-core --example positional_modifications
+        run: target/debug/examples/positional_modifications
       - name: Run named modification library regression
         run: python3 benchmarks/run_named_modifications.py --sage target/debug/sage
       - name: Run VAT1_HUMAN search
-        run: cargo run --locked -p sage-cli --bin sage -- tests/config.json --disable-telemetry-i-dont-want-to-improve-sage
+        run: target/debug/sage tests/config.json --disable-telemetry-i-dont-want-to-improve-sage
       - name: Run original synthetic fixture
-        run: cargo run --locked -p sage-cli --bin sage -- tests/synthetic/config.json --output_directory target/synthetic-smoke --disable-telemetry-i-dont-want-to-improve-sage
+        run: target/debug/sage tests/synthetic/config.json --output_directory target/synthetic-smoke --disable-telemetry-i-dont-want-to-improve-sage
       - name: Run with CLI args
         run: |
-          cargo run --locked -p sage-cli --bin sage -- \
+          target/debug/sage \
             -f tests/Q99536.fasta \
             -o foo \
             --annotate-matches \
