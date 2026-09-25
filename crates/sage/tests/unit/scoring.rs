@@ -1041,4 +1041,115 @@ mod mass_offsets {
             hit.aligned_average_ppm
         );
     }
+
+    fn phospho_hypothesis(database: &IndexedDatabase, precursor_mass: f32) -> OffsetHypothesis {
+        let offset = database.mass_offsets[0].clone();
+        OffsetHypothesis {
+            precursor_mass,
+            precursor_charge: 2,
+            preliminary_shifts: vec![offset.fragment_shift()],
+            offset,
+        }
+    }
+
+    #[test]
+    fn offset_hypothesis_reproduces_the_configured_offset_search() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let scorer = scorer(&offset, false);
+        let configured = scorer.score(&query);
+
+        let matches = scorer.score_offset_hypotheses(
+            &query,
+            &[phospho_hypothesis(&offset, target.monoisotopic)],
+            10,
+            5,
+        );
+        assert_eq!(matches.len(), 1);
+        let best = &matches[0][0];
+        assert_eq!(best.peptide.to_string(), "MAGSPEPTS[Phospho]IDEK");
+        assert_eq!(best.site, Site::Sequence(8));
+        assert_eq!(offset[best.peptide_idx].sequence, best.peptide.sequence);
+        assert_eq!(best.hyperscore, configured[0].hyperscore);
+        assert_eq!(
+            u32::from(best.matched_b + best.matched_y),
+            configured[0].matched_peaks
+        );
+        assert!(matches[0].len() <= 5);
+        assert!(matches[0]
+            .windows(2)
+            .all(|pair| pair[0].hyperscore >= pair[1].hyperscore));
+
+        // Hypothesis matches carry the peaks they matched.
+        let fragments = &best.fragments;
+        assert!(!fragments.peak_indices.is_empty());
+        assert_eq!(
+            fragments.peak_indices.len(),
+            fragments.mz_experimental.len()
+        );
+        for (&peak, &mz) in fragments
+            .peak_indices
+            .iter()
+            .zip(&fragments.mz_experimental)
+        {
+            assert_eq!(query.peak_mz(peak as usize), mz);
+        }
+    }
+
+    #[test]
+    fn offset_hypotheses_are_scored_independently_and_truncated() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let scorer = scorer(&offset, false);
+
+        let matches = scorer.score_offset_hypotheses(
+            &query,
+            &[
+                // No indexed peptide lies 250 Da below the precursor minus
+                // the offset.
+                phospho_hypothesis(&offset, target.monoisotopic + 250.0),
+                phospho_hypothesis(&offset, target.monoisotopic),
+            ],
+            10,
+            1,
+        );
+        assert_eq!(matches.len(), 2);
+        assert!(matches[0].is_empty());
+        assert_eq!(matches[1].len(), 1);
+        assert_eq!(matches[1][0].peptide.to_string(), "MAGSPEPTS[Phospho]IDEK");
+
+        assert!(scorer
+            .score_offset_hypotheses(&query, &[], 10, 5)
+            .is_empty());
+    }
+
+    #[test]
+    fn cloned_scorer_and_matched_peak_indices_leave_normal_scoring_unchanged() {
+        let expanded = database(SearchMode::Database);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let annotating = Scorer {
+            annotate_matches: true,
+            ..scorer(&expanded, false)
+        };
+        let cloned = annotating.clone();
+        let original = annotating.score(&query);
+        let copy = cloned.score(&query);
+        assert_eq!(original.len(), copy.len());
+        assert_eq!(original[0].hyperscore, copy[0].hyperscore);
+        assert_eq!(original[0].peptide_idx, copy[0].peptide_idx);
+
+        let fragments = original[0].fragments.as_ref().expect("annotated");
+        assert_eq!(
+            fragments.peak_indices.len(),
+            fragments.mz_experimental.len()
+        );
+        // The peak indices are internal: they are not serialized.
+        let json = serde_json::to_value(fragments).unwrap();
+        assert!(json.get("peak_indices").is_none());
+    }
 }

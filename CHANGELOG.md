@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added (library)
+- Offset hook: `Scorer::score_offset_hypotheses` scores peptides against caller-supplied precursor
+  masses and mass offsets (`OffsetHypothesis`, `OffsetMatch`), for modules that derive offsets
+  from each spectrum. Configured mass offsets now share its preliminary-matching helper.
+  `Fragments` records matched peak indices (not serialized) and `Scorer` is `Clone`. Normal
+  searches do not call the hook and their results are unchanged.
+
 ## [v0.1.0-beta.9] - 2026-09-25
 
 ### Added
