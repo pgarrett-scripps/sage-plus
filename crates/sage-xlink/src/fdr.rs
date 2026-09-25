@@ -87,27 +87,44 @@ pub fn assign_q_values(csms: &mut [Csm], db: &IndexedDatabase) -> FdrSummary {
         }
     }
 
-    // Residue-pair level: the best CSM of each linked residue pair.
+    // Residue-pair level: aggregate the CSMs of each linked residue pair and
+    // score the pair with its own discriminant (see `PairEvidence`).
     let keys: Vec<Option<ResiduePair>> = csms.iter().map(|c| residue_pair(db, c)).collect();
-    let mut best: HashMap<&ResiduePair, usize> = HashMap::new();
-    for (index, key) in keys.iter().enumerate() {
+    let mut grouped: HashMap<&ResiduePair, PairEvidence> = HashMap::new();
+    for (csm, key) in csms.iter().zip(&keys) {
         if let Some(key) = key {
-            best.entry(key)
-                .and_modify(|current| {
-                    if csms[index].discriminant_score > csms[*current].discriminant_score {
-                        *current = index;
-                    }
-                })
-                .or_insert(index);
+            grouped
+                .entry(key)
+                .and_modify(|e| e.add(csm))
+                .or_insert_with(|| PairEvidence::new(csm));
         }
     }
-    let mut pairs: Vec<(&ResiduePair, usize)> = best.into_iter().collect();
-    pairs.sort_unstable();
-    let scored: Vec<(f64, Class, bool)> = pairs
+    let mut pairs: Vec<(&ResiduePair, PairEvidence)> = grouped.into_iter().collect();
+    pairs.sort_unstable_by(|a, b| a.0.cmp(b.0));
+    let evidence: Vec<&PairEvidence> = pairs.iter().map(|(_, e)| e).collect();
+    let pair_decoy: Vec<bool> = evidence.iter().map(|e| e.class != Class::TT).collect();
+    let pair_lda = LinearDiscriminantAnalysis::train_regularized(
+        &evidence,
+        &pair_decoy,
+        |e: &&PairEvidence| e.features(),
+        REGULARIZATION,
+    )
+    .filter(|lda| {
+        evidence
+            .iter()
+            .all(|e| lda.score(&e.features()).is_finite())
+    });
+    if pair_lda.is_none() && !pairs.is_empty() {
+        log::warn!("residue-pair discriminant could not be fitted; using the best CSM score");
+    }
+    let scored: Vec<(f64, Class, bool)> = evidence
         .iter()
-        .map(|(_, index)| {
-            let c = &csms[*index];
-            (c.discriminant_score, c.class, c.intra)
+        .map(|e| {
+            let score = match &pair_lda {
+                Some(lda) => lda.score(&e.features()),
+                None => e.best,
+            };
+            (score, e.class, e.intra)
         })
         .collect();
     let pair_q: HashMap<ResiduePair, f32> = pairs
@@ -128,6 +145,50 @@ pub fn assign_q_values(csms: &mut [Csm], db: &IndexedDatabase) -> FdrSummary {
         csm.residue_pair_q = key.as_ref().map_or(1.0, |key| pair_q[key]);
     }
     summary
+}
+
+/// CSMs at or below this CSM q-value count as support for their residue pair.
+const SUPPORT_Q: f32 = 0.05;
+
+/// Evidence for one residue pair, pooled over its CSMs: the best CSM score
+/// and the number of supporting CSMs (CSM q <= `SUPPORT_Q`). A pair seen in a
+/// single spectrum is still scored, by its best CSM. Repeated support raises
+/// the score, because random wrong pairs, like decoy pairs, rarely collect
+/// several good CSMs. Counting every CSM, or adding distinct charge states or
+/// peptide forms, did not help consistently on the two ground-truth sets.
+struct PairEvidence {
+    best: f64,
+    supporting: usize,
+    class: Class,
+    intra: bool,
+}
+
+impl PairEvidence {
+    fn new(csm: &Csm) -> Self {
+        let mut evidence = PairEvidence {
+            best: csm.discriminant_score,
+            supporting: 0,
+            class: csm.class,
+            intra: csm.intra,
+        };
+        evidence.add(csm);
+        evidence
+    }
+
+    fn add(&mut self, csm: &Csm) {
+        if csm.discriminant_score > self.best {
+            self.best = csm.discriminant_score;
+            self.class = csm.class;
+            self.intra = csm.intra;
+        }
+        if csm.csm_q <= SUPPORT_Q {
+            self.supporting += 1;
+        }
+    }
+
+    fn features(&self) -> [f64; 2] {
+        [self.best, (self.supporting as f64).ln_1p()]
+    }
 }
 
 /// Unordered pair of (protein, 1-based position), decoy tags kept.
@@ -221,6 +282,58 @@ mod tests {
         assert_eq!(q[0], q[1]);
         assert!((q[3] - 1.0 / 3.0).abs() < 1e-6);
         assert!((q[0] - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    fn csm(score: f64, q: f32, class: Class) -> Csm {
+        let chain = crate::search::ChainMatch {
+            peptide: sage_core::database::PeptideIx(0),
+            site: sage_core::peptide::Site::Sequence(0),
+            hyperscore: 0.0,
+            matched_peaks: 0,
+            doublet: false,
+            length: 8,
+        };
+        Csm {
+            file_id: 0,
+            spectrum_id: String::new(),
+            rt: 0.0,
+            charge: 3,
+            expmass: 0.0,
+            calcmass: 0.0,
+            isotope_error: 0,
+            precursor_ppm: 0.0,
+            alpha: chain.clone(),
+            beta: chain,
+            hyperscore: 0.0,
+            delta_next: 0.0,
+            matched_peaks: 0,
+            matched_intensity_pct: 0.0,
+            doublets: 0,
+            class,
+            intra: true,
+            discriminant_score: score,
+            csm_q: q,
+            residue_pair_q: 1.0,
+        }
+    }
+
+    #[test]
+    fn pair_evidence_counts_only_supporting_csms() {
+        let mut pair = PairEvidence::new(&csm(2.0, 0.2, Class::TT));
+        // A single CSM that does not pass support is still scored by its best score.
+        assert_eq!(pair.features(), [2.0, 0.0]);
+        pair.add(&csm(5.0, 0.01, Class::TT));
+        pair.add(&csm(1.0, 0.04, Class::TT));
+        assert_eq!(pair.best, 5.0);
+        assert_eq!(pair.supporting, 2);
+        assert!((pair.features()[1] - 3f64.ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn best_csm_sets_pair_class() {
+        let mut pair = PairEvidence::new(&csm(1.0, 0.5, Class::TD));
+        pair.add(&csm(3.0, 0.5, Class::TT));
+        assert_eq!(pair.class, Class::TT);
     }
 
     #[test]

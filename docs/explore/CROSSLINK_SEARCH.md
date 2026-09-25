@@ -347,8 +347,13 @@ from the normal `sage` binary.
   - A 12-feature LDA scores each CSM.
   - q = (TD − DD) / TT, made monotone, computed separately for intra- and inter-protein
     links.
-  - It is applied at the CSM level and at the residue-pair level (best CSM per unordered
-    protein:position pair).
+  - It is applied at the CSM level and at the residue-pair level (unordered
+    protein:position pairs).
+  - Each residue pair is scored by a second, 2-feature LDA:
+    - the best CSM discriminant score of the pair;
+    - ln(1 + the number of the pair's CSMs with CSM q ≤ 5%).
+  - A pair seen in a single spectrum stays reachable through its best score. At 1% FDR, 5
+    such pairs pass on Beveridge (all correct) and 22 on the ribosome file (21 correct).
 
 ### Config
 
@@ -379,10 +384,10 @@ IMP-X-FDR substring rule. Scripts are in `explore-data/crosslink/runs/`:
 
 | Dataset / tool | CSMs (true FDR) | Residue pairs (true FDR) |
 | --- | ---: | ---: |
-| PXD014337 Beveridge Cas9, **Sage Plus** | 1828 (2.2%) | 189 (6.3%) |
+| PXD014337 Beveridge Cas9, **Sage Plus** | 1828 (2.2%) | 180 (4.4%) |
 | PXD014337, XlinkX (paper) | 481 (12.1%) | 181 crosslinks (29%) |
 | PXD014337, MeroX Rise / Riseup (paper) | – | 125 (0.8%) / 168 (11%) |
-| PXD029252 ribosome rep1, **Sage Plus** | 2322 (2.1%) | 475 (1.9%) |
+| PXD029252 ribosome rep1, **Sage Plus** | 2322 (2.1%) | 529 (2.6%) |
 | PXD029252 rep1, xiSEARCH (deposited mzid) | 1415 (2.1%) | 805 peptide pairs (3.4%) |
 
 - PXD029252 was searched against the 671-sequence entrapment FASTA: 171 E. coli proteins
@@ -390,11 +395,25 @@ IMP-X-FDR substring rule. Scripts are in `explore-data/crosslink/runs/`:
   included in the 48 wrong CSMs.
 - xiSEARCH searched only the 171 E. coli proteins, with 1% link-level and CSM-level FDR.
 - PXD014337 is intra-protein only (Cas9). PXD029252 is 92% inter-protein.
-- On Beveridge the estimate is slightly optimistic at the CSM level (2.2% true at 1%) and
-  more so at the residue-pair level (6.3%).
-  - Most wrong residue pairs have only 1–2 supporting CSMs.
-  - Requiring 3 or more supporting CSMs gives 140 correct and 2 wrong. That could become a
-    feature or a filter, which is a design choice left open.
+- The estimate is slightly optimistic at the CSM level: 2.1–2.2% true FDR at a nominal 1%.
+- **Residue-pair support feature.** Before it, pairs were scored by their best CSM alone.
+  Results at a nominal 1% pair FDR, before → after (CSM results unchanged):
+
+  | Dataset | Pairs | Correct | Wrong | True FDR |
+  | --- | --- | --- | --- | --- |
+  | Beveridge | 189 → 180 | 177 → 172 | 12 → 8 | 6.3% → 4.4% |
+  | Ribosome | 475 → 529 | 466 → 515 | 9 → 14 | 1.9% → 2.6% |
+
+  - Variants tried offline (script: `analysis/pair_variants.py`) did no better on both
+    sets at once:
+    - counting all CSMs;
+    - adding distinct charge states;
+    - adding distinct peptide forms.
+  - Charges plus forms reached 2.1% on Beveridge, but cost 38 correct pairs and pushed the
+    ribosome file to 3.6%.
+  - A hard filter (3 or more supporting CSMs) was not adopted, because it discards
+    single-spectrum pairs.
+  - The remaining gap is mostly the CSM-level optimism carried through to the pairs.
 
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 
