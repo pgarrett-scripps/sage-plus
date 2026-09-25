@@ -1456,6 +1456,9 @@
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"
     },
+    "glyco": {
+      "description": "Experimental intact N-glycopeptide search, written to\n`glyco.sage.parquet` next to the normal results. Requires a Sage build\nwith the `glyco` feature; see `docs/explore/GLYCO_SEARCH.md` for the\nfields."
+    },
     "ion_mobility_model": {
       "anyOf": [
         {

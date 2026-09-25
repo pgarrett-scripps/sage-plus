@@ -442,6 +442,13 @@ impl Runner {
             )?);
         }
 
+        if let Some(glyco) = &self.glyco {
+            let bytes = glyco.finish(&filenames)?;
+            let path = self.make_path(crate::glyco::FILE_NAME);
+            sage_cloudpath::write_bytes_sync(&path, bytes)?;
+            self.parameters.output_paths.push(path);
+        }
+
         let path = self.make_path("results.json");
         if !self.events.is_enabled() {
             println!("{}", serde_json::to_string_pretty(&self.parameters)?);

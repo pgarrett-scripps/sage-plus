@@ -1,6 +1,7 @@
 pub mod api;
 pub mod config_schema;
 pub mod events;
+pub mod glyco;
 pub mod input;
 pub mod memory;
 pub mod modification_migration;

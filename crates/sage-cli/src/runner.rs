@@ -259,6 +259,8 @@ pub struct Runner {
     retained_spectra: std::sync::Mutex<RetainedSpectra>,
     /// Search-time mass corrections selected for each searched file.
     mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
+    /// The optional glycopeptide pass.
+    glyco: Option<crate::glyco::GlycoState>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -663,6 +665,7 @@ impl Runner {
         let limits =
             MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
         let mut retained_spectra = RetainedSpectra::default();
+        let mut glyco = None;
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
         // Collect peptides from FASTA (if configured).
@@ -765,6 +768,13 @@ impl Runner {
                 }
             }
 
+            // The glyco index is built before the main one, so the two
+            // construction peaks do not overlap.
+            if let Some(setup) = parameters.glyco.as_ref() {
+                glyco = Some(crate::glyco::GlycoState::build(setup, &parameters, &fasta)?);
+                cancellation.check()?;
+            }
+
             let needs_estimate = limits.is_enabled()
                 || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
             if needs_estimate {
@@ -857,6 +867,7 @@ impl Runner {
                             cancellation: cancellation.clone(),
                             retained_spectra: Default::default(),
                             mass_recalibration: Default::default(),
+                            glyco: None,
                         };
                         let (peptides, retained) =
                             mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -869,6 +880,9 @@ impl Runner {
         } else {
             if database_parameters.loaded_ptm_library.is_some() {
                 anyhow::bail!("database.ptm_library requires database.fasta");
+            }
+            if parameters.glyco.is_some() {
+                anyhow::bail!("`glyco` requires database.fasta");
             }
             vec![]
         };
@@ -967,6 +981,7 @@ impl Runner {
             cancellation,
             retained_spectra: std::sync::Mutex::new(retained_spectra),
             mass_recalibration: Default::default(),
+            glyco,
         })
     }
 }

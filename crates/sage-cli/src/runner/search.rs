@@ -501,6 +501,9 @@ impl Runner {
             }
             None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
         };
+        if let Some(glyco) = &self.glyco {
+            glyco.search(&spectra.1);
+        }
         let (features, repeated_spectrum_psms) = if self.mass_recalibration_enabled() {
             self.discover_mass_corrections(scorer, &spectra.1);
             let recalibrated = Scorer {

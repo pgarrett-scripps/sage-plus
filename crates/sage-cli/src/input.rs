@@ -102,6 +102,10 @@ pub struct Search {
     pub annotate_matches: bool,
 
     pub score_type: ScoreType,
+
+    /// Experimental glycopeptide pass, written to `glyco.sage.parquet`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glyco: Option<crate::glyco::GlycoSetup>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -169,6 +173,11 @@ pub struct Input {
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
+    /// Experimental intact N-glycopeptide search, written to
+    /// `glyco.sage.parquet` next to the normal results. Requires a Sage build
+    /// with the `glyco` feature; see `docs/explore/GLYCO_SEARCH.md` for the
+    /// fields.
+    pub glyco: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
@@ -597,10 +606,12 @@ impl Input {
         self.validate()?;
         let memory_limits = self.memory_limits()?;
         let batch_size = resolve_batch_size(self.batch_size)?;
-        let database = self
-            .database
-            .expect("validated database configuration")
-            .make_parameters();
+        let builder = self.database.expect("validated database configuration");
+        let glyco = self
+            .glyco
+            .map(|value| crate::glyco::GlycoSetup::new(value, &builder))
+            .transpose()?;
+        let database = builder.make_parameters();
         database.validate_channels().map_err(anyhow::Error::msg)?;
         database
             .validate_compact_modifications()
@@ -716,6 +727,7 @@ impl Input {
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             score_type,
+            glyco,
         })
     }
 
