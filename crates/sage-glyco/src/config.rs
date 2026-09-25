@@ -87,6 +87,10 @@ pub struct GlycoConfig {
     /// the peptide discriminant (b/y, Y-ion, oxonium and glycan evidence
     /// together) instead of the glycan score alone.
     pub rescore_candidates: bool,
+    /// Add trunk Hex-ladder features (HexNAc(2)Hex(k) Y ions, their longest
+    /// consecutive run, and a control ladder at a fixed offset) to the glyco
+    /// peptide model.
+    pub ladder_feature: bool,
 }
 
 impl Default for GlycoConfig {
@@ -112,6 +116,7 @@ impl Default for GlycoConfig {
             site_features: true,
             twin_feature: "off".into(),
             rescore_candidates: true,
+            ladder_feature: false,
         }
     }
 }

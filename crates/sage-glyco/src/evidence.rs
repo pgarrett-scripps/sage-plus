@@ -247,6 +247,28 @@ pub fn ion_set(composition: &GlycanComposition) -> IonSet {
     IonSet { y, oxonium }
 }
 
+/// Largest Hex count on the trunk ladder, see [`SpectrumEvidence::ladder`].
+pub const LADDER_MAX_HEX: u8 = 14;
+
+/// Offset of the control ladder. It avoids the isotope, NH3, H2O and
+/// Fuc/Hex mass differences between real glycan ions.
+const LADDER_CONTROL: f32 = 7.37;
+
+/// Hex-ladder evidence on the chitobiose trunk: the Y ions peptide +
+/// HexNAc(2)Hex(k) for k = 0..`steps`, and the same rungs at a fixed
+/// offset as a control for how dense the spectrum is.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ladder {
+    /// Rungs checked (Hex counts 0..=n, so n + 1).
+    pub steps: u8,
+    /// Rungs matched.
+    pub matched: u8,
+    /// Longest run of consecutive matched rungs.
+    pub run: u8,
+    pub control_matched: u8,
+    pub control_run: u8,
+}
+
 /// Precomputed spectrum lookups for Y ions at one peptide mass.
 pub struct SpectrumEvidence<'a> {
     pub query: &'a ProcessedSpectrum,
@@ -300,6 +322,37 @@ impl<'a> SpectrumEvidence<'a> {
             (y_hits as f32 + 1.0) / (Y_PROBES as f32 + 2.0),
             (ox_hits as f32 + 1.0) / (OXONIUM_PROBES as f32 + 2.0),
         )
+    }
+
+    /// The trunk Hex ladder up to `max_hex` Hex (capped at
+    /// [`LADDER_MAX_HEX`]), and its control at a fixed offset.
+    pub fn ladder(&self, peptide_mass: f32, max_hex: u8) -> Ladder {
+        let steps = max_hex.min(LADDER_MAX_HEX) + 1;
+        let trunk = 2.0 * crate::config::HEXNAC as f32;
+        let hex = Monosaccharide::Hex.mass() as f32;
+        let walk = |offset: f32| {
+            let (mut matched, mut run, mut best) = (0u8, 0u8, 0u8);
+            for k in 0..steps {
+                let delta = trunk + k as f32 * hex + offset;
+                if self.y_peak(peptide_mass, delta).is_some() {
+                    matched += 1;
+                    run += 1;
+                    best = best.max(run);
+                } else {
+                    run = 0;
+                }
+            }
+            (matched, best)
+        };
+        let (matched, run) = walk(0.0);
+        let (control_matched, control_run) = walk(LADDER_CONTROL);
+        Ladder {
+            steps,
+            matched,
+            run,
+            control_matched,
+            control_run,
+        }
     }
 
     /// Class counts for the target and decoy versions of `ions`, plus the
@@ -405,6 +458,33 @@ mod tests {
         // Without NeuAc, NeuAc oxonium ions are generated as counter-evidence.
         assert_eq!(target.generated[NEUAC_ABSENT], 2);
         assert_eq!(target.matched[NEUAC_ABSENT], 0);
+    }
+
+    #[test]
+    fn ladder_counts_rungs_runs_and_control() {
+        let peptide = 1500.0f32;
+        let rung = |k: u8| {
+            peptide
+                + 2.0 * crate::config::HEXNAC as f32
+                + k as f32 * Monosaccharide::Hex.mass() as f32
+        };
+        // Rungs Hex 0, 1, 2, 4 and 5 present, 3 missing; one control peak.
+        let mut peaks: Vec<_> = [0, 1, 2, 4, 5].map(|k| (rung(k), 1, 100.0)).to_vec();
+        peaks.push((rung(1) + LADDER_CONTROL, 1, 50.0));
+        let query = spectrum(&peaks);
+        let evidence = SpectrumEvidence::new(&query, Tolerance::Ppm(-10.0, 10.0), 2);
+        let ladder = evidence.ladder(peptide, 5);
+        assert_eq!(
+            ladder,
+            Ladder {
+                steps: 6,
+                matched: 5,
+                run: 3,
+                control_matched: 1,
+                control_run: 1,
+            }
+        );
+        assert_eq!(evidence.ladder(peptide, 200).steps, LADDER_MAX_HEX + 1);
     }
 
     #[test]

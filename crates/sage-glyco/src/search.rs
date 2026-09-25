@@ -14,7 +14,7 @@ use sage_core::spectrum::ProcessedSpectrum;
 
 use crate::composition::{oxonium_evidence, GlycanLibrary, Monosaccharide};
 use crate::config::{GlycoConfig, HEXNAC};
-use crate::evidence::{ion_set, ClassCounts, IonSet, SpectrumEvidence};
+use crate::evidence::{ion_set, ClassCounts, IonSet, Ladder, SpectrumEvidence};
 
 /// Glycan residue masses added to the bare peptide for the Y ions put in the
 /// fragment index: Y0, Y1, Y1+Fuc, and the chitobiose core with one to three
@@ -120,6 +120,8 @@ pub struct GlycoCandidate {
     /// Hyperscore of the best same-mass competitor, see
     /// `glyco.twin_feature`; `None` without one or when the feature is off.
     pub twin_hyperscore: Option<f64>,
+    /// Trunk Hex ladder, when `glyco.ladder_feature` is on.
+    pub ladder: Ladder,
 }
 
 /// Matched b/y ions of a glyco candidate, from its fragment annotation.
@@ -486,7 +488,30 @@ impl GlycoSearch {
             };
             let twin_hyperscore =
                 twin_hyperscore(&features, &masses, index, &self.config.twin_feature);
+            let ladder = if self.config.ladder_feature {
+                // Oligomannose-type compositions carry their Hex on the
+                // trunk; the others only have the core's three.
+                let max_hex = explanations
+                    .iter()
+                    .map(|e| {
+                        let c = self.library.get(e.composition as usize).expect("library");
+                        let oligomannose = c.count(Monosaccharide::HexNAc) <= 2
+                            && c.count(Monosaccharide::NeuAc) + c.count(Monosaccharide::NeuGc) == 0;
+                        let hex = c.count(Monosaccharide::Hex);
+                        if oligomannose {
+                            hex
+                        } else {
+                            hex.min(3)
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0);
+                evidence.ladder(peptide_mass, max_hex)
+            } else {
+                Ladder::default()
+            };
             candidates.push(GlycoCandidate {
+                ladder,
                 site,
                 twin_hyperscore,
                 y1: evidence.y_peak(peptide_mass, HEXNAC as f32).is_some(),

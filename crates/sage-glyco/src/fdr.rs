@@ -267,7 +267,7 @@ pub struct FdrSummary {
     pub rates: [f64; CLASSES],
 }
 
-const PEPTIDE_FEATURES: usize = 32;
+const PEPTIDE_FEATURES: usize = 35;
 
 /// One spectrum's selected candidate: its index, and the lead of its glycan
 /// score over the next explained peptide candidate of the same spectrum
@@ -415,6 +415,8 @@ fn peptide_features(
         .iter()
         .map(|e| e.error_ppm.abs() as f64)
         .fold(f64::INFINITY, f64::min);
+    let ladder = candidate.ladder;
+    let steps = f64::from(ladder.steps.max(1));
     [
         feature.hyperscore.ln_1p(),
         feature.delta_next.ln_1p(),
@@ -450,6 +452,9 @@ fn peptide_features(
         candidate.twin_hyperscore.map_or(0.0, |twin| {
             feature.hyperscore.ln_1p() - twin.max(0.0).ln_1p()
         }),
+        ladder.run as f64 / steps,
+        (ladder.run as f64 - ladder.control_run as f64) / steps,
+        (ladder.matched as f64 - ladder.control_matched as f64) / steps,
     ]
 }
 
@@ -725,6 +730,7 @@ mod tests {
             explanations,
             site: Default::default(),
             twin_hyperscore: None,
+            ladder: Default::default(),
         };
         let a = model.assign(&candidate(vec![explanation(1, 6)]));
         assert!(a.decoy);
@@ -766,6 +772,7 @@ mod tests {
             explanations: vec![explanation(1, 0)],
             site: Default::default(),
             twin_hyperscore: None,
+            ladder: Default::default(),
         };
         let assignment = |score: f64| Assignment {
             explanation: 0,
