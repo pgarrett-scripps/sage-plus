@@ -35,8 +35,15 @@ pub struct GlycoConfig {
     pub glycan_fdr: f32,
     /// Peptide FDR threshold for `passes_fdr` in the output.
     pub peptide_fdr: f32,
-    /// Peptide candidates kept per spectrum before glycan explanation.
+    /// Peptide candidates kept per spectrum before glycan explanation. Most
+    /// top-ranked sequon peptides have no glycan that explains the precursor
+    /// delta, so a deep list is what lets a spectrum reach an explained one.
     pub report_candidates: usize,
+    /// Explained peptide candidates kept per spectrum (at most
+    /// `report_candidates`). The glycan evidence of each is scored, and the
+    /// best-supported one represents the spectrum in FDR. 1 keeps only the
+    /// highest-ranked explained candidate.
+    pub explain_candidates: usize,
     /// Fragment index bucket size of the sequon peptide index.
     pub bucket_size: usize,
     /// Keep `database.variable_mods` in the sequon peptide index. Off by
@@ -58,7 +65,8 @@ impl Default for GlycoConfig {
             min_oxonium_ions: 1,
             glycan_fdr: 0.01,
             peptide_fdr: 0.01,
-            report_candidates: 5,
+            report_candidates: 50,
+            explain_candidates: 5,
             bucket_size: 8192,
             variable_mods: false,
         }
@@ -92,6 +100,9 @@ impl GlycoConfig {
         }
         if self.report_candidates == 0 {
             return Err("`glyco.report_candidates` must be at least 1".into());
+        }
+        if self.explain_candidates == 0 {
+            return Err("`glyco.explain_candidates` must be at least 1".into());
         }
         if self.bucket_size == 0 {
             return Err("`glyco.bucket_size` must be at least 1".into());

@@ -204,10 +204,11 @@ impl GlycoSearch {
         }
     }
 
-    /// Search `spectra` (MS2 only are considered) in parallel.
+    /// Search `spectra` (MS2 only are considered) in parallel. The
+    /// candidates of one spectrum are contiguous and in peptide rank order.
     pub fn search(&self, spectra: &[ProcessedSpectrum]) -> (Vec<GlycoCandidate>, SearchCounts) {
         let scorer = self.scorer();
-        let results: Vec<(bool, Option<GlycoCandidate>)> = spectra
+        let results: Vec<(bool, Vec<GlycoCandidate>)> = spectra
             .par_iter()
             .filter(|query| query.level == 2 && !query.precursors.is_empty())
             .map(|query| self.search_spectrum(&scorer, query))
@@ -215,25 +216,30 @@ impl GlycoSearch {
         let counts = SearchCounts {
             spectra: results.len(),
             gated: results.iter().filter(|r| r.0).count(),
-            explained: results.iter().filter(|r| r.1.is_some()).count(),
+            explained: results.iter().filter(|r| !r.1.is_empty()).count(),
         };
-        let candidates = results.into_iter().filter_map(|r| r.1).collect();
+        let candidates = results.into_iter().flat_map(|r| r.1).collect();
         (candidates, counts)
     }
 
-    /// Gate one spectrum, search it, and explain its best-ranked candidate
-    /// whose precursor delta matches a glycan. Returns (gated, candidate).
+    /// Gate one spectrum, search it, and explain up to
+    /// `explain_candidates` of its ranked peptide candidates whose precursor
+    /// delta matches a glycan. Returns (gated, candidates).
     pub fn search_spectrum(
         &self,
         scorer: &Scorer,
         query: &ProcessedSpectrum,
-    ) -> (bool, Option<GlycoCandidate>) {
+    ) -> (bool, Vec<GlycoCandidate>) {
         let tolerance = self.settings.fragment_tol;
         let oxonium = oxonium_evidence(query, tolerance);
         if !oxonium.is_glyco(self.config.min_oxonium_ions) {
-            return (false, None);
+            return (false, Vec::new());
         }
+        let mut candidates = Vec::new();
         for feature in scorer.score(query) {
+            if candidates.len() >= self.config.explain_candidates {
+                break;
+            }
             let base = &self.db.peptides[feature.peptide_idx.0 as usize];
             let peptide_mass = base.monoisotopic;
             let delta = feature.expmass as f64 - peptide_mass as f64;
@@ -274,20 +280,17 @@ impl GlycoSearch {
                 })
                 .collect::<Vec<_>>();
             let (random_y, random_oxonium) = evidence.random_rates(peptide_mass, delta as f32);
-            return (
-                true,
-                Some(GlycoCandidate {
-                    peptide_mass,
-                    oxonium_ions: oxonium.count() as u8,
-                    oxonium_fraction: oxonium.intensity_fraction,
-                    anchored,
-                    random_y,
-                    random_oxonium,
-                    explanations,
-                    feature,
-                }),
-            );
+            candidates.push(GlycoCandidate {
+                peptide_mass,
+                oxonium_ions: oxonium.count() as u8,
+                oxonium_fraction: oxonium.intensity_fraction,
+                anchored,
+                random_y,
+                random_oxonium,
+                explanations,
+                feature,
+            });
         }
-        (true, None)
+        (true, candidates)
     }
 }

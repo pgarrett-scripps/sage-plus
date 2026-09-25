@@ -128,7 +128,9 @@ mod imp {
                 elapsed
             );
             log::info!(
-                "glyco: peptide model `{}`, {} target PSMs at peptide q <= {}, {} glycan decoy winners among them, {} glycoPSMs pass both FDRs",
+                "glyco: {} explained peptide candidates, {} selected; peptide model `{}`, {} target PSMs at peptide q <= {}, {} glycan decoy winners among them, {} glycoPSMs pass both FDRs",
+                summary.explained,
+                summary.candidates,
                 summary.model,
                 summary.peptide_passing,
                 config.peptide_fdr,

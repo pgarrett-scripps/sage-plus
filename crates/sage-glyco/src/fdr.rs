@@ -255,7 +255,10 @@ pub struct GlycoPsm {
 /// FDR summary numbers.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FdrSummary {
+    /// Spectra with a selected candidate.
     pub candidates: usize,
+    /// Explained peptide candidates before selection.
+    pub explained: usize,
     /// How the peptide discriminant was obtained.
     pub model: &'static str,
     pub peptide_passing: usize,
@@ -264,9 +267,57 @@ pub struct FdrSummary {
     pub rates: [f64; CLASSES],
 }
 
-const PEPTIDE_FEATURES: usize = 20;
+const PEPTIDE_FEATURES: usize = 22;
 
-fn peptide_features(candidate: &GlycoCandidate, best_glycan: f64) -> [f64; PEPTIDE_FEATURES] {
+/// One spectrum's selected candidate: its index, and the lead of its glycan
+/// score over the next explained peptide candidate of the same spectrum
+/// (over zero when it is the only one).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Selection {
+    pub index: usize,
+    pub lead: f64,
+}
+
+/// Pick, for each spectrum, the explained peptide candidate whose best
+/// glycan explanation scores highest. Candidates of one spectrum are
+/// contiguous (see [`crate::GlycoSearch::search`]); ties keep the better
+/// peptide rank. Target and decoy peptides are treated alike, so peptide
+/// target-decoy competition stays fair.
+pub fn select(candidates: &[GlycoCandidate], assignments: &[Assignment]) -> Vec<Selection> {
+    let mut selected = Vec::new();
+    let mut start = 0;
+    while start < candidates.len() {
+        let same = |c: &GlycoCandidate| {
+            c.feature.file_id == candidates[start].feature.file_id
+                && c.feature.spec_id == candidates[start].feature.spec_id
+        };
+        let mut end = start + 1;
+        while end < candidates.len() && same(&candidates[end]) {
+            end += 1;
+        }
+        let score = |i: usize| assignments[i].score;
+        // First maximum, so ties keep the better peptide rank.
+        let best = (start + 1..end).fold(start, |b, i| if score(i) > score(b) { i } else { b });
+        let second = (start..end)
+            .filter(|&i| i != best)
+            .map(score)
+            .fold(None, |m: Option<f64>, s| Some(m.map_or(s, |m| m.max(s))))
+            .unwrap_or(0.0);
+        let lead = score(best) - second;
+        selected.push(Selection {
+            index: best,
+            lead: if lead.is_finite() { lead } else { 0.0 },
+        });
+        start = end;
+    }
+    selected
+}
+
+fn peptide_features(
+    candidate: &GlycoCandidate,
+    best_glycan: f64,
+    lead: f64,
+) -> [f64; PEPTIDE_FEATURES] {
     let feature = &candidate.feature;
     let best = candidate
         .explanations
@@ -309,6 +360,8 @@ fn peptide_features(candidate: &GlycoCandidate, best_glycan: f64) -> [f64; PEPTI
         best_glycan.clamp(-50.0, 200.0),
         ppm.min(100.0),
         (candidate.explanations.len() as f64).ln(),
+        (feature.rank as f64).ln(),
+        lead.clamp(-50.0, 50.0),
     ]
 }
 
@@ -409,13 +462,29 @@ pub fn score(
     glycan_fdr: f32,
 ) -> (Vec<GlycoPsm>, GlycanModel, FdrSummary) {
     let mut model = GlycanModel::new(isotopes, max_adducts, explain_ppm);
+    let explained = candidates.len();
     let assignments: Vec<Assignment> = candidates.iter().map(|c| model.assign(c)).collect();
+
+    // One candidate per spectrum: the best-supported explained peptide.
+    let selection = select(&candidates, &assignments);
+    let mut keep = vec![false; candidates.len()];
+    for s in &selection {
+        keep[s.index] = true;
+    }
+    let assignments: Vec<Assignment> = selection.iter().map(|s| assignments[s.index]).collect();
+    let leads: Vec<f64> = selection.iter().map(|s| s.lead).collect();
+    let candidates: Vec<GlycoCandidate> = candidates
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(c, keep)| keep.then_some(c))
+        .collect();
 
     // Peptide level.
     let rows: Vec<_> = candidates
         .iter()
         .zip(&assignments)
-        .map(|(candidate, assignment)| peptide_features(candidate, assignment.score))
+        .zip(&leads)
+        .map(|((candidate, assignment), lead)| peptide_features(candidate, assignment.score, *lead))
         .collect();
     let peptide_decoy: Vec<bool> = candidates.iter().map(|c| c.feature.label == -1).collect();
     let hyperscore: Vec<f64> = candidates.iter().map(|c| c.feature.hyperscore).collect();
@@ -451,6 +520,7 @@ pub fn score(
 
     let mut summary = FdrSummary {
         candidates: candidates.len(),
+        explained,
         model: model_name,
         peptide_passing: eligible.len(),
         glycan_decoys_passing_peptide: glycan_decoy.iter().filter(|d| **d).count(),
@@ -555,5 +625,61 @@ mod tests {
         let best_decoy = score(&low, &low.decoy).max(score(&high, &high.decoy));
         assert_eq!(a.opposite, best_decoy);
         assert_eq!(a.competition(), 2.0 * a.score - a.opposite);
+    }
+
+    #[test]
+    fn selection_keeps_the_best_supported_candidate_per_spectrum() {
+        let candidate = |scan: &str| GlycoCandidate {
+            feature: sage_core::scoring::Feature {
+                spec_id: scan.into(),
+                ..Default::default()
+            },
+            peptide_mass: 1000.0,
+            oxonium_ions: 3,
+            oxonium_fraction: 0.1,
+            anchored: true,
+            random_y: 0.1,
+            random_oxonium: 0.1,
+            explanations: vec![explanation(1, 0)],
+        };
+        let assignment = |score: f64| Assignment {
+            explanation: 0,
+            decoy: false,
+            score,
+            runner_up: f64::NEG_INFINITY,
+            opposite: f64::NEG_INFINITY,
+        };
+        let candidates = [
+            candidate("a"),
+            candidate("a"),
+            candidate("a"),
+            candidate("b"),
+            candidate("c"),
+            candidate("c"),
+        ];
+        let assignments: Vec<_> = [1.0, 5.0, 3.0, 2.0, 4.0, 4.0]
+            .into_iter()
+            .map(assignment)
+            .collect();
+        let selected = select(&candidates, &assignments);
+        assert_eq!(
+            selected,
+            vec![
+                Selection {
+                    index: 1,
+                    lead: 2.0
+                },
+                // A lone candidate leads over zero.
+                Selection {
+                    index: 3,
+                    lead: 2.0
+                },
+                // Ties keep the better-ranked (earlier) peptide.
+                Selection {
+                    index: 4,
+                    lead: 0.0
+                },
+            ]
+        );
     }
 }
