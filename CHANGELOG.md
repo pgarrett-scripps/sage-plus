@@ -57,6 +57,8 @@ entries are retained below for provenance.
   by up to 0.017), and identification counts are unchanged or within 5 PSMs.
 
 ### Fixed
+- The vendored `filemanager` (Bruker TDF storage) now uses `arrow`/`parquet` 59, which drop the
+  `thrift` crate and its excessive-allocation advisory (thrift < 0.23.0).
 - MS2 spectra without a precursor are skipped by the search, the discovery pass, and the
   prefilter spectrum index. Thermo RAW files whose scan events are out of step with their
   trailers can contain MS2 scans without a plausible precursor m/z; the reader already

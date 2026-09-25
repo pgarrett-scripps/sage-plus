@@ -12,7 +12,11 @@ Sage Plus changes the normalized manifest to use `object_store` 0.14.1, imports
 `ObjectStoreExt`, converts storage byte ranges to `u64`, and checks that object
 sizes fit `usize`. Redundant development dependency entries are removed so Cargo
 can run the added tests from the root lockfile without a second workspace. This removes the old `quick-xml` 0.37 dependency and its
-RUSTSEC-2026-0194 and RUSTSEC-2026-0195 findings. No advisory is suppressed.
+RUSTSEC-2026-0194 and RUSTSEC-2026-0195 findings. It also moves `arrow` and `parquet` from 57
+to 59 and `serde_arrow` from 0.13 to 0.15 (`arrow-59`), and replaces the deprecated
+`set_max_row_group_size` with `set_max_row_group_row_count`. Parquet 58+ no longer depends on
+the `thrift` crate, which removes the thrift < 0.23.0 excessive-allocation advisory. No
+advisory is suppressed.
 
 The added tests cover upload, metadata, ranges, listing, buffered file upload,
 and download through the storage API. A local HTTP fixture also exercises S3
