@@ -51,6 +51,11 @@ pub struct GlycoConfig {
     /// every variable-mod variant is a candidate for every spectrum, which
     /// costs search time and adds peptide decoys to compete with.
     pub variable_mods: bool,
+    /// Add the peptide's core Y ions (Y0, Y1, Y1+Fuc and HexNAc(2)Hex(1..=3))
+    /// to the fragment index, so that preliminary candidate retrieval counts
+    /// them next to b and y ions. Y ions fix the peptide mass, which the open
+    /// glycan window leaves free.
+    pub index_y_ions: bool,
 }
 
 impl Default for GlycoConfig {
@@ -69,6 +74,7 @@ impl Default for GlycoConfig {
             explain_candidates: 5,
             bucket_size: 8192,
             variable_mods: false,
+            index_y_ions: true,
         }
     }
 }

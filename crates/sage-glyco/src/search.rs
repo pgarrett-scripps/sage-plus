@@ -8,9 +8,24 @@ use sage_core::mass::{Tolerance, NEUTRON};
 use sage_core::scoring::{Feature, ScoreType, Scorer};
 use sage_core::spectrum::ProcessedSpectrum;
 
-use crate::composition::{oxonium_evidence, GlycanLibrary};
+use crate::composition::{oxonium_evidence, GlycanLibrary, Monosaccharide};
 use crate::config::{GlycoConfig, HEXNAC};
 use crate::evidence::{ion_set, ClassCounts, IonSet, SpectrumEvidence};
+
+/// Glycan residue masses added to the bare peptide for the Y ions put in the
+/// fragment index: Y0, Y1, Y1+Fuc, and the chitobiose core with one to three
+/// Hex. The HexNAc hypothesis also looks every indexed fragment up at
+/// +HexNAc, which adds Y2 and Y2+Fuc.
+pub const INDEXED_Y_IONS: [f64; 6] = [
+    0.0,
+    HEXNAC,
+    HEXNAC + FUC,
+    2.0 * HEXNAC + HEX,
+    2.0 * HEXNAC + 2.0 * HEX,
+    2.0 * HEXNAC + 3.0 * HEX,
+];
+const HEX: f64 = Monosaccharide::Hex.mass();
+const FUC: f64 = Monosaccharide::Fuc.mass();
 
 /// NH3, the neutral mass of a noncovalent ammonium adduct.
 pub const AMMONIA: f64 = 17.026_549;
@@ -153,7 +168,15 @@ impl GlycoSearch {
                 !sites.is_empty()
             })
             .collect();
-        let mut db = parameters.build_from_peptides(peptides);
+        let mut db = if config.index_y_ions {
+            let y_ions = |peptide: &sage_core::peptide::Peptide, masses: &mut Vec<f32>| {
+                let bare = peptide.monoisotopic as f64;
+                masses.extend(INDEXED_Y_IONS.iter().map(|glycan| (bare + glycan) as f32));
+            };
+            parameters.build_from_peptides_with_extra_fragments(peptides, &y_ions)
+        } else {
+            parameters.build_from_peptides(peptides)
+        };
         // Every glycopeptide carries the innermost HexNAc: the HexNAc
         // hypothesis counts fragments with and without it, so the bare
         // hypothesis would repeat the same work.
