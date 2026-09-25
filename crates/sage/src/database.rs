@@ -1569,6 +1569,7 @@ impl Parameters {
             label_channels,
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
+            offsets_only: false,
         }
     }
 }
@@ -2003,6 +2004,12 @@ pub struct IndexedDatabase {
     pub decoy_tag: String,
     /// Optional explicit target pairing for non-reversal decoy peptides.
     pub decoy_pairing: Vec<PeptideIx>,
+    /// Search only the mass-offset hypotheses, not the unmodified precursor.
+    /// For open searches where every precursor carries one offset (for
+    /// example the innermost HexNAc of an N-glycan): the offset hypothesis
+    /// already counts unshifted fragments, so the unmodified pass is
+    /// redundant work. Ignored when no mass offsets are configured.
+    pub offsets_only: bool,
 }
 
 impl IndexedDatabase {

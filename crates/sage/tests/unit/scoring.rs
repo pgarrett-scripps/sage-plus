@@ -760,6 +760,28 @@ mod mass_offsets {
     }
 
     #[test]
+    fn offsets_only_skips_the_unshifted_hypothesis() {
+        let expanded = database(SearchMode::Database);
+        let mut offset = database(SearchMode::MassOffset);
+        offset.offsets_only = true;
+        // An unmodified precursor is no longer searched...
+        let plain = expanded
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "GGSTVLAPEDK")
+            .unwrap()
+            .clone();
+        let hits = scorer(&offset, false).score(&spectrum(&plain));
+        assert!(hits.iter().all(|hit| hit.mass_offset.is_some()));
+        // ...while offset precursors are found as before.
+        let hits = scorer(&offset, false).score(&spectrum(&expanded_target(&expanded)));
+        assert_eq!(
+            offset.resolve_peptide(&hits[0]).to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+    }
+
+    #[test]
     fn exact_prefilter_keeps_offset_base_peptides() {
         let expanded = database(SearchMode::Database);
         let offset = database(SearchMode::MassOffset);

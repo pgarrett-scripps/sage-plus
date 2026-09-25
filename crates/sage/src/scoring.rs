@@ -540,9 +540,11 @@ impl<'db> Scorer<'db> {
     }
 
     /// Offset hypotheses searched for every precursor: zero is the ordinary
-    /// search, followed by one hypothesis per configured mass offset.
+    /// search, followed by one hypothesis per configured mass offset. With
+    /// [`IndexedDatabase::offsets_only`], the ordinary search is skipped.
     fn offsets(&self) -> std::ops::RangeInclusive<u8> {
-        0..=self.db.mass_offsets.len() as u8
+        let first = u8::from(self.db.offsets_only && !self.db.mass_offsets.is_empty());
+        first..=self.db.mass_offsets.len() as u8
     }
 
     /// Translate a precursor query for an offset hypothesis. The tolerance is
