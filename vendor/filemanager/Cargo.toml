@@ -61,7 +61,7 @@ name = "filemanager"
 path = "src/lib.rs"
 
 [dependencies.arrow]
-version = "57"
+version = "59"
 optional = true
 default-features = true
 
@@ -86,7 +86,7 @@ optional = true
 default-features = false
 
 [dependencies.parquet]
-version = "57"
+version = "59"
 optional = true
 default-features = true
 
@@ -103,8 +103,8 @@ optional = true
 default-features = false
 
 [dependencies.serde_arrow]
-version = "0.13"
-features = ["arrow-57"]
+version = "0.15"
+features = ["arrow-59"]
 optional = true
 default-features = true
 

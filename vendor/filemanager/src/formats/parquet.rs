@@ -99,7 +99,7 @@ impl<T: serde::Serialize + for<'de> serde::Deserialize<'de>> ParquetWriter<T> {
         let schema = Arc::new(Schema::new(fields));
         let file = std::fs::File::create(p)?;
         let props = WriterProperties::builder()
-            .set_max_row_group_size(usize::MAX)
+            .set_max_row_group_row_count(Some(usize::MAX))
             .build();
         let writer = ArrowWriter::try_new(file, schema, Some(props))
             .map_err(|e| ParquetError::Write(Box::new(e)))?;
