@@ -27,12 +27,16 @@ from provenance import atomic_json, file_identities, sha256
 REPO = Path(__file__).resolve().parents[1]
 
 
-def offset(mass: float, name: str) -> dict:
-    return {"mass": mass, "name": name, "max_count": 1, "search_mode": "mass_offset"}
+def offset(mass: float, name: str, sites) -> dict:
+    return {name: {"mass": mass, "max_count": 1, "search_mode": "mass_offset",
+                   "sites": list(sites)}}
 
 
-def indexed(mass: float, name: str) -> dict:
-    return {"mass": mass, "name": name, "max_count": 1}
+def indexed(mass: float, name: str, sites) -> dict:
+    return {name: {"mass": mass, "max_count": 1, "sites": list(sites)}}
+
+
+CARBAMIDOMETHYL = {"Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}}
 
 
 OXIDATION, PHOSPHO, DEAMIDATION = 15.994915, 79.966331, 0.984016
@@ -40,15 +44,15 @@ OXIDATION, PHOSPHO, DEAMIDATION = 15.994915, 79.966331, 0.984016
 
 def scale_jobs(spectra: Path, fasta: Path, repeats: int) -> list[dict]:
     """Cost against the number of offsets, which are never combined."""
-    acetyl = [indexed(42.010565, "Acetyl")]
+    acetyl = indexed(42.010565, "Acetyl", ["peptide_n_term"])
     modes = {
-        "indexed": {"^": acetyl, "M": [indexed(OXIDATION, "Oxidation")]},
-        "offsets-1": {"^": acetyl, "M": [offset(OXIDATION, "Oxidation")]},
-        "offsets-2": {"^": acetyl, "M": [offset(OXIDATION, "Oxidation")],
-                      **{site: [offset(PHOSPHO, "Phospho")] for site in "STY"}},
-        "offsets-3": {"^": acetyl, "M": [offset(OXIDATION, "Oxidation")],
-                      **{site: [offset(PHOSPHO, "Phospho")] for site in "STY"},
-                      **{site: [offset(DEAMIDATION, "Deamidation")] for site in "NQ"}},
+        "indexed": {**acetyl, **indexed(OXIDATION, "Oxidation", "M")},
+        "offsets-1": {**acetyl, **offset(OXIDATION, "Oxidation", "M")},
+        "offsets-2": {**acetyl, **offset(OXIDATION, "Oxidation", "M"),
+                      **offset(PHOSPHO, "Phospho", "STY")},
+        "offsets-3": {**acetyl, **offset(OXIDATION, "Oxidation", "M"),
+                      **offset(PHOSPHO, "Phospho", "STY"),
+                      **offset(DEAMIDATION, "Deamidation", "NQ")},
     }
     jobs = []
     for name, mods in modes.items():
@@ -58,7 +62,7 @@ def scale_jobs(spectra: Path, fasta: Path, repeats: int) -> list[dict]:
                     "bucket_size": 16384,
                     "enzyme": {"missed_cleavages": 1, "cleave_at": "KR", "restrict": "P",
                                "min_len": 7, "max_len": 50},
-                    "static_mods": {"C": {"mass": 57.021464, "name": "Carbamidomethyl"}},
+                    "static_mods": CARBAMIDOMETHYL,
                     "variable_mods": mods,
                     "max_variable_mods": 1,
                     "max_total_variable_mods": 1,
@@ -80,15 +84,15 @@ def localization_jobs(fasta: Path, files: list[Path]) -> list[dict]:
     """Synthesis-defined phosphosites, expansion against one offset."""
     jobs = []
     for spectra in files:
-        for name, mods in (("indexed", indexed(PHOSPHO, "Phospho")),
-                           ("offset", offset(PHOSPHO, "Phospho"))):
+        for name, mods in (("indexed", indexed(PHOSPHO, "Phospho", "STY")),
+                           ("offset", offset(PHOSPHO, "Phospho", "STY"))):
             config = {
                 "database": {
                     "bucket_size": 16384,
                     "enzyme": {"missed_cleavages": 0, "cleave_at": "$", "restrict": "",
                                "min_len": 7, "max_len": 50},
                     "static_mods": {"C": 57.021464},
-                    "variable_mods": {site: [dict(mods)] for site in "STY"},
+                    "variable_mods": mods,
                     "max_variable_mods": 1, "max_total_variable_mods": 1,
                     "max_combinations": 128,
                     "decoy_tag": "rev_", "generate_decoys": True, "fasta": str(fasta),
@@ -111,15 +115,16 @@ def localization_jobs(fasta: Path, files: list[Path]) -> list[dict]:
 def entrapment_jobs(paired_fasta: Path, spectra: Path) -> list[dict]:
     """Paired one-to-one target and entrapment peptides."""
     jobs = []
-    for name, mods in (("indexed", indexed(OXIDATION, "Oxidation")),
-                       ("offset", offset(OXIDATION, "Oxidation"))):
+    for name, mods in (("indexed", indexed(OXIDATION, "Oxidation", "M")),
+                       ("offset", offset(OXIDATION, "Oxidation", "M"))):
         config = {
             "database": {
                 "bucket_size": 16384,
                 "enzyme": {"missed_cleavages": 0, "cleave_at": "$", "restrict": "",
                            "min_len": 7, "max_len": 50},
                 "static_mods": {"C": 57.021464},
-                "variable_mods": {"M": [dict(mods)], "^": [42.010565]},
+                "variable_mods": {**mods, "Acetyl": {"mass": 42.010565,
+                                                     "sites": ["peptide_n_term"]}},
                 "max_variable_mods": 2, "max_total_variable_mods": 2,
                 "decoy_tag": "rev_", "generate_decoys": True, "fasta": str(paired_fasta),
             },

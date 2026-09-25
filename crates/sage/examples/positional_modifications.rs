@@ -18,28 +18,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "KSTGGKAPR",
             Position::Internal,
             0,
-            vec!["^K", "~K"],
+            vec!["first_residue:K", "internal_residue:K"],
         ),
         (
             "H3_internal",
             "KSTGGKAPR",
             Position::Internal,
             5,
-            vec!["~K"],
+            vec!["internal_residue:K"],
         ),
         (
             "protein_C",
             "ASQKSTGGK",
             Position::Cterm,
             8,
-            vec!["^K", "~K", "]K"],
+            vec!["first_residue:K", "internal_residue:K", "protein_last:K"],
         ),
         (
             "peptide_last",
             "ASQKSTGGK",
             Position::Internal,
             8,
-            vec!["~K", "$K"],
+            vec!["internal_residue:K", "last_residue:K"],
         ),
     ] {
         let digest = Digest {
@@ -75,17 +75,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         };
         for mode in ["database", "mass_offset"] {
-            let mods = keys
-                .iter()
-                .map(|key| {
-                    (
-                        (*key).into(),
-                        json!([{
-                            "mass":42.0106, "name":"Acetyl", "max_count":1, "search_mode":mode
-                        }]),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>();
+            let mods = json!({"Acetyl": {
+                "mass":42.0106, "max_count":1, "search_mode":mode, "sites":keys
+            }});
             let parameters = serde_json::from_value::<Builder>(json!({
                 "variable_mods":mods, "generate_decoys":false, "max_variable_mods":1,
                 "peptide_min_mass":0

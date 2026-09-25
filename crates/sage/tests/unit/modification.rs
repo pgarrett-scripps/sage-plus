@@ -356,3 +356,56 @@ fn named_definitions_reject_ambiguous_or_invalid_configuration() {
         );
     }
 }
+
+#[test]
+fn symbol_keyed_maps_accept_upstream_sage_syntax() {
+    let builder: crate::database::Builder = serde_json::from_value(serde_json::json!({
+        "static_mods": {"C": 57.021464, "^": 229.1629, "$K": 1.0, "[": 42.0, "]R": 0.5},
+        "variable_mods": {"M": [15.9949], "^Q": [-17.026549], "S": [79.9663, 80.0]}
+    }))
+    .unwrap();
+    let params = builder.make_parameters();
+    assert_eq!(params.static_mods.len(), 5);
+    assert_eq!(params.variable_mods.values().flatten().count(), 4);
+}
+
+#[test]
+fn symbol_keyed_maps_reject_sage_plus_extensions() {
+    let error = |value: serde_json::Value| {
+        serde_json::from_value::<crate::database::Builder>(value)
+            .err()
+            .expect("configuration must be rejected")
+            .to_string()
+    };
+    for (section, key, site) in [
+        ("variable_mods", "~K", "internal_residue:K"),
+        ("static_mods", "~K", "internal_residue:K"),
+        ("variable_mods", "first_residue:K", "first_residue:K"),
+        ("static_mods", "peptide_n_term", "peptide_n_term"),
+    ] {
+        let value = if section == "static_mods" {
+            serde_json::json!(42.0)
+        } else {
+            serde_json::json!([42.0])
+        };
+        let message = error(serde_json::json!({ section: { key: value } }));
+        assert!(message.contains(&format!("`{key}`")), "{message}");
+        assert!(
+            message.contains(&format!("\"sites\": [\"{site}\"]")),
+            "{message}"
+        );
+        assert!(message.contains("DOCS.md"), "{message}");
+    }
+    for value in [
+        serde_json::json!({"static_mods": {"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}}),
+        serde_json::json!({"variable_mods": {"M": [{"mass": 15.9949, "max_count": 1}]}}),
+        serde_json::json!({"variable_mods": {"^K": [42.0106, {"mass": 42.0106}]}}),
+    ] {
+        let message = error(value);
+        assert!(
+            message.contains("must map to a mass, not an object"),
+            "{message}"
+        );
+        assert!(message.contains("DOCS.md"), "{message}");
+    }
+}

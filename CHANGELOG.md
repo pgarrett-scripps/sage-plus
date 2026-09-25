@@ -19,6 +19,12 @@ entries are retained below for provenance.
 ### Removed
 - `--migrate-modifications` is removed. Symbol-keyed configurations still load; DOCS.md lists the
   explicit site for each symbol key for rewriting them as named definitions.
+- Symbol-keyed modification maps accept only upstream Sage syntax: residue or terminal-symbol
+  keys (`^ $ [ ]`, optionally with a residue) mapped to masses. The Sage Plus-only extensions that
+  named definitions replaced in Beta 6 are rejected with an error suggesting the named form:
+  `~K` and explicit-site keys (such as `first_residue:K`), and object values (such as
+  `{"C": {"mass": 57.021464, "name": "Carbamidomethyl"}}`). Benchmark configurations and scripts
+  now use named definitions.
 
 ## [v0.1.0-beta.9] - 2026-09-25
 
