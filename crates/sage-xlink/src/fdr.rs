@@ -11,10 +11,10 @@ use sage_core::ml::linear_discriminant::LinearDiscriminantAnalysis;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-const FEATURES: usize = 12;
+const FEATURES: usize = 13;
 const REGULARIZATION: f64 = 1e-3;
 
-/// Target counts passing 1% FDR.
+/// Target counts passing the q-value threshold.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct FdrSummary {
     pub intra_csms: usize,
@@ -41,11 +41,23 @@ fn features(csm: &Csm) -> [f64; FEATURES] {
         (csm.matched_intensity_pct.max(0.0) as f64).ln_1p(),
         csm.charge as f64,
         (a.length.min(b.length) as f64).ln(),
+        // Matched fragments per residue of the less-covered chain: a wrong
+        // chain rarely explains a long sequence, which raw peak counts miss.
+        per_residue(a).min(per_residue(b)),
     ]
 }
 
+fn per_residue(chain: &crate::search::ChainMatch) -> f64 {
+    chain.matched_peaks as f64 / chain.length.max(1) as f64
+}
+
 /// Score CSMs with a discriminant and assign CSM and residue-pair q-values.
-pub fn assign_q_values(csms: &mut [Csm], db: &IndexedDatabase) -> FdrSummary {
+/// The summary counts target matches at or below `q_value_threshold`.
+pub fn assign_q_values(
+    csms: &mut [Csm],
+    db: &IndexedDatabase,
+    q_value_threshold: f32,
+) -> FdrSummary {
     let decoy: Vec<bool> = csms.iter().map(|c| c.class != Class::TT).collect();
     let lda = LinearDiscriminantAnalysis::train_regularized(csms, &decoy, features, REGULARIZATION)
         .filter(|lda| {
@@ -78,7 +90,7 @@ pub fn assign_q_values(csms: &mut [Csm], db: &IndexedDatabase) -> FdrSummary {
         csm.csm_q = q;
     }
     for csm in csms.iter() {
-        if csm.class == Class::TT && csm.csm_q <= 0.01 {
+        if csm.class == Class::TT && csm.csm_q <= q_value_threshold {
             if csm.intra {
                 summary.intra_csms += 1;
             } else {
@@ -133,7 +145,7 @@ pub fn assign_q_values(csms: &mut [Csm], db: &IndexedDatabase) -> FdrSummary {
         .map(|((key, _), q)| ((*key).clone(), q))
         .collect();
     for ((key, _), (_, class, intra)) in pairs.iter().zip(&scored) {
-        if *class == Class::TT && pair_q[*key] <= 0.01 {
+        if *class == Class::TT && pair_q[*key] <= q_value_threshold {
             if *intra {
                 summary.intra_residue_pairs += 1;
             } else {
@@ -327,6 +339,18 @@ mod tests {
         assert_eq!(pair.best, 5.0);
         assert_eq!(pair.supporting, 2);
         assert!((pair.features()[1] - 3f64.ln()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn weak_chain_coverage_uses_the_less_covered_chain() {
+        let mut c = csm(0.0, 1.0, Class::TT);
+        c.alpha.matched_peaks = 8;
+        c.alpha.length = 8;
+        c.beta.matched_peaks = 3;
+        c.beta.length = 12;
+        assert_eq!(features(&c)[FEATURES - 1], 0.25);
+        c.beta.length = 0;
+        assert_eq!(per_residue(&c.beta), 3.0);
     }
 
     #[test]

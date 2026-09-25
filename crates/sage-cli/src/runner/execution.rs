@@ -79,9 +79,10 @@ impl Runner {
         settings: &sage_xlink::CrosslinkSettings,
         filenames: &[String],
     ) -> anyhow::Result<()> {
-        let summary = sage_xlink::assign_q_values(&mut csms, &self.database);
+        let threshold = settings.q_value_threshold;
+        let summary = sage_xlink::assign_q_values(&mut csms, &self.database, threshold);
         info!(
-            "crosslinks at 1% FDR: {} intra + {} inter CSMs, {} intra + {} inter residue pairs ({} candidates)",
+            "crosslinks at q <= {threshold}: {} intra + {} inter CSMs, {} intra + {} inter residue pairs ({} candidates)",
             summary.intra_csms,
             summary.inter_csms,
             summary.intra_residue_pairs,

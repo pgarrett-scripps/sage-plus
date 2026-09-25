@@ -135,6 +135,11 @@ pub struct CrosslinkSettings {
     /// Crosslink-spectrum matches with a CSM q-value above this are not
     /// written.
     pub output_q_value: f32,
+    /// CSM and residue-pair q-value at which crosslinks are counted as
+    /// identified in the run summary. The estimate is `(TD - DD) / TT`; on
+    /// the two ground-truth sets, 0.01 gave about 2% true FDR and 0.002 about
+    /// 1% (see docs/explore/CROSSLINK_SEARCH.md, "Calibration").
+    pub q_value_threshold: f32,
 }
 
 impl Default for CrosslinkSettings {
@@ -153,6 +158,7 @@ impl Default for CrosslinkSettings {
             chain_candidates: 3,
             min_chain_matched_peaks: 2,
             output_q_value: 1.0,
+            q_value_threshold: 0.01,
         }
     }
 }
@@ -186,6 +192,9 @@ impl CrosslinkSettings {
         }
         if !(0.0..=1.0).contains(&self.output_q_value) {
             return Err("crosslink.output_q_value must be between 0 and 1".into());
+        }
+        if !(self.q_value_threshold > 0.0 && self.q_value_threshold <= 1.0) {
+            return Err("crosslink.q_value_threshold must be in (0, 1]".into());
         }
         Ok(())
     }

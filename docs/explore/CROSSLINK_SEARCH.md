@@ -344,7 +344,7 @@ from the normal `sage` binary.
   3. Chain candidates are combined, and the hyperscore is computed over the union of
      matched peaks.
 - **FDR:**
-  - A 12-feature LDA scores each CSM.
+  - A 13-feature LDA scores each CSM. The last feature is the matched fragments per residue of the less-covered chain.
   - q = (TD − DD) / TT, made monotone, computed separately for intra- and inter-protein
     links.
   - It is applied at the CSM level and at the residue-pair level (unordered
@@ -367,12 +367,16 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
   "isotope_errors": [-1, 3], "missing_charges": [3, 6], "isolation_half_width": 1.0,
   "min_chain_mass": 400.0, "max_pairs": 12,
   "preliminary_candidates": 5, "chain_candidates": 3,
-  "min_chain_matched_peaks": 2, "output_q_value": 1.0
+  "min_chain_matched_peaks": 2, "output_q_value": 1.0, "q_value_threshold": 0.01
 }
 ```
 
 - `linker` is `"DSSO"`, `"DSBU"`, or a custom object.
 - All other fields are optional; the values shown are the defaults.
+- `q_value_threshold` is the estimated CSM and residue-pair FDR at which the run summary
+  counts crosslinks. `output_q_value` controls which CSMs are written. The search never
+  applies a stricter cutoff than the one set here. See "Calibration" for the cutoff that
+  gives about 1% true FDR.
 - Keep the M0 monolink `mass_offset` mods in `variable_mods`, so that monolinks are not
   forced into crosslinks.
 
@@ -381,6 +385,9 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
 "Wrong" means the two chains come from different synthetic peptide groups, using the
 IMP-X-FDR substring rule. Scripts are in `explore-data/crosslink/runs/`:
 `analysis/eval_xl.py` and `analysis/xi_mzid.py`.
+
+The Sage Plus rows use the earlier 12-feature CSM discriminant. For the current
+13-feature numbers at 1% and 0.2%, see "Calibration".
 
 | Dataset / tool | CSMs (true FDR) | Residue pairs (true FDR) |
 | --- | ---: | ---: |
@@ -450,7 +457,40 @@ Wrong target CSMs at 1% estimated FDR fall into two kinds. Scripts:
     true FDR rises to 2.6% and 2.5%.
   - At 0.2% estimated FDR: 2343 correct at 1.14% true on the ribosome file (98% of the
     current depth). On Beveridge it is 1189 correct at 2.0%.
-  - Whether to adopt it, and at which cutoff, is left as a decision.
+  - It was adopted as the 13th CSM feature (see "Calibration").
+
+### Calibration
+
+These are search runs with the 13-feature discriminant, compared with the 12-feature one
+before it. Runs `m1-xl-wpl` and `ribo-xl-wpl`, script `wpl.sh`. Each cell gives correct
+target matches and the true FDR.
+
+| Dataset, level | Estimated FDR | 12 features | 13 features |
+| --- | ---: | ---: | ---: |
+| Ribosome, CSMs | 1% | 2274 (2.1%) | 2875 (2.4%) |
+| Ribosome, CSMs | 0.2% | 1199 (0.3%) | **2239 (1.1%)** |
+| Ribosome, residue pairs | 1% | 515 (2.6%) | 575 (3.0%) |
+| Ribosome, residue pairs | 0.2% | 413 (0.7%) | 385 (0.5%) |
+| Beveridge, CSMs | 1% | 1788 (2.2%) | 1851 (2.7%) |
+| Beveridge, CSMs | 0.2% | 1400 (1.8%) | 1172 (1.9%) |
+| Beveridge, residue pairs | 1% | 172 (4.4%) | 171 (3.4%) |
+| Beveridge, residue pairs | 0.2% | 81 (1.2%) | 146 (2.0%) |
+
+- **The estimate is optimistic by about 2×.** At a nominal 1%, true CSM FDR is 2.4–2.7%.
+  The default `q_value_threshold` stays at 0.01, so the search applies the cutoff the
+  config names and nothing stricter.
+- **For a strict true 1%, set `q_value_threshold` to 0.002.** Filter the output at
+  `csm_q <= 0.002` too.
+  - On the ribosome file this gives 2239 correct CSMs at 1.1% true FDR. That is 98% of the
+    depth the 12-feature search reached at a nominal 1%, where its true FDR was 2.1%.
+  - Residue pairs at 0.2% are at 0.5% true FDR.
+- **Beveridge has a floor of about 1.8–1.9% at any cutoff.** Nearly all of the excess is
+  cross-group links between library peptides. Examples are the recurring
+  MIAKSEQEIGK–LVDSTDKADLR CSMs; see "Where the CSM-level excess comes from".
+  - These are probably real crosslinks between synthetic groups, not random matches, so
+    target-decoy cannot see them.
+  - The random-match FDR on Beveridge is 0.2–0.4%.
+  - Beveridge should not drive the cutoff.
 
 ### Cost (`/usr/bin/time -v`, 16 cores, other jobs running)
 

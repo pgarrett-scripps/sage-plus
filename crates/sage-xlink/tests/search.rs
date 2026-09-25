@@ -151,7 +151,7 @@ fn synthetic_dsso_spectrum_identifies_both_chains() {
     }
 
     let mut csms = vec![csm];
-    sage_xlink::assign_q_values(&mut csms, &db);
+    sage_xlink::assign_q_values(&mut csms, &db, 0.01);
     let bytes = sage_xlink::output::serialize(
         &csms.iter().collect::<Vec<_>>(),
         &db,
