@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.9] - 2026-09-25
+
 ### Added
 - `"z_dot"` ion kind (aliases `"zdot"`, `"z."`): the radical z• ion (z + 1.007825 Da) produced by
   ETD and EThcD. The existing `"z"` kind is the even-electron z ion (y − NH3). Parquet and
