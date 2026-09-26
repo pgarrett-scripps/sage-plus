@@ -765,6 +765,7 @@ impl Runner {
                 }
             }
 
+            let mut unmodified_bytes = None;
             let needs_estimate = limits.is_enabled()
                 || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
             if needs_estimate {
@@ -779,6 +780,7 @@ impl Runner {
                         .max(full_estimate.modified_peak_bytes)
                         .max(full_estimate.fragment_peak_bytes),
                 });
+                unmodified_bytes = Some(full_estimate.unmodified_peak_bytes);
                 if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
                     database_parameters.auto_calculate_prefilter_chunk_size(
                         &fasta,
@@ -796,10 +798,20 @@ impl Runner {
                         full_estimate.fragments,
                         full_estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
                     );
-                    limits.check_estimate(
-                        "unmodified-peptide",
-                        full_estimate.unmodified_peak_bytes,
-                    )?;
+                    // A chunked prefilter holds one sequence bucket of the
+                    // unmodified digest at a time.
+                    let unmodified_peak = if database_parameters.prefilter
+                        && database_parameters.prefilter_chunk_size < fasta.targets.len()
+                    {
+                        let passes = prefilter::digest_passes(
+                            parameters.max_memory_gb,
+                            full_estimate.unmodified_peak_bytes,
+                        );
+                        full_estimate.unmodified_peak_bytes.div_ceil(passes)
+                    } else {
+                        full_estimate.unmodified_peak_bytes
+                    };
+                    limits.check_estimate("unmodified-peptide", unmodified_peak)?;
 
                     // Prefilter chunks are streamed through the spectrum index
                     // without a fragment index; the survivor index is checked
@@ -858,8 +870,12 @@ impl Runner {
                             retained_spectra: Default::default(),
                             mass_recalibration: Default::default(),
                         };
-                        let (peptides, retained) =
-                            mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
+                        let (peptides, retained) = mini_runner.prefilter_peptides(
+                            parallel,
+                            fasta,
+                            custom_cleavages,
+                            unmodified_bytes,
+                        )?;
                         retained_spectra = retained;
                         reordered = true;
                         peptides
