@@ -276,3 +276,40 @@ fn linear_scale_keeps_the_beta6_conversion() {
         MobilityScale::Linear(Some(scale)) if scale == linear
     ));
 }
+
+#[test]
+fn diapasef_reads_one_spectrum_per_window_split() {
+    // Regression test: timsrust 0.6 (Beta 2) read diaPASEF as precursor-anchored spectra
+    // and ignored `ms2.frame_splitting_params`.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let url = crate::Url::from_file_path(path).unwrap();
+    let read = |frame_splitting_params| {
+        let config = BrukerProcessingConfig {
+            ms2: BrukerSpectrumConfig {
+                frame_splitting_params,
+                ..BrukerSpectrumConfig::default()
+            },
+            ..BrukerProcessingConfig::default()
+        };
+        crate::util::read_spectra(&url, 0, None, config, false).unwrap()
+    };
+
+    // 470 MS2 frames, each with two 26 m/z windows centered at 413 + 25k.
+    let spectra = read(BrukerFrameWindowSplittingConfig::default());
+    assert_eq!(spectra.len(), 940);
+    for spectrum in &spectra {
+        assert_eq!(spectrum.ms_level, 2);
+        let precursor = &spectrum.precursors[0];
+        let step = (precursor.mz - 413.0) / 25.0;
+        assert!((step - step.round()).abs() < 1e-3, "{}", precursor.mz);
+        assert_eq!(precursor.isolation_window, Some(Tolerance::Da(-13.0, 13.0)));
+        assert_eq!(precursor.charge, None);
+        assert!(precursor.inverse_ion_mobility.is_some());
+    }
+
+    // The splitting config is honored: two mobility splits per window double the count.
+    let split = read(BrukerFrameWindowSplittingConfig::Quadrupole(
+        BrukerQuadWindowExpansionStrategy::Even(2),
+    ));
+    assert_eq!(split.len(), 2 * spectra.len());
+}
