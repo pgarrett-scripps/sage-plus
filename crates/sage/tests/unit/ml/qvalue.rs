@@ -81,7 +81,11 @@ fn one_group_matches_ungrouped_q_values() {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
-            let label = if (state >> 40) % 3 == 0 { -1 } else { 1 };
+            let label = if (state >> 40).is_multiple_of(3) {
+                -1
+            } else {
+                1
+            };
             feature(label, ((state >> 20) % 60) as f32 / 4.0)
         })
         .collect::<Vec<_>>();

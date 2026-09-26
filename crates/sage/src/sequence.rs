@@ -388,6 +388,8 @@ mod tests {
     }
 
     #[test]
+    // Owned `String`s exercise the `PartialEq<String>` impls.
+    #[allow(clippy::cmp_owned)]
     fn string_comparisons_in_both_directions() {
         let p = PeptideSequence::from("SAGE");
         assert!(p == "SAGE");
@@ -409,7 +411,7 @@ mod tests {
         let early = protein.peptide(0..2).unwrap();
         assert_eq!(late.cmp(&early), Ordering::Less);
         assert_eq!(early.partial_cmp(&late), Some(Ordering::Greater));
-        let mut v = vec![
+        let mut v = [
             PeptideSequence::from("B"),
             early,
             late,
