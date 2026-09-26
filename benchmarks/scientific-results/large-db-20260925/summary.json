@@ -1,0 +1,923 @@
+{
+ "campi_databases": {
+  "gut-db2mg-human.fasta": {
+   "GUT_DB2MG.faa": {
+    "dropped": 0,
+    "kept": 441558,
+    "residues": 110312187
+   },
+   "human.fasta": {
+    "dropped": 25,
+    "kept": 20391,
+    "residues": 11407014
+   }
+  },
+  "sihumi-igc.fasta": {
+   "GUT_DB1IGC.faa": {
+    "dropped": 1131,
+    "kept": 9878765,
+    "residues": 2470544416
+   },
+   "SIHUMI_DB1UNIPROT.faa": {
+    "dropped": 32,
+    "kept": 59314,
+    "residues": 19311746
+   }
+  },
+  "sihumi-reference.fasta": {
+   "SIHUMI_DB1UNIPROT.faa": {
+    "dropped": 32,
+    "kept": 59314,
+    "residues": 19311746
+   }
+  }
+ },
+ "databases": {
+  "catalog": "/mnt/data1/sage-plus-scientific/large-db-20260925/inputs/campi/GUT_DB1IGC.faa",
+  "catalog_proteins_dropped": 1131,
+  "catalog_proteins_kept": 9878765,
+  "human": "/data/sage-plus-scientific/20260914/references/human.fasta",
+  "human_residues": 11414637,
+  "subsets": {
+   "1": {
+    "fraction": 0.004620292161547603,
+    "proteins": 45548,
+    "residues": 11396059
+   },
+   "10": {
+    "fraction": 0.046202921615476025,
+    "proteins": 456081,
+    "residues": 113904417
+   },
+   "100": {
+    "fraction": 0.4620292161547603,
+    "proteins": 4563469,
+    "residues": 1141276596
+   },
+   "1000": {
+    "fraction": 4.620292161547603,
+    "proteins": 9878765,
+    "residues": 2470544416
+   },
+   "3": {
+    "fraction": 0.013860876484642808,
+    "proteins": 136606,
+    "residues": 34093694
+   },
+   "30": {
+    "fraction": 0.1386087648464281,
+    "proteins": 1367978,
+    "residues": 342102345
+   }
+  }
+ },
+ "executable": {
+  "path": "/mnt/data1/sage-plus-scientific/large-db-20260925/sage-beta10",
+  "sha256": "72f75a6c75e4aef0627f12a6484620b9b9cb897c31a93349bb64c19f0833394d"
+ },
+ "metaproteome": [
+  {
+   "database": "sample-specific",
+   "error_lines": [
+    "Error: estimated modified-peptide database peak is 32.32 GiB in addition to Sage's current 2.07 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "name": "campi-F05-full",
+   "outcome": "refused",
+   "peak_rss_gib": 2.8135986328125,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 21.86,
+    "fragments": 970485216,
+    "modified_gib": 15.59,
+    "modified_peptides": 33094648,
+    "unmodified_gib": 3.78,
+    "unmodified_peptides": 16547324
+   },
+   "refused_estimate_gib": 34.39,
+   "sample": "F05",
+   "wall_seconds": 22.82
+  },
+  {
+   "accepted_peptides": 15468,
+   "accepted_psms": 23573,
+   "database": "sample-specific",
+   "database_peptides": 23474178,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 583062296,
+    "gib": 13.34,
+    "peptides": 23474178
+   },
+   "human_peptides": 1458,
+   "microbial_peptides": 14010,
+   "name": "campi-F05-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 10.057281494140625,
+   "peptides_at_one_percent_fdr": 15468,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 23474178,
+    "seconds": 26.268,
+    "streamed": 29015540
+   },
+   "preflight": {
+    "fragment_index_gib": 21.86,
+    "fragments": 970485216,
+    "modified_gib": 15.59,
+    "modified_peptides": 33094648,
+    "unmodified_gib": 3.78,
+    "unmodified_peptides": 16547324
+   },
+   "psms_at_one_percent_fdr": 23573,
+   "refused_estimate_gib": null,
+   "results_sha256": "bfcef0578e8085d2158a7d4fb4baacf65c31838a812e5b14abae7ce1b54872ae",
+   "sample": "F05",
+   "spectrum_index": {
+    "mib": 45.1,
+    "spectra": 43040
+   },
+   "wall_seconds": 138.51
+  },
+  {
+   "database": "sample-specific",
+   "error_lines": [
+    "Error: estimated modified-peptide database peak is 32.32 GiB in addition to Sage's current 2.05 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "name": "campi-F06-full",
+   "outcome": "refused",
+   "peak_rss_gib": 2.78717041015625,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 21.86,
+    "fragments": 970485216,
+    "modified_gib": 15.59,
+    "modified_peptides": 33094648,
+    "unmodified_gib": 3.78,
+    "unmodified_peptides": 16547324
+   },
+   "refused_estimate_gib": 34.37,
+   "sample": "F06",
+   "wall_seconds": 18.59
+  },
+  {
+   "accepted_peptides": 22348,
+   "accepted_psms": 43306,
+   "database": "sample-specific",
+   "database_peptides": 24917411,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 643262834,
+    "gib": 14.37,
+    "peptides": 24917411
+   },
+   "human_peptides": 1711,
+   "microbial_peptides": 20637,
+   "name": "campi-F06-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 10.747539520263672,
+   "peptides_at_one_percent_fdr": 22348,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 24917411,
+    "seconds": 27.718,
+    "streamed": 29015540
+   },
+   "preflight": {
+    "fragment_index_gib": 21.86,
+    "fragments": 970485216,
+    "modified_gib": 15.59,
+    "modified_peptides": 33094648,
+    "unmodified_gib": 3.78,
+    "unmodified_peptides": 16547324
+   },
+   "psms_at_one_percent_fdr": 43306,
+   "refused_estimate_gib": null,
+   "results_sha256": "81eb6324cb503127d00c56095b959f4b9800a814bbc8c8baf2fdd5361cc4b2c4",
+   "sample": "F06",
+   "spectrum_index": {
+    "mib": 73.8,
+    "spectra": 82079
+   },
+   "wall_seconds": 190.89
+  }
+ ],
+ "narrow": [
+  {
+   "accepted_peptides": 7830,
+   "accepted_psms": 13518,
+   "catalog_proteins": 456081,
+   "catalog_residues": 113904417,
+   "combined_fdp": 1.2927144625398075,
+   "database_peptides": 14736298,
+   "entrapment_peptides": 92,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 303928026,
+    "gib": 7.75,
+    "peptides": 14736298
+   },
+   "human_peptides": 7738,
+   "multiple": "10x",
+   "name": "hek-igc-10x-mono-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 6.956645965576172,
+   "peptides_at_one_percent_fdr": 7830,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 14736298,
+    "seconds": 24.496,
+    "streamed": 31815852
+   },
+   "preflight": {
+    "fragment_index_gib": 22.7,
+    "fragments": 999586748,
+    "modified_gib": 16.27,
+    "modified_peptides": 34675270,
+    "unmodified_gib": 3.94,
+    "unmodified_peptides": 17337635
+   },
+   "psms_at_one_percent_fdr": 13518,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 7719,
+   "refused_estimate_gib": null,
+   "residue_ratio": 9.978803268119696,
+   "results_sha256": "e94b4d84fd2488e2d2c90d2bceb657107c710ce6814caf8f5972989e37e98c6a",
+   "spectrum_index": {
+    "mib": 29.9,
+    "spectra": 41800
+   },
+   "wall_seconds": 94.35
+  },
+  {
+   "catalog_proteins": 1367978,
+   "catalog_residues": 342102345,
+   "error_lines": [
+    "Error: estimated final fragment-index database peak is 6.79 GiB in addition to Sage's current 10.57 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "final_preflight": {
+    "fragments": 807315752,
+    "gib": 20.72,
+    "peptides": 38735627
+   },
+   "multiple": "30x",
+   "name": "hek-igc-30x-mono-prefilter",
+   "outcome": "refused",
+   "peak_rss_gib": 13.53472900390625,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 38735627,
+    "seconds": 72.523,
+    "streamed": 84319371
+   },
+   "preflight": {
+    "fragment_index_gib": 64.14,
+    "fragments": 2825261336,
+    "modified_gib": 46.02,
+    "modified_peptides": 98127796,
+    "unmodified_gib": 11.16,
+    "unmodified_peptides": 49063898
+   },
+   "refused_estimate_gib": 17.36,
+   "residue_ratio": 29.97049709070906,
+   "spectrum_index": {
+    "mib": 29.9,
+    "spectra": 41800
+   },
+   "wall_seconds": 360.95
+  },
+  {
+   "accepted_peptides": 8061,
+   "accepted_psms": 13823,
+   "catalog_proteins": 136606,
+   "catalog_residues": 34093694,
+   "combined_fdp": 1.2750248621597555,
+   "database_peptides": 5492106,
+   "entrapment_peptides": 77,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 112504034,
+    "gib": 2.87,
+    "peptides": 5492106
+   },
+   "human_peptides": 7984,
+   "multiple": "3x",
+   "name": "hek-igc-3x-mono-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 3.384479522705078,
+   "peptides_at_one_percent_fdr": 8061,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 5492106,
+    "seconds": 8.783,
+    "streamed": 11837937
+   },
+   "preflight": {
+    "fragment_index_gib": 8.2,
+    "fragments": 361096856,
+    "modified_gib": 5.86,
+    "modified_peptides": 12477352,
+    "unmodified_gib": 1.42,
+    "unmodified_peptides": 6238676
+   },
+   "psms_at_one_percent_fdr": 13823,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 7959,
+   "refused_estimate_gib": null,
+   "residue_ratio": 2.986839966965222,
+   "results_sha256": "dbdd95f73683781517587d80b515f21265a4b15c2e6d04a800ef8bc199d24ffa",
+   "spectrum_index": {
+    "mib": 29.9,
+    "spectra": 41800
+   },
+   "wall_seconds": 30.96
+  }
+ ],
+ "scaling": [
+  {
+   "accepted_peptides": 9293,
+   "accepted_psms": 16915,
+   "catalog_proteins": 0,
+   "catalog_residues": 0,
+   "database_peptides": 2803615,
+   "entrapment_peptides": 0,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 80834310,
+    "gib": 1.69,
+    "peptides": 2803615
+   },
+   "human_peptides": 9293,
+   "multiple": 0,
+   "name": "hek-human-full",
+   "outcome": "completed",
+   "peak_rss_gib": 1.4586410522460938,
+   "peptides_at_one_percent_fdr": 9293,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 2.01,
+    "fragments": 88450352,
+    "modified_gib": 1.42,
+    "modified_peptides": 3004638,
+    "unmodified_gib": 0.34,
+    "unmodified_peptides": 1502319
+   },
+   "psms_at_one_percent_fdr": 16915,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 9293,
+   "refused_estimate_gib": null,
+   "residue_ratio": 0.0,
+   "results_sha256": "102c0a5dd47e4fd9c2d677277d1d3e5c2acf57743353d6d5ca0a3bf43c8817a8",
+   "wall_seconds": 9.8
+  },
+  {
+   "accepted_peptides": 9293,
+   "accepted_psms": 16915,
+   "catalog_proteins": 0,
+   "catalog_residues": 0,
+   "database_peptides": 2803615,
+   "entrapment_peptides": 0,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 80834310,
+    "gib": 1.69,
+    "peptides": 2803615
+   },
+   "human_peptides": 9293,
+   "multiple": 0,
+   "name": "hek-human-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 1.4757957458496094,
+   "peptides_at_one_percent_fdr": 9293,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 2.01,
+    "fragments": 88450352,
+    "modified_gib": 1.42,
+    "modified_peptides": 3004638,
+    "unmodified_gib": 0.34,
+    "unmodified_peptides": 1502319
+   },
+   "psms_at_one_percent_fdr": 16915,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 9293,
+   "refused_estimate_gib": null,
+   "residue_ratio": 0.0,
+   "results_sha256": "102c0a5dd47e4fd9c2d677277d1d3e5c2acf57743353d6d5ca0a3bf43c8817a8",
+   "wall_seconds": 9.53
+  },
+  {
+   "catalog_proteins": 4563469,
+   "catalog_residues": 1141276596,
+   "error_lines": [
+    "Error: estimated unmodified-peptide database peak is 36.40 GiB in addition to Sage's current 1.71 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "100x",
+   "name": "hek-igc-100x-full",
+   "outcome": "refused",
+   "peak_rss_gib": 2.8978271484375,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 209.22,
+    "fragments": 9217201864,
+    "modified_gib": 150.13,
+    "modified_peptides": 320143930,
+    "unmodified_gib": 36.4,
+    "unmodified_peptides": 160071965
+   },
+   "refused_estimate_gib": 38.11,
+   "residue_ratio": 99.98360841435431,
+   "wall_seconds": 22.95
+  },
+  {
+   "catalog_proteins": 4563469,
+   "catalog_residues": 1141276596,
+   "error_lines": [
+    "Error: estimated unmodified-peptide database peak is 36.40 GiB in addition to Sage's current 1.71 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "100x",
+   "name": "hek-igc-100x-prefilter",
+   "outcome": "refused",
+   "peak_rss_gib": 2.8980712890625,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 209.22,
+    "fragments": 9217201864,
+    "modified_gib": 150.13,
+    "modified_peptides": 320143930,
+    "unmodified_gib": 36.4,
+    "unmodified_peptides": 160071965
+   },
+   "refused_estimate_gib": 38.11,
+   "residue_ratio": 99.98360841435431,
+   "wall_seconds": 23.29
+  },
+  {
+   "catalog_proteins": 456081,
+   "catalog_residues": 113904417,
+   "error_lines": [
+    "Error: estimated modified-peptide database peak is 34.66 GiB in addition to Sage's current 2.15 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "10x",
+   "name": "hek-igc-10x-full",
+   "outcome": "refused",
+   "peak_rss_gib": 2.928234100341797,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 22.7,
+    "fragments": 999586748,
+    "modified_gib": 16.27,
+    "modified_peptides": 34675270,
+    "unmodified_gib": 3.94,
+    "unmodified_peptides": 17337635
+   },
+   "refused_estimate_gib": 36.809999999999995,
+   "residue_ratio": 9.978803268119696,
+   "wall_seconds": 19.87
+  },
+  {
+   "accepted_peptides": 8691,
+   "accepted_psms": 16155,
+   "catalog_proteins": 456081,
+   "catalog_residues": 113904417,
+   "combined_fdp": 1.1899662553447958,
+   "database_peptides": 24277396,
+   "entrapment_peptides": 94,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 543698842,
+    "gib": 13.14,
+    "peptides": 24277396
+   },
+   "human_peptides": 8597,
+   "multiple": "10x",
+   "name": "hek-igc-10x-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 9.934017181396484,
+   "peptides_at_one_percent_fdr": 8691,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 24277396,
+    "seconds": 29.599,
+    "streamed": 31815852
+   },
+   "preflight": {
+    "fragment_index_gib": 22.7,
+    "fragments": 999586748,
+    "modified_gib": 16.27,
+    "modified_peptides": 34675270,
+    "unmodified_gib": 3.94,
+    "unmodified_peptides": 17337635
+   },
+   "psms_at_one_percent_fdr": 16155,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 8583,
+   "refused_estimate_gib": null,
+   "residue_ratio": 9.978803268119696,
+   "results_sha256": "44d34d63659db8f7b106cc95c6dad396e30b3acec41d8eddb3810afb3c475c3f",
+   "spectrum_index": {
+    "mib": 33.1,
+    "spectra": 41800
+   },
+   "wall_seconds": 136.81
+  },
+  {
+   "accepted_peptides": 9192,
+   "accepted_psms": 16715,
+   "catalog_proteins": 45548,
+   "catalog_residues": 11396059,
+   "combined_fdp": 1.2629955650133948,
+   "database_peptides": 5886174,
+   "entrapment_peptides": 58,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 167455700,
+    "gib": 3.5,
+    "peptides": 5886174
+   },
+   "human_peptides": 9134,
+   "multiple": "1x",
+   "name": "hek-igc-1x-full",
+   "outcome": "completed",
+   "peak_rss_gib": 2.8655929565429688,
+   "peptides_at_one_percent_fdr": 9192,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 4.08,
+    "fragments": 179786132,
+    "modified_gib": 2.91,
+    "modified_peptides": 6180676,
+    "unmodified_gib": 0.7,
+    "unmodified_peptides": 3090338
+   },
+   "psms_at_one_percent_fdr": 16715,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 9127,
+   "refused_estimate_gib": null,
+   "residue_ratio": 0.99837244057783,
+   "results_sha256": "e0cdf145b123d42d9fcb19b1391633cad93f92686fd15d0bc8baa159422102f6",
+   "wall_seconds": 17.91
+  },
+  {
+   "accepted_peptides": 9192,
+   "accepted_psms": 16715,
+   "catalog_proteins": 45548,
+   "catalog_residues": 11396059,
+   "combined_fdp": 1.2629955650133948,
+   "database_peptides": 5886174,
+   "entrapment_peptides": 58,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 167455700,
+    "gib": 3.5,
+    "peptides": 5886174
+   },
+   "human_peptides": 9134,
+   "multiple": "1x",
+   "name": "hek-igc-1x-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 2.78515625,
+   "peptides_at_one_percent_fdr": 9192,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 4.08,
+    "fragments": 179786132,
+    "modified_gib": 2.91,
+    "modified_peptides": 6180676,
+    "unmodified_gib": 0.7,
+    "unmodified_peptides": 3090338
+   },
+   "psms_at_one_percent_fdr": 16715,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 9127,
+   "refused_estimate_gib": null,
+   "residue_ratio": 0.99837244057783,
+   "results_sha256": "e0cdf145b123d42d9fcb19b1391633cad93f92686fd15d0bc8baa159422102f6",
+   "wall_seconds": 18.21
+  },
+  {
+   "catalog_proteins": 1367978,
+   "catalog_residues": 342102345,
+   "error_lines": [
+    "Error: estimated modified-peptide database peak is 93.40 GiB in addition to Sage's current 5.88 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "30x",
+   "name": "hek-igc-30x-full",
+   "outcome": "refused",
+   "peak_rss_gib": 8.077407836914062,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 64.14,
+    "fragments": 2825261336,
+    "modified_gib": 46.02,
+    "modified_peptides": 98127796,
+    "unmodified_gib": 11.16,
+    "unmodified_peptides": 49063898
+   },
+   "refused_estimate_gib": 99.28,
+   "residue_ratio": 29.97049709070906,
+   "wall_seconds": 66.76
+  },
+  {
+   "catalog_proteins": 1367978,
+   "catalog_residues": 342102345,
+   "exit_code": 137,
+   "multiple": "30x",
+   "name": "hek-igc-30x-prefilter",
+   "outcome": "guard",
+   "peak_rss_gib": 16.217815399169922,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 64.14,
+    "fragments": 2825261336,
+    "modified_gib": 46.02,
+    "modified_peptides": 98127796,
+    "unmodified_gib": 11.16,
+    "unmodified_peptides": 49063898
+   },
+   "refused_estimate_gib": null,
+   "residue_ratio": 29.97049709070906,
+   "spectrum_index": {
+    "mib": 33.1,
+    "spectra": 41800
+   },
+   "wall_seconds": 207.75
+  },
+  {
+   "accepted_peptides": 8996,
+   "accepted_psms": 16555,
+   "catalog_proteins": 136606,
+   "catalog_residues": 34093694,
+   "combined_fdp": 1.2166936877245915,
+   "database_peptides": 11837937,
+   "entrapment_peptides": 82,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 336277388,
+    "gib": 7.01,
+    "peptides": 11837937
+   },
+   "human_peptides": 8914,
+   "multiple": "3x",
+   "name": "hek-igc-3x-full",
+   "outcome": "completed",
+   "peak_rss_gib": 5.626201629638672,
+   "peptides_at_one_percent_fdr": 8996,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 8.2,
+    "fragments": 361096856,
+    "modified_gib": 5.86,
+    "modified_peptides": 12477352,
+    "unmodified_gib": 1.42,
+    "unmodified_peptides": 6238676
+   },
+   "psms_at_one_percent_fdr": 16555,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 8905,
+   "refused_estimate_gib": null,
+   "residue_ratio": 2.986839966965222,
+   "results_sha256": "8437b96c7ed574b0ce89d390cc19575d07c81449fbfb73c25ea7e5e136b38a34",
+   "wall_seconds": 38.4
+  },
+  {
+   "accepted_peptides": 8996,
+   "accepted_psms": 16555,
+   "catalog_proteins": 136606,
+   "catalog_residues": 34093694,
+   "combined_fdp": 1.2166936877245915,
+   "database_peptides": 9041890,
+   "entrapment_peptides": 82,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 200934390,
+    "gib": 4.86,
+    "peptides": 9041890
+   },
+   "human_peptides": 8914,
+   "multiple": "3x",
+   "name": "hek-igc-3x-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 4.4314727783203125,
+   "peptides_at_one_percent_fdr": 8996,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 9041890,
+    "seconds": 10.652,
+    "streamed": 11837937
+   },
+   "preflight": {
+    "fragment_index_gib": 8.2,
+    "fragments": 361096856,
+    "modified_gib": 5.86,
+    "modified_peptides": 12477352,
+    "unmodified_gib": 1.42,
+    "unmodified_peptides": 6238676
+   },
+   "psms_at_one_percent_fdr": 16555,
+   "reference_peptides": 9293,
+   "reference_peptides_retained": 8905,
+   "refused_estimate_gib": null,
+   "residue_ratio": 2.986839966965222,
+   "results_sha256": "8437b96c7ed574b0ce89d390cc19575d07c81449fbfb73c25ea7e5e136b38a34",
+   "spectrum_index": {
+    "mib": 33.1,
+    "spectra": 41800
+   },
+   "wall_seconds": 43.03
+  },
+  {
+   "catalog_proteins": 9878765,
+   "catalog_residues": 2470544416,
+   "error_lines": [
+    "Error: estimated unmodified-peptide database peak is 78.40 GiB in addition to Sage's current 3.68 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "full",
+   "name": "hek-igc-full-full",
+   "outcome": "refused",
+   "peak_rss_gib": 6.2322998046875,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 450.57,
+    "fragments": 19850368812,
+    "modified_gib": 323.34,
+    "modified_peptides": 689531118,
+    "unmodified_gib": 78.4,
+    "unmodified_peptides": 344765559
+   },
+   "refused_estimate_gib": 82.08000000000001,
+   "residue_ratio": 216.43652934385912,
+   "wall_seconds": 48.86
+  },
+  {
+   "catalog_proteins": 9878765,
+   "catalog_residues": 2470544416,
+   "error_lines": [
+    "Error: estimated unmodified-peptide database peak is 78.40 GiB in addition to Sage's current 3.68 GiB; this would exceed `max_memory_gb` (16.00 GiB). Reduce variable modifications, `max_variable_mods`, or database size"
+   ],
+   "exit_code": 1,
+   "multiple": "full",
+   "name": "hek-igc-full-prefilter",
+   "outcome": "refused",
+   "peak_rss_gib": 6.2320556640625,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 450.57,
+    "fragments": 19850368812,
+    "modified_gib": 323.34,
+    "modified_peptides": 689531118,
+    "unmodified_gib": 78.4,
+    "unmodified_peptides": 344765559
+   },
+   "refused_estimate_gib": 82.08000000000001,
+   "residue_ratio": 216.43652934385912,
+   "wall_seconds": 49.58
+  }
+ ],
+ "six_frame": [
+  {
+   "accepted_peptides": 39117,
+   "accepted_psms": 55614,
+   "database": "annotated",
+   "database_peptides": 3888457,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 111974216,
+    "gib": 2.34,
+    "peptides": 3888457
+   },
+   "microbial_annotated": 10638,
+   "microbial_peptides": 10638,
+   "microbial_shared_with_other_database": 9990,
+   "microbial_unannotated": 0,
+   "name": "lfq-annotated-full",
+   "outcome": "completed",
+   "peak_rss_gib": 2.3814964294433594,
+   "peptides_at_one_percent_fdr": 39117,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 2.78,
+    "fragments": 122555268,
+    "modified_gib": 1.96,
+    "modified_peptides": 4161730,
+    "unmodified_gib": 0.48,
+    "unmodified_peptides": 2080865
+   },
+   "psms_at_one_percent_fdr": 55614,
+   "results_sha256": "c14b0eb02aec4d2e41b4dc4d361f99208c0e7003bb5bdacfeba0df50517574f8",
+   "wall_seconds": 25.54
+  },
+  {
+   "accepted_peptides": 39117,
+   "accepted_psms": 55614,
+   "database": "annotated",
+   "database_peptides": 3888457,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 111974216,
+    "gib": 2.34,
+    "peptides": 3888457
+   },
+   "microbial_annotated": 10638,
+   "microbial_peptides": 10638,
+   "microbial_shared_with_other_database": 9990,
+   "microbial_unannotated": 0,
+   "name": "lfq-annotated-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 2.3791351318359375,
+   "peptides_at_one_percent_fdr": 39117,
+   "prefilter": true,
+   "preflight": {
+    "fragment_index_gib": 2.78,
+    "fragments": 122555268,
+    "modified_gib": 1.96,
+    "modified_peptides": 4161730,
+    "unmodified_gib": 0.48,
+    "unmodified_peptides": 2080865
+   },
+   "psms_at_one_percent_fdr": 55614,
+   "results_sha256": "c14b0eb02aec4d2e41b4dc4d361f99208c0e7003bb5bdacfeba0df50517574f8",
+   "wall_seconds": 25.77
+  },
+  {
+   "accepted_peptides": 37189,
+   "accepted_psms": 52960,
+   "database": "six-frame",
+   "database_peptides": 10766531,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 257758082,
+    "gib": 5.95,
+    "peptides": 10766531
+   },
+   "microbial_annotated": 10029,
+   "microbial_peptides": 10199,
+   "microbial_shared_with_other_database": 9990,
+   "microbial_unannotated": 170,
+   "name": "lfq-six-frame-full",
+   "outcome": "completed",
+   "peak_rss_gib": 4.75457763671875,
+   "peptides_at_one_percent_fdr": 37189,
+   "prefilter": false,
+   "preflight": {
+    "fragment_index_gib": 6.85,
+    "fragments": 276695344,
+    "modified_gib": 5.13,
+    "modified_peptides": 11360194,
+    "unmodified_gib": 1.26,
+    "unmodified_peptides": 5680097
+   },
+   "psms_at_one_percent_fdr": 52960,
+   "results_sha256": "1035f615d9a004c61e0d29c71a3a8336ca3bcd4c07ed343fa2f039fd67bb4e7a",
+   "wall_seconds": 65.11
+  },
+  {
+   "accepted_peptides": 37189,
+   "accepted_psms": 52960,
+   "database": "six-frame",
+   "database_peptides": 9429942,
+   "exit_code": 0,
+   "final_preflight": {
+    "fragments": 197381528,
+    "gib": 4.95,
+    "peptides": 9429942
+   },
+   "microbial_annotated": 10029,
+   "microbial_peptides": 10199,
+   "microbial_shared_with_other_database": 9990,
+   "microbial_unannotated": 170,
+   "name": "lfq-six-frame-prefilter",
+   "outcome": "completed",
+   "peak_rss_gib": 4.857856750488281,
+   "peptides_at_one_percent_fdr": 37189,
+   "prefilter": true,
+   "prefilter_counts": {
+    "retained": 9429942,
+    "seconds": 11.131,
+    "streamed": 10766531
+   },
+   "preflight": {
+    "fragment_index_gib": 6.85,
+    "fragments": 276695344,
+    "modified_gib": 5.13,
+    "modified_peptides": 11360194,
+    "unmodified_gib": 1.26,
+    "unmodified_peptides": 5680097
+   },
+   "psms_at_one_percent_fdr": 52960,
+   "results_sha256": "1035f615d9a004c61e0d29c71a3a8336ca3bcd4c07ed343fa2f039fd67bb4e7a",
+   "spectrum_index": {
+    "mib": 121.4,
+    "spectra": 109360
+   },
+   "wall_seconds": 65.52
+  }
+ ]
+}

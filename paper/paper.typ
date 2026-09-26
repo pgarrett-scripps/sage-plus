@@ -459,6 +459,38 @@ The fixtures also tested ambiguity that must prevent reusable site evidence.
 They assess consistency of the implemented semantics across search paths.
 Empirical terminal-localization calibration requires separate data.
 
+== Large search database evaluation
+
+The large-database searches used Sage Plus #lit("v0.1.0-beta.10"), with
+executable SHA-256 prefix `72f75a6c`. They kept the public search settings above
+and added an explicit #lit("16") GiB memory limit with eight workers. Each
+database was searched twice, once with the exact prefilter enabled and once
+without it. The prefilter scans the spectra first and keeps only peptides that
+could contribute a preliminary fragment match. Its retention therefore depends
+on the precursor search space, and a separate arm restricted isotope errors to
+the monoisotopic precursor. Outcomes were recorded as completed, refused by the
+preflight estimate before building, or stopped by the runtime memory guard.
+
+The scaling series searched one HEK file against the human reference combined
+with random subsets of the Integrated Gene Catalog of the human gut microbiome
+@li2014. The cleaned catalog held #s("large.catalog.proteins") proteins and #s(
+  "large.catalog.residues",
+) billion residues, about #s(
+  "large.catalog.multiple",
+) times the #s("large.human.residues") million human residues. Subsets were
+sized as multiples of the human residue count. Catalog peptides are absent from
+a human sample, so they served as entrapment sequences for the combined FDP
+estimate @wen2025.
+
+A six-frame search used one mixture file against the human reference with the
+_E. coli_ K-12 and _S. cerevisiae_ genomes translated in all six frames. Frames
+were split at stop codons, and open segments of at least seven residues became
+entries. The annotated mixture reference served as its comparison. Two fecal
+metaproteomes from the Critical Assessment of MetaProteome Investigation (CAMPI)
+@vandenbossche2021 were searched against their sample-specific metagenome
+database of #s("large.campi.proteins") proteins and #s("large.campi.residues")
+million residues, combined with the human reference.
+
 = Computational performance <sec:results>
 
 == Execution completeness
@@ -828,6 +860,82 @@ of accepted peptides. Their difference is a few entrapment peptides at this
 scale, so these searches do not establish equivalent error rates or general
 calibration.
 
+= Searching large databases <sec:large-db>
+
+The exact prefilter extended the database sizes Sage Plus could search within
+#lit("16") GiB (@fig:large-db). With the catalog at three times the human
+residues, the prefilter kept #s("large.3x.kept") million of #s(
+  "large.3x.streamed",
+) million peptides. Peak memory was #s("large.3x.rss") GiB against #s(
+  "large.3x.full.rss",
+) GiB unfiltered, with wall times of #s("large.3x.minutes") and #s(
+  "large.3x.full.minutes",
+) minutes. At ten times, the unfiltered preflight refused the search with an
+estimated #s("large.10x.full.need") GiB requirement. The prefilter search
+completed at #s("large.10x.rss") GiB in #s("large.10x.minutes") minutes, keeping
+#s("large.10x.kept") of #s("large.10x.streamed") million peptides.
+
+The prefilter did not change results where both modes completed. Of #s(
+  "large.pairs.compared",
+) completed pairs, #s("large.pairs.identical") produced byte-identical results.
+Accepted PSMs fell from #s("large.human.psms") on the human reference to #s(
+  "large.10x.psms",
+) at ten times, as the larger search space raised the score needed at the same
+q-value. The ten-times search still accepted #s(
+  "large.10x.retained",
+) percent of the human-only peptides. Combined entrapment FDP stayed at #s(
+  "large.1x.fdp",
+), #s("large.3x.fdp"), and #s("large.10x.fdp") percent for one, three, and ten
+times.
+
+#figure(
+  fig("fig.large-db", width: 100%),
+  caption: [Large-database searches with the exact prefilter within a 16 GiB
+    limit. A and B: peak resident memory and wall time for the HEK file against
+    the human reference with gut catalog subsets, as multiples of the human
+    residues. Crosses mark searches refused by the preflight or stopped by the
+    memory guard. C: fraction of streamed peptides kept by the prefilter.
+    Restricting the precursor to its monoisotopic mass keeps fewer. D: accepted
+    human and catalog-only peptides at one percent peptide q-value, labeled with
+    the combined entrapment FDP. E: accepted microbial peptides from annotated
+    proteomes or six-frame genome translations, split by presence in the
+    annotated proteomes. F: accepted peptides from two CAMPI fecal samples
+    searched against their metagenome database. Every run appears in
+    @tbl:si-large-db.],
+) <fig:large-db>
+
+Retention was set by the precursor search space rather than the database size.
+The prefilter kept #s("large.3x.retention") and #s("large.10x.retention")
+percent of peptides at three and ten times. With monoisotopic precursors only,
+it kept #s("large.mono.10x.retention") percent at ten times, used #s(
+  "large.mono.10x.rss",
+) GiB, and accepted #s("large.mono.10x.psms") PSMs. The prefilter still holds
+the unmodified digest while scanning. At thirty times, the memory guard stopped
+the search at #s("large.30x.guard") GiB, and the monoisotopic arm was refused at
+an estimated #s("large.mono.30x.need") GiB. The preflight refused the larger
+subsets and the full catalog before building, estimating #s("large.100x.need")
+GiB at one hundred times.
+
+Six-frame translation searched #s("large.six.frame.peptides") million peptides
+against #s("large.six.annotated.peptides") million for the annotated reference.
+It accepted #s("large.six.frame.microbial") microbial peptides against #s(
+  "large.six.annotated.microbial",
+), with #s("large.six.shared") accepted by both. Of the six-frame peptides, #s(
+  "large.six.annotated.share",
+) percent occur in the annotated proteomes and #s("large.six.unannotated") do
+not. These unannotated peptides are candidates, not validated novel proteins.
+
+Both CAMPI fecal samples completed against their metagenome database, while the
+unfiltered searches were refused at estimates of at least #s(
+  "large.campi.F06.need",
+) GiB. Sample F06 accepted #s("large.campi.F06.psms") PSMs and #s(
+  "large.campi.F06.microbial",
+) microbial peptides at #s("large.campi.F06.rss") GiB. Sample F05 accepted #s(
+  "large.campi.F05.psms",
+) PSMs and #s("large.campi.F05.microbial") microbial peptides at #s(
+  "large.campi.F05.rss",
+) GiB.
+
 = Discussion <sec:discussion>
 
 Explicit attachment identity makes modification evidence interpretable across
@@ -851,6 +959,15 @@ The enlarged entrapment databases also showed that lower memory need not imply
 shorter runtime. The scaling results suggest that memory savings could help when
 processing several files concurrently. Testing aggregate throughput at a fixed
 worker budget would establish whether that benefit occurs in practice.
+
+The exact prefilter makes large search databases a memory question the preflight
+can answer before a search starts. Because it discards only peptides that cannot
+match, results were unchanged wherever both modes completed. Its reach is
+bounded by two costs it does not remove. The FASTA and the unmodified digest are
+still loaded in full, and retention follows the precursor window, so wide
+isotope-error windows keep most of a database. Streaming the database and
+narrower precursor spaces would extend the range. Metaproteomic FDP estimation
+in sample-specific databases also remains outside what these searches test.
 
 High PSM agreement and similar entrapment estimates show that the two releases
 produced similar accepted identification sets and peptide-level error estimates

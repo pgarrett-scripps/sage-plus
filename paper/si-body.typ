@@ -440,3 +440,12 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
     identical across those repeats. Offset PSMs count reported candidates of any
     rank whose peptidoform carries an offset, including decoys.],
 ) <tbl:si-mass-offset>
+
+#figure(
+  tbl("tbl.large-db"),
+  caption: [Every large-database search with its outcome. Refused searches
+    stopped at the preflight estimate before building, and stopped searches hit
+    the runtime memory guard. Peptides searched counts the database peptides
+    after prefiltering where it applied. PSMs and peptides are accepted at one
+    percent q-value.],
+) <tbl:si-large-db>

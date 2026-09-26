@@ -135,6 +135,38 @@
         "analysis/scripts/gen_fdrbench_validation_figure.py": "sha256:3b2490c085eed44fc31e77cb2095c6f8e8b37381057bb900c012796314774894"
       }
     },
+    "fig.large-db": {
+      "path": "figures/large_db.png",
+      "kind": "figure",
+      "desc": "Large-database search cost, prefilter retention, and identifications.",
+      "hash": "sha256:9b0b32cdd0ef7d71ee7976de57e5d5dbfe0280254d7871026d415f10ad7a6752",
+      "origin": {
+        "by": "analysis/scripts/gen_large_db_figure.py",
+        "at": "2026-09-26T07:21:51Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "analysis/scripts/gen_large_db_figure.py": "sha256:98fee0b33a75fc1349bc4fc96d6dcfcd7e3e51c31c44398e51a80d5d4561f82f"
+      }
+    },
+    "fig.large-db-vector": {
+      "path": "figures/vector/large_db.svg",
+      "kind": "figure",
+      "desc": "Scalable companion to the large-database figure.",
+      "hash": "sha256:29c6b32e95d77d7d4b57c15c663acbaa370ca336690459ce29a0ab12177a6943",
+      "origin": {
+        "by": "analysis/scripts/gen_large_db_figure.py",
+        "at": "2026-09-26T07:21:51Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
+        "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
+        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "analysis/scripts/gen_large_db_figure.py": "sha256:98fee0b33a75fc1349bc4fc96d6dcfcd7e3e51c31c44398e51a80d5d4561f82f"
+      }
+    },
     "fig.mass-offset": {
       "path": "figures/mass_offset.png",
       "kind": "figure",
@@ -907,6 +939,21 @@
       "inputs": {
         "analysis/scripts/fdrbench_validation_results.csv": "sha256:5c3e67e07d7678331be9c26c1adb71eaea49ad13a1e48e344d1b16fa2cd7f079",
         "analysis/scripts/gen_fdrbench_validation_table.py": "sha256:535454b580db9380d8190a902abc9be93efdd7f24db46bf087502cc9c3e648ca"
+      }
+    },
+    "tbl.large-db": {
+      "path": "si/large_db_table.typ",
+      "kind": "table",
+      "desc": "Every large-database search with its outcome, cost, and identifications.",
+      "hash": "sha256:3ef331de64be7b4963ae1f3257c84e59bd2dd0d7e54697cc471ef30244b52d7a",
+      "origin": {
+        "by": "analysis/scripts/gen_large_db_table.py",
+        "at": "2026-09-26T07:23:45Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
+        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "analysis/scripts/gen_large_db_table.py": "sha256:c0277a01cd8b9a378d895e2e6f941f50b2832e47e1b0d0afdfab78153cfe67b7"
       }
     },
     "tbl.mass-offset": {
