@@ -278,9 +278,9 @@ fn linear_scale_keeps_the_beta6_conversion() {
 }
 
 #[test]
-fn diapasef_reads_one_spectrum_per_window_split() {
-    // Regression test: timsrust 0.6 (Beta 2) read diaPASEF as precursor-anchored spectra
-    // and ignored `ms2.frame_splitting_params`.
+fn dia_windows_reads_one_diapasef_spectrum_per_window_split() {
+    // Since timsrust 0.6 (Beta 2) diaPASEF is read as precursor-anchored spectra, which
+    // ignore `ms2.frame_splitting_params`; `dia_windows` restores the timsrust 0.4 reader.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
     let url = crate::Url::from_file_path(path).unwrap();
     let read = |frame_splitting_params| {
@@ -289,6 +289,7 @@ fn diapasef_reads_one_spectrum_per_window_split() {
                 frame_splitting_params,
                 ..BrukerSpectrumConfig::default()
             },
+            dia_windows: true,
             ..BrukerProcessingConfig::default()
         };
         crate::util::read_spectra(&url, 0, None, config, false).unwrap()
@@ -312,4 +313,12 @@ fn diapasef_reads_one_spectrum_per_window_split() {
         BrukerQuadWindowExpansionStrategy::Even(2),
     ));
     assert_eq!(split.len(), 2 * spectra.len());
+
+    // Off by default: the precursor-anchored reader is unchanged.
+    let default =
+        crate::util::read_spectra(&url, 0, None, BrukerProcessingConfig::default(), false)
+            .unwrap();
+    assert_ne!(default.len(), spectra.len());
+    let config: BrukerProcessingConfig = serde_json::from_str("{}").unwrap();
+    assert!(!config.dia_windows);
 }

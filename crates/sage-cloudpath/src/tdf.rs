@@ -150,6 +150,12 @@ pub struct BrukerProcessingConfig {
     /// Opt-in dnoise denoising of MS1 frames before centroiding. Off by default.
     #[serde(default)]
     pub denoise: BrukerDenoiseConfig,
+    /// Opt-in: read diaPASEF MS2 as one spectrum per isolation window, split by
+    /// `ms2.frame_splitting_params`, as Sage did with timsrust 0.4. Off by default: diaPASEF
+    /// is then read as precursor-anchored spectra (one per MS1 precursor and MS2 frame),
+    /// which ignores `ms2`. Other inputs ignore it.
+    #[serde(default)]
+    pub dia_windows: bool,
 }
 
 /// Scan-to-1/K0 conversion for one acquisition.
@@ -227,7 +233,7 @@ impl TdfReader {
         let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())
             .map_err(|error| tims(error.into()))?;
         let scale = MobilityScale::new(path_name.as_ref(), config.ion_mobility_scale)?;
-        let mut spectra = match Self::dia_window_reader(path_name.as_ref(), &path, config.ms2)? {
+        let mut spectra = match Self::dia_window_reader(path_name.as_ref(), &path, config)? {
             Some((reader, mz_converter)) => {
                 self.read_dia_window_spectra(file_id, &reader, &mz_converter, &scale)
             }
@@ -396,7 +402,8 @@ impl TdfReader {
         Ok(ms1_spectra)
     }
 
-    /// timsrust's TDF window reader for diaPASEF input, or `None` for every other input.
+    /// timsrust's TDF window reader for diaPASEF input when `dia_windows` is set, or `None`
+    /// to use the default reader.
     ///
     /// timsrust 0.6's `SpectrumReader` sends diaPASEF to its precursor-anchored centroid
     /// reader, which ignores `bruker_config.ms2`. The TDF reader it bypasses is the one Sage
@@ -405,9 +412,17 @@ impl TdfReader {
     fn dia_window_reader(
         path_name: &Path,
         path: &TimsTofPath,
-        ms2: BrukerSpectrumConfig,
+        config: BrukerProcessingConfig,
     ) -> Result<Option<(TDFSpectrumReader<ImConverter>, MzConverter)>, crate::Error> {
+        if !config.dia_windows {
+            return Ok(None);
+        }
+        let ms2 = config.ms2;
         let Some(tdf) = analysis_tdf(path_name) else {
+            log::warn!(
+                "{}: bruker_config.dia_windows needs an analysis.tdf, ignoring it",
+                path_name.display()
+            );
             return Ok(None);
         };
         let directory = tdf
@@ -421,6 +436,10 @@ impl TdfReader {
         let metadata = Metadata::new(directory.as_str())
             .map_err(|error| failed(format!("metadata could not be read: {error}")))?;
         if metadata.acquisition_type() != AcquisitionType::DIAPASEF {
+            log::warn!(
+                "{}: bruker_config.dia_windows applies only to diaPASEF input, ignoring it",
+                path_name.display()
+            );
             return Ok(None);
         }
         let im_converter = ImConverter::new(path)
