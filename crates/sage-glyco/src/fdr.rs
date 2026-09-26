@@ -567,12 +567,15 @@ fn fit(rows: &[[f64; PEPTIDE_FEATURES]], decoy: &[bool]) -> Option<(Discriminant
 }
 
 /// Optional steps of [`score`].
-#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct ScoreOptions {
     /// `glyco.rescore_candidates`, see [`rescore_selection`].
     pub rescore: bool,
     /// `glyco.sibling_feature`, see [`count_siblings`].
     pub siblings: bool,
+    /// `glyco.sibling_window`: only siblings within this many minutes of
+    /// the candidate count; 0 counts the whole run.
+    pub sibling_window: f32,
     /// `glyco.core_only_subgroup`, see [`grouped_discriminant`].
     pub core_only_subgroup: bool,
 }
@@ -638,7 +641,10 @@ const SIBLING_RT: f32 = 1.0;
 /// [`SIBLING_PPM`] at any charge, within [`SIBLING_RT`]) count once, so a
 /// wrong pick repeated across scans does not vouch for itself. The count
 /// ignores labels and scores, so targets and decoys are treated alike.
-fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize]) {
+/// With a positive `window` (minutes), only precursors eluting within it
+/// count: glycoforms of one peptide co-elute, while a wrong pick of a
+/// short peptide collects "siblings" across the whole gradient.
+fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize], window: f32) {
     let same = |a: (f32, f32), b: (f32, f32)| {
         (a.0 - b.0).abs() <= a.0.max(b.0) * SIBLING_PPM * 1e-6 && (a.1 - b.1).abs() <= SIBLING_RT
     };
@@ -661,9 +667,11 @@ fn count_siblings(candidates: &mut [GlycoCandidate], chosen: &[usize]) {
     for candidate in candidates.iter_mut() {
         let feature = &candidate.feature;
         let key = (feature.expmass, feature.rt);
-        let others = precursors
-            .get(&feature.peptide_idx.0)
-            .map_or(0, |list| list.iter().filter(|&&p| !same(p, key)).count());
+        let others = precursors.get(&feature.peptide_idx.0).map_or(0, |list| {
+            list.iter()
+                .filter(|&&p| !same(p, key) && (window <= 0.0 || (p.1 - key.1).abs() <= window))
+                .count()
+        });
         candidate.siblings = others.min(u16::MAX as usize) as u16;
     }
 }
@@ -690,7 +698,7 @@ pub fn score(
         .map(|s| s.index)
         .collect();
     if options.siblings {
-        count_siblings(&mut candidates, &chosen);
+        count_siblings(&mut candidates, &chosen, options.sibling_window);
     }
     let leads_all = glycan_leads(&candidates, &assignments);
     if options.rescore {
@@ -962,14 +970,18 @@ mod tests {
             candidate.feature.rt = i as f32 * 5.0;
         }
         let chosen: Vec<usize> = selected.iter().map(|s| s.index).collect();
-        count_siblings(&mut candidates, &chosen);
+        count_siblings(&mut candidates, &chosen, 0.0);
         let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
         // Picks 1, 3 and 4 are all peptide 8, at three different precursors.
         assert_eq!(siblings, vec![0, 2, 0, 2, 2, 0]);
+        // Within 6 min, pick 1 (5 min) is alone; picks 3 and 4 (15, 20) pair.
+        count_siblings(&mut candidates, &chosen, 6.0);
+        let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
+        assert_eq!(siblings, vec![0, 0, 0, 1, 1, 0]);
         // A repeat scan of pick 3's precursor counts once.
         candidates[4].feature.expmass = candidates[3].feature.expmass + 0.005;
         candidates[4].feature.rt = candidates[3].feature.rt + 0.5;
-        count_siblings(&mut candidates, &chosen);
+        count_siblings(&mut candidates, &chosen, 0.0);
         let siblings: Vec<u16> = candidates.iter().map(|c| c.siblings).collect();
         assert_eq!(siblings, vec![0, 1, 0, 1, 1, 0]);
     }

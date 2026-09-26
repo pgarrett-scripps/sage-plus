@@ -95,6 +95,9 @@ pub struct GlycoConfig {
     /// peptide (glycoform and charge-state siblings), counting each
     /// precursor once. On by default.
     pub sibling_feature: bool,
+    /// Count only siblings eluting within this many minutes of the
+    /// candidate; 0 counts the whole run.
+    pub sibling_window: f32,
     /// Fit the glyco peptide model and its q-values separately for
     /// candidates whose glycan has only core Y ions (such as HexNAc(1)).
     pub core_only_subgroup: bool,
@@ -125,6 +128,7 @@ impl Default for GlycoConfig {
             rescore_candidates: true,
             ladder_feature: true,
             sibling_feature: true,
+            sibling_window: 0.0,
             core_only_subgroup: false,
         }
     }
