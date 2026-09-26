@@ -1028,10 +1028,33 @@ therefore stays the default for DIA, and pseudo mode is the fast option.
 
 On a timsTOF diaPASEF E. coli run (PRIDE PXD070049, `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01`,
 50 ng, 15 min), pseudo mode found 6,403 peptides in 3 min 7 s with 6.1 GB peak memory. The
-wide-window chimeric search found 8,087 in 12 min 50 s with 16.6 GB.
+wide-window chimeric search found 3,897 in 18 s with 5.8 GB using the default
+`bruker_config.ms2` (one spectrum per diaPASEF window), and 6,386 in 1 min 54 s with 8.9 GB with
+finer mobility splitting (see "diaPASEF spectra" below). Beta 2 to Beta 9 read diaPASEF as
+timsrust's precursor-anchored spectra instead, which found 8,087 in 12 min 50 s with 16.6 GB.
 
 When `dia` is off or absent, spectra are read and searched exactly as before and
 `results.json` has no `dia` entry.
+
+### diaPASEF spectra
+
+Outside pseudo mode, each diaPASEF MS2 frame gives one spectrum per isolation window, summed over
+the window's scan range, as in upstream Sage. The precursor m/z is the window center, the isolation
+window is the full window width, and no charge is assigned, so search diaPASEF with
+`wide_window`. `bruker_config.ms2.frame_splitting_params` splits each window along ion mobility:
+`{"Quadrupole": {"Even": n}}` (default n = 1) cuts it into n equal scan ranges, and
+`{"Quadrupole": {"UniformMobility": [[width, step], null]}}` uses overlapping 1/K0 slices of
+`width` every `step`. `spectrum_processing_params.centroiding_window` merges neighboring TOF
+bins. On the E. coli diaPASEF run above, with the same wide-window chimeric search:
+
+| `frame_splitting_params` | `centroiding_window` | Spectra | Peptides at 1% | Time | Peak memory |
+|---|---|---|---|---|---|
+| `Even` 1 (default) | 1 | 40k | 3,897 | 18 s | 5.8 GB |
+| `Even` 1 | 3 | 40k | 4,195 | 18 s | 5.0 GB |
+| `Even` 2 | 1 | 80k | 4,477 | 30 s | 7.1 GB |
+| `Even` 4 | 5 | 161k | 5,572 | 56 s | 6.7 GB |
+| `Even` 8 | 3 | 321k | 6,092 | 1 min 43 s | 8.6 GB |
+| `UniformMobility` [0.05, 0.025] | 3 | 358k | 6,386 | 1 min 54 s | 8.9 GB |
 
 ## Empirical Spectral Libraries
 

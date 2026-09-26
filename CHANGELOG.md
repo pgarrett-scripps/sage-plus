@@ -24,8 +24,8 @@ entries are retained below for provenance.
   per diaPASEF m/z × 1/K0 box. koth hills and features carry 1/K0, a feature is paired only
   with boxes that contain its m/z and 1/K0, and fragment hills must match its 1/K0 within the
   new `dia.im_tolerance` (default 0.03). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
-  it found 6,403 peptides in 3 min 7 s and 6.1 GB. A wide-window chimeric search found 8,087
-  in 12 min 50 s and 16.6 GB.
+  it found 6,403 peptides in 3 min 7 s and 6.1 GB. A wide-window chimeric search found 3,897
+  in 18 s and 5.8 GB with the default diaPASEF reader (see Fixed).
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
@@ -82,6 +82,29 @@ entries are retained below for provenance.
   now use named definitions.
 - The `sage-mcp` server crate and binary are removed; release archives and the container image no
   longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+
+### Fixed
+- diaPASEF files are read as quadrupole-window spectra again, honoring `bruker_config.ms2`
+  splitting. Beta 2 to Beta 9 silently used timsrust 0.6's precursor-anchored reader, which
+  ignored these settings. diaPASEF identification counts will change. Each MS2 frame now gives
+  one spectrum per isolation window (split by `frame_splitting_params`), with the window center
+  as the precursor m/z, as in upstream Sage with timsrust 0.4. DDA and other inputs are
+  unchanged. On the E. coli diaPASEF run (PXD070049, wide-window chimeric search) the default
+  finds 3,897 peptides in 18 s and 5.8 GB, against 8,087 in 12 min 50 s and 16.6 GB before:
+
+  | `frame_splitting_params`, `centroiding_window` | Peptides at 1% | Time | Peak memory |
+  |---|---|---|---|
+  | Beta 2 to Beta 9 (precursor-anchored, settings ignored) | 8,087 | 12 min 50 s | 16.6 GB |
+  | `Even` 1, 1 (default) | 3,897 | 18 s | 5.8 GB |
+  | `Even` 1, 3 | 4,195 | 18 s | 5.0 GB |
+  | `Even` 2, 1 | 4,477 | 30 s | 7.1 GB |
+  | `Even` 4, 1 | 5,296 | 53 s | 8.4 GB |
+  | `Even` 4, 3 | 5,546 | 55 s | 7.3 GB |
+  | `Even` 4, 5 | 5,572 | 56 s | 6.7 GB |
+  | `Even` 8, 1 | 6,038 | 1 min 41 s | 9.8 GB |
+  | `Even` 8, 3 | 6,092 | 1 min 43 s | 8.6 GB |
+  | `UniformMobility` [0.05, 0.025], 1 | 6,359 | 1 min 54 s | 10.2 GB |
+  | `UniformMobility` [0.05, 0.025], 3 | 6,386 | 1 min 54 s | 8.9 GB |
 
 ### Documentation
 - DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
