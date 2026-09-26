@@ -100,6 +100,24 @@ impl PrecursorTrace {
         })
     }
 
+    /// A lone MS1 hill taken as the monoisotopic peak at `charge`.
+    pub fn from_hill(hill: &koth_core::Hill, charge: u8) -> Option<Self> {
+        let profile: Vec<f32> = hill.intensity_profile.to_vec();
+        let (apex_off, &max) = profile
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))?;
+        Some(PrecursorTrace {
+            mz: hill.mz as f32,
+            charge,
+            intensity: max,
+            im: hill.im as f32,
+            start: hill.scan_start as u32,
+            apex: (hill.scan_start + apex_off) as u32,
+            profile,
+        })
+    }
+
     fn at(&self, ms1_cycle: i64) -> f32 {
         let i = ms1_cycle - self.start as i64;
         if i < 0 || i >= self.profile.len() as i64 {

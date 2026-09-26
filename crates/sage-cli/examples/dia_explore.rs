@@ -62,6 +62,7 @@ struct Args {
     out: String,
     report_psms: usize,
     ms2_min_scans: usize,
+    hill_precursors: bool,
     mode: String,
     min_corr: f32,
     apex_tolerance: i64,
@@ -81,6 +82,7 @@ fn parse_args() -> Args {
         out: String::new(),
         report_psms: 5,
         ms2_min_scans: 3,
+        hill_precursors: true,
         mode: "rescore".into(),
         min_corr: 0.3,
         apex_tolerance: 2,
@@ -103,6 +105,7 @@ fn parse_args() -> Args {
             "--min-corr" => args.min_corr = value().parse().unwrap(),
             "--apex-tolerance" => args.apex_tolerance = value().parse().unwrap(),
             "--q3" => args.q3 = true,
+            "--no-hill-precursors" => args.hill_precursors = false,
             "--t2-corr" => args.t2_corr = value().parse().unwrap(),
             "--t2-apex" => args.t2_apex = value().parse().unwrap(),
             "--t2-psms" => args.t2_psms = value().parse().unwrap(),
@@ -585,7 +588,7 @@ fn run_hills(args: &Args, raw: &[RawSpectrum]) -> anyhow::Result<dia::RunHills> 
     if TIMS.load(Ordering::Relaxed) {
         sage_dia::tims::detect_hills(std::path::Path::new(&args.raw), args.ms2_min_scans as u32)
     } else {
-        dia::detect_hills(raw, args.ms2_min_scans as u32)
+        dia::detect_hills(raw, args.ms2_min_scans as u32, args.hill_precursors)
     }
 }
 

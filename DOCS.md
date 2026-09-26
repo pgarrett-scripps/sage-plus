@@ -1003,12 +1003,16 @@ settings and their defaults:
   "ms2_min_scans": 3,     // minimum consecutive scans for a fragment hill
   "min_peaks": 6,         // drop pseudo-spectra with fewer fragments
   "max_peaks": 150,       // keep the most intense fragments
-  "im_tolerance": 0.01    // timsTOF: max 1/K0 difference between fragment and precursor hills
+  "im_tolerance": 0.01,   // timsTOF: max 1/K0 difference between fragment and precursor hills
+  "hill_precursors": true // Orbitrap: also search strong MS1 hills with no isotope feature
 }
 ```
 
-Pseudo-spectrum ids are `pseudo=<n> window=<w>`. Precursors without an MS1 isotope feature
-are not searched. The mode supports Thermo RAW, mzML and mzMLb DIA files with m/z isolation
+Pseudo-spectrum ids are `pseudo=<n> window=<w>`. With `hill_precursors` (the default), MS1
+hills that no charged isotope feature claimed are searched as charge 2 monoisotopic
+precursors, provided they span at least 5 MS1 scans and their apex is at or above the median
+of such hills. It applies to Thermo RAW, mzML and mzMLb input; timsTOF ignores it. Precursors
+with no MS1 hill at all are not searched. The mode supports Thermo RAW, mzML and mzMLb DIA files with m/z isolation
 windows, and Bruker timsTOF diaPASEF `.d` directories.
 
 For diaPASEF, every frame is first processed like [dnoise](https://github.com/pgarrett-scripps/dnoise)
@@ -1022,7 +1026,8 @@ feature's apex. MS1 frames are streamed, and MS2 frames are read one window grou
 `im_tolerance` has no effect on files without ion mobility.
 
 On an Orbitrap E. coli DIA run (PRIDE PXD028735, `LFQ_Orbitrap_AIF_Ecoli_01`, 151 windows of
-8 m/z), pseudo mode found 5,763 peptides at 1% FDR in 6 s with 2.3 GB peak memory. The
+8 m/z), pseudo mode found 5,959 peptides at 1% FDR in 6 s with 2.3 GB peak memory (5,763
+without `hill_precursors`). The
 wide-window chimeric search found 6,975 in 30 s with 3.0 GB. The wide-window search
 therefore stays the default for DIA, and pseudo mode is the fast option.
 

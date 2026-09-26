@@ -31,6 +31,11 @@ entries are retained below for provenance.
   enough co-eluting fragments from other precursors into each pseudo-spectrum to hit the
   150-peak cap, which kept the most intense peaks and dropped real fragments. Pseudo mode now
   finds 92% of the wide-window peptides on timsTOF (was 79%) and 83% on Orbitrap (was 80%).
+- `dia.hill_precursors` (on by default, Orbitrap only): MS1 hills that no charged isotope
+  feature claimed are also searched as charge 2 precursors, if they span at least 5 MS1 scans
+  and their apex is at or above the median of such hills. On the Orbitrap AIF E. coli run,
+  pseudo mode goes from 5,763 to 5,959 peptides (+3.4%, 83% → 85% of wide-window), with the
+  same time and memory. timsTOF is unchanged (7,412).
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with

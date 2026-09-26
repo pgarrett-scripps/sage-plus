@@ -610,3 +610,45 @@ FDR, which do not use Sage's mass alignment or picked-peptide FDR. So tier 2 gai
 only comparable with the example's own tier 1. With the new defaults, tier 2 scored with
 Sage's LDA adds 242 peptides (+3.4%) to the example's tier 1, and adds none when scored
 with the regularized LDA.
+
+## 12. Single-hill precursors (Orbitrap)
+
+Section 11 left 283 Orbitrap misses that have an MS1 hill but no charged isotope feature.
+`dia.hill_precursors` searches every MS1 hill that no charged koth feature claimed as a
+precursor on its own: m/z is the hill's m/z, the elution profile is the hill's profile, and
+the charge is guessed. There are 162,773 MS1 hills; 70,889 are unclaimed.
+
+Sweep on `LFQ_Orbitrap_AIF_Ecoli_01` (baseline: 5,763 peptides at 1% FDR). "Gained" and
+"lost" are peptides relative to the baseline; the last column counts recovered misses from
+the section 11 "hill, no feature" bucket:
+
+| Charges | Min scans | Min apex | Precursors added | Peptides | Gained / lost | Hill bucket recovered |
+|---|---|---|---|---|---|---|
+| 2, 3 | - | - | 141,778 | 5,866 | 375 / 277 | 95 |
+| 2, 3, 4 | - | - | 212,667 | 5,849 | 377 / 296 | 91 |
+| 2 | - | - | 70,889 | 5,927 | 340 / 179 | 93 |
+| 2, 3 | 5 | - | 92,388 | 5,909 | 350 / 208 | 94 |
+| 2 | 5 | - | 46,194 | 5,937 | 321 / 150 | 89 |
+| 2 | - | median | 35,445 | 5,945 | 340 / 161 | - |
+| 2 | - | 75th pct | 17,723 | 5,954 | 311 / 123 | - |
+| 2, 3 | - | median | 70,890 | 5,895 | 366 / 237 | - |
+| **2** | **5** | **median** | **24,907** | **5,959** | 326 / 133 | - |
+| 2, 3 | 5 | median | 49,814 | 5,928 | 353 / 191 | - |
+| 2 | 5 | 3e5 (absolute) | 14,274 | 5,963 | 300 / 103 | 84 |
+| 2, 3 | - | 1e6 (absolute) | 4,896 | 5,922 | 185 / 26 | 41 |
+
+Every setting recovers roughly a third of the hill bucket, plus about 100 of the wrong-charge
+misses. Every extra precursor also adds decoy competition, which costs 100 to 300 peptides
+that the baseline found. Charge 3 and weak or short hills cost more than they recover.
+Results plateau around 5,950. The default is charge 2, at least 5 scans, and apex at or above
+the median of the unclaimed hills. That gives **5,959 peptides (+196, +3.4%)**, in the same
+6 s and 2.3 GB. The median threshold is relative, so it does not depend on the instrument's
+intensity scale; an absolute 3e5 is no better.
+
+| | (a) wide-window | (b) pseudo | Share of (a) |
+|---|---|---|---|
+| Orbitrap | 6,975 | 5,959 (was 5,763) | 85% (was 83%) |
+| timsTOF | 8,087 | 7,412 (unchanged) | 92% |
+
+timsTOF ignores the setting: there are only 170 no-feature misses there, and the hills carry
+1/K0, which would need its own tuning. Its default-config run still gives 7,412.

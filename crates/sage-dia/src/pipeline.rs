@@ -50,6 +50,10 @@ pub struct DiaSettings {
     /// of the precursor feature's apex mobility.
     #[schemars(range(min = 0.0))]
     pub im_tolerance: f32,
+    /// Orbitrap only: also seed charge-2 pseudo-spectra from MS1 hills that no
+    /// isotope feature claimed (at least 5 scans, apex above the median of
+    /// such hills). timsTOF ignores it.
+    pub hill_precursors: bool,
 }
 
 impl Default for DiaSettings {
@@ -63,6 +67,7 @@ impl Default for DiaSettings {
             min_peaks: p.min_peaks as u32,
             max_peaks: p.max_peaks as u32,
             im_tolerance: p.im_tolerance,
+            hill_precursors: true,
         }
     }
 }
@@ -98,6 +103,42 @@ impl DiaSettings {
 }
 
 type WindowKey = (i64, i64, i64);
+
+/// Single-hill precursors: charge, minimum MS1 scans, and minimum apex
+/// intensity as a quantile of the unclaimed hills. Tuned on the Orbitrap AIF
+/// E. coli run (DIA_SEARCH.md section 12): charge 3 and weak or short hills
+/// add more decoy competition than peptides.
+const HILL_CHARGE: u8 = 2;
+const HILL_MIN_SCANS: usize = 5;
+const HILL_MIN_QUANTILE: f64 = 0.5;
+
+/// MS1 hills that no charged isotope feature claimed, taken as charge-2
+/// monoisotopic precursors. Only hills with at least [`HILL_MIN_SCANS`]
+/// scans and an apex at or above the median of the unclaimed hills qualify.
+pub fn single_hill_precursors(
+    hills: &[koth_core::Hill],
+    features: &[koth_core::Feature],
+) -> Vec<PrecursorTrace> {
+    let used: std::collections::HashSet<u64> = features
+        .iter()
+        .filter(|f| f.charge != 0)
+        .flat_map(|f| f.hills.iter().map(|h| h.hill_id))
+        .collect();
+    let free: Vec<&koth_core::Hill> = hills
+        .iter()
+        .filter(|h| !used.contains(&h.hill_id))
+        .collect();
+    let mut apex: Vec<f64> = free.iter().map(|h| h.intensity_max).collect();
+    apex.sort_by(|a, b| a.total_cmp(b));
+    let Some(&min_int) = apex.get(((apex.len().max(1) - 1) as f64 * HILL_MIN_QUANTILE) as usize)
+    else {
+        return Vec::new();
+    };
+    free.into_iter()
+        .filter(|h| h.n_scans >= HILL_MIN_SCANS && h.intensity_max >= min_int)
+        .filter_map(|h| PrecursorTrace::from_hill(h, HILL_CHARGE))
+        .collect()
+}
 
 /// Hills of one DIA run: MS1 channel, one channel per isolation window
 /// (sorted by window), and the charged MS1 isotope features.
@@ -154,7 +195,13 @@ pub fn to_koth(s: &RawSpectrum, index: usize) -> koth_core::Spectrum {
 
 /// Detect MS1 hills + isotope features and per-window MS2 hills. `raw` must
 /// be sorted by retention time.
-pub fn detect_hills(raw: &[RawSpectrum], ms2_min_scans: u32) -> anyhow::Result<RunHills> {
+/// With `hill_precursors`, strong MS1 hills that are not part of any isotope
+/// feature become precursors too (see [`single_hill_precursors`]).
+pub fn detect_hills(
+    raw: &[RawSpectrum],
+    ms2_min_scans: u32,
+    hill_precursors: bool,
+) -> anyhow::Result<RunHills> {
     let kcfg = koth_core::KothConfig {
         hills_ms2: Some(koth_core::config::HillsMs2Overrides {
             min_scans: Some(ms2_min_scans as usize),
@@ -177,10 +224,15 @@ pub fn detect_hills(raw: &[RawSpectrum], ms2_min_scans: u32) -> anyhow::Result<R
         &kcfg.file,
     );
     let features = koth_core::run_features(&ms1_hills, &kcfg.features, &kcfg.file)?;
-    let precursors: Vec<PrecursorTrace> = features
+    let mut precursors: Vec<PrecursorTrace> = features
         .iter()
         .filter_map(PrecursorTrace::from_koth)
         .collect();
+    if hill_precursors {
+        let extra = single_hill_precursors(&ms1_hills, &features);
+        log::info!("DIA: {} single-hill precursors", extra.len());
+        precursors.extend(extra);
+    }
     drop(features);
     let ms1 = Channel::from_hills(0.0, f64::INFINITY, ms1_rts, ms1_hills);
 
@@ -381,7 +433,7 @@ pub fn pseudo_spectra(
     settings: &DiaSettings,
 ) -> anyhow::Result<Vec<RawSpectrum>> {
     raw.sort_by(|a, b| a.scan_start_time.total_cmp(&b.scan_start_time));
-    let hills = detect_hills(&raw, settings.ms2_min_scans)?;
+    let hills = detect_hills(&raw, settings.ms2_min_scans, settings.hill_precursors)?;
     raw.retain(|s| keep_ms1 && s.ms_level == 1);
     raw.extend(from_hills(hills, file_id, settings));
     Ok(raw)
@@ -542,5 +594,59 @@ mod tests {
             im_match(0.0, 1.05, 0.03),
             "IM-less hills are never rejected"
         );
+    }
+
+    fn koth_hill(id: u64, mz: f64, n_scans: usize, apex: f32) -> koth_core::Hill {
+        let profile: Vec<f32> = (0..n_scans)
+            .map(|i| if i == n_scans / 2 { apex } else { apex / 2.0 })
+            .collect();
+        koth_core::Hill {
+            hill_id: id,
+            mz,
+            mz_std: 0.0,
+            mz_se: 0.0,
+            rt: 1.0,
+            rt_start: 0.9,
+            rt_end: 1.1,
+            rt_width: 0.2,
+            im: 0.0,
+            im_std: 0.0,
+            scan_start: 4,
+            scan_apex: 4 + n_scans / 2,
+            scan_end: 4 + n_scans - 1,
+            n_scans,
+            skipped_scans: 0,
+            intensity_sum: profile.iter().map(|&v| v as f64).sum(),
+            intensity_max: apex as f64,
+            hill_score: 1.0,
+            intensity_profile: profile.into(),
+            isolation_window: None,
+            faims_cv: None,
+        }
+    }
+
+    #[test]
+    fn single_hill_precursors_skip_claimed_short_and_weak_hills() {
+        let hills = vec![
+            koth_hill(0, 500.0, 8, 1e6), // claimed by the feature
+            koth_hill(1, 501.0, 8, 1e6), // claimed by the feature
+            koth_hill(2, 600.0, 8, 4e5), // kept
+            koth_hill(3, 700.0, 3, 9e5), // too short
+            koth_hill(4, 800.0, 8, 1e3), // below the median apex
+        ];
+        let feature = koth_core::Feature {
+            hills: hills[..2].to_vec(),
+            charge: 2,
+            cosine_score: 1.0,
+            ppm_error: 0.0,
+        };
+        let p = single_hill_precursors(&hills, &[feature]);
+        assert_eq!(p.len(), 1);
+        assert_eq!(
+            (p[0].mz, p[0].charge, p[0].start, p[0].apex),
+            (600.0, 2, 4, 8)
+        );
+        assert_eq!(p[0].intensity, 4e5);
+        assert!(single_hill_precursors(&[], &[]).is_empty());
     }
 }

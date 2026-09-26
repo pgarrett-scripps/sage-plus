@@ -481,6 +481,11 @@
           "minimum": 0,
           "type": "integer"
         },
+        "hill_precursors": {
+          "default": true,
+          "description": "Orbitrap only: also seed charge-2 pseudo-spectra from MS1 hills that no\nisotope feature claimed (at least 5 scans, apex above the median of\nsuch hills). timsTOF ignores it.",
+          "type": "boolean"
+        },
         "im_tolerance": {
           "default": 0.009999999776482582,
           "description": "timsTOF only: fragment hills must lie within this ion mobility (1/K0)\nof the precursor feature's apex mobility.",
