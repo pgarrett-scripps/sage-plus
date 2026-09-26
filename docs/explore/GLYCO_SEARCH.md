@@ -950,6 +950,60 @@ With per-precursor siblings as the base, `glyco.ladder_feature` was re-tested
 It passes: yeast gains 37 at 23 entrapment hits and 2.8% non-high-mannose, and mouse
 is flat. The ladder is on by default from this milestone.
 
+Timing: a back-to-back rerun of the mouse+pombe search gave 2:52 and 2:52 for siblings
+alone, against 4:10 (load average 32) and 2:57 with the ladder. The first `m10lad`
+time of 3:56 was machine load. The ladder costs about 3% at most.
+
+### Addendum: sibling RT window (negative result, opt-in)
+
+The remaining wrong cluster (ERNITR, section 15) spans 5.4 min across Hex8–15, and
+another entrapment peptide's siblings span 131 min. True glycoforms co-elute, so
+`glyco.sibling_window` (minutes; 0, the default, counts the whole run) counts only
+siblings within that window. A count cap was not tried: passing targets mostly have
+eight or more siblings and ERNITR has six, so a cap cannot separate them. Offline, a
+2 min window cut near-miss decoys with three or more siblings from 39 to 4, and kept
+948 of 1,247 near-miss targets there.
+
+| variant | yeast | non-HM | decoy winners | yeast pep-q targets | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| siblings + ladder (default) | 1,367 | 2.8% | 220 | 1,930 | 23 | 9,021 | 12 (0.6%) |
+| + 2 min window | 1,442 | 2.9% | 250 | 2,062 | 31 | 8,985 | 14 (0.7%) |
+
+It fails the gate. Yeast gains 75, but entrapment rises from 23 to 31, non-high-mannose
+rises to 2.9%, and glycan decoy winners rise by 30. Mouse is flat. The offline decoy
+counts did not predict this: the window makes the feature sharper, and the refitted
+model then trusts it more, which admits more wrong peptides that have a few co-eluting
+wrong siblings. The window stays at 0.
+
+## 16. Where the defaults stand after M9 (2026-09-25)
+
+The defaults are now: rescoring (M7), the Hex-ladder features, and siblings counted per
+precursor.
+
+| defaults | yeast | non-HM | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- |
+| M6 (glycan-score pick) | 1,312 | 2.7% | 27 | 7,313 | 16 (1.0%) |
+| M7 (rescoring) | 1,328 | 2.7% | 24 | 8,392 | 14 (0.7%) |
+| M9 (+ ladder, siblings per precursor) | 1,367 | 2.8% | 23 | 9,021 | 12 (0.6%) |
+
+Against M6, yeast gains 4% (+55) with fewer entrapment hits, and mouse+pombe gains 23%
+(+1,708) while the estimated FDP falls from 1.0% to 0.6%. The plain mouse search has
+not been rerun with the M9 defaults (M7: 8,700). Plain non-glyco searches are unchanged
+at 8,674 (mouse) and 7,940 (yeast). These are fast-release numbers, and the release
+build needs a confirmation run.
+
+The remaining levers tested at M8 and M9 are each at or under the 2% noise level with
+the gate intact, or fail it:
+
+- The core-only subgroup recovers peptides but not glycoPSMs, because HexNAc(1) twins
+  tie at the glycan level.
+- The sibling RT window fails the entrapment gate.
+- Twin `opposite` failed at M7.
+- Extra rescoring rounds are within noise.
+
+The next yeast gain probably needs new spectrum evidence, not more features from the
+same Y-ion and sibling counts.
+
 ## Appendix: code and measurements
 
 - `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):
