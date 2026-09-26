@@ -799,34 +799,43 @@ impl Runner {
                         full_estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
                     );
                     // A chunked prefilter holds one sequence bucket of the
-                    // unmodified digest at a time.
-                    let unmodified_peak = if database_parameters.prefilter
-                        && database_parameters.prefilter_chunk_size < fasta.targets.len()
-                    {
+                    // unmodified digest and expands one chunk of it at a time.
+                    // Buckets are hash-balanced and chunks are balanced by
+                    // digest count, so each holds about an equal share; the
+                    // memory guard backs this for skewed databases.
+                    let chunked = database_parameters.prefilter
+                        && database_parameters.prefilter_chunk_size < fasta.targets.len();
+                    if chunked {
                         let passes = prefilter::digest_passes(
                             parameters.max_memory_gb,
                             full_estimate.unmodified_peak_bytes,
                         );
-                        full_estimate.unmodified_peak_bytes.div_ceil(passes)
+                        let chunks = passes.saturating_mul(prefilter::chunks_per_pass(
+                            fasta.targets.len(),
+                            database_parameters.prefilter_chunk_size,
+                            passes,
+                        ) as u64);
+                        let bucket = full_estimate.unmodified_peak_bytes.div_ceil(passes);
+                        limits.check_estimate("unmodified-peptide", bucket)?;
+                        // Prefilter chunks are streamed through the spectrum
+                        // index without a fragment index; the survivor index
+                        // is checked by the final database preflight.
+                        limits.check_estimate(
+                            "modified-peptide",
+                            bucket
+                                .saturating_add(full_estimate.modified_peak_bytes.div_ceil(chunks)),
+                        )?;
                     } else {
-                        full_estimate.unmodified_peak_bytes
-                    };
-                    limits.check_estimate("unmodified-peptide", unmodified_peak)?;
-
-                    // Prefilter chunks are streamed through the spectrum index
-                    // without a fragment index; the survivor index is checked
-                    // by the final database preflight.
-                    if database_parameters.prefilter {
-                        let mut modified_peak = 0u64;
-                        for chunk in fasta.iter_chunks(database_parameters.prefilter_chunk_size) {
-                            let estimate = database_parameters
-                                .estimate_memory_with_custom_cleavages(
-                                    &chunk,
-                                    custom_cleavages.as_ref(),
-                                );
-                            modified_peak = modified_peak.max(estimate.modified_peak_bytes);
+                        limits.check_estimate(
+                            "unmodified-peptide",
+                            full_estimate.unmodified_peak_bytes,
+                        )?;
+                        if database_parameters.prefilter {
+                            limits.check_estimate(
+                                "modified-peptide",
+                                full_estimate.modified_peak_bytes,
+                            )?;
                         }
-                        limits.check_estimate("modified-peptide", modified_peak)?;
                     }
                 }
             }

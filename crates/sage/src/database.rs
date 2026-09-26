@@ -248,6 +248,14 @@ pub struct DatabaseMemoryEstimate {
     pub fragment_peak_bytes: u64,
 }
 
+/// Estimated bytes one unmodified digest of `sequence_len` residues holds.
+fn digest_bytes(sequence_len: u64) -> u64 {
+    const ALLOCATION_OVERHEAD: u64 = 16;
+    (std::mem::size_of::<Digest>() as u64)
+        .saturating_add(sequence_len)
+        .saturating_add(ALLOCATION_OVERHEAD)
+}
+
 /// Bucket of a peptide sequence, equal for a sequence and its internal
 /// reversal. Generated decoys reverse the residues between the termini, so a
 /// target, its decoy, and any target equal to that decoy share a bucket.
@@ -736,9 +744,7 @@ impl Parameters {
                         unmodified_peptides: 1,
                         modified_peptides: variants,
                         fragments: variants.saturating_mul(fragments_per_variant),
-                        digest_bytes: (std::mem::size_of::<Digest>() as u64)
-                            .saturating_add(sequence_len)
-                            .saturating_add(ALLOCATION_OVERHEAD),
+                        digest_bytes: digest_bytes(sequence_len),
                         peptide_bytes: variants.saturating_mul(bytes_per_variant),
                     });
                 }
@@ -1058,6 +1064,32 @@ impl Parameters {
             digests.len()
         );
         digests
+    }
+
+    /// Peak bytes of the unmodified digest, as in
+    /// [`Self::estimate_memory_with_custom_cleavages`], without counting
+    /// modification variants.
+    pub fn estimate_unmodified_bytes(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> u64 {
+        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let bytes = fasta
+            .targets
+            .par_iter()
+            .map(|(protein, sequence)| {
+                let boundaries = custom_cleavages
+                    .map(|library| library.boundaries_for(protein))
+                    .unwrap_or_default();
+                enzyme
+                    .digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
+                    .iter()
+                    .map(|digest| digest_bytes(digest.sequence.len() as u64))
+                    .fold(0u64, u64::saturating_add)
+            })
+            .reduce(|| 0, u64::saturating_add);
+        with_estimation_margin(bytes.saturating_mul(2))
     }
 
     /// Digest and group the proteins whose peptides fall in `bucket` of

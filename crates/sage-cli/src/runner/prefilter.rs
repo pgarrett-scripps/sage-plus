@@ -27,22 +27,19 @@ impl Runner {
     ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
         let unmodified_bytes = unmodified_bytes.unwrap_or_else(|| {
-            db_params
-                .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
-                .unmodified_peak_bytes
+            db_params.estimate_unmodified_bytes(&fasta, custom_cleavages.as_ref())
         });
         let passes = digest_passes(self.parameters.max_memory_gb, unmodified_bytes);
-        let requested_chunks = fasta
-            .targets
-            .len()
-            .div_ceil(db_params.prefilter_chunk_size.max(1))
-            .max(1);
         let mut digests = DigestSource {
             db_params: &db_params,
             fasta: &fasta,
             custom_cleavages: custom_cleavages.as_ref(),
             passes,
-            chunks_per_pass: requested_chunks.div_ceil(passes as usize).max(1),
+            chunks_per_pass: chunks_per_pass(
+                fasta.targets.len(),
+                db_params.prefilter_chunk_size,
+                passes,
+            ),
             cached: None,
         };
         if passes > 1 {
@@ -202,6 +199,9 @@ fn spectrum_bytes(spectrum: &ProcessedSpectrum) -> u64 {
 /// digest pass of the prefilter.
 const DIGEST_MEMORY_FRACTION: f64 = 0.125;
 const DEFAULT_DIGEST_BUDGET_GIB: f64 = 2.0;
+/// Each pass digests the whole FASTA, so a tiny budget must not multiply
+/// that work without bound.
+const MAX_DIGEST_PASSES: u64 = 256;
 
 /// Number of sequence buckets the prefilter digests one at a time so the
 /// unmodified digest of each stays within its budget.
@@ -216,12 +216,24 @@ pub(crate) fn digest_passes(max_memory_gb: Option<f64>, unmodified_bytes: u64) -
         })
         .unwrap_or(DEFAULT_DIGEST_BUDGET_GIB);
     let budget = ((gib * 1024.0 * 1024.0 * 1024.0) as u64).max(1);
-    unmodified_bytes.div_ceil(budget).max(1)
+    unmodified_bytes
+        .div_ceil(budget)
+        .clamp(1, MAX_DIGEST_PASSES)
+}
+
+/// Chunks each digest pass is split into, so all passes together give about
+/// one chunk per `chunk_size` FASTA proteins.
+pub(crate) fn chunks_per_pass(proteins: usize, chunk_size: usize, passes: u64) -> usize {
+    proteins
+        .div_ceil(chunk_size.max(1))
+        .max(1)
+        .div_ceil(passes.max(1) as usize)
+        .max(1)
 }
 
 /// One sequence bucket of the digest, split into chunks, with the target
 /// sequences its decoys are checked against.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct DigestPass {
     chunks: Vec<Vec<DigestGroup>>,
     target_sequences: HashSet<PeptideSequence>,
@@ -244,13 +256,7 @@ impl DigestSource<'_> {
     fn pass(&mut self, pass: u64, last: bool) -> DigestPass {
         if let Some(cached) = &mut self.cached {
             return match last {
-                true => std::mem::replace(
-                    cached,
-                    DigestPass {
-                        chunks: Vec::new(),
-                        target_sequences: HashSet::new(),
-                    },
-                ),
+                true => std::mem::take(cached),
                 false => cached.clone(),
             };
         }
@@ -396,5 +402,33 @@ impl SurvivorPass<'_> {
         let kept = peptides.len();
         self.peptides.extend(peptides);
         (total, kept)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn digest_passes_fit_the_budget_and_are_capped() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // An eighth of 16 GiB is 2 GiB per pass.
+        assert_eq!(digest_passes(Some(16.0), 0), 1);
+        assert_eq!(digest_passes(Some(16.0), 2 * GIB), 1);
+        assert_eq!(digest_passes(Some(16.0), 2 * GIB + 1), 2);
+        assert_eq!(digest_passes(Some(16.0), 38 * GIB), 19);
+        // No or invalid limit falls back to the 2 GiB default.
+        assert_eq!(digest_passes(None, 5 * GIB), 3);
+        assert_eq!(digest_passes(Some(0.0), 5 * GIB), 3);
+        assert_eq!(digest_passes(Some(1e-9), u64::MAX), MAX_DIGEST_PASSES);
+    }
+
+    #[test]
+    fn passes_share_the_requested_chunks() {
+        // 12 chunks of 100 proteins, over 1, 5, or more passes than chunks.
+        assert_eq!(chunks_per_pass(1200, 100, 1), 12);
+        assert_eq!(chunks_per_pass(1200, 100, 5), 3);
+        assert_eq!(chunks_per_pass(1200, 100, 20), 1);
+        assert_eq!(chunks_per_pass(0, 0, 1), 1);
     }
 }
