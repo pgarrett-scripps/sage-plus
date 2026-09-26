@@ -146,11 +146,18 @@ fn group_digests_by(
         return Vec::new();
     }
     let mut groups = Vec::new();
+    // A total order, so the group reference (which supplies semi-enzymatic
+    // and missed-cleavage state) does not depend on which other digests are
+    // grouped alongside, e.g. in prefilter sequence buckets.
     digests.sort_unstable_by(|a, b| {
         a.position
             .cmp(&b.position)
             .then(a.decoy.cmp(&b.decoy))
             .then(a.sequence.cmp(&b.sequence))
+            .then_with(|| a.protein.cmp(&b.protein))
+            .then(a.protein_start.cmp(&b.protein_start))
+            .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
+            .then(a.missed_cleavages.cmp(&b.missed_cleavages))
     });
     let mut digests = digests.into_iter();
     let first = digests.next().expect("checked non-empty above");

@@ -108,6 +108,18 @@ impl Fasta {
         enzyme: &EnzymeParameters,
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
     ) -> Vec<Digest> {
+        self.digest_where(enzyme, custom_cleavages, |_| true)
+    }
+
+    /// Digest every protein, keeping only digests accepted by `keep`. The
+    /// rejected digests are dropped per protein, so a caller that selects a
+    /// fraction of the digest never holds the rest.
+    pub fn digest_where(
+        &self,
+        enzyme: &EnzymeParameters,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+        keep: impl Fn(&Digest) -> bool + Sync + Send,
+    ) -> Vec<Digest> {
         self.targets
             .par_iter()
             .flat_map_iter(|(protein, sequence)| {
@@ -117,6 +129,7 @@ impl Fasta {
                 enzyme
                     .digest_protein_with_custom_cleavages(sequence, protein.clone(), boundaries)
                     .into_iter()
+                    .filter(|digest| keep(digest))
                     .filter_map(|mut digest| {
                         if protein.contains(&self.decoy_tag) {
                             if !self.generate_decoys {

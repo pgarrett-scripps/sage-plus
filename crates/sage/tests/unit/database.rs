@@ -207,6 +207,132 @@ fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
 }
 
 #[test]
+fn sequence_buckets_pair_targets_with_their_reversals() {
+    for sequence in ["PEPTIDER", "PEDITPER", "AK", "K", "MPEPTIDEK", ""] {
+        let reversed = PeptideSequence::from(sequence).reversed_internal();
+        for buckets in [1, 2, 7, 64] {
+            let bucket = sequence_bucket(sequence.as_bytes(), buckets);
+            assert!(bucket < buckets);
+            assert_eq!(bucket, sequence_bucket(reversed.as_bytes(), buckets));
+        }
+    }
+    let buckets = (0..200)
+        .map(|n| sequence_bucket(format!("PEPTIDE{n}K").as_bytes(), 4))
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        buckets.len(),
+        4,
+        "hash should spread sequences over buckets"
+    );
+}
+
+/// Identity of a generated peptide, independent of chunking.
+type PeptideKey = (String, bool, bool, u8, Vec<String>, usize);
+
+fn peptide_keys(mut peptides: Vec<Peptide>) -> Vec<PeptideKey> {
+    Parameters::reorder_peptides(&mut peptides);
+    peptides
+        .iter()
+        .map(|peptide| {
+            (
+                peptide.to_string(),
+                peptide.decoy,
+                peptide.semi_enzymatic,
+                peptide.missed_cleavages,
+                peptide.proteins.iter().map(|p| p.to_string()).collect(),
+                peptide.protein_sites.len(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn bucketed_digests_expand_to_the_whole_database() {
+    // PEDITPER is the internal reversal of PEPTIDER, so its decoy collides
+    // with a target from another protein; the buckets must keep them together.
+    // With FASTA decoys, rev_c supplies decoys that must still be checked
+    // against targets in the same bucket.
+    let fasta = ">a\nMPEPTIDERSEQMENCEKAMPLIFIERKPEPTIDEKLLMSTK\n\
+                 >b\nPEDITPERGGMKWHATEVERKMMKSAMPLEPEPTIDERK\n\
+                 >rev_c\nREDITPEPKSEQUENCEKPEPTIDERK\n";
+    let configs = [
+        (
+            true,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 2, "min_len": 3},
+                "variable_mods": {"M": [15.9949], "^E": [-18.010565]},
+                "static_mods": {"C": 57.021464},
+                "max_variable_mods": 2
+            }),
+        ),
+        (
+            true,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 1, "min_len": 4, "semi_enzymatic": true},
+                "variable_mods": {"M": [15.9949]}
+            }),
+        ),
+        (
+            false,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 1, "min_len": 4},
+                "variable_mods": {"M": [15.9949]}
+            }),
+        ),
+    ];
+    for (generate_decoys, config) in configs {
+        let fasta = Fasta::parse(fasta.to_string(), "rev_", generate_decoys).unwrap();
+        let mut builder: Builder = serde_json::from_value(config).unwrap();
+        builder.generate_decoys = Some(generate_decoys);
+        let parameters = builder.make_parameters();
+        let whole = peptide_keys(parameters.digest(&fasta));
+        assert!(whole.iter().any(|key| key.1), "no decoys generated");
+
+        for buckets in [1, 2, 3, 8] {
+            let mut streamed = Vec::new();
+            let mut groups = 0;
+            for bucket in 0..buckets {
+                let digests = parameters.digest_unmodified_bucket(&fasta, None, bucket, buckets);
+                groups += digests.len();
+                let targets = digests
+                    .iter()
+                    .filter(|digest| !digest.reference.decoy)
+                    .map(|digest| digest.reference.sequence.clone())
+                    .collect::<HashSet<_>>();
+                streamed.extend(parameters.modify_digests_with_target_sequences(digests, &targets));
+            }
+            assert_eq!(groups, parameters.digest_unmodified(&fasta).len());
+            assert_eq!(
+                peptide_keys(streamed),
+                whole,
+                "{buckets} buckets, generate_decoys {generate_decoys}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unmodified_byte_estimate_matches_the_full_estimate() {
+    let fasta = Fasta::parse(
+        ">a\nMPEPTIDERSEQMENCEKAMPLIFIERK\n>b\nPEDITPERGGMKWHATEVERK\n".to_string(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "variable_mods": {"M": [15.9949]}
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    let full = parameters.estimate_memory_with_custom_cleavages(&fasta, None);
+    assert!(full.unmodified_peak_bytes > 0);
+    assert_eq!(
+        parameters.estimate_unmodified_bytes(&fasta, None),
+        full.unmodified_peak_bytes
+    );
+}
+
+#[test]
 fn modification_variants_share_target_and_decoy_sequence_storage() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "variable_mods": {"M": [15.9949]}

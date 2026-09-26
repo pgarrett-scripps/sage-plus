@@ -1,5 +1,6 @@
 use super::*;
 use sage_core::enzyme::DigestGroup;
+use sage_core::sequence::PeptideSequence;
 use sage_core::spectrum_index::{SpectrumIndex, SpectrumIndexBuilder, SpectrumIndexSettings};
 
 /// Spectrum index size, as a fraction of `max_memory_gb`, at which a batch of
@@ -22,32 +23,36 @@ impl Runner {
         parallel: usize,
         fasta: Fasta,
         custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
+        unmodified_bytes: Option<u64>,
     ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
-        let digests =
-            db_params.digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-        let target_sequences = digests
-            .iter()
-            .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.clone())
-            .collect::<HashSet<_>>();
-        let requested_chunks = fasta
-            .targets
-            .len()
-            .div_ceil(db_params.prefilter_chunk_size.max(1))
-            .max(1);
-        let digest_chunk_size = digests.len().div_ceil(requested_chunks).max(1);
-        let mut digest_chunks =
-            Parameters::partition_digests_by_sequence(digests, digest_chunk_size);
-        info!(
-            "using {} sequence-coherent prefilter chunks",
-            digest_chunks.len()
-        );
+        let unmodified_bytes = unmodified_bytes.unwrap_or_else(|| {
+            db_params.estimate_unmodified_bytes(&fasta, custom_cleavages.as_ref())
+        });
+        let passes = digest_passes(self.parameters.max_memory_gb, unmodified_bytes);
+        let mut digests = DigestSource {
+            db_params: &db_params,
+            fasta: &fasta,
+            custom_cleavages: custom_cleavages.as_ref(),
+            passes,
+            chunks_per_pass: chunks_per_pass(
+                fasta.targets.len(),
+                db_params.prefilter_chunk_size,
+                passes,
+            ),
+            cached: None,
+        };
+        if passes > 1 {
+            info!(
+                "streaming the digest in {} sequence buckets ({:.2} GiB unmodified digest estimated)",
+                passes,
+                unmodified_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+            );
+        }
 
         let budget = self.spectrum_index_budget();
         let mut pass = SurvivorPass {
             db_params: &db_params,
-            target_sequences: &target_sequences,
             keeps: Vec::new(),
             peptides: Vec::new(),
         };
@@ -93,10 +98,7 @@ impl Runner {
                 continue;
             }
             let index = Self::finish_spectrum_index(builder);
-            match last {
-                true => pass.run(&index, std::mem::take(&mut digest_chunks), true),
-                false => pass.run(&index, digest_chunks.clone(), false),
-            }
+            pass.run(&index, &mut digests, last);
             builder = self.spectrum_index_builder(&db_params);
         }
 
@@ -193,10 +195,107 @@ fn spectrum_bytes(spectrum: &ProcessedSpectrum) -> u64 {
         + spectrum.mobilities.capacity() * std::mem::size_of::<f32>()) as u64
 }
 
+/// Unmodified digest size, as a fraction of `max_memory_gb`, held by one
+/// digest pass of the prefilter.
+const DIGEST_MEMORY_FRACTION: f64 = 0.125;
+const DEFAULT_DIGEST_BUDGET_GIB: f64 = 2.0;
+/// Each pass digests the whole FASTA, so a tiny budget must not multiply
+/// that work without bound.
+const MAX_DIGEST_PASSES: u64 = 256;
+
+/// Number of sequence buckets the prefilter digests one at a time so the
+/// unmodified digest of each stays within its budget.
+pub(crate) fn digest_passes(max_memory_gb: Option<f64>, unmodified_bytes: u64) -> u64 {
+    let gib = std::env::var("SAGE_PREFILTER_DIGEST_GB")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .or_else(|| {
+            max_memory_gb
+                .filter(|gib| *gib > 0.0)
+                .map(|gib| gib * DIGEST_MEMORY_FRACTION)
+        })
+        .unwrap_or(DEFAULT_DIGEST_BUDGET_GIB);
+    let budget = ((gib * 1024.0 * 1024.0 * 1024.0) as u64).max(1);
+    unmodified_bytes
+        .div_ceil(budget)
+        .clamp(1, MAX_DIGEST_PASSES)
+}
+
+/// Chunks each digest pass is split into, so all passes together give about
+/// one chunk per `chunk_size` FASTA proteins.
+pub(crate) fn chunks_per_pass(proteins: usize, chunk_size: usize, passes: u64) -> usize {
+    proteins
+        .div_ceil(chunk_size.max(1))
+        .max(1)
+        .div_ceil(passes.max(1) as usize)
+        .max(1)
+}
+
+/// One sequence bucket of the digest, split into chunks, with the target
+/// sequences its decoys are checked against.
+#[derive(Clone, Default)]
+struct DigestPass {
+    chunks: Vec<Vec<DigestGroup>>,
+    target_sequences: HashSet<PeptideSequence>,
+}
+
+/// Digest passes, regenerated for every spectrum batch. When the whole digest
+/// is one pass it is kept between batches instead.
+struct DigestSource<'a> {
+    db_params: &'a Parameters,
+    fasta: &'a Fasta,
+    custom_cleavages: Option<&'a ValidatedCustomCleavageLibrary>,
+    passes: u64,
+    chunks_per_pass: usize,
+    cached: Option<DigestPass>,
+}
+
+impl DigestSource<'_> {
+    /// Digest bucket `pass`. Digestion and chunking are deterministic, so
+    /// every spectrum batch sees the same chunks in the same order.
+    fn pass(&mut self, pass: u64, last: bool) -> DigestPass {
+        if let Some(cached) = &mut self.cached {
+            return match last {
+                true => std::mem::take(cached),
+                false => cached.clone(),
+            };
+        }
+        let start = Instant::now();
+        let digests = self.db_params.digest_unmodified_bucket(
+            self.fasta,
+            self.custom_cleavages,
+            pass,
+            self.passes,
+        );
+        let target_sequences = digests
+            .iter()
+            .filter(|digest| !digest.reference.decoy)
+            .map(|digest| digest.reference.sequence.clone())
+            .collect::<HashSet<_>>();
+        let chunk_size = digests.len().div_ceil(self.chunks_per_pass).max(1);
+        let groups = digests.len();
+        let chunks = Parameters::partition_digests_by_sequence(digests, chunk_size);
+        info!(
+            "digest pass {}: {} peptide groups in {} sequence-coherent chunks ({}ms)",
+            pass,
+            groups,
+            chunks.len(),
+            start.elapsed().as_millis(),
+        );
+        let digested = DigestPass {
+            chunks,
+            target_sequences,
+        };
+        if self.passes == 1 && !last {
+            self.cached = Some(digested.clone());
+        }
+        digested
+    }
+}
+
 /// Survivor state shared by every spectrum batch.
 struct SurvivorPass<'a> {
     db_params: &'a Parameters,
-    target_sequences: &'a HashSet<sage_core::sequence::PeptideSequence>,
     /// One survivor set per digest chunk. Chunk expansion is deterministic,
     /// so peptide positions agree between batches.
     keeps: Vec<AtomicBitSet>,
@@ -206,66 +305,23 @@ struct SurvivorPass<'a> {
 impl SurvivorPass<'_> {
     /// Stream every digest chunk through `index`. The final batch also closes
     /// label and decoy partners and collects the survivors.
-    fn run(&mut self, index: &SpectrumIndex, digest_chunks: Vec<Vec<DigestGroup>>, last: bool) {
+    fn run(&mut self, index: &SpectrumIndex, digests: &mut DigestSource, last: bool) {
         let search_start = Instant::now();
         let mut streamed = 0usize;
         let mut retained = 0usize;
-        for (chunk_id, digest_chunk) in digest_chunks.into_iter().enumerate() {
-            let start = Instant::now();
-            let peptides = self
-                .db_params
-                .clone()
-                .modify_digests_with_target_sequences(digest_chunk, self.target_sequences);
-            let generated = Instant::now();
-            if self.keeps.len() == chunk_id {
-                self.keeps.push(AtomicBitSet::new(peptides.len()));
+        let mut chunk_id = 0usize;
+        for pass in 0..digests.passes {
+            let DigestPass {
+                chunks,
+                target_sequences,
+            } = digests.pass(pass, last);
+            for digest_chunk in chunks {
+                let (chunk_streamed, chunk_retained) =
+                    self.run_chunk(index, digest_chunk, &target_sequences, chunk_id, last);
+                streamed += chunk_streamed;
+                retained += chunk_retained;
+                chunk_id += 1;
             }
-            let keep = &self.keeps[chunk_id];
-            assert_eq!(
-                keep.len(),
-                peptides.len(),
-                "prefilter chunk expansion changed between spectrum batches"
-            );
-            index.filter(self.db_params, &peptides, keep);
-            streamed += peptides.len();
-            let filtered = Instant::now();
-            if !last {
-                info!(
-                    "prefilter chunk {}: streamed {} peptides (generate {}ms, stream {}ms)",
-                    chunk_id,
-                    peptides.len(),
-                    (generated - start).as_millis(),
-                    (filtered - generated).as_millis(),
-                );
-                continue;
-            }
-
-            // Closure needs mass-ordered peptides and decoy pairing, but no
-            // fragment index.
-            let db = self.db_params.clone().build_peptide_table(peptides);
-            LabelGroupIndex::new(&db.peptides).close(keep);
-            close_prefilter_pairs(&db, keep);
-
-            // Discarded peptides are released in parallel.
-            let total = db.peptides.len();
-            let peptides = db
-                .peptides
-                .into_par_iter()
-                .enumerate()
-                .filter_map(|(ix, peptide)| keep.contains(ix).then_some(peptide))
-                .collect::<Vec<_>>();
-
-            info!(
-                "prefilter chunk {}: kept {} of {} peptides (generate {}ms, stream {}ms, closure {}ms)",
-                chunk_id,
-                peptides.len(),
-                total,
-                (generated - start).as_millis(),
-                (filtered - generated).as_millis(),
-                filtered.elapsed().as_millis(),
-            );
-            retained += peptides.len();
-            self.peptides.extend(peptides);
         }
         match last {
             true => info!(
@@ -280,5 +336,99 @@ impl SurvivorPass<'_> {
                 streamed,
             ),
         }
+    }
+
+    /// Stream one chunk; returns the peptides streamed and retained.
+    fn run_chunk(
+        &mut self,
+        index: &SpectrumIndex,
+        digest_chunk: Vec<DigestGroup>,
+        target_sequences: &HashSet<PeptideSequence>,
+        chunk_id: usize,
+        last: bool,
+    ) -> (usize, usize) {
+        let start = Instant::now();
+        let peptides = self
+            .db_params
+            .clone()
+            .modify_digests_with_target_sequences(digest_chunk, target_sequences);
+        let generated = Instant::now();
+        if self.keeps.len() == chunk_id {
+            self.keeps.push(AtomicBitSet::new(peptides.len()));
+        }
+        let keep = &self.keeps[chunk_id];
+        assert_eq!(
+            keep.len(),
+            peptides.len(),
+            "prefilter chunk expansion changed between spectrum batches"
+        );
+        index.filter(self.db_params, &peptides, keep);
+        let filtered = Instant::now();
+        if !last {
+            info!(
+                "prefilter chunk {}: streamed {} peptides (generate {}ms, stream {}ms)",
+                chunk_id,
+                peptides.len(),
+                (generated - start).as_millis(),
+                (filtered - generated).as_millis(),
+            );
+            return (peptides.len(), 0);
+        }
+
+        // Closure needs mass-ordered peptides and decoy pairing, but no
+        // fragment index.
+        let db = self.db_params.clone().build_peptide_table(peptides);
+        LabelGroupIndex::new(&db.peptides).close(keep);
+        close_prefilter_pairs(&db, keep);
+
+        // Discarded peptides are released in parallel.
+        let total = db.peptides.len();
+        let peptides = db
+            .peptides
+            .into_par_iter()
+            .enumerate()
+            .filter_map(|(ix, peptide)| keep.contains(ix).then_some(peptide))
+            .collect::<Vec<_>>();
+
+        info!(
+            "prefilter chunk {}: kept {} of {} peptides (generate {}ms, stream {}ms, closure {}ms)",
+            chunk_id,
+            peptides.len(),
+            total,
+            (generated - start).as_millis(),
+            (filtered - generated).as_millis(),
+            filtered.elapsed().as_millis(),
+        );
+        let kept = peptides.len();
+        self.peptides.extend(peptides);
+        (total, kept)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn digest_passes_fit_the_budget_and_are_capped() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // An eighth of 16 GiB is 2 GiB per pass.
+        assert_eq!(digest_passes(Some(16.0), 0), 1);
+        assert_eq!(digest_passes(Some(16.0), 2 * GIB), 1);
+        assert_eq!(digest_passes(Some(16.0), 2 * GIB + 1), 2);
+        assert_eq!(digest_passes(Some(16.0), 38 * GIB), 19);
+        // No or invalid limit falls back to the 2 GiB default.
+        assert_eq!(digest_passes(None, 5 * GIB), 3);
+        assert_eq!(digest_passes(Some(0.0), 5 * GIB), 3);
+        assert_eq!(digest_passes(Some(1e-9), u64::MAX), MAX_DIGEST_PASSES);
+    }
+
+    #[test]
+    fn passes_share_the_requested_chunks() {
+        // 12 chunks of 100 proteins, over 1, 5, or more passes than chunks.
+        assert_eq!(chunks_per_pass(1200, 100, 1), 12);
+        assert_eq!(chunks_per_pass(1200, 100, 5), 3);
+        assert_eq!(chunks_per_pass(1200, 100, 20), 1);
+        assert_eq!(chunks_per_pass(0, 0, 1), 1);
     }
 }

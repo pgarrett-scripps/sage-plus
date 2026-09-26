@@ -847,6 +847,11 @@ alongside the library, because the location table does not embed chemical masses
   prefilter are kept for the search, from the first file batch up to the same budget, so those
   files are read and processed once. If keeping them would push the final fragment index past
   the memory limit, they are released and read again by the search.
+  The unmodified digest is not held whole. When its estimate exceeds an eighth of
+  `max_memory_gb` (2 GiB without a limit; `SAGE_PREFILTER_DIGEST_GB` overrides), the FASTA is
+  digested once per sequence bucket and each bucket is expanded and streamed on its own. A
+  peptide and its reversed decoy always share a bucket, so decoy collision checks and results are
+  unchanged.
 - **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
   A value of zero selects the chunk size from the estimated number of modified peptides.
 - **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor

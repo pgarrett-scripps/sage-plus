@@ -470,7 +470,7 @@ fn prefilter_spectra_are_reused_by_the_search() -> anyhow::Result<()> {
     let config_path = root.join("prefilter.json");
     std::fs::write(&config_path, serde_json::to_string(&config)?)?;
 
-    let run = |name: &str, index_gb: Option<&str>| -> anyhow::Result<_> {
+    let run = |name: &str, index_gb: Option<&str>, digest_gb: Option<&str>| -> anyhow::Result<_> {
         let run_root = root.join(name);
         std::fs::create_dir_all(&run_root)?;
         let mut command = Command::new(env!("CARGO_BIN_EXE_sage"));
@@ -486,6 +486,10 @@ fn prefilter_spectra_are_reused_by_the_search() -> anyhow::Result<()> {
         match index_gb {
             Some(gib) => command.env("SAGE_PREFILTER_INDEX_GB", gib),
             None => command.env_remove("SAGE_PREFILTER_INDEX_GB"),
+        };
+        match digest_gb {
+            Some(gib) => command.env("SAGE_PREFILTER_DIGEST_GB", gib),
+            None => command.env_remove("SAGE_PREFILTER_DIGEST_GB"),
         };
         let result = command.output()?;
         assert!(
@@ -510,10 +514,21 @@ fn prefilter_spectra_are_reused_by_the_search() -> anyhow::Result<()> {
     };
     // Files within a batch may be read in parallel, so only the events, not
     // their order, are compared.
-    let (reused_log, mut reused_events, reused) = run("reused", None)?;
-    let (reread_log, mut reread_events, reread) = run("reread", Some("0.000000001"))?;
+    let (reused_log, mut reused_events, reused) = run("reused", None, None)?;
+    let (reread_log, mut reread_events, reread) = run("reread", Some("0.000000001"), None)?;
+    // A tiny digest budget streams the digest in many sequence buckets, which
+    // are digested again for each spectrum batch.
+    let (streamed_log, mut streamed_events, streamed) =
+        run("streamed", Some("0.000000001"), Some("0.000000001"))?;
     reused_events.sort();
     reread_events.sort();
+    streamed_events.sort();
+    assert!(
+        streamed_log.contains("streaming the digest in"),
+        "{streamed_log}"
+    );
+    assert_eq!(reused, streamed);
+    assert_eq!(reused_events, streamed_events);
 
     assert!(
         reused_log.contains("retained 2 of 2 file batches"),

@@ -248,6 +248,38 @@ pub struct DatabaseMemoryEstimate {
     pub fragment_peak_bytes: u64,
 }
 
+/// Estimated bytes one unmodified digest of `sequence_len` residues holds.
+fn digest_bytes(sequence_len: u64) -> u64 {
+    const ALLOCATION_OVERHEAD: u64 = 16;
+    (std::mem::size_of::<Digest>() as u64)
+        .saturating_add(sequence_len)
+        .saturating_add(ALLOCATION_OVERHEAD)
+}
+
+/// Bucket of a peptide sequence, equal for a sequence and its internal
+/// reversal. Generated decoys reverse the residues between the termini, so a
+/// target, its decoy, and any target equal to that decoy share a bucket.
+pub fn sequence_bucket(sequence: &[u8], buckets: u64) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let step = |hash: u64, byte: &u8| (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+    let forward = sequence.iter().fold(OFFSET, step);
+    let reversed = match sequence {
+        [first, middle @ .., last] if !middle.is_empty() => {
+            let hash = step(OFFSET, first);
+            let hash = middle.iter().rev().fold(hash, step);
+            step(hash, last)
+        }
+        _ => forward,
+    };
+    // FNV's low bits mix poorly; finish with a SplitMix64 round.
+    let mut hash = forward.min(reversed);
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    hash ^= hash >> 31;
+    hash % buckets.max(1)
+}
+
 impl Parameters {
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
         let max_len = self.enzyme.max_len.unwrap_or(50);
@@ -712,9 +744,7 @@ impl Parameters {
                         unmodified_peptides: 1,
                         modified_peptides: variants,
                         fragments: variants.saturating_mul(fragments_per_variant),
-                        digest_bytes: (std::mem::size_of::<Digest>() as u64)
-                            .saturating_add(sequence_len)
-                            .saturating_add(ALLOCATION_OVERHEAD),
+                        digest_bytes: digest_bytes(sequence_len),
                         peptide_bytes: variants.saturating_mul(bytes_per_variant),
                     });
                 }
@@ -1034,6 +1064,54 @@ impl Parameters {
             digests.len()
         );
         digests
+    }
+
+    /// Peak bytes of the unmodified digest, as in
+    /// [`Self::estimate_memory_with_custom_cleavages`], without counting
+    /// modification variants.
+    pub fn estimate_unmodified_bytes(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> u64 {
+        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let bytes = fasta
+            .targets
+            .par_iter()
+            .map(|(protein, sequence)| {
+                let boundaries = custom_cleavages
+                    .map(|library| library.boundaries_for(protein))
+                    .unwrap_or_default();
+                enzyme
+                    .digest_with_custom_cleavages(sequence, protein.clone(), boundaries)
+                    .iter()
+                    .map(|digest| digest_bytes(digest.sequence.len() as u64))
+                    .fold(0u64, u64::saturating_add)
+            })
+            .reduce(|| 0, u64::saturating_add);
+        with_estimation_margin(bytes.saturating_mul(2))
+    }
+
+    /// Digest and group the proteins whose peptides fall in `bucket` of
+    /// `buckets` sequence buckets (see [`sequence_bucket`]). The buckets
+    /// partition the digest, and each one holds every target, generated decoy,
+    /// and FASTA decoy that shares or reverses a sequence, so a bucket can be
+    /// expanded with only its own target sequences.
+    pub fn digest_unmodified_bucket(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+        bucket: u64,
+        buckets: u64,
+    ) -> Vec<DigestGroup> {
+        if buckets <= 1 {
+            return self.digest_unmodified_with_custom_cleavages(fasta, custom_cleavages);
+        }
+        let enzyme = self.enzyme.clone().into();
+        let digests = fasta.digest_where(&enzyme, custom_cleavages, |digest| {
+            sequence_bucket(digest.sequence.as_bytes(), buckets) == bucket
+        });
+        group_protein_digests(digests)
     }
 
     /// Expand variable modifications and generate decoys from an unmodified digest.
