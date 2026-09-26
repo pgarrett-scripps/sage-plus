@@ -998,12 +998,12 @@ settings and their defaults:
 ```json
 "dia": {
   "mode": "pseudo",       // "off" (default) or "pseudo"
-  "min_corr": 0.5,        // fragment-precursor profile Pearson correlation
+  "min_corr": 0.3,        // fragment-precursor profile Pearson correlation
   "apex_tolerance": 2,    // fragment apex within this many cycles of the precursor apex
   "ms2_min_scans": 3,     // minimum consecutive scans for a fragment hill
   "min_peaks": 6,         // drop pseudo-spectra with fewer fragments
   "max_peaks": 150,       // keep the most intense fragments
-  "im_tolerance": 0.03    // timsTOF: max 1/K0 difference between fragment and precursor hills
+  "im_tolerance": 0.01    // timsTOF: max 1/K0 difference between fragment and precursor hills
 }
 ```
 
@@ -1022,12 +1022,12 @@ feature's apex. MS1 frames are streamed, and MS2 frames are read one window grou
 `im_tolerance` has no effect on files without ion mobility.
 
 On an Orbitrap E. coli DIA run (PRIDE PXD028735, `LFQ_Orbitrap_AIF_Ecoli_01`, 151 windows of
-8 m/z), pseudo mode found 5,567 peptides at 1% FDR in 6 s with 2.3 GB peak memory. The
+8 m/z), pseudo mode found 5,763 peptides at 1% FDR in 6 s with 2.3 GB peak memory. The
 wide-window chimeric search found 6,975 in 30 s with 3.0 GB. The wide-window search
 therefore stays the default for DIA, and pseudo mode is the fast option.
 
 On a timsTOF diaPASEF E. coli run (PRIDE PXD070049, `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01`,
-50 ng, 15 min), pseudo mode found 6,403 peptides in 3 min 7 s with 6.1 GB peak memory. The
+50 ng, 15 min), pseudo mode found 7,412 peptides in 2 min with 6.0 GB peak memory. The
 wide-window chimeric search found 8,087 in 12 min 50 s with 16.6 GB.
 
 When `dia` is off or absent, spectra are read and searched exactly as before and

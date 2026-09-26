@@ -82,7 +82,7 @@ fn parse_args() -> Args {
         report_psms: 5,
         ms2_min_scans: 3,
         mode: "rescore".into(),
-        min_corr: 0.5,
+        min_corr: 0.3,
         apex_tolerance: 2,
         q3: false,
         t2_corr: 0.3,

@@ -15,7 +15,7 @@ entries are retained below for provenance.
   v0.11.0 and anchors on each charged MS1 isotope feature. Fragment hills whose apex and elution
   profile match the precursor become one centroided MS2 spectrum. That spectrum is searched
   closed at the feature's monoisotopic m/z and charge, and `wide_window` and `chimera` are
-  ignored. On an Orbitrap E. coli DIA run (PXD028735) it found 5,567 peptides at 1% FDR in
+  ignored. On an Orbitrap E. coli DIA run (PXD028735) it found 5,763 peptides at 1% FDR in
   6 s and 2.3 GB. A wide-window chimeric search found 6,975 in 30 s and 3.0 GB, so wide-window
   stays the default. With `dia` off, spectra and results are unchanged, and `results.json`
   omits `dia`. See "DIA pseudo-spectrum search" in `DOCS.md`.
@@ -23,9 +23,14 @@ entries are retained below for provenance.
   vertical ion-mobility and halo filters, then watershed centroiding. MS2 frames are processed
   per diaPASEF m/z × 1/K0 box. koth hills and features carry 1/K0, a feature is paired only
   with boxes that contain its m/z and 1/K0, and fragment hills must match its 1/K0 within the
-  new `dia.im_tolerance` (default 0.03). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
-  it found 6,403 peptides in 3 min 7 s and 6.1 GB. A wide-window chimeric search found 8,087
+  new `dia.im_tolerance` (default 0.01). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
+  it found 7,412 peptides in 2 min and 6.0 GB. A wide-window chimeric search found 8,087
   in 12 min 50 s and 16.6 GB.
+- `dia` defaults tuned from a diagnosis of the peptides wide-window finds and pseudo mode
+  misses: `dia.min_corr` 0.5 → 0.3 and `dia.im_tolerance` 0.03 → 0.01. On timsTOF, 0.03 let
+  enough co-eluting fragments from other precursors into each pseudo-spectrum to hit the
+  150-peak cap, which kept the most intense peaks and dropped real fragments. Pseudo mode now
+  finds 92% of the wide-window peptides on timsTOF (was 79%) and 83% on Orbitrap (was 80%).
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with

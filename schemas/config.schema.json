@@ -482,7 +482,7 @@
           "type": "integer"
         },
         "im_tolerance": {
-          "default": 0.029999999329447746,
+          "default": 0.009999999776482582,
           "description": "timsTOF only: fragment hills must lie within this ion mobility (1/K0)\nof the precursor feature's apex mobility.",
           "format": "float",
           "minimum": 0.0,
@@ -496,7 +496,7 @@
           "type": "integer"
         },
         "min_corr": {
-          "default": 0.5,
+          "default": 0.30000001192092896,
           "description": "Minimum Pearson correlation between a fragment hill and its precursor.",
           "format": "float",
           "maximum": 1.0,

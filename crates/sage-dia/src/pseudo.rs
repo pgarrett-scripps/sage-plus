@@ -53,12 +53,12 @@ impl Default for PseudoSettings {
     fn default() -> Self {
         PseudoSettings {
             apex_tolerance: 2,
-            min_corr: 0.5,
+            min_corr: 0.3,
             half_window: 6,
             min_overlap: 3,
             max_peaks: 150,
             min_peaks: 6,
-            im_tolerance: 0.03,
+            im_tolerance: 0.01,
             rank: PeakRank::Intensity,
         }
     }
