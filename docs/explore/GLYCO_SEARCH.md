@@ -937,6 +937,19 @@ them. The feature is on by default from this milestone.
   Non-high-mannose rises to 2.9%, which is over the 2.8% gate. Mouse gains 100 at an
   unchanged 0.7% FDP. The option stays off by default.
 
+### Addendum: Hex ladder on by default
+
+With per-precursor siblings as the base, `glyco.ladder_feature` was re-tested
+(`m10lad`) against the same gate.
+
+| variant | yeast | non-HM | yeast pep-q targets | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- | --- |
+| siblings per precursor | 1,330 | 2.7% | 1,870 | 24 | 9,039 | 12 (0.6%) |
+| + ladder | 1,367 | 2.8% | 1,930 | 23 | 9,021 | 12 (0.6%) |
+
+It passes: yeast gains 37 at 23 entrapment hits and 2.8% non-high-mannose, and mouse
+is flat. The ladder is on by default from this milestone.
+
 ## Appendix: code and measurements
 
 - `crates/sage-glyco/src/composition.rs` (the prototype's `glycan.rs`):

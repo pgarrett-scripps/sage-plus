@@ -89,7 +89,7 @@ pub struct GlycoConfig {
     pub rescore_candidates: bool,
     /// Add trunk Hex-ladder features (HexNAc(2)Hex(k) Y ions, their longest
     /// consecutive run, and a control ladder at a fixed offset) to the glyco
-    /// peptide model.
+    /// peptide model. On by default.
     pub ladder_feature: bool,
     /// Add to the glyco peptide model how many other precursors picked the same
     /// peptide (glycoform and charge-state siblings), counting each
@@ -123,7 +123,7 @@ impl Default for GlycoConfig {
             site_features: true,
             twin_feature: "off".into(),
             rescore_candidates: true,
-            ladder_feature: false,
+            ladder_feature: true,
             sibling_feature: true,
             core_only_subgroup: false,
         }
