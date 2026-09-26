@@ -10,11 +10,16 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
-- `prefilter_min_matched_peaks` (default 1) and `prefilter_max_peaks` (default: all peaks). The
+- `prefilter_min_matched_peaks` (default 3) and `prefilter_max_peaks` (default: all peaks). The
   prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
   `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
-  `prefilter_max_peaks` most intense peaks. The defaults keep every peptide that could enter
-  the preliminary search, as before, so results are unchanged unless they are set.
+  `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
+
+### Changed
+- The prefilter now requires three preliminary fragment matches by default instead of one. On a
+  human plus 10x gut catalog search it kept 19% of peptides instead of 76%, halved peak memory,
+  and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
+  to keep the previous exact behavior.
 
 ## [v0.1.0-beta.10] - 2026-09-25
 

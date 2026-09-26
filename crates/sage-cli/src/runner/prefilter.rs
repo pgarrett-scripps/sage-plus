@@ -151,7 +151,10 @@ impl Runner {
             max_fragment_charge: self.parameters.max_fragment_charge,
             wide_window: self.parameters.wide_window,
             min_peaks: self.parameters.min_peaks,
-            min_matched_peaks: db_params.prefilter_min_matched_peaks,
+            // Never stricter than the search itself.
+            min_matched_peaks: db_params
+                .prefilter_min_matched_peaks
+                .min(self.parameters.min_matched_peaks.max(1)),
             max_peaks: db_params.prefilter_max_peaks,
         };
         SpectrumIndexBuilder::new(settings, &db_params.mass_offset_modifications())

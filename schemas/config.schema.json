@@ -1669,7 +1669,7 @@
           ]
         },
         "prefilter_min_matched_peaks": {
-          "description": "Preliminary fragment matches one precursor hypothesis of a spectrum\nneeds for the prefilter to keep a peptide (default 1).",
+          "description": "Preliminary fragment matches one precursor hypothesis of a spectrum\nneeds for the prefilter to keep a peptide (default 3).",
           "format": "uint16",
           "maximum": 65535,
           "minimum": 0,
