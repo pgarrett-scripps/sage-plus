@@ -382,10 +382,7 @@ fn specificity_parse_errors_identify_the_problem() {
         parse("first_residue:KK"),
         Err(TooLong("first_residue:KK".into()))
     );
-    assert_eq!(
-        parse("peptide_n_term:Z"),
-        Err(TooLong("peptide_n_term:Z".into()))
-    );
+    assert_eq!(parse("peptide_n_term:Z"), Err(InvalidResidue('Z')));
     // A residue-gated name without its residue is not a site.
     assert_eq!(parse("first_residue"), Err(TooLong("first_residue".into())));
     assert_eq!(parse("^Z"), Err(InvalidResidue('Z')));

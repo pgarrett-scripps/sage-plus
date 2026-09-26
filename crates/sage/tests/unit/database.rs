@@ -2007,8 +2007,8 @@ fn reversed_decoys_of_modified_targets_mirror_sites_and_keep_mass() {
     let again = parameters.add_reversed_decoys(peptides.clone());
     assert_eq!(again.len(), 4);
 
-    // A reversal that reproduces another target's sequence is dropped even
-    // when the modification sits on a different residue.
+    // A reversal that reproduces another target's sequence is dropped, with
+    // or without its modification (PEPM[Oxidation]K reverses to PM[Oxidation]PEK).
     let targets = parameters.modify_digests(group_digests(vec![
         positional_digest("PEPMK", Position::Full),
         positional_digest("PMPEK", Position::Full),

@@ -1019,6 +1019,8 @@ fn mass_offsets_on_terminal_sites_stack_with_existing_terminal_mods() {
         )
         .pop()
         .unwrap();
+    // Unlike indexed terminal mods, a search-time mass offset explains an
+    // extra delta, so it adds to whatever the terminus already carries.
     let offset =
         acetylated.with_mass_offset(Site::Nterm, &Arc::new(ModificationDefinition::bare(42.0)));
     assert_eq!(offset.nterm, Some(54.0));

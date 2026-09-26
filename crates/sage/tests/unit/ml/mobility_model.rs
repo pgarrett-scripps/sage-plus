@@ -509,7 +509,21 @@ fn mobility_ptm_offsets_split_global_and_charge_effects() {
 
 #[test]
 fn mobility_ptm_offsets_skip_invalid_rows_and_unmodified_peptides() {
+    // A seed that puts the two oxidized peptides in different folds, so each
+    // is corrected by a model trained on the other. Two folds never split
+    // them: the hash parity depends only on the residues.
+    let seed = (0..1000)
+        .find(|&seed| peptide_fold(b"PEMK", 3, seed) != peptide_fold(b"MPMK", 3, seed))
+        .unwrap();
+    let settings = IonMobilitySettings {
+        folds: 3,
+        seed,
+        ptm_regularization: 1.0,
+        ..IonMobilitySettings::default()
+    };
     let (db, mut features, mut predictions) = offset_data();
+    let mut valid_only = predictions.clone();
+    apply_ptm_offsets(&db, &features, &settings, &mut valid_only).unwrap();
     // Missing mobility: never trained on and never corrected.
     features.push(Feature {
         peptide_idx: PeptideIx(1),
@@ -523,16 +537,14 @@ fn mobility_ptm_offsets_skip_invalid_rows_and_unmodified_peptides() {
     // A non-finite prediction stays non-finite.
     features.push(features[3].clone());
     predictions.push(f64::NAN);
-    let settings = IonMobilitySettings {
-        folds: 2,
-        ptm_regularization: 1.0,
-        ..IonMobilitySettings::default()
-    };
     let (r2, _) = apply_ptm_offsets(&db, &features, &settings, &mut predictions).unwrap();
     assert!(r2.is_finite());
+    // The invalid rows do not change the valid rows' corrections.
+    assert_eq!(&predictions[..3], &valid_only[..]);
     assert_eq!(predictions[2], 0.5);
     assert_eq!(predictions[3], 0.5);
     assert!(predictions[4].is_nan());
-    // Oxidation residuals are positive, so corrections never lower mobility.
-    assert!(predictions[0] >= 0.5 && predictions[1] >= 0.5);
+    // Oxidation residuals are positive, so both oxidized peptides move up.
+    assert!(predictions[0] > 0.5, "{}", predictions[0]);
+    assert!(predictions[1] > predictions[0]);
 }

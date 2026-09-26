@@ -159,12 +159,12 @@ impl Matrix {
     }
 
     pub fn is_close(&self, rhs: &Self, eps: f64) -> bool {
-        if self.cols != self.rows {
+        if self.rows != rhs.rows || self.cols != rhs.cols {
             return false;
         }
 
         for i in 0..self.rows {
-            for j in 0..self.rows {
+            for j in 0..self.cols {
                 if (self[(i, j)] - rhs[(i, j)]).abs() > eps {
                     return false;
                 }

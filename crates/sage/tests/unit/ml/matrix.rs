@@ -152,7 +152,11 @@ fn is_close_compares_square_matrices_within_tolerance() {
     assert!(a.is_close(&b, 0.1));
     assert!(!a.is_close(&b, 0.01));
     let rect = Matrix::new([1., 2., 3., 4., 5., 6.], 2, 3);
-    assert!(!rect.is_close(&rect, 1.0));
+    assert!(rect.is_close(&rect, 0.0));
+    let wider = Matrix::new([1., 2., 3., 4., 5., 7.], 2, 3);
+    assert!(!rect.is_close(&wider, 0.5));
+    // Same entries, different shape.
+    assert!(!rect.is_close(&Matrix::new([1., 2., 3., 4., 5., 6.], 3, 2), 1.0));
 }
 
 #[test]

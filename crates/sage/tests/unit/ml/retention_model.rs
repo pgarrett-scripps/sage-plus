@@ -470,10 +470,27 @@ fn ptm_offsets_are_ridge_regressed_residuals_per_modification() {
     assert!(PtmOffsetModel::fit(&bare, &features, &[0, 1, 2], 1.0).is_none());
 }
 
+/// A seed that puts the two oxidized peptides in different folds, so each is
+/// corrected by a model trained on the other. Two folds never split them: the
+/// hash parity depends only on the residues.
+fn split_seed(folds: usize) -> u64 {
+    (0..1000)
+        .find(|&seed| peptide_fold(b"PEMK", folds, seed) != peptide_fold(b"MPMK", folds, seed))
+        .unwrap()
+}
+
 #[test]
 fn ptm_offsets_leave_unmodified_peptides_and_refresh_deltas() {
+    let settings = RetentionTimeSettings {
+        folds: 3,
+        seed: split_seed(3),
+        ptm_regularization: 1.0,
+        ..RetentionTimeSettings::default()
+    };
     let (db, mut features) = offset_data();
-    // A decoy never trains the offsets.
+    let mut without_decoy = features.clone();
+    apply_ptm_offsets(&db, &mut without_decoy, &settings);
+    // A decoy never trains the offsets: a late decoy changes nothing.
     features.push(Feature {
         peptide_idx: PeptideIx(1),
         label: -1,
@@ -481,12 +498,17 @@ fn ptm_offsets_leave_unmodified_peptides_and_refresh_deltas() {
         predicted_rt: 0.5,
         ..Feature::default()
     });
-    let settings = RetentionTimeSettings {
-        folds: 2,
-        ptm_regularization: 1.0,
-        ..RetentionTimeSettings::default()
-    };
     apply_ptm_offsets(&db, &mut features, &settings);
+    for (with, without) in features.iter().zip(&without_decoy) {
+        assert_eq!(with.predicted_rt, without.predicted_rt);
+    }
+    // Oxidation residuals are all positive, so both oxidized targets move up.
+    assert!(
+        features[0].predicted_rt > 0.5,
+        "{}",
+        features[0].predicted_rt
+    );
+    assert!(features[1].predicted_rt > features[0].predicted_rt);
     // The unmodified peptide keeps its prediction.
     assert_eq!(features[2].predicted_rt, 0.5);
     assert_eq!(features[2].delta_rt_model, 0.0625);
@@ -496,7 +518,5 @@ fn ptm_offsets_leave_unmodified_peptides_and_refresh_deltas() {
             feature.delta_rt_model,
             (feature.aligned_rt - feature.predicted_rt).abs()
         );
-        // Oxidation residuals are all positive, so offsets never lower RT.
-        assert!(feature.predicted_rt >= 0.5);
     }
 }

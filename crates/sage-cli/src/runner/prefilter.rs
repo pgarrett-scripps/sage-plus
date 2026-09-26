@@ -208,7 +208,16 @@ const MAX_DIGEST_PASSES: u64 = 256;
 pub(crate) fn digest_passes(max_memory_gb: Option<f64>, unmodified_bytes: u64) -> u64 {
     let gib = std::env::var("SAGE_PREFILTER_DIGEST_GB")
         .ok()
-        .and_then(|value| value.parse::<f64>().ok())
+        .and_then(|value| {
+            let gib = value
+                .parse::<f64>()
+                .ok()
+                .filter(|gib| gib.is_finite() && *gib > 0.0);
+            if gib.is_none() {
+                warn!("ignoring SAGE_PREFILTER_DIGEST_GB={value}: expected a positive number");
+            }
+            gib
+        })
         .or_else(|| {
             max_memory_gb
                 .filter(|gib| *gib > 0.0)
@@ -232,11 +241,12 @@ pub(crate) fn chunks_per_pass(proteins: usize, chunk_size: usize, passes: u64) -
 }
 
 /// One sequence bucket of the digest, split into chunks, with the target
-/// sequences its decoys are checked against.
+/// sequences its decoys are checked against. The set is shared so a cached
+/// pass is not copied for every spectrum batch.
 #[derive(Clone, Default)]
 struct DigestPass {
     chunks: Vec<Vec<DigestGroup>>,
-    target_sequences: HashSet<PeptideSequence>,
+    target_sequences: Arc<HashSet<PeptideSequence>>,
 }
 
 /// Digest passes, regenerated for every spectrum batch. When the whole digest
@@ -267,11 +277,13 @@ impl DigestSource<'_> {
             pass,
             self.passes,
         );
-        let target_sequences = digests
-            .iter()
-            .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.clone())
-            .collect::<HashSet<_>>();
+        let target_sequences = Arc::new(
+            digests
+                .iter()
+                .filter(|digest| !digest.reference.decoy)
+                .map(|digest| digest.reference.sequence.clone())
+                .collect::<HashSet<_>>(),
+        );
         let chunk_size = digests.len().div_ceil(self.chunks_per_pass).max(1);
         let groups = digests.len();
         let chunks = Parameters::partition_digests_by_sequence(digests, chunk_size);
