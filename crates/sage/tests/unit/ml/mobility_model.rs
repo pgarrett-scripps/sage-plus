@@ -453,3 +453,86 @@ fn mobility_fit_is_insensitive_to_the_standardized_ridge_penalty() {
         assert!(shift < tolerance, "ridge {ridge:e}: shift {shift:e}");
     }
 }
+
+fn oxidized(sequence: &[u8]) -> Peptide {
+    let modifications = sequence
+        .iter()
+        .map(|&residue| if residue == b'M' { 15.994_915 } else { 0.0 })
+        .collect::<Vec<f32>>();
+    Peptide {
+        sequence: sequence.to_vec().into(),
+        modifications: crate::peptide::CompactModifications::from_dense(modifications),
+        ..Peptide::default()
+    }
+}
+
+/// Charge 2 PSMs with 1, 2 and 0 oxidations, all predicted at 0.5.
+fn offset_data() -> (IndexedDatabase, Vec<Feature>, Vec<f64>) {
+    let oxidation = (ModificationSpecificity::Residue(b'M'), 15.994_915);
+    let db = IndexedDatabase {
+        peptides: vec![oxidized(b"PEMK"), oxidized(b"MPMK"), oxidized(b"PEPK")],
+        model_mods: vec![oxidation, oxidation],
+        ..IndexedDatabase::default()
+    };
+    let features = [0.625f32, 0.75, 0.5625]
+        .into_iter()
+        .enumerate()
+        .map(|(index, ims)| Feature {
+            peptide_idx: PeptideIx(index as u32),
+            label: 1,
+            spectrum_q: 0.001,
+            charge: 2,
+            ims,
+            ..Feature::default()
+        })
+        .collect();
+    (db, features, vec![0.5; 3])
+}
+
+#[test]
+fn mobility_ptm_offsets_split_global_and_charge_effects() {
+    let (db, features, predictions) = offset_data();
+    let model = MobilityPtmOffsetModel::fit(&db, &features, &predictions, &[0, 1, 2], 1.0).unwrap();
+    assert_eq!(model.keys.len(), 1);
+    assert_eq!(model.charges, vec![2]);
+    // Rows are [count, count]; S = sum(count^2) = 5, R = sum(count * residual)
+    // = 0.625. Ridge 1 on the global and 4 on the charge column:
+    // [[6, 5], [5, 9]] x = [R, R] gives x = [4R, R] / 29.
+    let r = 0.625;
+    assert!((model.offsets[0] - 4.0 * r / 29.0).abs() < 1e-12);
+    assert!((model.offsets[1] - r / 29.0).abs() < 1e-12);
+    assert!((model.predict(&db[PeptideIx(1)], 2) - 10.0 * r / 29.0).abs() < 1e-12);
+    // An unseen charge only gets the global effect.
+    assert!((model.predict(&db[PeptideIx(1)], 3) - 8.0 * r / 29.0).abs() < 1e-12);
+    assert_eq!(model.predict(&db[PeptideIx(2)], 2), 0.0);
+}
+
+#[test]
+fn mobility_ptm_offsets_skip_invalid_rows_and_unmodified_peptides() {
+    let (db, mut features, mut predictions) = offset_data();
+    // Missing mobility: never trained on and never corrected.
+    features.push(Feature {
+        peptide_idx: PeptideIx(1),
+        label: 1,
+        spectrum_q: 0.001,
+        charge: 2,
+        ims: 0.0,
+        ..Feature::default()
+    });
+    predictions.push(0.5);
+    // A non-finite prediction stays non-finite.
+    features.push(features[3].clone());
+    predictions.push(f64::NAN);
+    let settings = IonMobilitySettings {
+        folds: 2,
+        ptm_regularization: 1.0,
+        ..IonMobilitySettings::default()
+    };
+    let (r2, _) = apply_ptm_offsets(&db, &features, &settings, &mut predictions).unwrap();
+    assert!(r2.is_finite());
+    assert_eq!(predictions[2], 0.5);
+    assert_eq!(predictions[3], 0.5);
+    assert!(predictions[4].is_nan());
+    // Oxidation residuals are positive, so corrections never lower mobility.
+    assert!(predictions[0] >= 0.5 && predictions[1] >= 0.5);
+}
