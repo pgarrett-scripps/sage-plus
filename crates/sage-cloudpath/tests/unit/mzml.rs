@@ -715,3 +715,252 @@ async fn astral_analyzer_term_matches_the_thermo_filter() -> Result<(), MzMLErro
     );
     Ok(())
 }
+
+#[test]
+fn decodes_little_endian_arrays_and_rejects_bad_lengths_and_types() {
+    use super::{decode_charge_array, decode_float_array, Dtype};
+    let f32s: Vec<u8> = [1.5f32, -2.0]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    assert_eq!(decode_float_array(&f32s, Dtype::F32).unwrap(), [1.5, -2.0]);
+    let f64s: Vec<u8> = [400.25f64].iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert_eq!(decode_float_array(&f64s, Dtype::F64).unwrap(), [400.25]);
+    assert!(decode_float_array(&[], Dtype::F64).unwrap().is_empty());
+    assert!(matches!(
+        decode_float_array(&f32s[..7], Dtype::F32),
+        Err(MzMLError::Malformed)
+    ));
+    assert!(matches!(
+        decode_float_array(&f64s[..5], Dtype::F64),
+        Err(MzMLError::Malformed)
+    ));
+    assert!(matches!(
+        decode_float_array(&f32s, Dtype::I32),
+        Err(MzMLError::InvalidFloatArrayType)
+    ));
+    assert!(matches!(
+        decode_float_array(&f64s, Dtype::I64),
+        Err(MzMLError::InvalidFloatArrayType)
+    ));
+
+    let i64s: Vec<u8> = [0i64, 3, 255]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    assert_eq!(decode_charge_array(&i64s, Dtype::I64).unwrap(), [0, 3, 255]);
+    assert!(matches!(
+        decode_charge_array(&i64s[..9], Dtype::I64),
+        Err(MzMLError::Malformed)
+    ));
+    let i32s: Vec<u8> = [2i32, 256].iter().flat_map(|v| v.to_le_bytes()).collect();
+    assert!(matches!(
+        decode_charge_array(&i32s, Dtype::I32),
+        Err(MzMLError::InvalidFragmentCharge(256))
+    ));
+    let negative: Vec<u8> = (-1i32).to_le_bytes().to_vec();
+    assert!(matches!(
+        decode_charge_array(&negative, Dtype::I32),
+        Err(MzMLError::InvalidFragmentCharge(-1))
+    ));
+    assert!(matches!(
+        decode_charge_array(&i32s[..3], Dtype::I32),
+        Err(MzMLError::Malformed)
+    ));
+    assert!(matches!(
+        decode_charge_array(&f32s, Dtype::F32),
+        Err(MzMLError::InvalidChargeArrayType)
+    ));
+    assert!(matches!(
+        decode_charge_array(&f64s, Dtype::F64),
+        Err(MzMLError::InvalidChargeArrayType)
+    ));
+}
+
+const MZ_400_500_600_ZLIB: &str = "eJxjYACBSgcw5VAPoQ80OQAAGlQDOw==";
+const INTENSITY_100X3_F32: &str = "AADIQgAAyEIAAMhC";
+const NOISE_2_4_5_F32: &str = "AAAAQAAAgEAAAKBA";
+
+fn simple_spectrum(id: &str, ms_level: u8, tic: &str, scan_params: &str, extra: &str) -> String {
+    format!(
+        r#"<spectrum id="{id}">
+          <cvParam accession="MS:1000511" value="{ms_level}"/>
+          <cvParam accession="MS:1000128"/>
+          <cvParam accession="MS:1000285" value="{tic}"/>
+          <scanList count="1"><scan>{scan_params}</scan></scanList>
+          {extra}
+          <binaryDataArrayList count="2">
+            <binaryDataArray>
+              <cvParam accession="MS:1000514"/>
+              <cvParam accession="MS:1000523"/>
+              <cvParam accession="MS:1000574"/>
+              <binary>{MZ_400_500_600_ZLIB}</binary>
+            </binaryDataArray>
+            <binaryDataArray>
+              <cvParam accession="MS:1000515"/>
+              <cvParam accession="MS:1000521"/>
+              <cvParam accession="MS:1000576"/>
+              <binary>{INTENSITY_100X3_F32}</binary>
+            </binaryDataArray>
+          </binaryDataArrayList>
+        </spectrum>"#
+    )
+}
+
+fn wrap(spectra: &[String]) -> String {
+    format!(
+        "<mzML><run><spectrumList count=\"{}\">{}</spectrumList></run></mzML>",
+        spectra.len(),
+        spectra.join("\n")
+    )
+}
+
+#[tokio::test]
+async fn zlib_arrays_seconds_and_isolation_window() -> Result<(), MzMLError> {
+    let precursor = r#"<precursorList count="1"><precursor spectrumRef="scan=1">
+          <isolationWindow>
+            <cvParam accession="MS:1000827" value="450.5"/>
+            <cvParam accession="MS:1000828" value="0.7"/>
+            <cvParam accession="MS:1000829" value="0.8"/>
+          </isolationWindow>
+          <selectedIonList count="1"><selectedIon>
+            <cvParam accession="MS:1000744" value="0"/>
+            <cvParam accession="MS:1000041" value="3"/>
+            <cvParam accession="MS:1000042" value="1234.5"/>
+          </selectedIon></selectedIonList>
+        </precursor></precursorList>"#;
+    let input = wrap(&[simple_spectrum(
+        "scan=2",
+        2,
+        "300",
+        r#"<cvParam accession="MS:1000016" value="90" unitAccession="UO:0000010"/>
+           <cvParam accession="MS:1000927" value="12.5"/>"#,
+        precursor,
+    )]);
+    let spectra = MzMLReader::with_file_id(4).parse(input.as_bytes()).await?;
+    assert_eq!(spectra.len(), 1);
+    let s = &spectra[0];
+    assert_eq!(s.file_id, 4);
+    assert_eq!(s.id, "scan=2");
+    assert_eq!(s.representation, Representation::Profile);
+    assert_eq!(s.mz, [400.0, 500.0, 600.0]);
+    assert_eq!(s.intensity, [100.0, 100.0, 100.0]);
+    assert!((s.scan_start_time - 1.5).abs() < 1e-6);
+    assert_eq!(s.ion_injection_time, 12.5);
+    assert_eq!(s.total_ion_current, 300.0);
+    let p = &s.precursors[0];
+    // A zero selected-ion m/z falls back to the isolation window target.
+    assert_eq!(p.mz, 450.5);
+    assert_eq!(p.charge, Some(3));
+    assert_eq!(p.intensity, Some(1234.5));
+    assert_eq!(p.spectrum_ref.as_deref(), Some("scan=1"));
+    assert_eq!(p.isolation_window, Some(Tolerance::Da(-0.7, 0.8)));
+    Ok(())
+}
+
+#[tokio::test]
+async fn scan_start_time_requires_a_known_unit() {
+    let input = wrap(&[simple_spectrum(
+        "scan=1",
+        2,
+        "300",
+        r#"<cvParam accession="MS:1000016" value="90"/>"#,
+        "",
+    )]);
+    let result = MzMLReader::with_file_id(0).parse(input.as_bytes()).await;
+    assert!(matches!(result, Err(MzMLError::Malformed)));
+}
+
+#[tokio::test]
+async fn ms_level_filter_keeps_only_requested_level() -> Result<(), MzMLError> {
+    let minutes = r#"<cvParam accession="MS:1000016" value="2" unitAccession="UO:0000031"/>"#;
+    let input = wrap(&[
+        simple_spectrum("scan=1", 1, "300", minutes, ""),
+        simple_spectrum("scan=2", 2, "300", minutes, ""),
+        simple_spectrum("scan=3", 1, "300", minutes, ""),
+    ]);
+    let ms1 = MzMLReader::with_file_id_and_level_filter(0, 1)
+        .parse(input.as_bytes())
+        .await?;
+    let ids: Vec<&str> = ms1.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["scan=1", "scan=3"]);
+    assert!(ms1.iter().all(|s| s.mz == [400.0, 500.0, 600.0]));
+    let ms2 = MzMLReader::with_file_id_and_level_filter(0, 2)
+        .parse(input.as_bytes())
+        .await?;
+    assert_eq!(ms2.len(), 1);
+    assert_eq!(ms2[0].id, "scan=2");
+    assert_eq!(ms2[0].scan_start_time, 2.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn signal_to_noise_divides_intensity_at_requested_level() -> Result<(), MzMLError> {
+    let noise = format!(
+        r#"<binaryDataArrayList count="1"><binaryDataArray>
+             <cvParam accession="MS:1002744"/>
+             <cvParam accession="MS:1000521"/>
+             <binary>{NOISE_2_4_5_F32}</binary>
+           </binaryDataArray></binaryDataArrayList>"#
+    );
+    let minutes = r#"<cvParam accession="MS:1000016" value="2" unitAccession="UO:0000031"/>"#;
+    let input = wrap(&[
+        simple_spectrum("scan=1", 1, "300", minutes, &noise),
+        simple_spectrum("scan=2", 2, "300", minutes, &noise),
+    ]);
+    let spectra = MzMLReader::with_file_id(0)
+        .set_signal_to_noise(Some(2))
+        .parse(input.as_bytes())
+        .await?;
+    assert_eq!(spectra.len(), 2);
+    // MS1 is left untouched; MS2 intensities become S/N ratios.
+    assert_eq!(spectra[0].intensity, [100.0, 100.0, 100.0]);
+    assert_eq!(spectra[1].intensity, [50.0, 25.0, 20.0]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn structural_errors_are_reported() {
+    let missing_accession = wrap(&[r#"<spectrum id="s"><cvParam value="2"/></spectrum>"#.into()]);
+    assert!(matches!(
+        MzMLReader::with_file_id(0)
+            .parse(missing_accession.as_bytes())
+            .await,
+        Err(MzMLError::Malformed)
+    ));
+
+    let missing_id =
+        wrap(&[r#"<spectrum><cvParam accession="MS:1000511" value="2"/></spectrum>"#.into()]);
+    assert!(matches!(
+        MzMLReader::with_file_id(0)
+            .parse(missing_id.as_bytes())
+            .await,
+        Err(MzMLError::Malformed)
+    ));
+
+    let bad_level = wrap(&[
+        r#"<spectrum id="s"><cvParam accession="MS:1000511" value="two"/></spectrum>"#.into(),
+    ]);
+    assert!(matches!(
+        MzMLReader::with_file_id(0)
+            .parse(bad_level.as_bytes())
+            .await,
+        Err(MzMLError::IntError(_))
+    ));
+
+    let unknown_group =
+        wrap(&[r#"<spectrum id="s"><referenceableParamGroupRef ref="nope"/></spectrum>"#.into()]);
+    assert!(matches!(
+        MzMLReader::with_file_id(0).parse(unknown_group.as_bytes()).await,
+        Err(MzMLError::UnknownReferenceableParamGroup(id)) if id == "nope"
+    ));
+
+    let entity = wrap(&[r#"<spectrum id="s"><binaryDataArrayList><binaryDataArray>
+        <cvParam accession="MS:1000514"/><binary>&amp;AAAA</binary>
+        </binaryDataArray></binaryDataArrayList></spectrum>"#
+        .into()]);
+    assert!(matches!(
+        MzMLReader::with_file_id(0).parse(entity.as_bytes()).await,
+        Err(MzMLError::BinaryEntityReference)
+    ));
+}
