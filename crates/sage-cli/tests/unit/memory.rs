@@ -92,6 +92,43 @@ fn scoped_guard_cancels_embedded_job_at_limit() {
 }
 
 #[test]
+fn scoped_guard_cancels_embedded_job_at_system_reserve() {
+    let cancellation = CancellationToken::default();
+    let limits = MemoryLimits {
+        max_bytes: None,
+        min_free_bytes: Some(u64::MAX),
+    };
+    let guard =
+        spawn_memory_guard(limits, MemoryLimitBehavior::CancelJob(cancellation.clone())).unwrap();
+
+    for _ in 0..100 {
+        if cancellation.is_cancelled() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    assert!(cancellation.is_memory_limit());
+    assert!(guard
+        .failure()
+        .is_some_and(|message| message.contains("configured reserve")));
+}
+
+#[test]
+fn guard_under_generous_limits_polls_and_stops_on_drop() {
+    let cancellation = CancellationToken::default();
+    let limits = MemoryLimits::from_gib(Some(1_000_000.0), Some(1e-9)).unwrap();
+    assert!(limits.is_enabled());
+    let guard =
+        spawn_memory_guard(limits, MemoryLimitBehavior::CancelJob(cancellation.clone())).unwrap();
+    // Let the monitor take a few samples (poll interval is 250 ms).
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    assert!(guard.failure().is_none());
+    drop(guard);
+    assert!(!cancellation.is_cancelled());
+}
+
+#[test]
 fn disabled_guard_does_not_cancel_job() {
     let cancellation = CancellationToken::default();
     let guard = spawn_memory_guard(
