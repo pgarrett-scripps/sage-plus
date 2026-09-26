@@ -18,6 +18,10 @@ entries are retained below for provenance.
   so its memory no longer grows with the full digest. Results are unchanged. The per-bucket
   budget is an eighth of `max_memory_gb` (`SAGE_PREFILTER_DIGEST_GB` overrides it), and the
   preflight checks one bucket instead of the whole digest.
+- Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
+  key (for example intra- vs inter-protein crosslinks or glycan classes) with the same
+  conventions as `spectrum_q_value`. `Scorer::with_db` builds a scorer with the same settings
+  against another `IndexedDatabase`. Search results are unchanged.
 
 ### Changed
 - The prefilter now requires three preliminary fragment matches by default instead of one. On a

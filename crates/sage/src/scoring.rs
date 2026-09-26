@@ -511,6 +511,33 @@ pub(crate) fn offset_query(mass: f32, tolerance: Tolerance, delta: f32) -> (f32,
 }
 
 impl<'db> Scorer<'db> {
+    /// This scorer's settings against another database, e.g. a module's own
+    /// candidate set. Override single settings with struct update syntax:
+    /// `Scorer { chimera: false, ..scorer.with_db(&db) }`.
+    pub fn with_db<'other>(&self, db: &'other IndexedDatabase) -> Scorer<'other> {
+        // Listed field by field (the lifetime changes), so a new setting
+        // fails to compile here until it is carried over.
+        Scorer {
+            db,
+            precursor_tol: self.precursor_tol,
+            fragment_tol: self.fragment_tol,
+            min_matched_peaks: self.min_matched_peaks,
+            min_isotope_err: self.min_isotope_err,
+            max_isotope_err: self.max_isotope_err,
+            min_precursor_charge: self.min_precursor_charge,
+            max_precursor_charge: self.max_precursor_charge,
+            override_precursor_charge: self.override_precursor_charge,
+            max_fragment_charge: self.max_fragment_charge,
+            chimera: self.chimera,
+            report_psms: self.report_psms,
+            wide_window: self.wide_window,
+            annotate_matches: self.annotate_matches,
+            mass_shift_ppm: self.mass_shift_ppm,
+            score_type: self.score_type,
+            mass_recalibration: self.mass_recalibration.clone(),
+        }
+    }
+
     /// Mark every peptide that contributes at least one preliminary fragment
     /// match for this spectrum. Keeping all contributors preserves the normal
     /// top-K candidate set and its candidate statistics after chunk merging.
