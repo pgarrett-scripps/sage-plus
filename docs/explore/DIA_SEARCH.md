@@ -140,7 +140,7 @@ Calls used:
 "dia": {
   "mode": "pseudo",           // "off" (default) | "pseudo" | later "hybrid"
   "apex_tolerance": 2,        // cycles between fragment and precursor apex
-  "min_corr": 0.5,            // fragment vs precursor profile Pearson
+  "min_corr": 0.3,            // fragment vs precursor profile Pearson
   "min_overlap": 3,           // cycles
   "half_window": 6,           // cycles compared around the apex
   "min_peaks": 6,
@@ -515,9 +515,11 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
 | Variant | Path | Peptides | Runtime | Peak RAM |
 |---|---|---|---|---|
 | (a) raw wide-window, chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
-| (b) tier 1 (`dia.mode = "pseudo"`) | CLI | 6,403 | 3 min 7 s | 6.1 GB |
+| (b) tier 1 (`dia.mode = "pseudo"`), defaults before section 11 | CLI | 6,403 | 3 min 7 s | 6.1 GB |
+| (b) tier 1, section 11 defaults (min_corr 0.3, im_tolerance 0.01) | CLI | 7,412 | 1 min 36 s – 2 min | 6.0 GB |
 | (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,847 (tier 1 alone 5,773; tier 2 +74, about +1.3%) | 3 min 4 s | 5.8 GB |
 | (c) tier 1 + tier 2, pooled, tier as an LDA feature | example | 5,355 | 3 min 4 s | 5.8 GB |
+| (c) section 11 defaults, separate q-values (tier 2 scored with Sage LDA) | example | 7,307 (tier 1 alone 7,065; tier 2 +242) | 1 min 40 s | 6.0 GB |
 | (d) wide-window on hill-filtered scans | example | pending | | |
 
 - **Centroiding.** dnoise-core 0.5.0 watershed (`watershed::watershed_centroid`, the mode
@@ -529,7 +531,7 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
   peptides. Hill detection takes about 165 s (MS1 100 s, MS2 65 s); the search takes 5 s.
 - **Ion mobility.** koth links hills by m/z and 1/K0 and gives features a 1/K0 apex. A
   feature is paired only with boxes that contain its m/z and its 1/K0, and fragment hills
-  must be within `dia.im_tolerance` (default 0.03 1/K0) of it.
+  must be within `dia.im_tolerance` (default 0.01 1/K0 since section 11; was 0.03) of it.
 - **Memory.** MS1 frames are streamed in chunks of 64, and MS2 frames one window group at
   a time. The wide-window baseline holds every per-scan-split raw MS2 spectrum
   (524k spectra, 1.39 billion peaks), which is where its 16.6 GB comes from.
@@ -538,3 +540,73 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
 - **DDA unchanged.** Checked on the denoised ddaPASEF twin of this run
   (`LFQ_Ultra2_PASEF_15min_50ng_Ecoli_01.d`; the raw twin was not on disk). Results were
   byte-identical to origin/main, with 8,872 peptides.
+
+## 11. Why pseudo mode misses peptides wide-window finds
+
+Missed = peptides at 1% peptide FDR in (a), any of its 5 chimeric ranks, but not in (b).
+For each one, `dia_explore --mode diagnose` takes its best (a) PSM's m/z, charge and RT and
+finds the MS1 isotope feature (same charge within the precursor tolerance and RT span; else
+an isotope offset of ±1 or ±2; else another charge). It then counts the theoretical b/y ions
+(charge 1–2) in that feature's pseudo-spectrum under the shipped settings and under
+variants, and also counts ions shifted by +11 Th as a random-match null. Each peptide goes
+to the furthest stage it reached. Scripts: `runs/diag/{targets,bucket,peaks}.py`.
+
+Missed peptides, defaults before this section (min_corr 0.5, im_tolerance 0.03):
+
+| Bucket | Orbitrap (1,864 missed) | timsTOF (2,384 missed) |
+|---|---|---|
+| No MS1 feature at that m/z / RT (feature detection) | 674 (36%): 391 with no MS1 hill at all | 172 (7%) |
+| Wrong charge, or monoisotopic off by 2 or more isotopes | 126 (7%) | 214 (9%) |
+| Feature found, fewer than 4 true fragments in its pseudo-spectrum (grouping) | 651 (35%) | 1,220 (51%) |
+| Built with ≥ 4 fragments, lost at scoring or FDR | 413 (22%) | 778 (33%) |
+
+**Grouping, timsTOF.** 75% of the missed peptides' pseudo-spectra hit the 150-peak cap. The
+0.03 1/K0 window let co-eluting fragments of other precursors in, and ranking by intensity
+then dropped real fragments. The diagnose variants, counting feature-found targets with
+at least 4 true fragments (random-match null in brackets):
+
+| Variant | timsTOF | Orbitrap |
+|---|---|---|
+| shipped (corr 0.5, IM 0.03, cap 150) | 802 (7) | 420 (0) |
+| min_corr 0 | 898 (9) | 649 (0) |
+| im_tolerance 0.015 | 898 (5) | — |
+| no IM gate | 666 (11) | — |
+| cap 300 | 1,046 (42) | 424 (0) |
+| rank by correlation instead of intensity | 463 (7) | 419 (0) |
+| apex tolerance 4 | 796 (8) | 464 (0) |
+
+**Fix and sweep (CLI, peptides at 1%).** timsTOF: im_tolerance 0.015 gives 7,133, 0.01 gives
+7,271, 0.007 gives 7,212, and 0.01 with min_corr 0.3 gives 7,412. min_corr 0 gives 7,343, and
+cap 300 at 0.01 gives 7,277, so the cap is no longer binding. Orbitrap: min_corr 0.3 gives
+5,763, 0 gives 5,807 and −1 gives 5,833. Apex tolerance 3 or 4 on top of min_corr 0 lowers it
+(5,779, 5,765). The defaults are now min_corr 0.3 and im_tolerance 0.01. 0.3 is within 1% of
+the best Orbitrap value and is the best on timsTOF.
+
+| | (a) wide-window | (b) before | (b) now | Share of (a) |
+|---|---|---|---|---|
+| Orbitrap | 6,975, 30 s, 3.0 GB | 5,567 | 5,763, 6 s, 2.3 GB | 80% → 83% |
+| timsTOF | 8,087, 12 min 50 s, 16.6 GB | 6,403 | 7,412, 2 min, 6.0 GB | 79% → 92% |
+
+**What is left** (same diagnosis, new defaults):
+
+| Bucket | Orbitrap (1,715 missed) | timsTOF (1,892 missed; (b) also finds 1,217 that (a) does not) |
+|---|---|---|
+| No MS1 feature | 674 (39%) | 170 (9%) |
+| Wrong charge / mono | 126 (7%) | 211 (11%) |
+| Too few fragments | 497 (29%) | 1,045 (55%) |
+| Lost at scoring or FDR | 418 (24%) | 466 (25%) |
+
+On Orbitrap the largest remaining bucket is feature detection. Of those misses, 391 have no
+MS1 hill: the precursor is below MS1 detection, so no MS1-anchored method can recover them.
+Another 283 have a hill but no charged isotope feature. On timsTOF it is still grouping,
+but no single threshold variant recovers it. Where "all relaxed" recovers it, that is at
+thousands of peaks with a null that matches just as often, which is noise, not signal.
+
+**Example vs CLI tier 1.** The example's tier 1 (5,773 before, 7,065 now) is below the CLI
+(6,403, 7,412) on the same pseudo-spectra, because the example rescores with its own
+regularized LDA and peptide-level FDR. Turning off the CLI's RT and ion-mobility model
+features alone drops it from 6,403 to 6,136. The rest comes from the example's LDA and
+FDR, which do not use Sage's mass alignment or picked-peptide FDR. So tier 2 gains are
+only comparable with the example's own tier 1. With the new defaults, tier 2 scored with
+Sage's LDA adds 242 peptides (+3.4%) to the example's tier 1, and adds none when scored
+with the regularized LDA.
