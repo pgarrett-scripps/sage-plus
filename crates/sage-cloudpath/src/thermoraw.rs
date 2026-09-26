@@ -1,4 +1,4 @@
-use opentfraw::{iter_spectra, PrecursorInfo, RawFileReader, ScanParams, SpectrumRecord};
+use opentfraw::{try_iter_spectra, PrecursorInfo, RawFileReader, ScanParams, SpectrumRecord};
 use sage_core::{
     mass::Tolerance,
     spectrum::{AcquisitionGroup, Precursor, RawSpectrum, Representation},
@@ -24,7 +24,20 @@ impl ThermoRawReader {
         let mut source = BufReader::new(File::open(path)?);
 
         let expected = raw.num_scans as usize;
-        let mut records: Vec<_> = iter_spectra(&raw, &mut source, false).collect();
+        let mut records: Vec<_> =
+            try_iter_spectra(&raw, &mut source, false).collect::<opentfraw::Result<_>>()?;
+        let unknown_activation = records
+            .iter()
+            .filter(|record| {
+                record
+                    .precursor
+                    .as_ref()
+                    .is_some_and(|precursor| precursor.activation.is_none())
+            })
+            .count();
+        if unknown_activation > 0 {
+            log::warn!("{} scans in {} have no independently qualified activation method. Their acquisition activation remains unknown", unknown_activation, path.display());
+        }
         let first_scan = raw.run_header.sample_info.first_scan_number;
         let masters = (0..raw.num_scans)
             .map(|idx| {

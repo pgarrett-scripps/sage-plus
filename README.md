@@ -138,7 +138,7 @@ These additions are planned. None of them is available yet.
 
 ## Build and run
 
-Sage Plus currently requires Rust 1.88 or newer.
+This reader integration requires Rust 1.97 or newer and authorized access to its private reader Git dependencies. This integration branch must remain local until the readers are public or a private consumer deployment is arranged.
 
 ```shell
 git clone https://github.com/pgarrett-scripps/sage-plus.git

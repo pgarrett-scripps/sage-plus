@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-26",
+  "status": "passed",
+  "baseline_commits": {
+    "msconvert-rs": "e6b9936d6137dd66b404e73430298406b95d45a5",
+    "sage-plus": "e59456beb3b70e86408a15fae7d2cdf94c247fb5"
+  },
+  "scientific_comparison": {
+    "numeric_tolerance": 0,
+    "zero_padding": "preserved",
+    "sage_order": "ignored, complete spectrum multiset compared",
+    "scope": "decoded spectra, metadata and MSConvert mzML semantics. No claim of peptide search result equivalence."
+  },
+  "sage": {
+    "sage-large-dda": {
+      "baseline_spectra": 2584,
+      "current_spectra": 2584,
+      "exact_spectrum_multiset": true,
+      "equal_after_documented_metadata_correction": true,
+      "current_sorted_sha256": "1190efdac4d58857a2c9b7f3ffaee8f39be39719b2d3b24bbc6e6e96a4570df1"
+    },
+    "sage-scp-dia": {
+      "baseline_spectra": 363,
+      "current_spectra": 363,
+      "exact_spectrum_multiset": true,
+      "equal_after_documented_metadata_correction": true,
+      "current_sorted_sha256": "3b98bffce3f60807dfc9e17a7b7d4980b31b6f5dc522244e4aed433fa8001553"
+    },
+    "sage-angiotensin": {
+      "baseline_spectra": 10,
+      "current_spectra": 10,
+      "exact_spectrum_multiset": false,
+      "equal_after_documented_metadata_correction": true,
+      "current_sorted_sha256": "6ee0317c6cb05f0158a21043e37cdd2ca3af1c49b6234c5652af4e5736a6f853"
+    },
+    "sage-hcd": {
+      "baseline_spectra": 1,
+      "current_spectra": 1,
+      "exact_spectrum_multiset": false,
+      "equal_after_documented_metadata_correction": true,
+      "current_sorted_sha256": "15d45519b424e24d57169c6782e0a6c36ccf065d40ca09100a23a9ab06b1fb07"
+    },
+    "sage-large-thermo": {
+      "baseline": "reader failure",
+      "current_spectra": 5445
+    }
+  },
+  "intentional_metadata_changes": [
+    "Angiotensin v66 reaction tag 1 does not establish activation, and its HCD Energy trailer is an unset -1 sentinel. Unknown replaces inferred HCD.",
+    "Unlabeled raw reaction energy is no longer emitted as electronvolts.",
+    "Trimmed HCD parent scan 3163 lies outside the one-scan acquisition and is omitted as a dangling reference."
+  ],
+  "limitations": [
+    "Public Sage integration stays local while its reader dependencies are private.",
+    "Original public LZF acquisitions have inconsistent scan counts, and one has a truncated final frame. They remain negative tests. Explicit derived copies qualify decoder arrays only.",
+    "Whole consumer applications retain native dependencies for unrelated formats and processing. The Bruker reader itself uses Rust database and decoding implementations."
+  ],
+  "reader_revisions": {
+    "opentfraw-reader": "e1b6afb3178d8babdf49e10a2ee05854e5332703",
+    "timsrust-reader": "27a8c0e6ab17e15a2b983bf3af26149be0b8eeeb"
+  },
+  "tested_bruker_source_revision": "fc2f2d3649b6b05e7361d0e91ecb59f7021e3581",
+  "revision_note": "The final Bruker revision changes only the fuzz workflow toolchain setup. Rust source, manifests and lockfiles are identical to the tested source revision.",
+  "thermo": {
+    "thermo-angiotensin-profile": {
+      "spectra": 10,
+      "exact_arrays_and_metadata_after_explicit_corrections": true,
+      "removed_unqualified_activation_or_energy_parameters": 20,
+      "current_mzml_sha256": "b12e7549cadae64b0cd659bd991bd64dd36b0e89f81edcac5af834b86ca7a4dc",
+      "baseline_mzml_sha256": "2d579d16ee523b1f95d7f17b762d6845e09ba397606a821a9016fb9ea0e35d45"
+    },
+    "thermo-angiotensin-centroid": {
+      "spectra": 10,
+      "exact_arrays_and_metadata_after_explicit_corrections": true,
+      "removed_unqualified_activation_or_energy_parameters": 20,
+      "current_mzml_sha256": "18a8e90e6cb4b2934c9a4bbd92e1fe2a8394b31edb422343fc66482860a19483",
+      "baseline_mzml_sha256": "326fdc7f2c5672c95902e27be29097b9310342222d5068871f23801ba54febee"
+    },
+    "thermo-large-profile": {
+      "spectra": 5445,
+      "exact_arrays_and_metadata_after_explicit_corrections": true,
+      "removed_unqualified_activation_or_energy_parameters": 2000,
+      "current_mzml_sha256": "aad4bbde20db9ff4737ce158b9894c55326e56d8057130ab5172f0dbdcee3c19",
+      "baseline_mzml_sha256": "d00e8455cadc1fe0ad11df7355947afe6bf52a0a577305a729460373c3913e42"
+    },
+    "thermo-large-centroid": {
+      "spectra": 5445,
+      "exact_arrays_and_metadata_after_explicit_corrections": true,
+      "removed_unqualified_activation_or_energy_parameters": 2000,
+      "current_mzml_sha256": "cfecc60a612484d87fdaf685d6d5802ef97fecac44e81e7dfc2c18dbedee2877",
+      "baseline_mzml_sha256": "3ba437aa268667cdc7a25b909d3bd49c20f35289e09865194ace5cc5dd523e4b"
+    }
+  },
+  "msconvert_bruker": {
+    "bruker-scp-frames": {
+      "input_sha256": "60a379019fdc56fb6299dc4bb6eeefbd0c1a8fed5dfd30ee24d136fae232133f",
+      "spectra_written": 595,
+      "peaks_written": 4470167,
+      "output_sha256": "027b71387ecc23009adc2b6190223eb2351938bc8dabc97ec2c4366944ee3f2c",
+      "reader": "timsrust-reader 0.1.1-rc.2 frame ions",
+      "comparison": "equivalent",
+      "spectra": {
+        "actual": 595,
+        "reference": 595,
+        "matched": 595
+      },
+      "differences": {}
+    },
+    "bruker-dda-spectra": {
+      "input_sha256": "a5dd3bebbedc3d600bf1d6bd2d6303096a3c8556534592afa73199e6a0f1c3ae",
+      "spectra_written": 2519,
+      "peaks_written": 2365792,
+      "output_sha256": "5c9c186279687c1215bb77cbf1ff8ed8c2da0d946188e9887ea68b239e866226",
+      "reader": "timsrust-reader 0.1.1-rc.2 with timsrust 0.6.6 processing",
+      "comparison": "equivalent",
+      "spectra": {
+        "actual": 2519,
+        "reference": 2519,
+        "matched": 2519
+      },
+      "differences": {}
+    },
+    "bruker-dda-frames": {
+      "input_sha256": "a5dd3bebbedc3d600bf1d6bd2d6303096a3c8556534592afa73199e6a0f1c3ae",
+      "spectra_written": 9976,
+      "peaks_written": 26086520,
+      "output_sha256": "1eb88e8fc84b361092a31001124e46d9531a560e50c5e9c40cf6b99953b6f72d",
+      "reader": "timsrust-reader 0.1.1-rc.2 frame ions",
+      "comparison": "equivalent",
+      "spectra": {
+        "actual": 9976,
+        "reference": 9976,
+        "matched": 9976
+      },
+      "differences": {}
+    }
+  },
+  "final_sage_replay": "All five acquisitions passed with final Git dependencies. Sorted scientific records match the qualified prior outputs exactly.",
+  "validation": {
+    "msconvert_workspace": {
+      "passed": 112,
+      "ignored": 10
+    },
+    "sage_workspace": {
+      "passed": 574,
+      "ignored": 1
+    },
+    "additional_regressions": [
+      "Native Bruker processing adapter is invoked",
+      "Corrupt MS2 aborts Sage import",
+      "Case-insensitive calibration and property metadata",
+      "Inactive FAIMS omitted and explicitly enabled zero retained"
+    ],
+    "strict_clippy": "passed in both affected consumers"
+  },
+  "reader_ci": {
+    "thermo": "https://github.com/pgarrett-scripps/opentfraw/actions/runs/36256886241",
+    "bruker": "https://github.com/pgarrett-scripps/timsrust-reader/actions/runs/36257150849"
+  }
+}

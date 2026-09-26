@@ -29,6 +29,7 @@ codegen-units = 16
 incremental = true
 
 [patch.crates-io]
+timsrust-tdf = { path = "vendor/timsrust-tdf" }
 filemanager = { path = "vendor/filemanager" }
 
 # Debug test builds run real searches and Bruker decoding; unoptimized

@@ -229,7 +229,7 @@ impl TdfReader {
         let scale = MobilityScale::new(path_name.as_ref(), config.ion_mobility_scale)?;
         let mut spectra = match Self::dia_window_reader(path_name.as_ref(), &path, config.ms2)? {
             Some((reader, mz_converter)) => {
-                self.read_dia_window_spectra(file_id, &reader, &mz_converter, &scale)
+                self.read_dia_window_spectra(file_id, &reader, &mz_converter, &scale)?
             }
             None => {
                 let spectrum_reader = SpectrumReader::build()
@@ -371,14 +371,11 @@ impl TdfReader {
                         };
                         Ok(Some(spec))
                     }
-                    Err(x) => {
-                        log::error!("error parsing spectrum: {:?}", x);
-                        Ok(None)
-                    }
+                    Err(error) => Err(crate::Error::TDFFrame(error)),
                 },
             )
             .filter_map(Result::transpose)
-            .collect::<Result<_, DenoiseError>>()?;
+            .collect::<Result<_, crate::Error>>()?;
         log::info!(
             "read {} ms1 spectra in {:#?}",
             ms1_spectra.len(),
@@ -444,26 +441,26 @@ impl TdfReader {
         reader: &TDFSpectrumReader<ImConverter>,
         mz_converter: &MzConverter,
         scale: &MobilityScale,
-    ) -> Vec<RawSpectrum> {
+    ) -> Result<Vec<RawSpectrum>, crate::Error> {
         let start = std::time::Instant::now();
         let spectra: Vec<RawSpectrum> = (0..reader.len())
             .into_par_iter()
-            .filter_map(|index| match reader.get(index) {
-                Ok(spectrum) => {
-                    Self::msn_spectrum(file_id, &spectrum.convert_to(mz_converter), scale)
-                }
-                Err(error) => {
-                    log::warn!("error parsing Bruker diaPASEF spectrum: {error}");
-                    None
-                }
+            .map(|index| {
+                reader
+                    .get(index)
+                    .map(|spectrum| {
+                        Self::msn_spectrum(file_id, &spectrum.convert_to(mz_converter), scale)
+                    })
+                    .map_err(crate::Error::TDFWindow)
             })
-            .collect();
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?;
         log::info!(
             "read {} diaPASEF window spectra in {:#?}",
             spectra.len(),
             start.elapsed()
         );
-        spectra
+        Ok(spectra)
     }
 
     fn read_msn_spectra(
@@ -474,14 +471,9 @@ impl TdfReader {
     ) -> Result<Vec<RawSpectrum>, timsrust::TimsRustError> {
         let spectra: Vec<RawSpectrum> = spectrum_reader
             .par_iter()
-            .filter_map(|result| match result {
-                Ok(spectrum) => Self::msn_spectrum(file_id, &spectrum, scale),
-                Err(error) => {
-                    log::warn!("error parsing Bruker MS2 spectrum: {error}");
-                    None
-                }
-            })
-            .collect();
+            .map(|result| result.map(|spectrum| Self::msn_spectrum(file_id, &spectrum, scale)))
+            .filter_map(Result::transpose)
+            .collect::<Result<_, _>>()?;
         Ok(spectra)
     }
 

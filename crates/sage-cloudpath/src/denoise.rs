@@ -15,7 +15,7 @@
 //! diaPASEF isolation windows from `DiaFrameMsMsWindows`, both converted with the
 //! run-level m/z calibration of `GlobalMetadata` and the run's `TimsCalibration`.
 
-use crate::tims_mobility::BrukerMobilityScale;
+use crate::tims_mobility::{metadata_value, BrukerMobilityScale};
 use dnoise_core::{
     convert::{ConvertableDomain, Scan2ImConverter, Tof2MzConverter},
     mobility::TimsCalibrationModel,
@@ -24,10 +24,10 @@ use dnoise_core::{
     Acquisition, Denoiser, DiaMs1WindowParams, FilterParams, FlatFrame, FrameMeta, HaloParams,
     Ms1PolygonParams, ScanToMobility, Stages,
 };
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use timsrust_reader::{MetadataDatabase as Connection, MetadataRow};
 
 /// dnoise settings for timsTOF MS1 frames. Off by default; every other key
 /// defaults to the dnoise 0.5.0 CLI default and uses the same name as
@@ -116,7 +116,7 @@ pub enum DenoiseError {
     Sql {
         path: PathBuf,
         #[source]
-        source: rusqlite::Error,
+        source: timsrust_reader::Error,
     },
     #[error("{path}: {message}")]
     Metadata { path: PathBuf, message: String },
@@ -321,18 +321,17 @@ struct Tdf {
 
 impl Tdf {
     fn open(path: &Path) -> Result<Self, DenoiseError> {
-        let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|source| DenoiseError::Sql {
-                path: path.to_path_buf(),
-                source,
-            })?;
+        let connection = Connection::open(path).map_err(|source| DenoiseError::Sql {
+            path: path.to_path_buf(),
+            source,
+        })?;
         Ok(Self {
             path: path.to_path_buf(),
             connection,
         })
     }
 
-    fn sql(&self, source: rusqlite::Error) -> DenoiseError {
+    fn sql(&self, source: timsrust_reader::Error) -> DenoiseError {
         DenoiseError::Sql {
             path: self.path.clone(),
             source,
@@ -353,80 +352,76 @@ impl Tdf {
         }
     }
 
+    fn rows(&self, table: &str) -> Result<Vec<MetadataRow>, DenoiseError> {
+        self.connection.table(table).map_err(|e| self.sql(e))
+    }
+
+    fn field<T: serde::de::DeserializeOwned>(
+        &self,
+        row: &MetadataRow,
+        name: &str,
+    ) -> Result<T, DenoiseError> {
+        let value = metadata_value(row, name)
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        serde_json::from_value(value)
+            .map_err(|error| self.metadata(format!("invalid {name}: {error}")))
+    }
+
     fn has_table(&self, name: &str) -> Result<bool, DenoiseError> {
-        self.connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                [name],
-                |row| row.get(0),
-            )
-            .map_err(|e| self.sql(e))
+        Ok(self
+            .connection
+            .tables()
+            .map_err(|e| self.sql(e))?
+            .iter()
+            .any(|table| table == name))
     }
 
     fn frame_meta(&self) -> Result<Vec<FrameMeta>, DenoiseError> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT Id, NumScans, NumPeaks, MsMsType, Time FROM Frames ORDER BY Id")
-            .map_err(|e| self.sql(e))?;
-        let rows = statement
-            .query_map([], |r| {
+        let mut rows = self
+            .rows("Frames")?
+            .iter()
+            .map(|r| {
                 Ok(FrameMeta {
-                    id: r.get::<_, i64>(0)? as usize,
-                    num_scans: r.get::<_, i64>(1)? as usize,
-                    num_peaks: r.get::<_, i64>(2)? as u64,
-                    ms_ms_type: r.get(3)?,
-                    rt: r.get(4)?,
+                    id: self.field(r, "Id")?,
+                    num_scans: self.field(r, "NumScans")?,
+                    num_peaks: self.field(r, "NumPeaks")?,
+                    ms_ms_type: self.field(r, "MsMsType")?,
+                    rt: self.field(r, "Time")?,
                 })
             })
-            .map_err(|e| self.sql(e))?;
-        rows.collect::<Result<_, _>>().map_err(|e| self.sql(e))
+            .collect::<Result<Vec<_>, DenoiseError>>()?;
+        rows.sort_by_key(|row| row.id);
+        Ok(rows)
     }
 
-    /// dnoise converts gate geometry once with the run-level calibration, which
-    /// is exact only when every frame shares one calibration row.
+    /// Gate geometry uses one calibration for the whole acquisition.
     fn require_single_calibration(&self, gate: &str, key: &str) -> Result<(), DenoiseError> {
-        let mut columns = BTreeSet::new();
-        let mut statement = self
-            .connection
-            .prepare("PRAGMA table_info(Frames)")
-            .map_err(|e| self.sql(e))?;
-        let rows = statement
-            .query_map([], |r| r.get::<_, String>(1))
-            .map_err(|e| self.sql(e))?;
-        for column in rows {
-            columns.insert(column.map_err(|e| self.sql(e))?);
-        }
-        let count = |column: &str| -> Result<i64, DenoiseError> {
-            if !columns.contains(column) {
+        let rows = self.rows("Frames")?;
+        let count = |column: &str| -> Result<usize, DenoiseError> {
+            if !rows.iter().any(|row| metadata_value(row, column).is_some()) {
                 return Ok(1);
             }
-            self.connection
-                .query_row(
-                    &format!("SELECT COUNT(DISTINCT {column}) FROM Frames"),
-                    [],
-                    |r| r.get(0),
-                )
-                .map_err(|e| self.sql(e))
+            let values = rows
+                .iter()
+                .map(|row| self.field::<Option<i64>>(row, column))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(values.into_iter().flatten().collect::<BTreeSet<_>>().len())
         };
         let (mz, im) = (count("MzCalibration")?, count("TimsCalibration")?);
         if mz > 1 || im > 1 {
             return Err(self.metadata(format!(
-                "the {gate} gate needs one calibration for the whole run, but frames reference \
-                 {mz} m/z and {im} mobility calibrations; set `bruker_config.denoise.{key}` to false"
+                "the {gate} gate needs one calibration for the whole run, but frames reference {mz} m/z and {im} mobility calibrations. Set `bruker_config.denoise.{key}` to false"
             )));
         }
         Ok(())
     }
 
     fn global_metadata(&self) -> Result<HashMap<String, String>, DenoiseError> {
-        let mut statement = self
-            .connection
-            .prepare("SELECT Key, Value FROM GlobalMetadata")
-            .map_err(|e| self.sql(e))?;
-        let rows = statement
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-            .map_err(|e| self.sql(e))?;
-        rows.collect::<Result<_, _>>().map_err(|e| self.sql(e))
+        self.rows("GlobalMetadata")?
+            .iter()
+            .map(|row| Ok((self.field(row, "Key")?, self.field(row, "Value")?)))
+            .collect()
     }
 
     /// The run-level converters dnoise uses: timsrust 0.4.2's m/z line (with the
@@ -462,31 +457,28 @@ impl Tdf {
             }
             BrukerMobilityScale::Calibrated => {
                 let ids: Vec<i64> = self
-                    .connection
-                    .prepare("SELECT DISTINCT TimsCalibration FROM Frames")
-                    .and_then(|mut s| s.query_map([], |r| r.get(0))?.collect())
-                    .map_err(|e| self.sql(e))?;
+                    .rows("Frames")?
+                    .iter()
+                    .map(|row| self.field::<i64>(row, "TimsCalibration"))
+                    .collect::<Result<BTreeSet<_>, _>>()?
+                    .into_iter()
+                    .collect();
                 let [id] = ids[..] else {
                     return Err(self.metadata(format!(
                         "frames reference {} TimsCalibration rows, expected one",
                         ids.len()
                     )));
                 };
-                let (model, c) = self
-                    .connection
-                    .query_row(
-                        "SELECT ModelType, C0, C1, C2, C3, C4, C5, C6, C7, C8, C9 \
-                         FROM TimsCalibration WHERE Id = ?1",
-                        [id],
-                        |r| {
-                            let mut c = [0.0; 10];
-                            for (i, v) in c.iter_mut().enumerate() {
-                                *v = r.get(i + 1)?;
-                            }
-                            Ok((r.get::<_, i64>(0)?, c))
-                        },
-                    )
-                    .map_err(|e| self.sql(e))?;
+                let rows = self.rows("TimsCalibration")?;
+                let row = rows
+                    .iter()
+                    .find(|row| metadata_value(row, "Id").and_then(|v| v.as_i64()) == Some(id))
+                    .ok_or_else(|| self.metadata(format!("missing TimsCalibration {id}")))?;
+                let model = self.field::<i64>(row, "ModelType")?;
+                let mut c = [0.0; 10];
+                for (i, value) in c.iter_mut().enumerate() {
+                    *value = self.field(row, &format!("C{i}"))?;
+                }
                 ScanToMobility::Calibrated(TimsCalibrationModel::new(model, c).map_err(|e| {
                     self.metadata(format!(
                         "{e}; set `bruker_config.denoise.mobility_scale` to \"linear\""
@@ -502,26 +494,23 @@ impl Tdf {
         if !self.has_table("PropertyDefinitions")? || !self.has_table("GroupProperties")? {
             return Ok(None);
         }
+        let properties = self.rows("PropertyDefinitions")?;
+        let groups = self.rows("GroupProperties")?;
         let property = |name: &str| -> Result<Option<i64>, DenoiseError> {
-            self.connection
-                .query_row(
-                    "SELECT Id FROM PropertyDefinitions WHERE PermanentName=?1",
-                    [name],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| self.sql(e))
+            properties
+                .iter()
+                .find(|row| {
+                    metadata_value(row, "PermanentName").and_then(|v| v.as_str()) == Some(name)
+                })
+                .map(|row| self.field(row, "Id"))
+                .transpose()
         };
         let blob = |id: i64| -> Result<Option<Vec<f64>>, DenoiseError> {
-            let blob: Option<Vec<u8>> = self
-                .connection
-                .query_row(
-                    "SELECT Value FROM GroupProperties WHERE Property=?1 LIMIT 1",
-                    [id],
-                    |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| self.sql(e))?;
+            let blob: Option<Vec<u8>> = groups
+                .iter()
+                .find(|row| metadata_value(row, "Property").and_then(|v| v.as_i64()) == Some(id))
+                .map(|row| self.field(row, "Value"))
+                .transpose()?;
             Ok(blob.map(|b| {
                 b.chunks_exact(8)
                     .map(|c| f64::from_le_bytes(c.try_into().expect("8-byte chunk")))
@@ -546,45 +535,53 @@ impl Tdf {
         if !self.has_table("DiaFrameMsMsInfo")? || !self.has_table("DiaFrameMsMsWindows")? {
             return Ok(false);
         }
-        self.connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM DiaFrameMsMsInfo i JOIN DiaFrameMsMsWindows w \
-                 ON w.WindowGroup = i.WindowGroup WHERE w.ScanNumEnd > w.ScanNumBegin)",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|e| self.sql(e))
+        let groups = self
+            .rows("DiaFrameMsMsInfo")?
+            .iter()
+            .map(|row| self.field::<i64>(row, "WindowGroup"))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        for row in self.rows("DiaFrameMsMsWindows")? {
+            if groups.contains(&self.field::<i64>(&row, "WindowGroup")?)
+                && self.field::<i64>(&row, "ScanNumEnd")?
+                    > self.field::<i64>(&row, "ScanNumBegin")?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn dia_ms1_boxes(&self) -> Result<Vec<DiaMs1Box>, DenoiseError> {
         if !self.has_table("DiaFrameMsMsWindows")? {
             return Ok(Vec::new());
         }
-        let mut statement = self
-            .connection
-            .prepare(
-                "SELECT DISTINCT ScanNumBegin, ScanNumEnd, IsolationMz, IsolationWidth \
-                 FROM DiaFrameMsMsWindows \
-                 WHERE IsolationMz IS NOT NULL AND IsolationWidth IS NOT NULL",
-            )
-            .map_err(|e| self.sql(e))?;
-        let rows = statement
-            .query_map([], |r| {
-                let mz: f64 = r.get(2)?;
-                let width: f64 = r.get(3)?;
-                Ok(DiaMs1Box {
-                    scan_begin: r.get::<_, i64>(0)? as u32,
-                    scan_end: r.get::<_, i64>(1)? as u32,
+        let mut seen = BTreeSet::new();
+        let mut boxes = Vec::new();
+        for row in self.rows("DiaFrameMsMsWindows")? {
+            let (Some(mz), Some(width)) = (
+                self.field::<Option<f64>>(&row, "IsolationMz")?,
+                self.field::<Option<f64>>(&row, "IsolationWidth")?,
+            ) else {
+                continue;
+            };
+            let begin = self.field::<u32>(&row, "ScanNumBegin")?;
+            let end = self.field::<u32>(&row, "ScanNumEnd")?;
+            if seen.insert((
+                begin,
+                end,
+                if mz == 0.0 { 0 } else { mz.to_bits() },
+                if width == 0.0 { 0 } else { width.to_bits() },
+            )) && end > begin
+            {
+                boxes.push(DiaMs1Box {
+                    scan_begin: begin,
+                    scan_end: end,
                     mz_lo: mz - width / 2.0,
                     mz_hi: mz + width / 2.0,
-                })
-            })
-            .map_err(|e| self.sql(e))?;
-        let boxes: Vec<DiaMs1Box> = rows.collect::<Result<_, _>>().map_err(|e| self.sql(e))?;
-        Ok(boxes
-            .into_iter()
-            .filter(|b| b.scan_end > b.scan_begin)
-            .collect())
+                });
+            }
+        }
+        Ok(boxes)
     }
 
     /// dnoise's `build_polygon_gate`. Skipped on runs with diaPASEF windows,

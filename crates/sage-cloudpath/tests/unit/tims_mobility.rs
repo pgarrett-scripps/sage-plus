@@ -178,3 +178,17 @@ fn analysis_tdf_is_resolved_like_timsrust() {
         MobilityCalibration::dda_precursor_scans(&directory).unwrap()
     );
 }
+
+#[test]
+fn lowercase_global_metadata_columns_preserve_linear_scale() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("analysis.tdf");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE GlobalMetadata(key TEXT, value TEXT);
+        INSERT INTO GlobalMetadata VALUES('OneOverK0AcqRangeLower','0.6'),('OneOverK0AcqRangeUpper','1.6');
+        CREATE TABLE Frames(numscans INTEGER);
+        INSERT INTO Frames VALUES(100),(200);").unwrap();
+    drop(db);
+    let actual = LinearMobilityScale::from_path(&path).unwrap();
+    assert_eq!(actual, LinearMobilityScale::new(0.6, 1.6, 200));
+}

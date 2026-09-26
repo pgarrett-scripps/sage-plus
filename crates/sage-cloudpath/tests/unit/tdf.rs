@@ -313,3 +313,42 @@ fn diapasef_reads_one_spectrum_per_window_split() {
     ));
     assert_eq!(split.len(), 2 * spectra.len());
 }
+
+#[test]
+fn corrupt_compressed_frame_fails_the_whole_import() {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bruker/example_dia.d");
+    let temp = tempfile::tempdir().unwrap();
+    for name in ["analysis.tdf", "analysis.tdf_bin"] {
+        std::fs::copy(source.join(name), temp.path().join(name)).unwrap();
+    }
+    let db = rusqlite::Connection::open(temp.path().join("analysis.tdf")).unwrap();
+    let offset: u64 = db
+        .query_row(
+            "SELECT TimsId FROM Frames WHERE MsMsType=9 ORDER BY Id LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(db);
+    let mut binary = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(temp.path().join("analysis.tdf_bin"))
+        .unwrap();
+    binary.seek(SeekFrom::Start(offset)).unwrap();
+    let mut size = [0u8; 4];
+    binary.read_exact(&mut size).unwrap();
+    let enlarged = u32::from_le_bytes(size) + 1;
+    binary.seek(SeekFrom::Start(offset)).unwrap();
+    binary.write_all(&enlarged.to_le_bytes()).unwrap();
+    drop(binary);
+    let error = TdfReader
+        .parse(temp.path(), 0, BrukerProcessingConfig::default(), true)
+        .unwrap_err();
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("trailing") || message.contains("extent"),
+        "{message}"
+    );
+}

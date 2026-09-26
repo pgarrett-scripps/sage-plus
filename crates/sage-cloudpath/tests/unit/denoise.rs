@@ -224,3 +224,37 @@ fn denoises_only_ms1_spectra_when_reading_the_fixture() {
         assert!(mobility.iter().all(|&im| (0.5..1.7).contains(&im)));
     }
 }
+
+#[test]
+fn lowercase_columns_preserve_calibration_gate_and_polygon_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("analysis.tdf");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("CREATE TABLE Frames(id INTEGER, mzcalibration INTEGER, timscalibration INTEGER);
+        INSERT INTO Frames VALUES(1,7,1),(2,8,1);
+        CREATE TABLE PropertyDefinitions(id INTEGER, permanentname TEXT);
+        INSERT INTO PropertyDefinitions VALUES(1,'IMS_PolygonFilter_Mass'),(2,'IMS_PolygonFilter_Mobility');
+        CREATE TABLE GroupProperties(property INTEGER, value BLOB);").unwrap();
+    let mz: Vec<u8> = [400.0f64, 600.0, 500.0]
+        .into_iter()
+        .flat_map(f64::to_le_bytes)
+        .collect();
+    let im: Vec<u8> = [0.8f64, 0.8, 1.2]
+        .into_iter()
+        .flat_map(f64::to_le_bytes)
+        .collect();
+    db.execute("INSERT INTO GroupProperties VALUES(1,?1)", [mz])
+        .unwrap();
+    db.execute("INSERT INTO GroupProperties VALUES(2,?1)", [im])
+        .unwrap();
+    drop(db);
+    let native = Tdf::open(&path).unwrap();
+    let error = native
+        .require_single_calibration("polygon", "ms1_polygon")
+        .unwrap_err();
+    assert!(error.to_string().contains("2 m/z and 1 mobility"));
+    assert_eq!(
+        native.selection_polygon().unwrap(),
+        Some((vec![400.0, 600.0, 500.0], vec![0.8, 0.8, 1.2]))
+    );
+}

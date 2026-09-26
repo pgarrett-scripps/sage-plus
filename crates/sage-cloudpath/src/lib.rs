@@ -293,6 +293,10 @@ pub enum Error {
     MzML(#[from] mzml::MzMLError),
     #[error("TDF error: {0}")]
     TDF(#[from] timsrust::TimsRustError),
+    #[error("Bruker frame decoding failed: {0}")]
+    TDFFrame(#[from] timsrust::core::FrameReaderError),
+    #[error("Bruker window processing failed: {0}")]
+    TDFWindow(#[from] timsrust::tdf::TDFSpectrumReaderError),
     #[error(transparent)]
     MobilityCalibration(#[from] tims_mobility::MobilityCalibrationError),
     #[error(transparent)]

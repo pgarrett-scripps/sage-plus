@@ -82,11 +82,13 @@ fn analysis_tdf_or_guess(path: &Path) -> PathBuf {
 
 #[derive(Debug, thiserror::Error)]
 pub enum MobilityCalibrationError {
+    #[error("invalid TDF metadata value: {0}")]
+    MetadataValue(#[from] serde_json::Error),
     #[error("failed to read ion mobility calibration from {path}: {source}")]
     Sql {
         path: PathBuf,
         #[source]
-        source: rusqlite::Error,
+        source: timsrust_reader::Error,
     },
     #[error(
         "{path}: TimsCalibration {id} uses unsupported ModelType {model}; set \
@@ -133,17 +135,16 @@ impl LinearMobilityScale {
             path: tdf.clone(),
             source,
         };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
+        let connection = timsrust_reader::MetadataDatabase::open(&tdf).map_err(sql)?;
+        let rows = connection.table("GlobalMetadata").map_err(sql)?;
         let metadata = |key: &str| -> Result<f64, MobilityCalibrationError> {
-            let value: String = connection
-                .query_row(
-                    "SELECT Value FROM GlobalMetadata WHERE Key = ?1",
-                    [key],
-                    |row| row.get(0),
-                )
-                .map_err(sql)?;
+            let value = rows
+                .iter()
+                .find(|row| metadata_value(row, "Key").and_then(|v| v.as_str()) == Some(key))
+                .and_then(|row| metadata_value(row, "Value"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
             value
                 .parse()
                 .map_err(|_| MobilityCalibrationError::InvalidMetadata {
@@ -154,10 +155,16 @@ impl LinearMobilityScale {
         };
         let lower = metadata("OneOverK0AcqRangeLower")?;
         let upper = metadata("OneOverK0AcqRangeUpper")?;
-        let scans: i64 = connection
-            .query_row("SELECT max(NumScans) FROM Frames", [], |row| row.get(0))
-            .map_err(sql)?;
-        Ok(Self::new(lower, upper, scans as u64))
+        let scans = connection
+            .table("Frames")
+            .map_err(sql)?
+            .iter()
+            .map(|row| field::<u64>(row, "NumScans"))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max()
+            .unwrap_or(0);
+        Ok(Self::new(lower, upper, scans))
     }
 
     pub fn one_over_k0(&self, scan: u32) -> f64 {
@@ -210,29 +217,22 @@ impl MobilityCalibration {
             path: tdf.clone(),
             source,
         };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
-
+        let connection = timsrust_reader::MetadataDatabase::open(&tdf).map_err(sql)?;
         let mut ids = HashMap::new();
         let mut models = Vec::new();
-        let mut statement = connection
-            .prepare(
-                "SELECT Id, ModelType, C0, C1, C2, C3, C4, C5, C6, C7, C8, C9 \
-                 FROM TimsCalibration ORDER BY Id",
-            )
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| {
-                let mut coefficients = [0.0; 10];
-                for (index, value) in coefficients.iter_mut().enumerate() {
-                    *value = row.get(index + 2)?;
-                }
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, coefficients))
-            })
-            .map_err(sql)?;
-        for row in rows {
-            let (id, model, coefficients) = row.map_err(sql)?;
+        let mut rows = connection
+            .table("TimsCalibration")
+            .map_err(sql)?
+            .into_iter()
+            .map(|row| Ok((field::<i64>(&row, "Id")?, row)))
+            .collect::<Result<Vec<_>, MobilityCalibrationError>>()?;
+        rows.sort_by_key(|(id, _)| *id);
+        for (id, row) in rows {
+            let model = field::<i64>(&row, "ModelType")?;
+            let mut coefficients = [0.0; 10];
+            for (index, value) in coefficients.iter_mut().enumerate() {
+                *value = field(&row, &format!("C{index}"))?;
+            }
             if model != 2 {
                 return Err(MobilityCalibrationError::UnsupportedModel {
                     path: tdf.clone(),
@@ -249,14 +249,9 @@ impl MobilityCalibration {
 
         let mut frame_models = HashMap::new();
         let mut counts = vec![0usize; models.len()];
-        let mut statement = connection
-            .prepare("SELECT Id, TimsCalibration FROM Frames")
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-            .map_err(sql)?;
-        for row in rows {
-            let (frame, id) = row.map_err(sql)?;
+        for row in connection.table("Frames").map_err(sql)? {
+            let frame: i64 = field(&row, "Id")?;
+            let id: i64 = field(&row, "TimsCalibration")?;
             let model =
                 *ids.get(&id)
                     .ok_or_else(|| MobilityCalibrationError::MissingCalibration {
@@ -302,34 +297,48 @@ impl MobilityCalibration {
             path: tdf.clone(),
             source,
         };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
-        let exists: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Precursors')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(sql)?;
-        if !exists {
+        let connection = timsrust_reader::MetadataDatabase::open(&tdf).map_err(sql)?;
+        if !connection
+            .tables()
+            .map_err(sql)?
+            .iter()
+            .any(|table| table.eq_ignore_ascii_case("Precursors"))
+        {
             return Ok(HashMap::new());
         }
-        let mut statement = connection
-            .prepare("SELECT Id, Parent, ScanNumber FROM Precursors WHERE ScanNumber IS NOT NULL")
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)? as usize,
-                    (row.get::<_, i64>(1)? as usize, row.get::<_, f64>(2)?),
-                ))
-            })
-            .map_err(sql)?;
-        rows.collect::<Result<_, _>>().map_err(sql)
+        let mut result = HashMap::new();
+        for row in connection.table("Precursors").map_err(sql)? {
+            if let Some(scan) = field::<Option<f64>>(&row, "ScanNumber")? {
+                result.insert(
+                    field::<usize>(&row, "Id")?,
+                    (field::<usize>(&row, "Parent")?, scan),
+                );
+            }
+        }
+        Ok(result)
     }
 }
 
 #[cfg(test)]
 #[path = "../tests/unit/tims_mobility.rs"]
 mod test;
+
+fn field<T: serde::de::DeserializeOwned>(
+    row: &timsrust_reader::MetadataRow,
+    name: &str,
+) -> Result<T, MobilityCalibrationError> {
+    let value = metadata_value(row, name)
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Ok(serde_json::from_value(value)?)
+}
+
+/// SQLite column identifiers retain their source spelling in the native reader.
+pub(crate) fn metadata_value<'a>(
+    row: &'a timsrust_reader::MetadataRow,
+    name: &str,
+) -> Option<&'a serde_json::Value> {
+    row.iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value)
+}

@@ -3,7 +3,7 @@ name = "sage-cloudpath"
 version.workspace = true
 authors = ["Michael Lazear <michaellazear92@gmail.com"]
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.97"
 description = "A very fast proteomics database search tool"
 readme = "README.md"
 license = "MIT"
@@ -30,9 +30,8 @@ tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 quick-xml = { version = "0.41.0", features = ["async-tokio"] }
 timsrust = { version = "0.6.6" }
-# Same version and features as timsrust; reads TimsCalibration from analysis.tdf.
-rusqlite = { version = "0.35", features = ["bundled"] }
-opentfraw = "1.4.1"
+timsrust-reader = { git = "https://github.com/pgarrett-scripps/timsrust-reader", rev = "27a8c0e6ab17e15a2b983bf3af26149be0b8eeeb" }
+opentfraw = { package = "opentfraw-reader", git = "https://github.com/pgarrett-scripps/opentfraw", rev = "e1b6afb3178d8babdf49e10a2ee05854e5332703" }
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
 dnoise-core = "0.5.0"
 rayon = "1.5"
@@ -49,4 +48,5 @@ parquet = { version = "59.2.0", optional = true, default-features = false, featu
 mzdata = { version = "0.65.5", optional = true, default-features = false, features = ["mzmlb", "hdf5_static", "zlib"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.35", features = ["bundled"] }
 tempfile = "3"
