@@ -50,9 +50,9 @@ pub struct DiaSettings {
     /// of the precursor feature's apex mobility.
     #[schemars(range(min = 0.0))]
     pub im_tolerance: f32,
-    /// Orbitrap only: also seed charge-2 pseudo-spectra from MS1 hills that no
-    /// isotope feature claimed (at least 5 scans, apex above the median of
-    /// such hills). timsTOF ignores it.
+    /// Also seed charge-2 pseudo-spectra from MS1 hills that no isotope
+    /// feature claimed (at least 5 scans, apex above the median of such
+    /// hills). On timsTOF the precursor 1/K0 is the hill's 1/K0.
     pub hill_precursors: bool,
 }
 
@@ -446,7 +446,7 @@ pub fn pseudo_spectra_tdf(
     file_id: usize,
     settings: &DiaSettings,
 ) -> anyhow::Result<Vec<RawSpectrum>> {
-    let hills = crate::tims::detect_hills(path, settings.ms2_min_scans)?;
+    let hills = crate::tims::detect_hills(path, settings.ms2_min_scans, settings.hill_precursors)?;
     Ok(from_hills(hills, file_id, settings))
 }
 

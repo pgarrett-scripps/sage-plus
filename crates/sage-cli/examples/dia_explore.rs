@@ -586,7 +586,11 @@ fn tier_row(p: &Psm) -> [f64; 14] {
 /// Hills of the input: from the `.raw` scans, or straight from `.d` frames.
 fn run_hills(args: &Args, raw: &[RawSpectrum]) -> anyhow::Result<dia::RunHills> {
     if TIMS.load(Ordering::Relaxed) {
-        sage_dia::tims::detect_hills(std::path::Path::new(&args.raw), args.ms2_min_scans as u32)
+        sage_dia::tims::detect_hills(
+            std::path::Path::new(&args.raw),
+            args.ms2_min_scans as u32,
+            args.hill_precursors,
+        )
     } else {
         dia::detect_hills(raw, args.ms2_min_scans as u32, args.hill_precursors)
     }

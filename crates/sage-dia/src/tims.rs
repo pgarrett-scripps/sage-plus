@@ -170,7 +170,11 @@ struct DiaBox {
 /// Detect MS1 hills + isotope features and per-box MS2 hills of a diaPASEF
 /// run. Channels carry their box's m/z and 1/K0 bounds, hills and precursors
 /// their ion mobility.
-pub fn detect_hills(path: &Path, ms2_min_scans: u32) -> anyhow::Result<RunHills> {
+pub fn detect_hills(
+    path: &Path,
+    ms2_min_scans: u32,
+    hill_precursors: bool,
+) -> anyhow::Result<RunHills> {
     let tims = TimsTofPath::new(path.to_string_lossy())
         .map_err(|e| anyhow!("{}: not a timsTOF .d: {e:?}", path.display()))?;
     let reader = tims
@@ -257,10 +261,16 @@ pub fn detect_hills(path: &Path, ms2_min_scans: u32) -> anyhow::Result<RunHills>
         features.len(),
         start.elapsed() - hill_time
     );
-    let precursors: Vec<PrecursorTrace> = features
+    let mut precursors: Vec<PrecursorTrace> = features
         .iter()
         .filter_map(PrecursorTrace::from_koth)
         .collect();
+    if hill_precursors {
+        // Precursor 1/K0 is the hill's intensity-weighted mobility.
+        let extra = crate::pipeline::single_hill_precursors(&ms1_hills, &features);
+        log::info!("timsTOF DIA: {} single-hill precursors", extra.len());
+        precursors.extend(extra);
+    }
     drop(features);
     let ms1 = Channel::from_hills(0.0, f64::INFINITY, ms1_rts, ms1_hills);
 

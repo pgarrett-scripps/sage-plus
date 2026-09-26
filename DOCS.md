@@ -1004,14 +1004,14 @@ settings and their defaults:
   "min_peaks": 6,         // drop pseudo-spectra with fewer fragments
   "max_peaks": 150,       // keep the most intense fragments
   "im_tolerance": 0.01,   // timsTOF: max 1/K0 difference between fragment and precursor hills
-  "hill_precursors": true // Orbitrap: also search strong MS1 hills with no isotope feature
+  "hill_precursors": true // also search strong MS1 hills with no isotope feature
 }
 ```
 
 Pseudo-spectrum ids are `pseudo=<n> window=<w>`. With `hill_precursors` (the default), MS1
 hills that no charged isotope feature claimed are searched as charge 2 monoisotopic
 precursors, provided they span at least 5 MS1 scans and their apex is at or above the median
-of such hills. It applies to Thermo RAW, mzML and mzMLb input; timsTOF ignores it. Precursors
+of such hills. On timsTOF the precursor 1/K0 is the hill's 1/K0. Precursors
 with no MS1 hill at all are not searched. The mode supports Thermo RAW, mzML and mzMLb DIA files with m/z isolation
 windows, and Bruker timsTOF diaPASEF `.d` directories.
 
@@ -1032,7 +1032,8 @@ wide-window chimeric search found 6,975 in 30 s with 3.0 GB. The wide-window sea
 therefore stays the default for DIA, and pseudo mode is the fast option.
 
 On a timsTOF diaPASEF E. coli run (PRIDE PXD070049, `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01`,
-50 ng, 15 min), pseudo mode found 7,412 peptides in 2 min with 6.0 GB peak memory. The
+50 ng, 15 min), pseudo mode found 7,604 peptides in 1 min 45 s with 6.3 GB peak memory
+(7,412 without `hill_precursors`). The
 default chimeric search found 8,087 in 12 min 50 s with 16.6 GB. On diaPASEF that search
 reads timsrust's precursor-anchored spectra (one per MS1 precursor and MS2 frame), not
 wide windows.

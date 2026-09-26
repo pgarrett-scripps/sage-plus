@@ -673,8 +673,14 @@ intensity scale; an absolute 3e5 is no better.
 | | (a) wide-window | (b) pseudo | Share of (a) |
 |---|---|---|---|
 | Orbitrap | 6,975 | 5,959 (was 5,763) | 85% (was 83%) |
-| timsTOF ((a) is timsrust precursor-anchored, see section 10) | 8,087 | 7,412 (unchanged) | 92% |
-| timsTOF, true wide-window (a'), default / best split | 3,897 / 6,386 | 7,412 | 190% / 116% |
+| timsTOF ((a) is timsrust precursor-anchored, see section 10) | 8,087 | 7,604 (was 7,412) | 94% (was 92%) |
+| timsTOF, true wide-window (a'), default / best split | 3,897 / 6,386 | 7,604 | 195% / 119% |
 
-timsTOF ignores the setting: there are only 170 no-feature misses there, and the hills carry
-1/K0, which would need its own tuning. Its default-config run still gives 7,412.
+timsTOF was first left out: there are only 170 no-feature misses there, and the hills carry
+1/K0. Enabled with the same rule (charge 2, at least 5 scans, apex at or above the median of
+the unclaimed hills) and the hill's intensity-weighted 1/K0 as the precursor 1/K0, it adds
+492,948 precursors to 137,970 features. Pseudo-spectra go from 90,462 to 155,499, and the
+diaPASEF E. coli run goes from **7,412 to 7,604 peptides (+192, +2.6%)** and from 9,273 to
+10,378 PSMs, in 1 min 45 s and 6.3 GB (2 min 6 s and 6.1 GB without). The hills already
+carry 1/K0 from the MS1 centroids, so no separate tuning was needed. It is on for both
+instruments.

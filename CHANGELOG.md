@@ -24,7 +24,7 @@ entries are retained below for provenance.
   per diaPASEF m/z × 1/K0 box. koth hills and features carry 1/K0, a feature is paired only
   with boxes that contain its m/z and 1/K0, and fragment hills must match its 1/K0 within the
   new `dia.im_tolerance` (default 0.01). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
-  it found 7,412 peptides in 2 min and 6.0 GB. The default chimeric search, which on
+  it found 7,604 peptides in 1 min 45 s and 6.3 GB (7,412 without `dia.hill_precursors`). The default chimeric search, which on
   diaPASEF reads timsrust's precursor-anchored spectra rather than wide windows, found 8,087
   in 12 min 50 s and 16.6 GB.
 - `dia` defaults tuned from a diagnosis of the peptides wide-window finds and pseudo mode
@@ -34,11 +34,12 @@ entries are retained below for provenance.
   finds 92% of the default search's peptides on timsTOF (was 79%; that baseline is
   timsrust's precursor-anchored spectra, not wide windows) and 83% of the wide-window
   peptides on Orbitrap (was 80%).
-- `dia.hill_precursors` (on by default, Orbitrap only): MS1 hills that no charged isotope
+- `dia.hill_precursors` (on by default): MS1 hills that no charged isotope
   feature claimed are also searched as charge 2 precursors, if they span at least 5 MS1 scans
   and their apex is at or above the median of such hills. On the Orbitrap AIF E. coli run,
   pseudo mode goes from 5,763 to 5,959 peptides (+3.4%, 83% → 85% of wide-window), with the
-  same time and memory. timsTOF is unchanged (7,412).
+  same time and memory. On the diaPASEF E. coli run, with the precursor 1/K0 taken from the
+  hill, it goes from 7,412 to 7,604 peptides (+2.6%) in the same time and memory.
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
