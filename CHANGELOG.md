@@ -29,6 +29,16 @@ entries are retained below for provenance.
   and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
   to keep the previous exact behavior.
 
+### Fixed
+- mzML files read without an MS-level filter no longer gain an empty spectrum (blank id, MS
+  level 0) for every spectrum with zero total ion current.
+- A modification site such as `peptide_n_term:Z` now reports an invalid residue instead of a
+  too-long specificity.
+- `SAGE_PREFILTER_DIGEST_GB` values that are not positive numbers are ignored with a warning
+  instead of forcing 256 digest passes.
+- `Matrix::get_mut` returns `None` for an out-of-range column instead of another row's entry,
+  and `Matrix::is_close` compares shapes and every entry of non-square matrices.
+
 ## [v0.1.0-beta.10] - 2026-09-25
 
 ### Added
