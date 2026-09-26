@@ -533,6 +533,7 @@ impl SpectrumIndex {
         if self.min_matched_peaks <= 1 {
             return self.any_match(scratch);
         }
+        scratch.fragments.sort_unstable_by(f32::total_cmp);
         // A window counts the matches of its unshifted and shifted probes,
         // so any single probe reaching the threshold decides early.
         self.count_matches(scratch, self.min_matched_peaks)
@@ -653,12 +654,22 @@ impl SpectrumIndex {
                     let peaks = self.peaks_of(probe);
                     let window = |mass| fragment_window(self.fragment_tol, mass, probe.shift);
                     // Lower and upper bounds are both monotone within a probe,
-                    // so the windows containing a fragment are contiguous.
-                    let count = scratch.fragments.iter().fold(0u16, |count, &fragment| {
-                        let end = peaks.partition_point(|&mass| window(mass).0 <= fragment);
-                        let start = peaks[..end].partition_point(|&mass| window(mass).1 < fragment);
-                        count.saturating_add((end - start).min(u16::MAX as usize) as u16)
-                    });
+                    // so the windows containing a fragment are a contiguous
+                    // run ending at the last window starting at or below it.
+                    // Fragments are sorted, so that end only moves forward.
+                    let mut count = 0u16;
+                    let mut end = 0;
+                    for &fragment in &scratch.fragments {
+                        end += peaks[end..].partition_point(|&mass| window(mass).0 <= fragment);
+                        let mut start = end;
+                        while start > 0 && window(peaks[start - 1]).1 >= fragment {
+                            start -= 1;
+                        }
+                        count = count.saturating_add((end - start).min(u16::MAX as usize) as u16);
+                        if count >= stop {
+                            break;
+                        }
+                    }
                     scratch.counts[probe_ix as usize] = count;
                     if count >= stop {
                         return true;

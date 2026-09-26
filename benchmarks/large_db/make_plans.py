@@ -4,8 +4,9 @@
 Every plan starts from the paper's public search settings (tryptic, one missed
 cleavage, 7 to 50 residues, fixed carbamidomethylation, 10 ppm precursor and
 20 ppm fragment tolerances) with an explicit 16 GiB memory limit and eight
-workers. Each database is searched with the exact prefilter and, where the
-memory preflight allows it, without.
+workers. Each database is searched with the prefilter and, where the memory
+preflight allows it, without. `--min-matched` and `--max-peaks` set the
+prefilter's match threshold and peak cap.
 """
 
 from __future__ import annotations
@@ -49,9 +50,14 @@ BASE = {
 }
 
 
+PREFILTER: dict = {}
+
+
 def config(fasta: Path, spectra: list[Path], prefilter: bool, oxidation: bool = False,
            isotope_errors: list[int] | None = None) -> dict:
     content = copy.deepcopy(BASE)
+    if prefilter:
+        content["database"] |= PREFILTER
     if isotope_errors is not None:
         content["isotope_errors"] = isotope_errors
     content["database"]["fasta"] = str(fasta)
@@ -77,7 +83,13 @@ def pair(name: str, fasta: Path, spectra: list[Path], meta: dict,
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--min-matched", type=int, help="prefilter_min_matched_peaks")
+    parser.add_argument("--max-peaks", type=int, help="prefilter_max_peaks")
     args = parser.parse_args()
+    if args.min_matched is not None:
+        PREFILTER["prefilter_min_matched_peaks"] = args.min_matched
+    if args.max_peaks is not None:
+        PREFILTER["prefilter_max_peaks"] = args.max_peaks
     args.out.mkdir(parents=True, exist_ok=True)
 
     scaling = pair("hek-human", REFERENCES / "human.fasta", [HEK],
