@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `prefilter_min_matched_peaks` (default 1) and `prefilter_max_peaks` (default: all peaks). The
+  prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
+  `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
+  `prefilter_max_peaks` most intense peaks. The defaults keep every peptide that could enter
+  the preliminary search, as before, so results are unchanged unless they are set.
+
 ## [v0.1.0-beta.10] - 2026-09-25
 
 ### Added

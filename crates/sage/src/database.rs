@@ -129,6 +129,12 @@ pub struct Builder {
     pub prefilter_chunk_size: Option<usize>,
     /// Pre-filter the database to minimize memory usage
     pub prefilter: Option<bool>,
+    /// Preliminary fragment matches one precursor hypothesis of a spectrum
+    /// needs for the prefilter to keep a peptide (default 1).
+    pub prefilter_min_matched_peaks: Option<u16>,
+    /// Only each spectrum's most intense peaks are used by the prefilter
+    /// (default: every processed peak).
+    pub prefilter_max_peaks: Option<usize>,
     /// Deprecated compatibility option. Exact prefiltering always uses compact
     /// survivor tracking and ignores this value.
     pub prefilter_low_memory: Option<bool>,
@@ -179,6 +185,8 @@ impl Builder {
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
+            prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(1).max(1),
+            prefilter_max_peaks: self.prefilter_max_peaks.filter(|&n| n > 0),
             loaded_ptm_library: None,
         }
     }
@@ -211,6 +219,8 @@ pub struct Parameters {
     pub custom_cleavage_sites: Option<String>,
     pub prefilter_chunk_size: usize,
     pub prefilter: bool,
+    pub prefilter_min_matched_peaks: u16,
+    pub prefilter_max_peaks: Option<usize>,
     #[serde(skip)]
     pub loaded_ptm_library: Option<Arc<PtmLibrary>>,
 }

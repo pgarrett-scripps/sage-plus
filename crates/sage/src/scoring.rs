@@ -113,7 +113,7 @@ struct PreScore {
 #[derive(Copy, Clone)]
 pub(crate) struct FragmentMatchPeak {
     pub(crate) neutral_mass: f32,
-    query_index: usize,
+    pub(crate) query_index: usize,
     charge: u8,
     charge_is_known: bool,
 }

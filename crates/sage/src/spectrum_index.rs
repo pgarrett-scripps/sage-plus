@@ -6,12 +6,14 @@
 //! through the spectrum index without ever building or sorting a fragment
 //! index.
 //!
-//! The retained set is identical to [`crate::scoring::Scorer::exact_prefilter`]:
-//! a peptide is kept when at least one of its preliminary fragments falls inside
-//! the fragment tolerance of a peak from a spectrum whose precursor hypothesis
-//! (charge, isotope error, and mass offset) contains the peptide mass. Every
-//! window is computed with the same floating-point operations as the fragment
-//! index query, so the comparison is exact rather than approximate.
+//! A peptide is kept when, for at least one precursor hypothesis (charge,
+//! isotope error, and mass offset) of a spectrum whose window contains the
+//! peptide mass, at least `min_matched_peaks` (peak, preliminary fragment)
+//! pairs fall inside the fragment tolerance. This is the preliminary match
+//! count of the search. With `min_matched_peaks = 1` and no peak cap, the
+//! retained set is identical to [`crate::scoring::Scorer::exact_prefilter`].
+//! Every window is computed with the same floating-point operations as the
+//! fragment index query, so the comparison is exact rather than approximate.
 
 use crate::database::{preliminary_fragment_masses, MassOffset, Parameters};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
@@ -40,6 +42,10 @@ pub struct SpectrumIndexSettings {
     pub max_fragment_charge: Option<u8>,
     pub wide_window: bool,
     pub min_peaks: usize,
+    /// Preliminary matches a precursor hypothesis needs to keep a peptide.
+    pub min_matched_peaks: u16,
+    /// Only the most intense peaks of each spectrum are indexed.
+    pub max_peaks: Option<usize>,
 }
 
 /// Accumulates spectra, possibly across several file batches, before the
@@ -181,6 +187,20 @@ impl SpectrumIndexBuilder {
             }
         }
 
+        // Peaks among the `max_peaks` most intense, ties broken by position.
+        let mut intense = vec![true; query.masses.len()];
+        if let Some(max_peaks) = s.max_peaks.filter(|&n| n < query.masses.len()) {
+            let mut order = (0..query.masses.len()).collect::<Vec<_>>();
+            order.sort_by(|&a, &b| {
+                query.intensities[b]
+                    .total_cmp(&query.intensities[a])
+                    .then(a.cmp(&b))
+            });
+            for &ix in &order[max_peaks..] {
+                intense[ix] = false;
+            }
+        }
+
         let mut local = LocalSpectrum::default();
         // Probe ids per fragment-charge limit: unshifted, then one per offset.
         let mut probe_sets: Vec<(u8, Vec<u32>)> = Vec::new();
@@ -196,6 +216,7 @@ impl SpectrumIndexBuilder {
                         FragmentMatchIndex::new(query, fragment_charge)
                             .peaks
                             .iter()
+                            .filter(|peak| intense[peak.query_index])
                             .map(|peak| peak.neutral_mass)
                             .filter(|mass| mass.is_finite())
                             .collect(),
@@ -354,6 +375,7 @@ impl SpectrumIndexBuilder {
 
         SpectrumIndex {
             fragment_tol: tolerance,
+            min_matched_peaks: settings.min_matched_peaks.max(1),
             window_lo,
             window_hi,
             window_max_hi,
@@ -411,6 +433,7 @@ impl GlobalPeaks {
 
 pub struct SpectrumIndex {
     fragment_tol: Tolerance,
+    min_matched_peaks: u16,
     window_lo: Vec<f32>,
     window_hi: Vec<f32>,
     window_max_hi: Vec<f32>,
@@ -430,8 +453,12 @@ pub struct SpectrumIndex {
 /// Per-thread scratch space.
 struct Scratch {
     stamp: Vec<u32>,
+    /// Preliminary matches per probe, valid where `stamp` is current.
+    counts: Vec<u16>,
     epoch: u32,
     probes: Vec<u32>,
+    /// Precursor windows containing the peptide mass.
+    windows: Vec<u32>,
     fragments: Vec<f32>,
 }
 
@@ -466,17 +493,27 @@ impl SpectrumIndex {
             + self.global.as_ref().map_or(0, GlobalPeaks::allocated_bytes)
     }
 
-    /// Mark every peptide that the exact prefilter would retain.
+    pub fn min_matched_peaks(&self) -> u16 {
+        self.min_matched_peaks
+    }
+
+    fn scratch(&self) -> Scratch {
+        Scratch {
+            stamp: vec![0; self.probes()],
+            counts: vec![0; self.probes()],
+            epoch: 0,
+            probes: Vec::new(),
+            windows: Vec::new(),
+            fragments: Vec::new(),
+        }
+    }
+
+    /// Mark every peptide with at least `min_matched_peaks` preliminary
+    /// matches to one precursor hypothesis of any spectrum.
     pub fn filter(&self, parameters: &Parameters, peptides: &[Peptide], keep: &AtomicBitSet) {
         assert_eq!(keep.len(), peptides.len());
-        let probes = self.probes();
         peptides.par_iter().enumerate().for_each_init(
-            || Scratch {
-                stamp: vec![0; probes],
-                epoch: 0,
-                probes: Vec::new(),
-                fragments: Vec::new(),
-            },
+            || self.scratch(),
             |scratch, (index, peptide)| {
                 if self.retains(parameters, peptide, scratch) {
                     keep.insert(index);
@@ -486,7 +523,28 @@ impl SpectrumIndex {
     }
 
     fn retains(&self, parameters: &Parameters, peptide: &Peptide, scratch: &mut Scratch) -> bool {
-        let mass = peptide.monoisotopic;
+        if !self.candidate_probes(peptide.monoisotopic, scratch) {
+            return false;
+        }
+        scratch.fragments.clear();
+        scratch
+            .fragments
+            .extend(preliminary_fragment_masses(parameters, peptide));
+        if self.min_matched_peaks <= 1 {
+            return self.any_match(scratch);
+        }
+        // A window counts the matches of its unshifted and shifted probes,
+        // so any single probe reaching the threshold decides early.
+        self.count_matches(scratch, self.min_matched_peaks)
+            || scratch
+                .windows
+                .iter()
+                .any(|&ix| self.window_count(ix, scratch) >= self.min_matched_peaks)
+    }
+
+    /// Stamp the probes of every precursor window containing `mass`, matching
+    /// the peptide-range bounds of `IndexedDatabase::query`.
+    fn candidate_probes(&self, mass: f32, scratch: &mut Scratch) -> bool {
         scratch.epoch = scratch.epoch.wrapping_add(1);
         if scratch.epoch == 0 {
             scratch.stamp.fill(0);
@@ -494,9 +552,8 @@ impl SpectrumIndex {
         }
         let epoch = scratch.epoch;
         scratch.probes.clear();
+        scratch.windows.clear();
 
-        // Precursor windows with lo <= mass <= hi, matching the peptide-range
-        // bounds of `IndexedDatabase::query`.
         let end = self
             .window_lo
             .partition_point(|lo| lo.total_cmp(&mass).is_le());
@@ -505,46 +562,53 @@ impl SpectrumIndex {
                 break;
             }
             if self.window_hi[ix] >= mass {
+                scratch.windows.push(ix as u32);
                 for &probe in &self.window_probes[ix] {
                     if probe != NO_PROBE && scratch.stamp[probe as usize] != epoch {
                         scratch.stamp[probe as usize] = epoch;
+                        scratch.counts[probe as usize] = 0;
                         scratch.probes.push(probe);
                     }
                 }
             }
         }
-        if scratch.probes.is_empty() {
-            return false;
-        }
+        !scratch.probes.is_empty()
+    }
 
-        scratch.fragments.clear();
-        scratch
-            .fragments
-            .extend(preliminary_fragment_masses(parameters, peptide));
+    fn use_global(&self, scratch: &Scratch) -> Option<&GlobalPeaks> {
+        self.global
+            .as_ref()
+            .filter(|_| scratch.probes.len() as f64 * self.probe_cost > self.global_cost)
+    }
 
-        match &self.global {
-            Some(global) if scratch.probes.len() as f64 * self.probe_cost > self.global_cost => {
-                scratch.fragments.iter().any(|&fragment| {
-                    let end = global
-                        .lo
-                        .partition_point(|lo| lo.total_cmp(&fragment).is_le());
-                    for ix in (0..end).rev() {
-                        if global.max_hi[ix] < fragment {
-                            return false;
-                        }
-                        if global.hi[ix] >= fragment
-                            && scratch.stamp[global.probe[ix] as usize] == epoch
-                        {
-                            return true;
-                        }
+    fn peaks_of(&self, probe: Probe) -> &[f32] {
+        &self.peaks[self.peakset_starts[probe.peakset as usize] as usize
+            ..self.peakset_starts[probe.peakset as usize + 1] as usize]
+    }
+
+    /// Whether any fragment matches any stamped probe.
+    fn any_match(&self, scratch: &Scratch) -> bool {
+        let epoch = scratch.epoch;
+        match self.use_global(scratch) {
+            Some(global) => scratch.fragments.iter().any(|&fragment| {
+                let end = global
+                    .lo
+                    .partition_point(|lo| lo.total_cmp(&fragment).is_le());
+                for ix in (0..end).rev() {
+                    if global.max_hi[ix] < fragment {
+                        return false;
                     }
-                    false
-                })
-            }
-            _ => scratch.probes.iter().any(|&probe| {
+                    if global.hi[ix] >= fragment
+                        && scratch.stamp[global.probe[ix] as usize] == epoch
+                    {
+                        return true;
+                    }
+                }
+                false
+            }),
+            None => scratch.probes.iter().any(|&probe| {
                 let probe = self.probes[probe as usize];
-                let peaks = &self.peaks[self.peakset_starts[probe.peakset as usize] as usize
-                    ..self.peakset_starts[probe.peakset as usize + 1] as usize];
+                let peaks = self.peaks_of(probe);
                 let window = |mass| fragment_window(self.fragment_tol, mass, probe.shift);
                 scratch.fragments.iter().any(|&fragment| {
                     // Bounds are monotone within a probe, so the last window
@@ -554,6 +618,63 @@ impl SpectrumIndex {
                     end > 0 && window(peaks[end - 1]).1 >= fragment
                 })
             }),
+        }
+    }
+
+    /// Count (peak, fragment) matches per stamped probe. Returns true as soon
+    /// as one probe reaches `stop`, leaving other counts partial.
+    fn count_matches(&self, scratch: &mut Scratch, stop: u16) -> bool {
+        let epoch = scratch.epoch;
+        match self.use_global(scratch) {
+            Some(global) => {
+                for &fragment in &scratch.fragments {
+                    let end = global
+                        .lo
+                        .partition_point(|lo| lo.total_cmp(&fragment).is_le());
+                    for ix in (0..end).rev() {
+                        if global.max_hi[ix] < fragment {
+                            break;
+                        }
+                        let probe = global.probe[ix] as usize;
+                        if global.hi[ix] >= fragment && scratch.stamp[probe] == epoch {
+                            let count = scratch.counts[probe].saturating_add(1);
+                            scratch.counts[probe] = count;
+                            if count >= stop {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                false
+            }
+            None => {
+                for &probe_ix in &scratch.probes {
+                    let probe = self.probes[probe_ix as usize];
+                    let peaks = self.peaks_of(probe);
+                    let window = |mass| fragment_window(self.fragment_tol, mass, probe.shift);
+                    // Lower and upper bounds are both monotone within a probe,
+                    // so the windows containing a fragment are contiguous.
+                    let count = scratch.fragments.iter().fold(0u16, |count, &fragment| {
+                        let end = peaks.partition_point(|&mass| window(mass).0 <= fragment);
+                        let start = peaks[..end].partition_point(|&mass| window(mass).1 < fragment);
+                        count.saturating_add((end - start).min(u16::MAX as usize) as u16)
+                    });
+                    scratch.counts[probe_ix as usize] = count;
+                    if count >= stop {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    fn window_count(&self, ix: u32, scratch: &Scratch) -> u16 {
+        let [unshifted, shifted] = self.window_probes[ix as usize];
+        let count = scratch.counts[unshifted as usize];
+        match shifted {
+            NO_PROBE => count,
+            shifted => count.saturating_add(scratch.counts[shifted as usize]),
         }
     }
 }

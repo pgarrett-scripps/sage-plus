@@ -1659,6 +1659,25 @@
             "null"
           ]
         },
+        "prefilter_max_peaks": {
+          "description": "Only each spectrum's most intense peaks are used by the prefilter\n(default: every processed peak).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prefilter_min_matched_peaks": {
+          "description": "Preliminary fragment matches one precursor hypothesis of a spectrum\nneeds for the prefilter to keep a peptide (default 1).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "ptm_library": {
           "anyOf": [
             {

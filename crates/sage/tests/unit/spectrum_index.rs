@@ -5,7 +5,7 @@ use crate::ion_series::{IonSeries, Kind};
 use crate::modification::{
     NeutralLossMode, SearchMode, SiteMode, StaticModEntry, VarModEntry, VariableModification,
 };
-use crate::scoring::{ScoreType, Scorer};
+use crate::scoring::{offset_query, ScoreType, Scorer};
 use crate::spectrum::Precursor;
 use std::collections::HashMap;
 
@@ -142,6 +142,8 @@ fn settings(
         max_fragment_charge: Some(2),
         wide_window,
         min_peaks: 1,
+        min_matched_peaks: 1,
+        max_peaks: None,
     }
 }
 
@@ -337,4 +339,163 @@ fn wide_windows_select_the_global_index() {
     };
     assert!(!build(Tolerance::Ppm(-10.0, 10.0)).uses_global_index());
     assert!(build(Tolerance::Da(-50.0, 150.0)).uses_global_index());
+}
+
+/// Best preliminary match count of every peptide over the precursor
+/// hypotheses of `query`, counted with the fragment index as the search does.
+fn classic_counts(
+    database: &IndexedDatabase,
+    s: &SpectrumIndexSettings,
+    query: &ProcessedSpectrum,
+    best: &mut [u16],
+) {
+    let precursor = &query.precursors[0];
+    let mz = precursor.mz - PROTON;
+    let mut hypotheses = Vec::new();
+    if s.wide_window {
+        for charge in s.min_precursor_charge..=s.max_precursor_charge {
+            let tolerance = precursor.isolation_window.unwrap() * charge as f32;
+            hypotheses.push((mz * charge as f32, charge, tolerance));
+        }
+    } else if let Some(charge) = precursor.charge.filter(|_| !s.override_precursor_charge) {
+        hypotheses.push((mz * charge as f32, charge, s.precursor_tol));
+    } else {
+        for charge in s.min_precursor_charge..=s.max_precursor_charge {
+            hypotheses.push((mz * charge as f32, charge, s.precursor_tol));
+        }
+    }
+
+    let mut order = (0..query.masses.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| {
+        query.intensities[b]
+            .total_cmp(&query.intensities[a])
+            .then(a.cmp(&b))
+    });
+    let mut intense = vec![false; query.masses.len()];
+    for &ix in order.iter().take(s.max_peaks.unwrap_or(usize::MAX)) {
+        intense[ix] = true;
+    }
+
+    for (precursor_mass, charge, tolerance) in hypotheses {
+        if !precursor_mass.is_finite() {
+            continue;
+        }
+        let peaks =
+            FragmentMatchIndex::new(query, max_fragment_charge(s.max_fragment_charge, charge))
+                .peaks
+                .into_iter()
+                .filter(|peak| intense[peak.query_index])
+                .collect::<Vec<_>>();
+        for offset in 0..=database.mass_offsets.len() {
+            for isotope_error in s.min_isotope_err..=s.max_isotope_err {
+                let mass = precursor_mass - isotope_error as f32 * NEUTRON;
+                let (mass, tolerance) = match offset {
+                    0 => (mass, tolerance),
+                    _ => offset_query(mass, tolerance, database.mass_offsets[offset - 1].mass()),
+                };
+                let candidates = database.query(mass, tolerance, s.fragment_tol);
+                let mut counts = HashMap::<usize, u16>::new();
+                for peak in &peaks {
+                    for fragment in candidates.page_search(peak.neutral_mass) {
+                        *counts.entry(fragment.peptide_index.0 as usize).or_default() += 1;
+                    }
+                    if offset > 0 {
+                        let shift = database.mass_offsets[offset - 1].fragment_shift();
+                        for fragment in candidates.page_search_shifted(peak.neutral_mass, shift) {
+                            *counts.entry(fragment.peptide_index.0 as usize).or_default() += 1;
+                        }
+                    }
+                }
+                for (peptide, count) in counts {
+                    best[peptide] = best[peptide].max(count);
+                }
+            }
+        }
+    }
+}
+
+/// Survivors of every lookup path must equal the peptides whose best
+/// preliminary count reaches the threshold.
+fn assert_threshold_survivors(offset: bool, base: SpectrumIndexSettings) {
+    let parameters = parameters(offset);
+    let fasta = Fasta::parse(FASTA.into(), "rev_", true).unwrap();
+    let database = parameters.clone().build(fasta);
+    let mut queries = spectra(&database, 400, 0xc0de ^ offset as u64);
+    let mut rng = Lcg(11);
+    for query in &mut queries {
+        for intensity in &mut query.intensities {
+            *intensity = rng.unit();
+        }
+    }
+
+    for max_peaks in [None, Some(12)] {
+        let mut best = vec![0u16; database.peptides.len()];
+        let s = SpectrumIndexSettings {
+            max_peaks,
+            ..base.clone()
+        };
+        for query in &queries {
+            classic_counts(&database, &s, query, &mut best);
+        }
+        let mut previous = usize::MAX;
+        for min_matched_peaks in [1u16, 2, 3, 5] {
+            let s = SpectrumIndexSettings {
+                min_matched_peaks,
+                ..s.clone()
+            };
+            let expected = (0..best.len())
+                .filter(|&ix| best[ix] >= min_matched_peaks)
+                .collect::<Vec<_>>();
+            assert!(!expected.is_empty(), "threshold {min_matched_peaks}");
+            assert!(expected.len() <= previous);
+            previous = expected.len();
+
+            let survivors = |keep: &AtomicBitSet| {
+                (0..database.peptides.len())
+                    .filter(|&ix| keep.contains(ix))
+                    .collect::<Vec<_>>()
+            };
+            for global in [false, true] {
+                let mut builder = SpectrumIndexBuilder::new(s.clone(), &database.mass_offsets);
+                builder.add(&queries);
+                let index = builder.finish_with(Some(global));
+                let actual = AtomicBitSet::new(database.peptides.len());
+                index.filter(&parameters, &database.peptides, &actual);
+                assert_eq!(
+                    expected,
+                    survivors(&actual),
+                    "threshold {min_matched_peaks}, max peaks {max_peaks:?}, global {global}"
+                );
+            }
+            let actual = AtomicBitSet::new(database.peptides.len());
+            for batch in queries.chunks(150) {
+                let mut builder = SpectrumIndexBuilder::new(s.clone(), &database.mass_offsets);
+                builder.add(batch);
+                builder
+                    .finish()
+                    .filter(&parameters, &database.peptides, &actual);
+            }
+            assert_eq!(expected, survivors(&actual), "batched indexes");
+        }
+    }
+}
+
+#[test]
+fn match_threshold_closed_search() {
+    assert_threshold_survivors(false, settings(Tolerance::Ppm(-10.0, 10.0), false, false));
+}
+
+#[test]
+fn match_threshold_mass_offsets() {
+    assert_threshold_survivors(true, settings(Tolerance::Da(-0.02, 0.02), false, false));
+}
+
+#[test]
+fn match_threshold_wide_window() {
+    assert_threshold_survivors(false, settings(Tolerance::Ppm(-10.0, 10.0), true, false));
+}
+
+#[test]
+fn match_threshold_open_search() {
+    assert_threshold_survivors(true, settings(Tolerance::Da(-50.0, 150.0), false, false));
 }

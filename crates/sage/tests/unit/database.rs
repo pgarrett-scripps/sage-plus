@@ -578,6 +578,8 @@ fn digestion() {
         custom_cleavage_sites: None,
         prefilter: false,
         prefilter_chunk_size: 0,
+        prefilter_min_matched_peaks: 1,
+        prefilter_max_peaks: None,
         loaded_ptm_library: None,
     };
 

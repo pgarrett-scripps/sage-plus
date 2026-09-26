@@ -834,8 +834,12 @@ alongside the library, because the location table does not embed chemical masses
 - **prefilter**: Boolean. Retain only peptides that can contribute a preliminary fragment match
   before building the search index. The spectra are indexed once, and the database is generated
   in chunks and streamed through the spectrum index, so no fragment index is built for discarded
-  peptides. Targets, paired decoys, and label-channel partners are retained together, so the final
-  search uses the same FDR competition and produces the same results as a full database search.
+  peptides. A peptide is kept when one precursor hypothesis (charge, isotope error, mass offset)
+  of a spectrum has at least `prefilter_min_matched_peaks` preliminary fragment matches, counted
+  as the search counts them. Targets, paired decoys, and label-channel partners are retained
+  together. With `prefilter_min_matched_peaks: 1` and no `prefilter_max_peaks`, every peptide
+  that could enter the preliminary search is kept, and the results equal a full database search.
+  Stricter settings shrink the searched database further, so results can differ slightly.
   The spectrum index is limited to a quarter of `max_memory_gb`, or 8 GiB without a limit. Larger
   inputs are indexed in file batches, and the database is streamed once per batch. Set the
   `SAGE_PREFILTER_INDEX_GB` environment variable to override the budget. Spectra read by the
@@ -844,6 +848,12 @@ alongside the library, because the location table does not embed chemical masses
   the memory limit, they are released and read again by the search.
 - **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
   A value of zero selects the chunk size from the estimated number of modified peptides.
+- **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor
+  hypothesis of a spectrum needs to keep a peptide (default: 1). Preliminary fragments skip the
+  first `min_ion_index` ions, so this counts fewer ions than `min_matched_peaks`.
+- **prefilter_max_peaks**: Integer. Only each spectrum's most intense peaks are used by the
+  prefilter (default: every processed peak). Fewer peaks make the spectrum index smaller and
+  faster and keep fewer peptides.
 - **prefilter_low_memory**: Deprecated and ignored. Exact prefiltering always uses compact survivor
   tracking.
 
