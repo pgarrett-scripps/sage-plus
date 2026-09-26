@@ -924,8 +924,18 @@ them. The feature is on by default from this milestone.
   discriminant, gives 0 targets at 1% (the first decoy is at rank 37), 151 at 2% and
   181 at 5%. Because of the glycan-level tie, the gain in glycoPSMs that pass both
   FDRs is expected to be small.
-- **Measured run (`m9core`: yeast and mouse+pombe with the subgroup on).** Pending.
-  The run finished, but its numbers have not been read yet.
+- **Measured run (`m9core`, with per-precursor siblings on).**
+
+  | variant | yeast | non-HM | yeast pep-q targets | yeast mouse-protein hits | mouse+pombe | pombe hits (FDP) |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | siblings per precursor | 1,330 | 2.7% | 1,870 | 24 | 9,039 | 12 (0.6%) |
+  | + core-only subgroup | 1,320 | 2.9% | 2,047 | 21 | 9,139 | 15 (0.7%) |
+
+  The subgroup recovers 177 yeast peptide-level targets, close to the simulation.
+  Yeast glycoPSMs still drop by 10, though, because the recovered core-only
+  candidates tie with their glycan-decoy twins and do not pass the glycan FDR.
+  Non-high-mannose rises to 2.9%, which is over the 2.8% gate. Mouse gains 100 at an
+  unchanged 0.7% FDP. The option stays off by default.
 
 ## Appendix: code and measurements
 
