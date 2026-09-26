@@ -19,10 +19,13 @@ const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
 use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::HashMap, path::Path};
 use timsrust::{
-    core::{Converter, Frame, MSLevel, Precursor as TimsrustPrecursor, ScanIndex, TofIndex},
+    core::{
+        utils::reader::Reader, AcquisitionType, Converter, Frame, MSLevel, Mz,
+        Precursor as TimsrustPrecursor, ScanIndex, Spectrum as TimsrustSpectrum, TofIndex,
+    },
     tdf::{
-        FrameWindowSplittingConfiguration, QuadWindowExpansionStrategy, SpectrumProcessingParams,
-        SpectrumReaderConfig,
+        FrameWindowSplittingConfiguration, Metadata, QuadWindowExpansionStrategy,
+        SpectrumProcessingParams, SpectrumReaderConfig, TDFSpectrumReader,
     },
     ImConverter, MzConverter, SpectrumReader, TimsTofPath,
 };
@@ -224,12 +227,19 @@ impl TdfReader {
         let path = TimsTofPath::new(path_name.as_ref().to_string_lossy())
             .map_err(|error| tims(error.into()))?;
         let scale = MobilityScale::new(path_name.as_ref(), config.ion_mobility_scale)?;
-        let spectrum_reader = SpectrumReader::build()
-            .with_path(&path)
-            .with_config(config.ms2.into_timsrust())
-            .finalize()
-            .map_err(|error| tims(error.into()))?;
-        let mut spectra = self.read_msn_spectra(file_id, &spectrum_reader, &scale)?;
+        let mut spectra = match Self::dia_window_reader(path_name.as_ref(), &path, config.ms2)? {
+            Some((reader, mz_converter)) => {
+                self.read_dia_window_spectra(file_id, &reader, &mz_converter, &scale)
+            }
+            None => {
+                let spectrum_reader = SpectrumReader::build()
+                    .with_path(&path)
+                    .with_config(config.ms2.into_timsrust())
+                    .finalize()
+                    .map_err(|error| tims(error.into()))?;
+                self.read_msn_spectra(file_id, &spectrum_reader, &scale)?
+            }
+        };
         if requires_ms1 {
             let ms1s =
                 self.read_ms1_spectra(&path_name, file_id, config.ms1, config.denoise, &scale)?;
@@ -386,6 +396,76 @@ impl TdfReader {
         Ok(ms1_spectra)
     }
 
+    /// timsrust's TDF window reader for diaPASEF input, or `None` for every other input.
+    ///
+    /// timsrust 0.6's `SpectrumReader` sends diaPASEF to its precursor-anchored centroid
+    /// reader, which ignores `bruker_config.ms2`. The TDF reader it bypasses is the one Sage
+    /// used with timsrust 0.4: one spectrum per diaPASEF window, split by
+    /// `ms2.frame_splitting_params`.
+    fn dia_window_reader(
+        path_name: &Path,
+        path: &TimsTofPath,
+        ms2: BrukerSpectrumConfig,
+    ) -> Result<Option<(TDFSpectrumReader<ImConverter>, MzConverter)>, crate::Error> {
+        let Some(tdf) = analysis_tdf(path_name) else {
+            return Ok(None);
+        };
+        let directory = tdf
+            .parent()
+            .expect("analysis.tdf lives in a .d directory")
+            .to_string_lossy()
+            .into_owned();
+        let failed = |why: String| {
+            crate::Error::Unsupported(format!("{}: diaPASEF {why}", path_name.display()))
+        };
+        let metadata = Metadata::new(directory.as_str())
+            .map_err(|error| failed(format!("metadata could not be read: {error}")))?;
+        if metadata.acquisition_type() != AcquisitionType::DIAPASEF {
+            return Ok(None);
+        }
+        let im_converter = ImConverter::new(path)
+            .ok_or_else(|| failed("ion mobility converter could not be read".into()))?;
+        let mz_converter = MzConverter::new(path)
+            .ok_or_else(|| failed("m/z converter could not be read".into()))?;
+        let reader = TDFSpectrumReader::new(
+            directory.as_str(),
+            ms2.into_timsrust(),
+            std::sync::Arc::new(im_converter),
+        )
+        .map_err(|error| failed(format!("windows could not be read: {error}")))?;
+        Ok(Some((reader, mz_converter)))
+    }
+
+    /// diaPASEF MS2 spectra, one per window split, with the window center as the precursor
+    /// m/z and the full window as the isolation window. The id is the spectrum index.
+    fn read_dia_window_spectra(
+        &self,
+        file_id: usize,
+        reader: &TDFSpectrumReader<ImConverter>,
+        mz_converter: &MzConverter,
+        scale: &MobilityScale,
+    ) -> Vec<RawSpectrum> {
+        let start = std::time::Instant::now();
+        let spectra: Vec<RawSpectrum> = (0..reader.len())
+            .into_par_iter()
+            .filter_map(|index| match reader.get(index) {
+                Ok(spectrum) => {
+                    Self::msn_spectrum(file_id, &spectrum.convert_to(mz_converter), scale)
+                }
+                Err(error) => {
+                    log::warn!("error parsing Bruker diaPASEF spectrum: {error}");
+                    None
+                }
+            })
+            .collect();
+        log::info!(
+            "read {} diaPASEF window spectra in {:#?}",
+            spectra.len(),
+            start.elapsed()
+        );
+        spectra
+    }
+
     fn read_msn_spectra(
         &self,
         file_id: usize,
@@ -395,42 +475,7 @@ impl TdfReader {
         let spectra: Vec<RawSpectrum> = spectrum_reader
             .par_iter()
             .filter_map(|result| match result {
-                Ok(dda_spectrum) => match dda_spectrum.precursor() {
-                    Some(dda_precursor) => {
-                        let mut precursor = Self::parse_precursor(dda_precursor);
-                        precursor.inverse_ion_mobility = Some(scale.precursor(dda_precursor));
-                        let isolation_width = f64::from(dda_spectrum.isolation_window().width());
-                        precursor.isolation_window = Option::from(Tolerance::Da(
-                            -isolation_width as f32 / 2.0,
-                            isolation_width as f32 / 2.0,
-                        ));
-                        let spectrum: RawSpectrum = RawSpectrum {
-                            file_id,
-                            precursors: vec![precursor],
-                            representation: Representation::Centroid,
-                            scan_start_time: f64::from(dda_precursor.rt()) as f32 / 60.0,
-                            ion_injection_time: f64::from(dda_precursor.rt()) as f32,
-                            total_ion_current: 0.0,
-                            mz: dda_spectrum
-                                .mz_values()
-                                .iter()
-                                .map(|&value| f64::from(value) as f32)
-                                .collect(),
-                            ms_level: 2,
-                            id: dda_spectrum.index().to_string(),
-                            intensity: dda_spectrum
-                                .intensities()
-                                .iter()
-                                .map(|&value| value as f32)
-                                .collect(),
-                            fragment_charges: None,
-                            mobility: None,
-                            acquisition: TIMS_TOF,
-                        };
-                        Some(spectrum)
-                    }
-                    None => None,
-                },
+                Ok(spectrum) => Self::msn_spectrum(file_id, &spectrum, scale),
                 Err(error) => {
                     log::warn!("error parsing Bruker MS2 spectrum: {error}");
                     None
@@ -438,6 +483,44 @@ impl TdfReader {
             })
             .collect();
         Ok(spectra)
+    }
+
+    fn msn_spectrum(
+        file_id: usize,
+        dda_spectrum: &TimsrustSpectrum<Mz>,
+        scale: &MobilityScale,
+    ) -> Option<RawSpectrum> {
+        let dda_precursor = dda_spectrum.precursor().as_ref()?;
+        let mut precursor = Self::parse_precursor(dda_precursor);
+        precursor.inverse_ion_mobility = Some(scale.precursor(dda_precursor));
+        let isolation_width = f64::from(dda_spectrum.isolation_window().width());
+        precursor.isolation_window = Option::from(Tolerance::Da(
+            -isolation_width as f32 / 2.0,
+            isolation_width as f32 / 2.0,
+        ));
+        Some(RawSpectrum {
+            file_id,
+            precursors: vec![precursor],
+            representation: Representation::Centroid,
+            scan_start_time: f64::from(dda_precursor.rt()) as f32 / 60.0,
+            ion_injection_time: f64::from(dda_precursor.rt()) as f32,
+            total_ion_current: 0.0,
+            mz: dda_spectrum
+                .mz_values()
+                .iter()
+                .map(|&value| f64::from(value) as f32)
+                .collect(),
+            ms_level: 2,
+            id: dda_spectrum.index().to_string(),
+            intensity: dda_spectrum
+                .intensities()
+                .iter()
+                .map(|&value| value as f32)
+                .collect(),
+            fragment_charges: None,
+            mobility: None,
+            acquisition: TIMS_TOF,
+        })
     }
 
     fn parse_precursor(dda_precursor: &TimsrustPrecursor) -> Precursor {
