@@ -514,7 +514,9 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
 
 | Variant | Path | Peptides | Runtime | Peak RAM |
 |---|---|---|---|---|
-| (a) default CLI reader (timsrust precursor-anchored spectra, not wide-window), chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
+| (a) timsrust precursor-anchored spectra (Beta 2 to Beta 9 default reader), chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
+| (a') true wide-window, default splitting (`Even` 1; the reader on main after `fix/diapasef-window-splitting`), chimeric | CLI | 3,897 | 18 s | 5.8 GB |
+| (a') true wide-window, best splitting (`UniformMobility` [0.05, 0.025], centroiding window 3), chimeric | CLI | 6,386 | 1 min 54 s | 8.9 GB |
 | (b) tier 1 (`dia.mode = "pseudo"`), defaults before section 11 | CLI | 6,403 | 3 min 7 s | 6.1 GB |
 | (b) tier 1, section 11 defaults (min_corr 0.3, im_tolerance 0.01) | CLI | 7,412 | 1 min 36 s – 2 min | 6.0 GB |
 | (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,847 (tier 1 alone 5,773; tier 2 +74, about +1.3%) | 3 min 4 s | 5.8 GB |
@@ -545,6 +547,14 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
   the 25 m/z box) around it, and the RT is the MS1 frame's. So (a) on timsTOF is
   precursor-anchored already, just without elution-profile grouping. That is why its gap to
   (b) is smaller than on Orbitrap.
+- **Two timsTOF baselines.** (a) is what Beta 2 to Beta 9 searched: timsrust 0.6 sent
+  diaPASEF to its precursor-anchored reader and ignored `bruker_config.ms2`. The fix on
+  `fix/diapasef-window-splitting` restores upstream Sage's window reader (one spectrum per
+  isolation window, split by `frame_splitting_params`), which is (a'). Pseudo mode's 7,412 is
+  92% of (a) and 190% of default (a') (3,897), 116% of the best (a') split (6,386). Splitting
+  sweep (peptides, time, memory): `Even` 1: 3,897 (4,195 with centroiding window 3); `Even` 2:
+  4,477; `Even` 4: 5,296 (5,572 with window 5); `Even` 8: 6,038 (6,092 with window 3);
+  `UniformMobility` [0.05, 0.025]: 6,359 (6,386 with window 3), 1 min 54 s, 8.9 GB.
 - **(d) debug.** The first (d) run kept 0 of 1.39 billion peaks. Its matcher looked for a
   box with the spectrum's isolation bounds at the spectrum's RT, but both are
   precursor-based, as above. The fix: the MS2 frame is in the high 32 bits of the spectrum
@@ -664,6 +674,7 @@ intensity scale; an absolute 3e5 is no better.
 |---|---|---|---|
 | Orbitrap | 6,975 | 5,959 (was 5,763) | 85% (was 83%) |
 | timsTOF ((a) is timsrust precursor-anchored, see section 10) | 8,087 | 7,412 (unchanged) | 92% |
+| timsTOF, true wide-window (a'), default / best split | 3,897 / 6,386 | 7,412 | 190% / 116% |
 
 timsTOF ignores the setting: there are only 170 no-feature misses there, and the hills carry
 1/K0, which would need its own tuning. Its default-config run still gives 7,412.
