@@ -341,6 +341,135 @@ fn explicit_sites_round_trip_and_distinguish_attachment() {
 }
 
 #[test]
+fn every_specificity_round_trips_through_explicit_name_and_display() {
+    use ModificationSpecificity::*;
+    for specificity in [
+        Residue(b'K'),
+        Internal(b'K'),
+        PeptideN(None),
+        PeptideC(None),
+        ProteinN(None),
+        ProteinC(None),
+        PeptideN(Some(b'Q')),
+        PeptideC(Some(b'K')),
+        ProteinN(Some(b'M')),
+        ProteinC(Some(b'R')),
+        PeptideNTerm(b'K'),
+        PeptideCTerm(b'K'),
+        ProteinNTerm(b'M'),
+        ProteinCTerm(b'R'),
+    ] {
+        let explicit = specificity.explicit_name();
+        assert_eq!(explicit.parse(), Ok(specificity), "{explicit}");
+        let display = specificity.to_string();
+        assert_eq!(display.parse(), Ok(specificity), "{display}");
+        assert!(!specificity.is_motif());
+    }
+    // Terminal groups gated on a residue have no symbol form, so they
+    // display with their explicit name.
+    assert_eq!(PeptideNTerm(b'K').to_string(), "peptide_n_term:K");
+    assert_eq!(ProteinCTerm(b'R').to_string(), "protein_c_term:R");
+    assert_eq!(PeptideN(None).to_string(), "^");
+    assert_eq!(PeptideN(None).explicit_name(), "peptide_n_term");
+}
+
+#[test]
+fn specificity_parse_errors_identify_the_problem() {
+    use InvalidModification::*;
+    let parse = |text: &str| text.parse::<ModificationSpecificity>();
+    assert_eq!(parse(""), Err(Empty));
+    assert_eq!(
+        parse("first_residue:KK"),
+        Err(TooLong("first_residue:KK".into()))
+    );
+    assert_eq!(
+        parse("peptide_n_term:Z"),
+        Err(TooLong("peptide_n_term:Z".into()))
+    );
+    // A residue-gated name without its residue is not a site.
+    assert_eq!(parse("first_residue"), Err(TooLong("first_residue".into())));
+    assert_eq!(parse("^Z"), Err(InvalidResidue('Z')));
+    assert_eq!(parse("~"), Err(InvalidResidue('~')));
+    assert!(matches!(parse("motif:"), Err(Motif(_))));
+}
+
+#[test]
+fn residue_anchored_rules_follow_peptide_and_protein_position() {
+    use crate::enzyme::Position;
+    use crate::peptide::Site;
+    use ModificationSpecificity::*;
+    // A single residue is both the first and the last residue.
+    assert_eq!(
+        PeptideN(Some(b'K')).sites(b"K", Position::Internal),
+        vec![Site::Sequence(0)]
+    );
+    assert_eq!(
+        PeptideC(Some(b'K')).sites(b"K", Position::Internal),
+        vec![Site::Sequence(0)]
+    );
+    // Residue-gated rules do not fire on a different residue.
+    assert!(PeptideN(Some(b'K')).sites(b"AK", Position::Full).is_empty());
+    assert!(PeptideC(Some(b'K')).sites(b"KA", Position::Full).is_empty());
+    assert!(PeptideNTerm(b'K').sites(b"AK", Position::Full).is_empty());
+    assert!(PeptideCTerm(b'K').sites(b"KA", Position::Full).is_empty());
+    // Protein anchors need the matching protein end.
+    for (position, n, c) in [
+        (Position::Internal, false, false),
+        (Position::Nterm, true, false),
+        (Position::Cterm, false, true),
+        (Position::Full, true, true),
+    ] {
+        let sequence = b"MAK";
+        assert_eq!(!ProteinN(None).sites(sequence, position).is_empty(), n);
+        assert_eq!(!ProteinC(None).sites(sequence, position).is_empty(), c);
+        assert_eq!(
+            !ProteinN(Some(b'M')).sites(sequence, position).is_empty(),
+            n
+        );
+        assert_eq!(
+            !ProteinC(Some(b'K')).sites(sequence, position).is_empty(),
+            c
+        );
+        assert_eq!(!ProteinNTerm(b'M').sites(sequence, position).is_empty(), n);
+        assert_eq!(!ProteinCTerm(b'K').sites(sequence, position).is_empty(), c);
+        // Peptide-terminal rules never depend on the protein position.
+        assert_eq!(PeptideN(None).sites(sequence, position), vec![Site::Nterm]);
+        assert_eq!(PeptideC(None).sites(sequence, position), vec![Site::Cterm]);
+    }
+    assert!(ProteinN(Some(b'A'))
+        .sites(b"MAK", Position::Full)
+        .is_empty());
+    assert!(ProteinCTerm(b'A').sites(b"MAK", Position::Full).is_empty());
+}
+
+#[test]
+fn overlap_detects_rules_that_can_share_an_attachment() {
+    use ModificationSpecificity::*;
+    let overlaps = |left: ModificationSpecificity, right: ModificationSpecificity| {
+        let forward = left.overlaps(right);
+        assert_eq!(forward, right.overlaps(left), "{left} vs {right}");
+        forward
+    };
+    // Same residue attachment.
+    assert!(overlaps(Residue(b'K'), PeptideN(Some(b'K'))));
+    assert!(overlaps(Residue(b'K'), Internal(b'K')));
+    assert!(overlaps(Residue(b'K'), ProteinC(Some(b'K'))));
+    // A one-residue peptide makes the first and last residue the same site.
+    assert!(overlaps(PeptideN(Some(b'K')), PeptideC(Some(b'K'))));
+    // Terminal groups.
+    assert!(overlaps(PeptideN(None), ProteinN(None)));
+    assert!(overlaps(PeptideN(None), PeptideNTerm(b'K')));
+    assert!(overlaps(ProteinC(None), PeptideCTerm(b'R')));
+    // Different residues or different attachments never overlap.
+    assert!(!overlaps(Residue(b'K'), Residue(b'R')));
+    assert!(!overlaps(Internal(b'K'), PeptideN(Some(b'K'))));
+    assert!(!overlaps(Internal(b'K'), PeptideC(Some(b'K'))));
+    assert!(!overlaps(PeptideNTerm(b'K'), PeptideNTerm(b'R')));
+    assert!(!overlaps(PeptideN(None), PeptideC(None)));
+    assert!(!overlaps(Residue(b'K'), PeptideNTerm(b'K')));
+}
+
+#[test]
 fn named_definitions_reject_ambiguous_or_invalid_configuration() {
     use crate::database::Builder;
     for value in [
@@ -358,6 +487,98 @@ fn named_definitions_reject_ambiguous_or_invalid_configuration() {
             "{value}"
         );
     }
+}
+
+#[test]
+fn named_definition_errors_explain_the_fix() {
+    let error = |section: &str, value: serde_json::Value| {
+        serde_json::from_value::<crate::database::Builder>(serde_json::json!({ section: value }))
+            .err()
+            .expect("configuration must be rejected")
+            .to_string()
+    };
+    let cases = [
+        (
+            serde_json::json!({" Acetyl": {"mass": 42, "sites": ["K"]}}),
+            "modification IDs must be nonempty and have no surrounding whitespace",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["K"]}, "Methyl": {"mass": 14}}),
+            "modification `Methyl` requires `sites`",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["K"]}, "Methyl": 14}),
+            "named and legacy modification declarations cannot be mixed",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": []}}),
+            "modification `Acetyl` has no sites",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["K"], "name": "Other"}}),
+            "modification `Acetyl` must not override its identity with a different name",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["K"], "max_count": 0}}),
+            "max_count must be positive",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["Z"]}}),
+            "invalid site `Z` for modification `Acetyl`",
+        ),
+        (
+            serde_json::json!({"Acetyl": {"mass": 42, "sites": ["^K"]}}),
+            "use explicit site `first_residue:K` instead of `^K`",
+        ),
+    ];
+    for (value, expected) in cases {
+        for section in ["static_mods", "variable_mods"] {
+            if section == "static_mods" && expected == "max_count must be positive" {
+                continue;
+            }
+            let message = error(section, value.clone());
+            assert!(message.contains(expected), "{section} {value}: {message}");
+        }
+    }
+    let message = error(
+        "static_mods",
+        serde_json::json!({
+            "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
+            "Other": {"mass": 58.0, "sites": ["C"]}
+        }),
+    );
+    assert!(
+        message.contains("different static modifications target the same site rule"),
+        "{message}"
+    );
+}
+
+#[test]
+fn named_definitions_share_sites_and_ignore_repeated_sites() {
+    let params = serde_json::from_value::<crate::database::Builder>(serde_json::json!({
+        "variable_mods": {
+            "Acetyl": {"mass": 42.010565, "sites": ["K", "K", "peptide_n_term"]},
+            "Methyl": {"mass": 14.01565, "sites": ["K"]}
+        },
+        "static_mods": {
+            "Carbamidomethyl": {"mass": 57.021464, "sites": ["C", "C"]}
+        }
+    }))
+    .unwrap()
+    .make_parameters();
+    assert_eq!(params.static_mods.len(), 1);
+    let lysine = &params.variable_mods[&ModificationSpecificity::Residue(b'K')];
+    let mut names = lysine
+        .iter()
+        .map(|entry| entry.definition().name.unwrap().to_string())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["Acetyl", "Methyl"]);
+    assert_eq!(
+        params.variable_mods[&ModificationSpecificity::PeptideN(None)].len(),
+        1
+    );
+    assert_eq!(params.variable_mods.values().flatten().count(), 3);
 }
 
 #[test]
