@@ -1003,7 +1003,8 @@ fn hill_filtered(
         .sum();
     let t = Instant::now();
     if TIMS.load(Ordering::Relaxed) {
-        hill_filter_by_rt(&mut raw, &hills, 20.0);
+        let frame_rt = sage_dia::tims::frame_rts(std::path::Path::new(&args.raw))?;
+        hill_filter_by_rt(&mut raw, &hills, &frame_rt, 20.0);
     } else {
         dia::hill_filter(&mut raw, &hills, 15.0);
     }
@@ -1043,31 +1044,47 @@ fn hill_filtered(
     Ok(report)
 }
 
-/// timsTOF variant of `dia::hill_filter`: each wide-window scan is one
-/// quadrupole window of one frame, so its channel is the box with the same
-/// m/z bounds and a cycle at the scan's retention time.
-fn hill_filter_by_rt(raw: &mut [RawSpectrum], hills: &dia::RunHills, ppm: f32) {
+/// timsTOF variant of `dia::hill_filter`. timsrust 0.6 reads diaPASEF with
+/// its own precursor-anchored reader, not as wide windows: it finds MS1
+/// isotope pairs and emits one spectrum per (precursor, MS2 frame), holding
+/// the MS2 peaks in that precursor's scan range. The precursor m/z is the
+/// detected MS1 m/z, the isolation window is +-(box width / 4) around it, and
+/// the RT is the MS1 frame's. The MS2 frame is in the high 32 bits of the
+/// spectrum index. So the channel is the box containing the precursor's m/z
+/// and 1/K0, and the cycle is that frame's position in the box.
+fn hill_filter_by_rt(
+    raw: &mut [RawSpectrum],
+    hills: &dia::RunHills,
+    frame_rt: &HashMap<usize, f32>,
+    ppm: f32,
+) {
+    let unmatched = std::sync::atomic::AtomicUsize::new(0);
     raw.par_iter_mut()
         .filter(|s| s.ms_level == 2)
         .for_each(|s| {
-            let found = window_of(s).and_then(|(_, lo, hi)| {
-                hills
-                    .windows
-                    .iter()
-                    .filter(|w| (w.lower - lo).abs() < 0.5 && (w.upper - hi).abs() < 0.5)
-                    .map(|w| {
-                        let c = w.cycle_at(s.scan_start_time);
-                        ((w.rts[c] - s.scan_start_time).abs(), w, c as u32)
-                    })
-                    .min_by(|a, b| a.0.total_cmp(&b.0))
-            });
+            let found = (|| {
+                let frame = (s.id.parse::<u64>().ok()? >> 32) as usize;
+                let rt = *frame_rt.get(&frame)?;
+                let p = s.precursors.first()?;
+                let (mz, im) = (p.mz as f64, p.inverse_ion_mobility.unwrap_or(0.0) as f64);
+                hills.windows.iter().find_map(|w| {
+                    if !w.contains(mz, im) {
+                        return None;
+                    }
+                    let c = w.rts.partition_point(|&t| t < rt);
+                    (w.rts.get(c) == Some(&rt)).then_some((w, c as u32))
+                })
+            })();
             let keep: Vec<bool> = match found {
-                Some((dt, w, c)) if dt < 1e-3 => {
+                Some((w, c)) => {
                     s.mz.iter()
                         .map(|&mz| w.find(mz, ppm).iter().any(|h| h.start <= c && c <= h.end()))
                         .collect()
                 }
-                _ => vec![false; s.mz.len()],
+                None => {
+                    unmatched.fetch_add(1, Ordering::Relaxed);
+                    vec![false; s.mz.len()]
+                }
             };
             let mut it = keep.iter();
             s.mz.retain(|_| *it.next().unwrap());
@@ -1075,6 +1092,10 @@ fn hill_filter_by_rt(raw: &mut [RawSpectrum], hills: &dia::RunHills, ppm: f32) {
             s.intensity.retain(|_| *it.next().unwrap());
             s.total_ion_current = s.intensity.iter().sum();
         });
+    eprintln!(
+        "hill filter: {} MS2 spectra matched no box and frame",
+        unmatched.into_inner()
+    );
 }
 
 fn main() -> anyhow::Result<()> {

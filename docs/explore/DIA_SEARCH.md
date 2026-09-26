@@ -520,7 +520,7 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
 | (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,847 (tier 1 alone 5,773; tier 2 +74, about +1.3%) | 3 min 4 s | 5.8 GB |
 | (c) tier 1 + tier 2, pooled, tier as an LDA feature | example | 5,355 | 3 min 4 s | 5.8 GB |
 | (c) section 11 defaults, separate q-values (tier 2 scored with Sage LDA) | example | 7,307 (tier 1 alone 7,065; tier 2 +242) | 1 min 40 s | 6.0 GB |
-| (d) wide-window on hill-filtered scans | example | pending | | |
+| (d) timsrust spectra, peaks kept only on MS2 hills (see below) | example | 6,874 (regularized LDA 6,608) | 7 min 58 s | 17.2 GB |
 
 - **Centroiding.** dnoise-core 0.5.0 watershed (`watershed::watershed_centroid`, the mode
   dnoise and koth's validated Bruker path use), after dnoise's vertical ion-mobility filter
@@ -537,6 +537,21 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
   (524k spectra, 1.39 billion peaks), which is where its 16.6 GB comes from.
 - **Decision.** Same as Orbitrap: (b) finds 79% of (a)'s peptides in a quarter of the
   time and at 37% of the memory. Tier 2 adds about 1%. Wide-window stays the default.
+- **What (a) is on timsTOF.** timsrust 0.6 does not read diaPASEF as wide windows. Its
+  `SpectrumReader` switches to `timsrust_centroid`'s narrow reader, which ignores
+  `bruker_config.ms2`. That reader finds MS1 isotope pairs and emits one spectrum per
+  (precursor, MS2 frame), with the MS2 peaks in that precursor's scan range: 524k spectra.
+  The precursor m/z is the detected MS1 m/z. The isolation window is +-6.25 m/z (a quarter of
+  the 25 m/z box) around it, and the RT is the MS1 frame's. So (a) on timsTOF is
+  precursor-anchored already, just without elution-profile grouping. That is why its gap to
+  (b) is smaller than on Orbitrap.
+- **(d) debug.** The first (d) run kept 0 of 1.39 billion peaks. Its matcher looked for a
+  box with the spectrum's isolation bounds at the spectrum's RT, but both are
+  precursor-based, as above. The fix: the MS2 frame is in the high 32 bits of the spectrum
+  index. The box is the one containing the precursor's m/z and 1/K0, and the cycle is that
+  frame's (`sage_dia::tims::frame_rts`). 12% of spectra (63k) match no box, because their
+  precursor lies outside every box, and they are dropped. The filter keeps 48% of peaks.
+  (d) finds 6,874 peptides. That is below both (a) and (b), at (a)'s memory. Not pursued.
 - **DDA unchanged.** Checked on the denoised ddaPASEF twin of this run
   (`LFQ_Ultra2_PASEF_15min_50ng_Ecoli_01.d`; the raw twin was not on disk). Results were
   byte-identical to origin/main, with 8,872 peptides.

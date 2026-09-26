@@ -32,6 +32,26 @@ const MAX_CENTROIDS: usize = 100_000;
 /// MS1 frames centroided in parallel per streamed chunk.
 const CHUNK: usize = 64;
 
+/// Retention time (minutes) of every frame, by timsrust frame index: the
+/// index [`detect_hills`] reads frames by, and the one timsrust's diaPASEF
+/// spectrum reader puts in the high 32 bits of a spectrum index.
+pub fn frame_rts(path: &Path) -> anyhow::Result<std::collections::HashMap<usize, f32>> {
+    let tims = TimsTofPath::new(path.to_string_lossy())
+        .map_err(|e| anyhow!("{}: not a timsTOF .d: {e:?}", path.display()))?;
+    let reader = tims
+        .frame_reader()
+        .map_err(|e| anyhow!("{}: cannot read frames: {e:?}", path.display()))?;
+    reader
+        .iter_indices()
+        .map(|index| {
+            let info = reader
+                .get_info(index)
+                .map_err(|e| anyhow!("frame {index}: {e:?}"))?;
+            Ok((index, (info.rt_in_seconds() / 60.0) as f32))
+        })
+        .collect()
+}
+
 /// Is `path` a Bruker timsTOF `.d` directory with TDF data?
 pub fn is_tdf(path: &Path) -> bool {
     path.join("analysis.tdf").is_file()
