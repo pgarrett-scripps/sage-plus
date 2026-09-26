@@ -964,3 +964,17 @@ async fn structural_errors_are_reported() {
         Err(MzMLError::BinaryEntityReference)
     ));
 }
+
+#[tokio::test]
+async fn zero_tic_spectra_are_dropped_without_a_placeholder() -> Result<(), MzMLError> {
+    let minutes = r#"<cvParam accession="MS:1000016" value="2" unitAccession="UO:0000031"/>"#;
+    let input = wrap(&[
+        simple_spectrum("scan=1", 2, "0", minutes, ""),
+        simple_spectrum("scan=2", 2, "300", minutes, ""),
+    ]);
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+    let ids: Vec<&str> = spectra.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["scan=2"]);
+    assert_eq!(spectra[0].mz, [400.0, 500.0, 600.0]);
+    Ok(())
+}
