@@ -1033,7 +1033,9 @@ therefore stays the default for DIA, and pseudo mode is the fast option.
 
 On a timsTOF diaPASEF E. coli run (PRIDE PXD070049, `LFQ_Ultra2_diaPASEF_15min_50ng_Ecoli_01`,
 50 ng, 15 min), pseudo mode found 7,412 peptides in 2 min with 6.0 GB peak memory. The
-wide-window chimeric search found 8,087 in 12 min 50 s with 16.6 GB.
+default chimeric search found 8,087 in 12 min 50 s with 16.6 GB. On diaPASEF that search
+reads timsrust's precursor-anchored spectra (one per MS1 precursor and MS2 frame), not
+wide windows.
 
 When `dia` is off or absent, spectra are read and searched exactly as before and
 `results.json` has no `dia` entry.

@@ -514,7 +514,7 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
 
 | Variant | Path | Peptides | Runtime | Peak RAM |
 |---|---|---|---|---|
-| (a) raw wide-window, chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
+| (a) default CLI reader (timsrust precursor-anchored spectra, not wide-window), chimeric | CLI | 8,087 | 12 min 50 s | 16.6 GB |
 | (b) tier 1 (`dia.mode = "pseudo"`), defaults before section 11 | CLI | 6,403 | 3 min 7 s | 6.1 GB |
 | (b) tier 1, section 11 defaults (min_corr 0.3, im_tolerance 0.01) | CLI | 7,412 | 1 min 36 s – 2 min | 6.0 GB |
 | (c) tier 1 + tier 2 (corr 0.3), separate q-values | example | 5,847 (tier 1 alone 5,773; tier 2 +74, about +1.3%) | 3 min 4 s | 5.8 GB |
@@ -533,10 +533,10 @@ fragment ±20 ppm, same FASTA and search settings as section 9.
   feature is paired only with boxes that contain its m/z and its 1/K0, and fragment hills
   must be within `dia.im_tolerance` (default 0.01 1/K0 since section 11; was 0.03) of it.
 - **Memory.** MS1 frames are streamed in chunks of 64, and MS2 frames one window group at
-  a time. The wide-window baseline holds every per-scan-split raw MS2 spectrum
-  (524k spectra, 1.39 billion peaks), which is where its 16.6 GB comes from.
+  a time. The (a) baseline holds every timsrust precursor-anchored raw MS2 spectrum
+  (524k spectra, one per MS1 precursor and MS2 frame, 1.39 billion peaks), which is where its 16.6 GB comes from.
 - **Decision.** Same as Orbitrap: (b) finds 79% of (a)'s peptides in a quarter of the
-  time and at 37% of the memory. Tier 2 adds about 1%. Wide-window stays the default.
+  time and at 37% of the memory. Tier 2 adds about 1%. The default CLI search stays the default.
 - **What (a) is on timsTOF.** timsrust 0.6 does not read diaPASEF as wide windows. Its
   `SpectrumReader` switches to `timsrust_centroid`'s narrow reader, which ignores
   `bruker_config.ms2`. That reader finds MS1 isotope pairs and emits one spectrum per
@@ -600,7 +600,7 @@ the best Orbitrap value and is the best on timsTOF.
 | | (a) wide-window | (b) before | (b) now | Share of (a) |
 |---|---|---|---|---|
 | Orbitrap | 6,975, 30 s, 3.0 GB | 5,567 | 5,763, 6 s, 2.3 GB | 80% → 83% |
-| timsTOF | 8,087, 12 min 50 s, 16.6 GB | 6,403 | 7,412, 2 min, 6.0 GB | 79% → 92% |
+| timsTOF ((a) is timsrust precursor-anchored, see section 10) | 8,087, 12 min 50 s, 16.6 GB | 6,403 | 7,412, 2 min, 6.0 GB | 79% → 92% |
 
 **What is left** (same diagnosis, new defaults):
 
@@ -663,7 +663,7 @@ intensity scale; an absolute 3e5 is no better.
 | | (a) wide-window | (b) pseudo | Share of (a) |
 |---|---|---|---|
 | Orbitrap | 6,975 | 5,959 (was 5,763) | 85% (was 83%) |
-| timsTOF | 8,087 | 7,412 (unchanged) | 92% |
+| timsTOF ((a) is timsrust precursor-anchored, see section 10) | 8,087 | 7,412 (unchanged) | 92% |
 
 timsTOF ignores the setting: there are only 170 no-feature misses there, and the hills carry
 1/K0, which would need its own tuning. Its default-config run still gives 7,412.

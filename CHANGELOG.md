@@ -24,13 +24,16 @@ entries are retained below for provenance.
   per diaPASEF m/z × 1/K0 box. koth hills and features carry 1/K0, a feature is paired only
   with boxes that contain its m/z and 1/K0, and fragment hills must match its 1/K0 within the
   new `dia.im_tolerance` (default 0.01). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
-  it found 7,412 peptides in 2 min and 6.0 GB. A wide-window chimeric search found 8,087
+  it found 7,412 peptides in 2 min and 6.0 GB. The default chimeric search, which on
+  diaPASEF reads timsrust's precursor-anchored spectra rather than wide windows, found 8,087
   in 12 min 50 s and 16.6 GB.
 - `dia` defaults tuned from a diagnosis of the peptides wide-window finds and pseudo mode
   misses: `dia.min_corr` 0.5 → 0.3 and `dia.im_tolerance` 0.03 → 0.01. On timsTOF, 0.03 let
   enough co-eluting fragments from other precursors into each pseudo-spectrum to hit the
   150-peak cap, which kept the most intense peaks and dropped real fragments. Pseudo mode now
-  finds 92% of the wide-window peptides on timsTOF (was 79%) and 83% on Orbitrap (was 80%).
+  finds 92% of the default search's peptides on timsTOF (was 79%; that baseline is
+  timsrust's precursor-anchored spectra, not wide windows) and 83% of the wide-window
+  peptides on Orbitrap (was 80%).
 - `dia.hill_precursors` (on by default, Orbitrap only): MS1 hills that no charged isotope
   feature claimed are also searched as charge 2 precursors, if they span at least 5 MS1 scans
   and their apex is at or above the median of such hills. On the Orbitrap AIF E. coli run,
