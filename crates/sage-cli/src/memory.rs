@@ -1,11 +1,11 @@
-//! Lightweight process and system memory safety limits.
+//! Lightweight process memory safety limit.
 //!
 //! Sage performs large, highly parallel allocations. Instrumenting each one would add
-//! complexity and contention to hot paths, so these limits are enforced by periodically
-//! sampling the process resident set and the memory available to the whole system.
+//! complexity and contention to hot paths, so the limit is enforced by periodically
+//! sampling the process resident set. Memory estimates never stop a run.
 
 use crate::events::CancellationToken;
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -83,86 +83,40 @@ impl Drop for MemoryGuard {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MemoryLimits {
     max_bytes: Option<u64>,
-    min_free_bytes: Option<u64>,
 }
 
 impl MemoryLimits {
-    pub fn from_gib(max_gib: Option<f64>, min_free_gib: Option<f64>) -> Result<Self> {
+    pub fn from_gib(max_gib: Option<f64>) -> Result<Self> {
         Ok(Self {
             max_bytes: gib_to_bytes("max_memory_gb", max_gib)?,
-            min_free_bytes: gib_to_bytes("min_free_memory_gb", min_free_gib)?,
         })
     }
 
     pub fn is_enabled(self) -> bool {
-        self.max_bytes.is_some() || self.min_free_bytes.is_some()
+        self.max_bytes.is_some()
     }
 
     pub fn max_gib(self) -> Option<f64> {
         self.max_bytes.map(bytes_to_gib)
     }
 
-    pub fn min_free_gib(self) -> Option<f64> {
-        self.min_free_bytes.map(bytes_to_gib)
-    }
-
-    /// Reject an estimated allocation before it begins if it would cross either limit.
-    pub fn check_estimate(self, stage: &str, additional_bytes: u64) -> Result<()> {
-        if !self.is_enabled() {
-            return Ok(());
-        }
-
-        let pid = sysinfo::get_current_pid()
-            .map_err(|error| anyhow::anyhow!("could not determine the Sage process ID: {error}"))?;
+    /// Whether Sage's current memory plus `additional_bytes` stays under
+    /// `max_memory_gb`. Only used to choose how to proceed, never to stop a
+    /// run: estimates can be far off, and the guard enforces the real limit.
+    pub fn estimate_fits(self, additional_bytes: u64) -> bool {
+        let Some(limit) = self.max_bytes else {
+            return true;
+        };
+        let Ok(pid) = sysinfo::get_current_pid() else {
+            return true;
+        };
         let mut system = System::new();
-        system.refresh_memory();
         system.refresh_process(pid);
-        let rss = system
+        system
             .process(pid)
-            .context("could not inspect the Sage process")?
-            .memory();
-
-        if estimate_exceeds_process_limit(self, rss, additional_bytes) {
-            bail!(
-                "estimated {stage} database peak is {:.2} GiB in addition to Sage's current {:.2} GiB; this would exceed `max_memory_gb` ({:.2} GiB). Reduce variable modifications, `max_variable_mods`, or database size",
-                bytes_to_gib(additional_bytes),
-                bytes_to_gib(rss),
-                bytes_to_gib(self.max_bytes.unwrap_or_default()),
-            );
-        }
-
-        let available = system.available_memory();
-        if estimate_exceeds_reserve(self, available, system.total_memory(), additional_bytes) {
-            bail!(
-                "estimated {stage} database peak requires {:.2} GiB, but only {:.2} GiB is currently available while preserving `min_free_memory_gb` ({:.2} GiB). Reduce variable modifications, `max_variable_mods`, or database size",
-                bytes_to_gib(additional_bytes),
-                bytes_to_gib(available),
-                bytes_to_gib(self.min_free_bytes.unwrap_or_default()),
-            );
-        }
-
-        Ok(())
+            .map(|process| process.memory().saturating_add(additional_bytes) < limit)
+            .unwrap_or(true)
     }
-}
-
-fn estimate_exceeds_process_limit(limits: MemoryLimits, rss: u64, additional_bytes: u64) -> bool {
-    limits
-        .max_bytes
-        .map(|limit| rss.saturating_add(additional_bytes) >= limit)
-        .unwrap_or(false)
-}
-
-fn estimate_exceeds_reserve(
-    limits: MemoryLimits,
-    available: u64,
-    total: u64,
-    additional_bytes: u64,
-) -> bool {
-    total != 0
-        && limits
-            .min_free_bytes
-            .map(|reserve| additional_bytes.saturating_add(reserve) >= available)
-            .unwrap_or(false)
 }
 
 fn gib_to_bytes(name: &str, value: Option<f64>) -> Result<Option<u64>> {
@@ -231,9 +185,8 @@ fn guard_loop(
     };
 
     log::info!(
-        "memory limits active: max Sage memory = {}, minimum free system memory = {}",
+        "memory limit active: max Sage memory = {}",
         display_limit(limits.max_bytes),
-        display_limit(limits.min_free_bytes),
     );
 
     let mut system = System::new();
@@ -252,24 +205,11 @@ fn guard_loop(
                 return;
             }
         };
-        let available = system.available_memory();
-
         if process_limit_reached(limits, rss) {
             let message = format!(
                 "Sage reached its configured memory limit: {:.2} GiB used, {:.2} GiB allowed. Aborting to keep the system responsive. Reduce `batch_size`, reduce database complexity, or increase `max_memory_gb`.",
                 bytes_to_gib(rss),
                 bytes_to_gib(limits.max_bytes.unwrap_or_default()),
-            );
-            trigger(&behavior, &failure, message);
-            return;
-        }
-
-        if reserve_limit_reached(limits, available, system.total_memory()) {
-            let message = format!(
-                "System available memory reached Sage's configured reserve: {:.2} GiB available, {:.2} GiB required. Sage is using {:.2} GiB. Aborting to keep the system responsive.",
-                bytes_to_gib(available),
-                bytes_to_gib(limits.min_free_bytes.unwrap_or_default()),
-                bytes_to_gib(rss),
             );
             trigger(&behavior, &failure, message);
             return;
@@ -294,14 +234,6 @@ fn trigger(behavior: &MemoryLimitBehavior, failure: &Mutex<Option<String>>, mess
 
 fn process_limit_reached(limits: MemoryLimits, rss: u64) -> bool {
     limits.max_bytes.map(|limit| rss >= limit).unwrap_or(false)
-}
-
-fn reserve_limit_reached(limits: MemoryLimits, available: u64, total: u64) -> bool {
-    total != 0
-        && limits
-            .min_free_bytes
-            .map(|minimum| available <= minimum)
-            .unwrap_or(false)
 }
 
 fn display_limit(bytes: Option<u64>) -> String {

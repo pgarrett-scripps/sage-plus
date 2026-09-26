@@ -41,7 +41,7 @@ Other benefits describe the intended effect and have not all been validated inde
 | Protein-backed peptide sequences and compact modification records | beta.2 | Every generated peptide allocated its own sequence and a dense modification vector | 29.5% less peak memory on a conventional search and 38.9% less with variable modifications ([results](benchmarks/RESULTS.md)) |
 | Lossless six-byte fragment index | beta.2 | Fragment records dominate index memory in large searches | Smaller index with exact masses and bounded search buckets |
 | Compact spectrum storage | beta.2 | Loaded spectra repeat fragment and charge data | Lower resident memory for large file batches |
-| Memory estimation, `max_memory_gb`, and `min_free_memory_gb` | beta.1 | Large searches could exhaust workstation memory | Oversized searches are rejected before they start, and running searches stop before the limit |
+| Memory estimation and `max_memory_gb` | beta.1 | Large searches could exhaust workstation memory | Running searches stop when measured memory reaches the limit; since Beta 11, estimates are only previewed with `--estimate` and never stop a run |
 | Configurable `batch_size` | beta.1 | Only a command-line option controlled file batching | Batching can be set per configuration |
 
 ### Modifications and PTMs

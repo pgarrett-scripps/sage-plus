@@ -29,7 +29,8 @@ impl Runner {
         let unmodified_bytes = unmodified_bytes.unwrap_or_else(|| {
             db_params.estimate_unmodified_bytes(&fasta, custom_cleavages.as_ref())
         });
-        let passes = digest_passes(self.parameters.max_memory_gb, unmodified_bytes);
+        let budgets = PrefilterBudgets::for_search(&self.parameters);
+        let passes = digest_passes(budgets.digest_bytes, unmodified_bytes);
         let mut digests = DigestSource {
             db_params: &db_params,
             fasta: &fasta,
@@ -50,7 +51,7 @@ impl Runner {
             );
         }
 
-        let budget = self.spectrum_index_budget();
+        let budget = budgets.index_bytes;
         let mut pass = SurvivorPass {
             db_params: &db_params,
             keeps: Vec::new(),
@@ -114,20 +115,6 @@ impl Runner {
             );
         }
         Ok((all_peptides, retained))
-    }
-
-    fn spectrum_index_budget(&self) -> u64 {
-        let gib = std::env::var("SAGE_PREFILTER_INDEX_GB")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .or_else(|| {
-                self.parameters
-                    .max_memory_gb
-                    .filter(|gib| *gib > 0.0)
-                    .map(|gib| gib * INDEX_MEMORY_FRACTION)
-            })
-            .unwrap_or(DEFAULT_INDEX_BUDGET_GIB);
-        (gib * 1024.0 * 1024.0 * 1024.0) as u64
     }
 
     fn spectrum_index_builder(&self, db_params: &Parameters) -> SpectrumIndexBuilder {
@@ -203,30 +190,42 @@ const DEFAULT_DIGEST_BUDGET_GIB: f64 = 2.0;
 /// that work without bound.
 const MAX_DIGEST_PASSES: u64 = 256;
 
+/// Byte budgets the prefilter works within, derived from `max_memory_gb`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrefilterBudgets {
+    /// Unmodified digest held by one digest pass.
+    pub digest_bytes: u64,
+    /// Spectrum index built from one batch of files.
+    pub index_bytes: u64,
+}
+
+impl PrefilterBudgets {
+    pub(crate) fn from_max_memory(max_memory_gb: Option<f64>) -> Self {
+        let limit = max_memory_gb.filter(|gib| *gib > 0.0);
+        let bytes = |gib: f64| ((gib * 1024.0 * 1024.0 * 1024.0) as u64).max(1);
+        Self {
+            digest_bytes: bytes(limit.map_or(DEFAULT_DIGEST_BUDGET_GIB, |gib| {
+                gib * DIGEST_MEMORY_FRACTION
+            })),
+            index_bytes: bytes(
+                limit.map_or(DEFAULT_INDEX_BUDGET_GIB, |gib| gib * INDEX_MEMORY_FRACTION),
+            ),
+        }
+    }
+
+    /// Budgets for `parameters`, honoring a test override.
+    pub(crate) fn for_search(parameters: &Search) -> Self {
+        parameters
+            .prefilter_budgets
+            .unwrap_or_else(|| Self::from_max_memory(parameters.max_memory_gb))
+    }
+}
+
 /// Number of sequence buckets the prefilter digests one at a time so the
-/// unmodified digest of each stays within its budget.
-pub(crate) fn digest_passes(max_memory_gb: Option<f64>, unmodified_bytes: u64) -> u64 {
-    let gib = std::env::var("SAGE_PREFILTER_DIGEST_GB")
-        .ok()
-        .and_then(|value| {
-            let gib = value
-                .parse::<f64>()
-                .ok()
-                .filter(|gib| gib.is_finite() && *gib > 0.0);
-            if gib.is_none() {
-                warn!("ignoring SAGE_PREFILTER_DIGEST_GB={value}: expected a positive number");
-            }
-            gib
-        })
-        .or_else(|| {
-            max_memory_gb
-                .filter(|gib| *gib > 0.0)
-                .map(|gib| gib * DIGEST_MEMORY_FRACTION)
-        })
-        .unwrap_or(DEFAULT_DIGEST_BUDGET_GIB);
-    let budget = ((gib * 1024.0 * 1024.0 * 1024.0) as u64).max(1);
+/// unmodified digest of each stays within `budget_bytes`.
+pub(crate) fn digest_passes(budget_bytes: u64, unmodified_bytes: u64) -> u64 {
     unmodified_bytes
-        .div_ceil(budget)
+        .div_ceil(budget_bytes.max(1))
         .clamp(1, MAX_DIGEST_PASSES)
 }
 
@@ -424,15 +423,27 @@ mod test {
     #[test]
     fn digest_passes_fit_the_budget_and_are_capped() {
         const GIB: u64 = 1024 * 1024 * 1024;
+        let passes = |max_memory_gb, bytes| {
+            digest_passes(
+                PrefilterBudgets::from_max_memory(max_memory_gb).digest_bytes,
+                bytes,
+            )
+        };
         // An eighth of 16 GiB is 2 GiB per pass.
-        assert_eq!(digest_passes(Some(16.0), 0), 1);
-        assert_eq!(digest_passes(Some(16.0), 2 * GIB), 1);
-        assert_eq!(digest_passes(Some(16.0), 2 * GIB + 1), 2);
-        assert_eq!(digest_passes(Some(16.0), 38 * GIB), 19);
+        assert_eq!(passes(Some(16.0), 0), 1);
+        assert_eq!(passes(Some(16.0), 2 * GIB), 1);
+        assert_eq!(passes(Some(16.0), 2 * GIB + 1), 2);
+        assert_eq!(passes(Some(16.0), 38 * GIB), 19);
         // No or invalid limit falls back to the 2 GiB default.
-        assert_eq!(digest_passes(None, 5 * GIB), 3);
-        assert_eq!(digest_passes(Some(0.0), 5 * GIB), 3);
-        assert_eq!(digest_passes(Some(1e-9), u64::MAX), MAX_DIGEST_PASSES);
+        assert_eq!(passes(None, 5 * GIB), 3);
+        assert_eq!(passes(Some(0.0), 5 * GIB), 3);
+        assert_eq!(passes(Some(1e-9), u64::MAX), MAX_DIGEST_PASSES);
+        // A quarter of 16 GiB indexes spectra; 8 GiB without a limit.
+        assert_eq!(
+            PrefilterBudgets::from_max_memory(Some(16.0)).index_bytes,
+            4 * GIB
+        );
+        assert_eq!(PrefilterBudgets::from_max_memory(None).index_bytes, 8 * GIB);
     }
 
     #[test]

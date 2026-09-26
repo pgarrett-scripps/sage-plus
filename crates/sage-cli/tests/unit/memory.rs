@@ -2,79 +2,37 @@ use super::*;
 
 #[test]
 fn converts_memory_limits() {
-    let limits = MemoryLimits::from_gib(Some(8.5), Some(2.0)).unwrap();
+    let limits = MemoryLimits::from_gib(Some(8.5)).unwrap();
     assert_eq!(limits.max_bytes, Some((8.5 * GIB) as u64));
-    assert_eq!(limits.min_free_bytes, Some((2.0 * GIB) as u64));
     assert_eq!(limits.max_gib(), Some(8.5));
-    assert_eq!(limits.min_free_gib(), Some(2.0));
 }
 
 #[test]
 fn zero_and_missing_limits_are_disabled() {
-    let limits = MemoryLimits::from_gib(Some(0.0), None).unwrap();
+    let limits = MemoryLimits::from_gib(Some(0.0)).unwrap();
     assert_eq!(limits, MemoryLimits::default());
     assert!(!limits.is_enabled());
 }
 
 #[test]
 fn rejects_invalid_limits() {
-    assert!(MemoryLimits::from_gib(Some(-1.0), None).is_err());
-    assert!(MemoryLimits::from_gib(Some(f64::NAN), None).is_err());
-    assert!(MemoryLimits::from_gib(None, Some(f64::INFINITY)).is_err());
+    assert!(MemoryLimits::from_gib(Some(-1.0)).is_err());
+    assert!(MemoryLimits::from_gib(Some(f64::NAN)).is_err());
+    assert!(MemoryLimits::from_gib(Some(f64::INFINITY)).is_err());
 }
 
 #[test]
-fn detects_configured_thresholds() {
-    let limits = MemoryLimits::from_gib(Some(8.0), Some(2.0)).unwrap();
+fn detects_configured_threshold() {
+    let limits = MemoryLimits::from_gib(Some(8.0)).unwrap();
     assert!(!process_limit_reached(limits, 7 * GIB as u64));
     assert!(process_limit_reached(limits, 8 * GIB as u64));
-    assert!(!reserve_limit_reached(
-        limits,
-        3 * GIB as u64,
-        16 * GIB as u64
-    ));
-    assert!(reserve_limit_reached(
-        limits,
-        2 * GIB as u64,
-        16 * GIB as u64
-    ));
-    assert!(!reserve_limit_reached(limits, 0, 0));
-}
-
-#[test]
-fn rejects_estimates_that_cross_limits() {
-    let limits = MemoryLimits::from_gib(Some(8.0), Some(2.0)).unwrap();
-    assert!(!estimate_exceeds_process_limit(
-        limits,
-        2 * GIB as u64,
-        5 * GIB as u64
-    ));
-    assert!(estimate_exceeds_process_limit(
-        limits,
-        2 * GIB as u64,
-        6 * GIB as u64
-    ));
-    assert!(!estimate_exceeds_reserve(
-        limits,
-        10 * GIB as u64,
-        16 * GIB as u64,
-        7 * GIB as u64
-    ));
-    assert!(estimate_exceeds_reserve(
-        limits,
-        9 * GIB as u64,
-        16 * GIB as u64,
-        7 * GIB as u64
-    ));
+    assert!(!process_limit_reached(MemoryLimits::default(), u64::MAX));
 }
 
 #[test]
 fn scoped_guard_cancels_embedded_job_at_limit() {
     let cancellation = CancellationToken::default();
-    let limits = MemoryLimits {
-        max_bytes: Some(1),
-        min_free_bytes: None,
-    };
+    let limits = MemoryLimits { max_bytes: Some(1) };
     let guard =
         spawn_memory_guard(limits, MemoryLimitBehavior::CancelJob(cancellation.clone())).unwrap();
 
@@ -92,32 +50,9 @@ fn scoped_guard_cancels_embedded_job_at_limit() {
 }
 
 #[test]
-fn scoped_guard_cancels_embedded_job_at_system_reserve() {
-    let cancellation = CancellationToken::default();
-    let limits = MemoryLimits {
-        max_bytes: None,
-        min_free_bytes: Some(u64::MAX),
-    };
-    let guard =
-        spawn_memory_guard(limits, MemoryLimitBehavior::CancelJob(cancellation.clone())).unwrap();
-
-    for _ in 0..100 {
-        if cancellation.is_cancelled() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-
-    assert!(cancellation.is_memory_limit());
-    assert!(guard
-        .failure()
-        .is_some_and(|message| message.contains("configured reserve")));
-}
-
-#[test]
 fn guard_under_generous_limits_polls_and_stops_on_drop() {
     let cancellation = CancellationToken::default();
-    let limits = MemoryLimits::from_gib(Some(1_000_000.0), Some(1e-9)).unwrap();
+    let limits = MemoryLimits::from_gib(Some(1_000_000.0)).unwrap();
     assert!(limits.is_enabled());
     let guard =
         spawn_memory_guard(limits, MemoryLimitBehavior::CancelJob(cancellation.clone())).unwrap();
@@ -141,29 +76,12 @@ fn disabled_guard_does_not_cancel_job() {
 }
 
 #[test]
-fn live_memory_preflight_accepts_and_rejects_real_process_estimates() {
-    let generous = MemoryLimits::from_gib(Some(1_000_000.0), None).unwrap();
-    generous.check_estimate("test", 1).unwrap();
-
-    let tiny_process_limit = MemoryLimits {
-        max_bytes: Some(1),
-        min_free_bytes: None,
-    };
-    assert!(tiny_process_limit
-        .check_estimate("test", 1)
-        .unwrap_err()
-        .to_string()
-        .contains("max_memory_gb"));
-
-    let impossible_reserve = MemoryLimits {
-        max_bytes: None,
-        min_free_bytes: Some(u64::MAX),
-    };
-    assert!(impossible_reserve
-        .check_estimate("test", 1)
-        .unwrap_err()
-        .to_string()
-        .contains("min_free_memory_gb"));
+fn estimate_fits_reads_the_live_process_but_never_errors() {
+    assert!(MemoryLimits::default().estimate_fits(u64::MAX));
+    assert!(MemoryLimits::from_gib(Some(1_000_000.0))
+        .unwrap()
+        .estimate_fits(1));
+    assert!(!MemoryLimits { max_bytes: Some(1) }.estimate_fits(1));
 }
 
 #[test]

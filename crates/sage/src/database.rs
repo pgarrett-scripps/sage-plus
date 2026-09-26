@@ -248,6 +248,15 @@ pub struct DatabaseMemoryEstimate {
     pub fragment_peak_bytes: u64,
 }
 
+impl DatabaseMemoryEstimate {
+    /// Largest of the three stage peaks.
+    pub fn peak_bytes(&self) -> u64 {
+        self.unmodified_peak_bytes
+            .max(self.modified_peak_bytes)
+            .max(self.fragment_peak_bytes)
+    }
+}
+
 /// Estimated bytes one unmodified digest of `sequence_len` residues holds.
 fn digest_bytes(sequence_len: u64) -> u64 {
     const ALLOCATION_OVERHEAD: u64 = 16;

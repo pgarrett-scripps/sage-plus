@@ -16,14 +16,23 @@ entries are retained below for provenance.
   `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
 - The prefilter streams the unmodified digest in sequence buckets instead of holding it whole,
   so its memory no longer grows with the full digest. Results are unchanged. The per-bucket
-  budget is an eighth of `max_memory_gb` (`SAGE_PREFILTER_DIGEST_GB` overrides it), and the
-  preflight checks one bucket instead of the whole digest.
+  budget is an eighth of `max_memory_gb`.
+- `sage config.json --estimate` prints a rough database memory estimate (peptides, fragments,
+  prefilter plan) and exits without searching.
 - Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
   key (for example intra- vs inter-protein crosslinks or glycan classes) with the same
   conventions as `spectrum_q_value`. `Scorer::with_db` builds a scorer with the same settings
   against another `IndexedDatabase`. Search results are unchanged.
 
 ### Changed
+- Memory estimates no longer refuse or stop a search. Estimates could not predict database size
+  reliably (PTM libraries, custom cleavages, peptide lists) and rejected searches that would
+  have fit. `max_memory_gb` is now enforced only on measured memory; estimates only size the
+  prefilter. Use `--estimate` for a preview.
+- The `SAGE_PREFILTER_INDEX_GB` environment variable is removed; the prefilter's budgets come
+  only from `max_memory_gb`.
+- `min_free_memory_gb` is ignored with a warning. It is still accepted so older configurations
+  parse; keeping memory free for other programs is left to the system.
 - The prefilter now requires three preliminary fragment matches by default instead of one. On a
   human plus 10x gut catalog search it kept 19% of peptides instead of 76%, halved peak memory,
   and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
@@ -34,8 +43,6 @@ entries are retained below for provenance.
   level 0) for every spectrum with zero total ion current.
 - A modification site such as `peptide_n_term:Z` now reports an invalid residue instead of a
   too-long specificity.
-- `SAGE_PREFILTER_DIGEST_GB` values that are not positive numbers are ignored with a warning
-  instead of forcing 256 digest passes.
 - `Matrix::get_mut` returns `None` for an out-of-range column instead of another row's entry,
   and `Matrix::is_close` compares shapes and every entry of non-square matrices.
 

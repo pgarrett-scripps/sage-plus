@@ -428,7 +428,6 @@ pub struct ExecutionRunStats {
     #[serde(default)]
     pub rayon_threads: usize,
     pub max_memory_gb: Option<f64>,
-    pub min_free_memory_gb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -605,6 +604,83 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
     }
 }
 
+/// Load `database.ptm_library`, if configured, into the database parameters.
+fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> {
+    if let Some(settings) = database_parameters.ptm_library.clone() {
+        let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
+            let contents = sage_cloudpath::util::read_text(&settings.path)
+                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+            sage_core::ptm_library::PtmLibrary::from_tsv(&contents).map_err(anyhow::Error::msg)
+        } else {
+            let bytes = sage_cloudpath::util::read_bytes(&settings.path)
+                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+            sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
+        }
+        .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
+        database_parameters
+            .validate_ptm_library(&library)
+            .map_err(anyhow::Error::msg)?;
+        info!("loaded {} unique PTM library sites", library.len());
+        database_parameters.loaded_ptm_library = Some(Arc::new(library));
+    }
+    Ok(())
+}
+
+fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
+    let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
+    sage_cloudpath::util::read_fasta(
+        &fasta_url,
+        &database_parameters.decoy_tag,
+        database_parameters.generate_decoys,
+    )
+    .with_context(|| {
+        format!(
+            "Failed to build database from `{}`",
+            database_parameters.fasta
+        )
+    })
+}
+
+fn load_custom_cleavages(
+    database_parameters: &Parameters,
+    fasta: &Fasta,
+) -> anyhow::Result<Option<ValidatedCustomCleavageLibrary>> {
+    let Some(path) = database_parameters.custom_cleavage_sites.as_deref() else {
+        return Ok(None);
+    };
+    let library = if path.to_ascii_lowercase().ends_with(".parquet") {
+        let content = sage_cloudpath::util::read_bytes(path)
+            .with_context(|| format!("Failed to read custom cleavage-site file `{path}`"))?;
+        sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)
+            .with_context(|| format!("Failed to parse custom cleavage-site file `{path}`"))?
+    } else {
+        let content = sage_cloudpath::util::read_text(path)
+            .with_context(|| format!("Failed to read custom cleavage-site file `{path}`"))?;
+        CustomCleavageLibrary::from_tsv(&content)
+            .with_context(|| format!("Failed to parse custom cleavage-site file `{path}`"))?
+    };
+    let validated = library
+        .validate(fasta)
+        .with_context(|| format!("Failed to validate custom cleavage-site file `{path}`"))?;
+    info!(
+        "custom cleavage sites: {} matched, {} unmatched",
+        validated.matched_sites, validated.unmatched_sites
+    );
+    if validated.unmatched_sites > 0 {
+        warn!(
+            "{} custom cleavage sites refer to proteins absent from the FASTA",
+            validated.unmatched_sites
+        );
+    }
+    if validated.sites_without_context > 0 {
+        warn!(
+                "{} custom cleavage sites have no sequence context and were validated by coordinate only",
+                validated.sites_without_context
+            );
+    }
+    Ok(Some(validated))
+}
+
 fn missing_decoy_warning(
     generate_decoys: bool,
     decoy_labels: impl IntoIterator<Item = bool>,
@@ -642,85 +718,16 @@ impl Runner {
         let mut database_parameters = parameters.database.clone();
         let start = Instant::now();
         cancellation.check()?;
-        if let Some(settings) = database_parameters.ptm_library.clone() {
-            let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
-                let contents = sage_cloudpath::util::read_text(&settings.path)
-                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
-                sage_core::ptm_library::PtmLibrary::from_tsv(&contents).map_err(anyhow::Error::msg)
-            } else {
-                let bytes = sage_cloudpath::util::read_bytes(&settings.path)
-                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
-                sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
-            }
-            .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
-            database_parameters
-                .validate_ptm_library(&library)
-                .map_err(anyhow::Error::msg)?;
-            info!("loaded {} unique PTM library sites", library.len());
-            database_parameters.loaded_ptm_library = Some(Arc::new(library));
-        }
+        load_ptm_library(&mut database_parameters)?;
         events.emit(EventKind::DatabaseStarted);
-        let limits =
-            MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
+        let limits = MemoryLimits::from_gib(parameters.max_memory_gb)?;
         let mut retained_spectra = RetainedSpectra::default();
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
-            let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
-            let fasta = sage_cloudpath::util::read_fasta(
-                &fasta_url,
-                &database_parameters.decoy_tag,
-                database_parameters.generate_decoys,
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to build database from `{}`",
-                    database_parameters.fasta
-                )
-            })?;
-            let custom_cleavages = if let Some(path) =
-                database_parameters.custom_cleavage_sites.as_deref()
-            {
-                let library = if path.to_ascii_lowercase().ends_with(".parquet") {
-                    let content = sage_cloudpath::util::read_bytes(path).with_context(|| {
-                        format!("Failed to read custom cleavage-site file `{path}`")
-                    })?;
-                    sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)
-                        .with_context(|| {
-                            format!("Failed to parse custom cleavage-site file `{path}`")
-                        })?
-                } else {
-                    let content = sage_cloudpath::util::read_text(path).with_context(|| {
-                        format!("Failed to read custom cleavage-site file `{path}`")
-                    })?;
-                    CustomCleavageLibrary::from_tsv(&content).with_context(|| {
-                        format!("Failed to parse custom cleavage-site file `{path}`")
-                    })?
-                };
-                let validated = library.validate(&fasta).with_context(|| {
-                    format!("Failed to validate custom cleavage-site file `{path}`")
-                })?;
-                info!(
-                    "custom cleavage sites: {} matched, {} unmatched",
-                    validated.matched_sites, validated.unmatched_sites
-                );
-                if validated.unmatched_sites > 0 {
-                    warn!(
-                        "{} custom cleavage sites refer to proteins absent from the FASTA",
-                        validated.unmatched_sites
-                    );
-                }
-                if validated.sites_without_context > 0 {
-                    warn!(
-                        "{} custom cleavage sites have no sequence context and were validated by coordinate only",
-                        validated.sites_without_context
-                    );
-                }
-                Some(validated)
-            } else {
-                None
-            };
+            let fasta = load_fasta(&database_parameters)?;
+            let custom_cleavages = load_custom_cleavages(&database_parameters, &fasta)?;
 
             if let (Some(settings), Some(library)) = (
                 database_parameters.ptm_library.as_ref(),
@@ -765,95 +772,27 @@ impl Runner {
                 }
             }
 
+            // Estimates only size the prefilter; they never stop a run. Use
+            // `--estimate` to preview memory before searching.
             let mut unmodified_bytes = None;
-            let needs_estimate = limits.is_enabled()
-                || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
-            if needs_estimate {
+            if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
                 let full_estimate = database_parameters
                     .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
                 events.emit(EventKind::DatabaseEstimated {
                     unmodified_peptides: full_estimate.unmodified_peptides,
                     modified_peptides: full_estimate.modified_peptides,
                     fragments: full_estimate.fragments,
-                    peak_bytes: full_estimate
-                        .unmodified_peak_bytes
-                        .max(full_estimate.modified_peak_bytes)
-                        .max(full_estimate.fragment_peak_bytes),
+                    peak_bytes: full_estimate.peak_bytes(),
                 });
                 unmodified_bytes = Some(full_estimate.unmodified_peak_bytes);
-                if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
-                    database_parameters.auto_calculate_prefilter_chunk_size(
-                        &fasta,
-                        full_estimate.modified_peptides,
-                    );
-                }
-
-                if limits.is_enabled() {
-                    info!(
-                        "database preflight: {} unmodified peptides ({:.2} GiB peak), up to {} modified peptides ({:.2} GiB peak), up to {} fragments ({:.2} GiB index peak)",
-                        full_estimate.unmodified_peptides,
-                        full_estimate.unmodified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        full_estimate.modified_peptides,
-                        full_estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        full_estimate.fragments,
-                        full_estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                    );
-                    // A chunked prefilter holds one sequence bucket of the
-                    // unmodified digest and expands one chunk of it at a time.
-                    // Buckets are hash-balanced and chunks are balanced by
-                    // digest count, so each holds about an equal share; the
-                    // memory guard backs this for skewed databases.
-                    let chunked = database_parameters.prefilter
-                        && database_parameters.prefilter_chunk_size < fasta.targets.len();
-                    if chunked {
-                        let passes = prefilter::digest_passes(
-                            parameters.max_memory_gb,
-                            full_estimate.unmodified_peak_bytes,
-                        );
-                        let chunks = passes.saturating_mul(prefilter::chunks_per_pass(
-                            fasta.targets.len(),
-                            database_parameters.prefilter_chunk_size,
-                            passes,
-                        ) as u64);
-                        let bucket = full_estimate.unmodified_peak_bytes.div_ceil(passes);
-                        limits.check_estimate("unmodified-peptide", bucket)?;
-                        // Prefilter chunks are streamed through the spectrum
-                        // index without a fragment index; the survivor index
-                        // is checked by the final database preflight.
-                        limits.check_estimate(
-                            "modified-peptide",
-                            bucket
-                                .saturating_add(full_estimate.modified_peak_bytes.div_ceil(chunks)),
-                        )?;
-                    } else {
-                        limits.check_estimate(
-                            "unmodified-peptide",
-                            full_estimate.unmodified_peak_bytes,
-                        )?;
-                        if database_parameters.prefilter {
-                            limits.check_estimate(
-                                "modified-peptide",
-                                full_estimate.modified_peak_bytes,
-                            )?;
-                        }
-                    }
-                }
+                database_parameters
+                    .auto_calculate_prefilter_chunk_size(&fasta, full_estimate.modified_peptides);
             }
 
             match database_parameters.prefilter {
                 false => {
                     let digests = database_parameters
                         .digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-                    if limits.is_enabled() {
-                        let estimate = database_parameters.estimate_modified_memory(&digests);
-                        info!(
-                            "modification preflight: {} unmodified peptides may expand to {} modified peptides ({:.2} GiB additional peak)",
-                            estimate.unmodified_peptides,
-                            estimate.modified_peptides,
-                            estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        );
-                        limits.check_estimate("modified-peptide", estimate.modified_peak_bytes)?;
-                    }
                     database_parameters.modify_digests(digests)
                 }
                 true => {
@@ -910,27 +849,18 @@ impl Runner {
         if !reordered {
             Parameters::reorder_peptides(&mut all_peptides);
         }
-        if limits.is_enabled() {
+        // Prefilter spectra are kept to skip rereading them, unless the
+        // fragment index looks unlikely to fit beside them. The search
+        // rereads released spectra.
+        if limits.is_enabled() && !retained_spectra.batches.is_empty() {
             let estimate = database_parameters.estimate_index_memory(&all_peptides);
-            info!(
-                "final database preflight: {} peptides, {} fragments, estimated {:.2} GiB peak",
-                estimate.modified_peptides,
-                estimate.fragments,
-                estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-            );
             let additional = estimate
                 .fragment_peak_bytes
                 .saturating_sub(estimate.modified_peak_bytes);
-            if let Err(error) = limits.check_estimate("final fragment-index", additional) {
-                if retained_spectra.batches.is_empty() {
-                    return Err(error);
-                }
-                // Spectra are reread by the search rather than held through
-                // the index build.
-                info!("releasing prefilter spectra to fit the fragment index");
+            if !limits.estimate_fits(additional) {
+                info!("releasing prefilter spectra to make room for the fragment index");
                 retained_spectra = RetainedSpectra::default();
                 let _ = trim_allocator();
-                limits.check_estimate("final fragment-index", additional)?;
             }
         }
         let database = database_parameters
@@ -996,9 +926,10 @@ impl Runner {
     }
 }
 mod artifacts;
+pub mod estimate;
 mod execution;
 mod postprocess;
-mod prefilter;
+pub(crate) mod prefilter;
 mod search;
 
 #[cfg(test)]

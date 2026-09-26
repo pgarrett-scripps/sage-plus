@@ -75,8 +75,6 @@ pub struct Search {
     pub protein_grouping_peptide_fdr: f32,
     /// Maximum resident memory Sage may use, in GiB. `None` or zero disables the limit.
     pub max_memory_gb: Option<f64>,
-    /// Minimum system memory Sage must leave available, in GiB. `None` or zero disables the limit.
-    pub min_free_memory_gb: Option<f64>,
     /// Number of input files to load and search at once.
     pub batch_size: usize,
 
@@ -107,6 +105,11 @@ pub struct Search {
     /// DIA search mode; omitted from results.json when off.
     #[serde(skip_serializing_if = "DiaSettings::is_off")]
     pub dia: DiaSettings,
+
+    /// Prefilter budgets overriding those from `max_memory_gb`, so tests can
+    /// force streaming on tiny inputs. Not configurable.
+    #[serde(skip)]
+    pub(crate) prefilter_budgets: Option<crate::runner::prefilter::PrefilterBudgets>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -154,6 +157,8 @@ pub struct Input {
     pub protein_grouping_peptide_fdr: Option<f32>,
     #[schemars(range(min = 0.0))]
     pub max_memory_gb: Option<f64>,
+    /// Ignored since Beta 11: Sage enforces only `max_memory_gb`. Still
+    /// accepted so older configurations parse.
     #[schemars(range(min = 0.0))]
     pub min_free_memory_gb: Option<f64>,
     #[schemars(range(min = 1))]
@@ -617,6 +622,9 @@ impl Input {
     pub fn build(self) -> anyhow::Result<Search> {
         self.validate()?;
         let memory_limits = self.memory_limits()?;
+        if self.min_free_memory_gb.is_some() {
+            log::warn!("`min_free_memory_gb` is ignored; Sage enforces only `max_memory_gb`");
+        }
         let batch_size = resolve_batch_size(self.batch_size)?;
         let database = self
             .database
@@ -737,7 +745,6 @@ impl Input {
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
             max_memory_gb: memory_limits.max_gib(),
-            min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
             ptm_localization,
             spectral_library,
@@ -747,12 +754,13 @@ impl Input {
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             score_type,
             dia,
+            prefilter_budgets: None,
         })
     }
 
     /// Validate and convert the configured memory limits.
     pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
-        MemoryLimits::from_gib(self.max_memory_gb, self.min_free_memory_gb)
+        MemoryLimits::from_gib(self.max_memory_gb)
     }
 }
 

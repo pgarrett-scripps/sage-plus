@@ -1817,6 +1817,7 @@
       ]
     },
     "min_free_memory_gb": {
+      "description": "Ignored since Beta 11: Sage enforces only `max_memory_gb`. Still\naccepted so older configurations parse.",
       "format": "double",
       "minimum": 0.0,
       "type": [

@@ -215,3 +215,34 @@ fn cancellation_during_search_or_annotation_never_completes_the_run() -> anyhow:
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn estimate_reports_the_database_without_searching() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = workspace
+        .join("tests/Q99536.fasta")
+        .to_string_lossy()
+        .into_owned()
+        .into();
+    config["database"]["prefilter"] = true.into();
+    config["mzml_paths"] = serde_json::json!([workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML")]);
+    // A limit the estimate far exceeds must not make it fail, and the
+    // retired reserve setting must still parse.
+    config["max_memory_gb"] = 1e-9.into();
+    config["min_free_memory_gb"] = 1_000_000.0.into();
+    let input: Input = serde_json::from_value(config)?;
+
+    let report = SageRunner::new(input, JobOptions::default()).estimate()?;
+
+    assert_eq!(report.proteins, 1);
+    assert!(report.database.modified_peptides >= report.database.unmodified_peptides);
+    assert!(report.database.fragments > 0);
+    let plan = report.prefilter.as_ref().expect("prefilter plan");
+    assert!(plan.chunks >= 1 && plan.digest_passes >= 1);
+    let text = report.to_string();
+    assert!(text.contains("never limits a run"));
+    assert!(text.contains("fragments:"));
+    Ok(())
+}
