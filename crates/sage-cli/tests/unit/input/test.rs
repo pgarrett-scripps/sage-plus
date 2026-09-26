@@ -525,3 +525,127 @@ fn dia_settings_are_validated() {
     }))
     .is_err());
 }
+
+#[test]
+fn each_logical_constraint_reports_its_own_message() {
+    let fixture = serde_json::json!({
+        "database": {"fasta": "missing.fasta"},
+        "mzml_paths": ["missing.mzML"],
+        "precursor_tol": {"ppm": [-10, 10]},
+        "fragment_tol": {"ppm": [-20, 20]}
+    });
+    let valid: Input = serde_json::from_value(fixture.clone()).unwrap();
+    assert!(valid.validate().is_ok());
+    for (key, value, message) in [
+        (
+            "database",
+            serde_json::json!({}),
+            "Either `database.fasta` or `database.peptides`",
+        ),
+        (
+            "database",
+            serde_json::json!({"peptides": "p.tsv", "custom_cleavage_sites": "c.tsv"}),
+            "`database.custom_cleavage_sites` requires `database.fasta`",
+        ),
+        (
+            "mzml_paths",
+            serde_json::json!([]),
+            "`mzml_paths` must contain at least one",
+        ),
+        ("isotope_errors", serde_json::json!([3, 1]), "[3, 1]"),
+        ("precursor_charge", serde_json::json!([4, 2]), "[4, 2]"),
+        ("mass_shift_ppm", serde_json::json!(-1.0), "mass_shift_ppm"),
+        (
+            "ion_mobility_model",
+            serde_json::json!({"min_training_psms": 0}),
+            "min_training_psms",
+        ),
+        (
+            "retention_time_model",
+            serde_json::json!({"folds": 11}),
+            "retention_time_model.folds",
+        ),
+        ("report_psms", serde_json::json!(0), "report_psms"),
+        (
+            "ptm_localization",
+            serde_json::json!({"psm_q_value": 2.0}),
+            "ptm_localization.psm_q_value",
+        ),
+        (
+            "ptm_localization",
+            serde_json::json!({"localization_q_value": -0.5}),
+            "ptm_localization.localization_q_value",
+        ),
+        ("max_memory_gb", serde_json::json!(-1.0), ""),
+        ("batch_size", serde_json::json!(0), "batch_size"),
+        (
+            "precursor_tol",
+            serde_json::json!({"pct": [-1, 1]}),
+            "percentage precursor tolerances",
+        ),
+        (
+            "fragment_tol",
+            serde_json::json!({"da": [0.5, -0.5]}),
+            "`fragment_tol` must contain finite ordered bounds",
+        ),
+    ] {
+        let mut config = fixture.clone();
+        config[key] = value;
+        let input: Input = serde_json::from_value(config).unwrap();
+        let error = input
+            .validate()
+            .expect_err(&format!("accepted invalid {key}"))
+            .to_string();
+        assert!(error.contains(message), "{key}: {error}");
+    }
+
+    // Percentage tolerances remain legal for fragments.
+    let mut config = fixture.clone();
+    config["fragment_tol"] = serde_json::json!({"pct": [-1, 1]});
+    let input: Input = serde_json::from_value(config).unwrap();
+    assert!(input.validate().is_ok());
+
+    // A peptide list stands in for a FASTA.
+    let mut config = fixture;
+    config["database"] = serde_json::json!({"peptides": "p.tsv"});
+    let input: Input = serde_json::from_value(config).unwrap();
+    assert!(input.validate().is_ok());
+}
+
+#[test]
+fn quant_options_fill_unset_fields_from_defaults() {
+    use super::{QuantOptions, QuantSettings, TmtSettings};
+    let options: QuantOptions = serde_json::from_value(serde_json::json!({
+        "lfq": true,
+        "tmt_settings": {"sn": true},
+        "lfq_settings": {"ppm_tolerance": 7.5, "mbr": false}
+    }))
+    .unwrap();
+    let settings: QuantSettings = options.into();
+    assert!(settings.lfq);
+    assert!(settings.tmt.is_none());
+    assert_eq!(settings.tmt_settings.level, 3);
+    assert!(settings.tmt_settings.sn);
+    assert_eq!(settings.lfq_settings.ppm_tolerance, 7.5);
+    assert!(!settings.lfq_settings.mbr);
+    let lfq_default = sage_core::lfq::LfqSettings::default();
+    assert_eq!(
+        settings.lfq_settings.rt_pct_tolerance,
+        lfq_default.rt_pct_tolerance
+    );
+
+    let empty: QuantSettings = QuantOptions::default().into();
+    assert!(!empty.lfq);
+    let tmt_default = TmtSettings::default();
+    assert_eq!(
+        (empty.tmt_settings.level, empty.tmt_settings.sn),
+        (tmt_default.level, tmt_default.sn)
+    );
+    assert_eq!((tmt_default.level, tmt_default.sn), (3, false));
+
+    let level_two: TmtSettings =
+        serde_json::from_value::<super::TmtOptions>(serde_json::json!({"level": 2}))
+            .unwrap()
+            .into();
+    assert_eq!((level_two.level, level_two.sn), (2, false));
+}
