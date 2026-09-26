@@ -820,6 +820,7 @@ fn protein_site_library_adds_targeted_combinations() {
                 search_mode: SearchMode::Database,
                 mass: 79.96633,
                 max_count: Some(2),
+                max_total_count: None,
                 name: Some("Phospho".into()),
                 neutral_losses: vec![97.9769],
                 neutral_loss_mode: NeutralLossMode::Optional,
@@ -875,6 +876,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
                 search_mode: SearchMode::Database,
                 mass: 79.96633,
                 max_count: Some(2),
+                max_total_count: None,
                 name: Some("Phospho".into()),
                 neutral_losses: vec![],
                 neutral_loss_mode: NeutralLossMode::Optional,
@@ -921,6 +923,7 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
         VarModEntry::Detailed(VariableModification {
             mass: 79.966_33,
             max_count: Some(1),
+            max_total_count: None,
             name: name.map(str::to_string),
             neutral_losses: Vec::new(),
             neutral_loss_mode: NeutralLossMode::Optional,
@@ -1413,4 +1416,123 @@ fn required_neutral_loss_fragment_shift_matches_preliminary_index() {
             assert!((delta - offset.fragment_shift()).abs() < 1e-3, "{delta}");
         }
     }
+}
+
+fn histone_parameters(
+    max_count: usize,
+    max_total_count: Option<usize>,
+    max_new: usize,
+    max_total: usize,
+) -> Parameters {
+    use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+
+    let mut acetyl = serde_json::json!({
+        "mass": 42.010565, "sites": ["K"], "max_count": max_count, "site_mode": "both"
+    });
+    if let Some(max_total_count) = max_total_count {
+        acetyl["max_total_count"] = max_total_count.into();
+    }
+    let mut parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "variable_mods": {
+            "Acetyl": acetyl,
+            "Methyl": {"mass": 14.01565, "sites": ["K", "R"], "max_count": 1, "site_mode": "both"}
+        },
+        "generate_decoys": false, "peptide_min_mass": 0, "peptide_max_mass": 100000,
+        "max_variable_mods": max_new, "max_total_variable_mods": max_total,
+        "enzyme": {"min_len": 1, "max_len": 50, "missed_cleavages": 0, "cleave_at": "$"}
+    }))
+    .unwrap()
+    .make_parameters();
+    let site = |position: u32, modification: &str| PtmLibrarySite {
+        attachment: Default::default(),
+        protein: Arc::from("H4"),
+        position,
+        residue: b'K',
+        modification: Arc::from(modification),
+    };
+    // GKGGKGLGKGGAKKR: K4, K8 and K12 acetyl and K4 methyl are known.
+    parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
+        site(4, "Acetyl"),
+        site(8, "Acetyl"),
+        site(12, "Acetyl"),
+        site(4, "Methyl"),
+    ])));
+    parameters
+}
+
+fn acetyl_sites(peptide: &Peptide, library: &[usize]) -> (usize, usize) {
+    let sites = peptide
+        .applied_modifications()
+        .filter(|applied| applied.modification.name.as_deref() == Some("Acetyl"))
+        .filter_map(|applied| match applied.site {
+            crate::peptide::Site::Sequence(i) => Some(i as usize),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let known = sites.iter().filter(|site| library.contains(site)).count();
+    (known, sites.len() - known)
+}
+
+#[test]
+fn max_total_count_caps_library_and_max_count_caps_new_sites() {
+    let fasta = Fasta::parse(">H4\nGKGGKGLGKGGAKKR\n".into(), "rev_", false).unwrap();
+    // Sequence indices of the library acetyl sites (protein positions 4, 8, 12).
+    let library = [4, 8, 12];
+
+    // Default: max_total_count falls back to max_count, so a library acetyl
+    // uses the only acetyl slot (Beta 9 behaviour).
+    let peptides = histone_parameters(1, None, 1, 3).digest(&fasta);
+    assert!(peptides.iter().all(|p| {
+        let (known, new) = acetyl_sites(p, &library);
+        known + new <= 1
+    }));
+
+    // Library acetyls are limited by max_total_count; new acetyls by max_count.
+    let peptides = histone_parameters(1, Some(3), 1, 3).digest(&fasta);
+    assert!(peptides.iter().any(|p| acetyl_sites(p, &library) == (3, 0)));
+    assert!(peptides.iter().any(|p| acetyl_sites(p, &library) == (2, 1)));
+    assert!(peptides.iter().all(|p| acetyl_sites(p, &library).1 <= 1));
+
+    // Two new acetyls need both max_count and max_variable_mods of two.
+    let peptides = histone_parameters(1, Some(3), 2, 3).digest(&fasta);
+    assert!(!peptides.iter().any(|p| acetyl_sites(p, &library).1 == 2));
+    let peptides = histone_parameters(2, Some(3), 2, 3).digest(&fasta);
+    assert!(peptides.iter().any(|p| acetyl_sites(p, &library).1 == 2));
+}
+
+#[test]
+fn memory_estimate_counts_per_modification_caps_exactly() {
+    let fasta = Fasta::parse(">H4\nGKGGKGLGKGGAKKR\n".into(), "rev_", false).unwrap();
+    for (max_count, max_total_count) in [
+        (1, None),
+        (1, Some(2)),
+        (1, Some(3)),
+        (2, Some(3)),
+        (3, None),
+    ] {
+        for (max_new, max_total) in [(1, 1), (1, 3), (2, 3), (3, 5)] {
+            let parameters = histone_parameters(max_count, max_total_count, max_new, max_total);
+            let generated = parameters.digest(&fasta).len() as u64;
+            let estimated = parameters.estimate_memory(&fasta).modified_peptides;
+            assert_eq!(
+                estimated, generated,
+                "max_count {max_count}, max_total_count {max_total_count:?}, \
+                 max_variable_mods {max_new}, max_total_variable_mods {max_total}"
+            );
+        }
+    }
+}
+
+#[test]
+fn max_total_count_must_cover_max_count() {
+    let error = serde_json::from_value::<Builder>(serde_json::json!({
+        "variable_mods": {
+            "Acetyl": {"mass": 42.010565, "sites": ["K"], "max_count": 2, "max_total_count": 1}
+        }
+    }))
+    .err()
+    .expect("max_total_count below max_count must be rejected");
+    assert!(error
+        .to_string()
+        .contains("max_total_count must be at least max_count"));
 }

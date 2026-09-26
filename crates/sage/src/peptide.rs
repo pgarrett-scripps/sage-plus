@@ -481,10 +481,20 @@ pub trait ModificationSource {
 pub(crate) struct VariableRule {
     pub specificity: ModificationSpecificity,
     pub modification: Arc<ModificationDefinition>,
+    /// Per-peptide limit on new (non-library) placements of this modification.
     pub max_count: Option<usize>,
+    /// Per-peptide limit on all placements, library-supported included.
+    /// Defaults to `max_count`.
+    pub max_total_count: Option<usize>,
     pub site_mode: SiteMode,
     /// Rules with the same named modification share one occurrence counter.
     pub count_group: usize,
+}
+
+impl VariableRule {
+    pub(crate) fn total_limit(&self) -> Option<usize> {
+        self.max_total_count.or(self.max_count)
+    }
 }
 
 /// Channel-resolved modification definitions shared by every peptide produced
@@ -1068,6 +1078,7 @@ impl Peptide {
                     specificity: *specificity,
                     modification: modification.definition(),
                     max_count: *max_count,
+                    max_total_count: None,
                     site_mode: SiteMode::Exhaustive,
                     count_group,
                 },
@@ -1099,8 +1110,8 @@ impl Peptide {
 
     /// Apply config-defined and library-supported variable modifications in a
     /// single enumeration. Library-supported placements do not consume the
-    /// exhaustive budget, but all placements consume the total budget and the
-    /// named modification's shared `max_count`.
+    /// exhaustive budget or the named modification's `max_count`; all
+    /// placements consume the total budget and its `max_total_count`.
     pub(crate) fn apply_rules(
         mut self,
         plan: &ModificationPlan<'_>,
@@ -1240,7 +1251,8 @@ struct ModificationEnumeration<'a, 'p> {
     plan: &'p ModificationPlan<'a>,
     occupied: FnvHashSet<Site>,
     selected: Vec<ModificationCandidate>,
-    mod_counts: Vec<usize>,
+    new_counts: Vec<usize>,
+    total_counts: Vec<usize>,
     output: Vec<Peptide>,
 }
 
@@ -1257,7 +1269,8 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
             plan,
             occupied: FnvHashSet::default(),
             selected: Vec::new(),
-            mod_counts: vec![0; group_count],
+            new_counts: vec![0; group_count],
+            total_counts: vec![0; group_count],
             output: vec![peptide.clone()],
         }
     }
@@ -1271,17 +1284,23 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
 
             let rule = &self.plan.variable_mods[modification.rule];
             let group = rule.count_group;
-            let next_exhaustive = exhaustive_count + usize::from(!modification.library_supported);
+            let is_new = !modification.library_supported;
+            let next_exhaustive = exhaustive_count + usize::from(is_new);
             let exceeds_limit = next_exhaustive > self.plan.max_exhaustive_mods
+                || (is_new
+                    && rule
+                        .max_count
+                        .is_some_and(|limit| self.new_counts[group] >= limit))
                 || rule
-                    .max_count
-                    .is_some_and(|limit| self.mod_counts[group] >= limit);
+                    .total_limit()
+                    .is_some_and(|limit| self.total_counts[group] >= limit);
             if exceeds_limit {
                 self.occupied.remove(&modification.site);
                 continue;
             }
 
-            self.mod_counts[group] += 1;
+            self.new_counts[group] += usize::from(is_new);
+            self.total_counts[group] += 1;
             self.selected.push(modification);
             let should_continue = if remaining == 1 {
                 self.push_variant()
@@ -1289,7 +1308,8 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
                 self.enumerate(idx + 1, remaining - 1, next_exhaustive)
             };
             self.selected.pop();
-            self.mod_counts[group] -= 1;
+            self.new_counts[group] -= usize::from(is_new);
+            self.total_counts[group] -= 1;
             self.occupied.remove(&modification.site);
             if !should_continue {
                 return false;

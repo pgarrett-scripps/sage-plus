@@ -519,8 +519,12 @@ preserving the existing variable-before-static behavior. Conflicting fixed
 definitions that can occupy the same site are rejected. One name cannot appear in
 both static and variable sections.
 
-For indexed variable modifications, `max_count` limits occurrences of that identity
-across all its sites. `max_variable_mods` limits exhaustive placements per peptide.
+For indexed variable modifications, `max_count` limits new (exhaustive) placements of
+that identity across all its sites. `max_total_count` limits all its placements,
+library-supported included, and defaults to `max_count`, so a library site uses up the
+`max_count` allowance unless `max_total_count` is raised. For example,
+`{"max_count": 1, "max_total_count": 3}` allows up to three library acetyl sites but
+only one new one. The pair mirrors the global limits: `max_variable_mods` limits exhaustive placements per peptide.
 `max_total_variable_mods` limits exhaustive and library-supported placements combined
 and defaults to `max_variable_mods`. `max_combinations` caps generated variants,
 including the unmodified form. Existing mass-offset limitations are described below.

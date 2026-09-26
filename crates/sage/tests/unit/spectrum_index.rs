@@ -39,6 +39,7 @@ fn parameters(offset: bool) -> Parameters {
     let phospho = VarModEntry::Detailed(VariableModification {
         mass: 79.966_33,
         max_count: Some(1),
+        max_total_count: None,
         name: Some("Phospho".into()),
         neutral_losses: vec![97.976_9],
         neutral_loss_mode: NeutralLossMode::Required,

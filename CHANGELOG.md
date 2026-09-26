@@ -10,6 +10,13 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- Per-modification `max_total_count` for PTM-library searches. `max_count` now limits new
+  (exhaustive) placements of a modification, and `max_total_count` limits all its placements,
+  library-supported included. `max_total_count` defaults to `max_count`, which reproduces
+  Beta 9 exactly, so existing configs give the same results. Setting
+  `{"max_count": 1, "max_total_count": 3}` lets a peptide carry up to three library acetyl
+  sites plus one new one, where Beta 9 allowed one acetyl in total. Library and `both`
+  definitions need `max_count` or `max_total_count`.
 - `dia` (off by default): DIA pseudo-spectrum search (`"dia": {"mode": "pseudo"}` or
   `--dia pseudo`). The new `sage-dia` crate detects MS1 and per-window MS2 hills with koth-core
   v0.11.0 and anchors on each charged MS1 isotope feature. Fragment hills whose apex and elution
@@ -84,6 +91,9 @@ entries are retained below for provenance.
   longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
 
 ### Fixed
+- The preflight memory estimate now counts modified peptides exactly, honoring each
+  modification's `max_count` and `max_total_count`. It previously ignored per-modification
+  caps, overestimated PTM-library searches and could refuse a database that would fit.
 - diaPASEF files are read as quadrupole-window spectra again, honoring `bruker_config.ms2`
   splitting. Beta 2 to Beta 9 silently used timsrust 0.6's precursor-anchored reader, which
   ignored these settings. diaPASEF identification counts will change. Each MS2 frame now gives

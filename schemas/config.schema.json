@@ -864,6 +864,16 @@
           "type": "number"
         },
         "max_count": {
+          "description": "Per-peptide limit on new (non-library) placements.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_total_count": {
+          "description": "Per-peptide limit on all placements, library-supported included.\nDefaults to `max_count`.",
           "format": "uint",
           "minimum": 1,
           "type": [
@@ -1425,6 +1435,16 @@
           "type": "number"
         },
         "max_count": {
+          "description": "Per-peptide limit on new (non-library) placements.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_total_count": {
+          "description": "Per-peptide limit on all placements, library-supported included.\nDefaults to `max_count`.",
           "format": "uint",
           "minimum": 0,
           "type": [

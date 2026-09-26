@@ -354,6 +354,7 @@ impl Parameters {
                             entry_order,
                             Arc::new(entry.definition()),
                             entry.max_count(),
+                            entry.max_total_count(),
                             entry.site_mode(),
                         )
                     })
@@ -363,26 +364,29 @@ impl Parameters {
         let mut named_groups: HashMap<Arc<str>, usize> = HashMap::new();
         let mut next_group = 0usize;
         mods.into_iter()
-            .map(|(specificity, _, modification, max_count, site_mode)| {
-                let count_group = if let Some(name) = modification.name.clone() {
-                    *named_groups.entry(name).or_insert_with(|| {
+            .map(
+                |(specificity, _, modification, max_count, max_total_count, site_mode)| {
+                    let count_group = if let Some(name) = modification.name.clone() {
+                        *named_groups.entry(name).or_insert_with(|| {
+                            let group = next_group;
+                            next_group += 1;
+                            group
+                        })
+                    } else {
                         let group = next_group;
                         next_group += 1;
                         group
-                    })
-                } else {
-                    let group = next_group;
-                    next_group += 1;
-                    group
-                };
-                VariableRule {
-                    specificity,
-                    modification,
-                    max_count,
-                    site_mode,
-                    count_group,
-                }
-            })
+                    };
+                    VariableRule {
+                        specificity,
+                        modification,
+                        max_count,
+                        max_total_count,
+                        site_mode,
+                        count_group,
+                    }
+                },
+            )
             .collect()
     }
 
@@ -549,20 +553,25 @@ impl Parameters {
         }
 
         let rules = self.variable_modifications();
-        let mut definitions: HashMap<&str, (&ModificationDefinition, Option<usize>, SiteMode)> =
-            HashMap::new();
+        type Definition<'a> = (
+            &'a ModificationDefinition,
+            Option<usize>,
+            Option<usize>,
+            SiteMode,
+        );
+        let mut definitions: HashMap<&str, Definition> = HashMap::new();
         for rule in &rules {
-            if self.ptm_library.is_some() && rule.max_count.is_none() {
+            if self.ptm_library.is_some() && rule.total_limit().is_none() {
                 return Err(
-                    "all variable modifications require `max_count` when database.ptm_library is configured"
+                    "all variable modifications require `max_count` or `max_total_count` when database.ptm_library is configured"
                         .into(),
                 );
             }
             if rule.site_mode != SiteMode::Exhaustive
-                && (rule.modification.name.is_none() || rule.max_count.is_none())
+                && (rule.modification.name.is_none() || rule.total_limit().is_none())
             {
                 return Err(
-                    "variable modifications using `library` or `both` require `name` and `max_count`"
+                    "variable modifications using `library` or `both` require `name` and `max_count` or `max_total_count`"
                         .into(),
                 );
             }
@@ -572,9 +581,12 @@ impl Parameters {
                         "variable modification `{name}` cannot use both `database` and `mass_offset` search modes"
                     ));
                 }
-                if let Some((definition, max_count, site_mode)) = definitions.get(name) {
+                if let Some((definition, max_count, max_total_count, site_mode)) =
+                    definitions.get(name)
+                {
                     if *definition != rule.modification.as_ref()
                         || *max_count != rule.max_count
+                        || *max_total_count != rule.max_total_count
                         || *site_mode != rule.site_mode
                     {
                         return Err(format!(
@@ -582,7 +594,15 @@ impl Parameters {
                         ));
                     }
                 } else {
-                    definitions.insert(name, (&rule.modification, rule.max_count, rule.site_mode));
+                    definitions.insert(
+                        name,
+                        (
+                            &rule.modification,
+                            rule.max_count,
+                            rule.max_total_count,
+                            rule.site_mode,
+                        ),
+                    );
                 }
             }
         }
@@ -604,7 +624,7 @@ impl Parameters {
                         site.modification
                     ))
                 }
-                Some((_, _, SiteMode::Exhaustive)) => {
+                Some((_, _, _, SiteMode::Exhaustive)) => {
                     return Err(format!(
                         "PTM library modification `{}` must use site_mode `library` or `both`",
                         site.modification
@@ -912,39 +932,53 @@ impl Parameters {
             }
         }
 
-        let mut choices_by_site: HashMap<usize, (u64, u64)> = HashMap::new();
-        for ((site, _), library_supported) in candidates {
-            let choices = choices_by_site.entry(site).or_default();
-            if library_supported {
-                choices.0 += 1;
-            } else {
-                choices.1 += 1;
-            }
+        let group_count = rules
+            .iter()
+            .map(|rule| rule.count_group + 1)
+            .max()
+            .unwrap_or(0);
+        let mut limits = vec![(None, None); group_count];
+        for rule in rules {
+            limits[rule.count_group] = (rule.max_count, rule.total_limit());
         }
+        let mut candidates = candidates
+            .into_iter()
+            .map(|((site, group), library)| (site, group, library))
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
 
-        let max_total = self.max_total_variable_mods.min(choices_by_site.len());
-        let max_exhaustive = self.max_variable_mods.min(max_total);
-        let mut counts = vec![vec![0u64; max_exhaustive + 1]; max_total + 1];
-        counts[0][0] = 1;
-        for (library_choices, exhaustive_choices) in choices_by_site.values().copied() {
-            let mut next = counts.clone();
-            for total in 0..max_total {
-                for exhaustive in 0..=max_exhaustive {
-                    let current = counts[total][exhaustive];
-                    next[total + 1][exhaustive] = next[total + 1][exhaustive]
-                        .saturating_add(current.saturating_mul(library_choices));
-                    if exhaustive < max_exhaustive {
-                        next[total + 1][exhaustive + 1] = next[total + 1][exhaustive + 1]
-                            .saturating_add(current.saturating_mul(exhaustive_choices));
-                    }
-                }
-            }
-            counts = next;
-        }
-        let variants = counts.into_iter().flatten().fold(0u64, u64::saturating_add);
-        let variable_variants = self
+        // Count exactly what `ModificationEnumeration` emits. Stop early at
+        // `max_combinations`, or fall back to a cap-free upper bound when a
+        // single peptide has too many variants to count cheaply.
+        let limit = self
             .max_combinations
-            .map_or(variants, |cap| variants.min(cap as u64));
+            .map_or(EXACT_VARIANT_COUNT_LIMIT, |cap| {
+                (cap as u64).min(EXACT_VARIANT_COUNT_LIMIT)
+            });
+        let mut counter = VariantCounter::new(
+            &candidates,
+            &limits,
+            self.max_variable_mods,
+            self.max_total_variable_mods,
+            limit,
+        );
+        counter.count(0, 0, 0);
+        let variable_variants = if counter.variants < limit
+            || self
+                .max_combinations
+                .is_some_and(|cap| cap as u64 <= EXACT_VARIANT_COUNT_LIMIT)
+        {
+            counter.variants
+        } else {
+            let bound = variant_upper_bound(
+                &candidates,
+                self.max_variable_mods,
+                self.max_total_variable_mods,
+            );
+            self.max_combinations
+                .map_or(bound, |cap| bound.min(cap as u64))
+                .max(limit)
+        };
         variable_variants.saturating_mul(self.label_channels().len().max(1) as u64)
     }
 
@@ -2332,6 +2366,126 @@ where
         slice[left_idx..].partition_point(|a| key(a, &high) != Ordering::Greater) + left_idx;
 
     (left_idx, right_idx)
+}
+
+/// Per-peptide variant count above which the preflight estimate switches from
+/// exact counting to [`variant_upper_bound`].
+const EXACT_VARIANT_COUNT_LIMIT: u64 = 1 << 20;
+
+/// Count-only mirror of `ModificationEnumeration`. Candidates are
+/// `(site, count_group, library_supported)` sorted by site, with at most one
+/// entry per site and group.
+struct VariantCounter<'a> {
+    candidates: &'a [(usize, usize, bool)],
+    /// First candidate index at a later site than each candidate.
+    next_site: Vec<usize>,
+    /// `(max_count, total limit)` per count group.
+    limits: &'a [(Option<usize>, Option<usize>)],
+    new_counts: Vec<usize>,
+    total_counts: Vec<usize>,
+    max_exhaustive: usize,
+    max_total: usize,
+    limit: u64,
+    variants: u64,
+}
+
+impl<'a> VariantCounter<'a> {
+    fn new(
+        candidates: &'a [(usize, usize, bool)],
+        limits: &'a [(Option<usize>, Option<usize>)],
+        max_exhaustive: usize,
+        max_total: usize,
+        limit: u64,
+    ) -> Self {
+        let mut next_site = vec![candidates.len(); candidates.len()];
+        for idx in (0..candidates.len().saturating_sub(1)).rev() {
+            next_site[idx] = if candidates[idx + 1].0 != candidates[idx].0 {
+                idx + 1
+            } else {
+                next_site[idx + 1]
+            };
+        }
+        Self {
+            candidates,
+            next_site,
+            limits,
+            new_counts: vec![0; limits.len()],
+            total_counts: vec![0; limits.len()],
+            max_exhaustive,
+            max_total,
+            limit,
+            // The unmodified peptide.
+            variants: 1,
+        }
+    }
+
+    fn count(&mut self, start: usize, total: usize, exhaustive: usize) {
+        if total == self.max_total {
+            return;
+        }
+        for idx in start..self.candidates.len() {
+            if self.variants >= self.limit {
+                return;
+            }
+            let (_, group, library) = self.candidates[idx];
+            let is_new = !library;
+            let (max_count, total_limit) = self.limits[group];
+            if (is_new && exhaustive == self.max_exhaustive)
+                || (is_new && max_count.is_some_and(|limit| self.new_counts[group] >= limit))
+                || total_limit.is_some_and(|limit| self.total_counts[group] >= limit)
+            {
+                continue;
+            }
+            self.new_counts[group] += usize::from(is_new);
+            self.total_counts[group] += 1;
+            self.variants += 1;
+            self.count(
+                self.next_site[idx],
+                total + 1,
+                exhaustive + usize::from(is_new),
+            );
+            self.new_counts[group] -= usize::from(is_new);
+            self.total_counts[group] -= 1;
+        }
+    }
+}
+
+/// Upper bound on variants that ignores per-modification caps.
+fn variant_upper_bound(
+    candidates: &[(usize, usize, bool)],
+    max_variable_mods: usize,
+    max_total_variable_mods: usize,
+) -> u64 {
+    let mut choices_by_site: HashMap<usize, (u64, u64)> = HashMap::new();
+    for (site, _, library_supported) in candidates.iter().copied() {
+        let choices = choices_by_site.entry(site).or_default();
+        if library_supported {
+            choices.0 += 1;
+        } else {
+            choices.1 += 1;
+        }
+    }
+
+    let max_total = max_total_variable_mods.min(choices_by_site.len());
+    let max_exhaustive = max_variable_mods.min(max_total);
+    let mut counts = vec![vec![0u64; max_exhaustive + 1]; max_total + 1];
+    counts[0][0] = 1;
+    for (library_choices, exhaustive_choices) in choices_by_site.values().copied() {
+        let mut next = counts.clone();
+        for total in 0..max_total {
+            for exhaustive in 0..=max_exhaustive {
+                let current = counts[total][exhaustive];
+                next[total + 1][exhaustive] = next[total + 1][exhaustive]
+                    .saturating_add(current.saturating_mul(library_choices));
+                if exhaustive < max_exhaustive {
+                    next[total + 1][exhaustive + 1] = next[total + 1][exhaustive + 1]
+                        .saturating_add(current.saturating_mul(exhaustive_choices));
+                }
+            }
+        }
+        counts = next;
+    }
+    counts.into_iter().flatten().fold(0u64, u64::saturating_add)
 }
 
 #[cfg(test)]

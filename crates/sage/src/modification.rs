@@ -172,8 +172,13 @@ impl<'de> Deserialize<'de> for StaticModification {
 #[serde(deny_unknown_fields)]
 pub struct VariableModification {
     pub mass: f32,
+    /// Per-peptide limit on new (non-library) placements.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_count: Option<usize>,
+    /// Per-peptide limit on all placements, library-supported included.
+    /// Defaults to `max_count`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -208,6 +213,8 @@ impl<'de> Deserialize<'de> for VariableModification {
             #[serde(default)]
             max_count: Option<usize>,
             #[serde(default)]
+            max_total_count: Option<usize>,
+            #[serde(default)]
             name: Option<String>,
             #[serde(default)]
             neutral_losses: Vec<f32>,
@@ -229,6 +236,16 @@ impl<'de> Deserialize<'de> for VariableModification {
             raw.neutral_loss_mode,
             &raw.channel_offsets,
         )?;
+        if raw.max_total_count == Some(0) {
+            return Err(de::Error::custom("max_total_count must be positive"));
+        }
+        if let (Some(max_count), Some(max_total_count)) = (raw.max_count, raw.max_total_count) {
+            if max_total_count < max_count {
+                return Err(de::Error::custom(
+                    "max_total_count must be at least max_count",
+                ));
+            }
+        }
         if raw.search_mode == SearchMode::MassOffset {
             if raw.mass.abs() < 1e-5 {
                 return Err(de::Error::custom(
@@ -244,6 +261,7 @@ impl<'de> Deserialize<'de> for VariableModification {
         Ok(Self {
             mass: raw.mass,
             max_count: raw.max_count,
+            max_total_count: raw.max_total_count,
             name: raw.name,
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
@@ -499,6 +517,13 @@ impl VarModEntry {
         match self {
             VarModEntry::Mass(_) => None,
             VarModEntry::Detailed(modification) => modification.max_count,
+        }
+    }
+
+    pub fn max_total_count(&self) -> Option<usize> {
+        match self {
+            VarModEntry::Mass(_) => None,
+            VarModEntry::Detailed(modification) => modification.max_total_count,
         }
     }
 

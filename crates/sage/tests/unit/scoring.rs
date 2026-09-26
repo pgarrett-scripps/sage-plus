@@ -632,6 +632,7 @@ mod mass_offsets {
         vec![VarModEntry::Detailed(VariableModification {
             mass: PHOSPHO,
             max_count: Some(1),
+            max_total_count: None,
             name: Some("Phospho".into()),
             neutral_losses: Vec::new(),
             neutral_loss_mode: NeutralLossMode::Optional,

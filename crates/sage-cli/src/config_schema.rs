@@ -26,6 +26,8 @@ pub fn generate_config_schema() -> String {
     }
 
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
+    value["$defs"]["NamedVariableModification"]["properties"]["max_total_count"]["minimum"] =
+        1.into();
     // Symbol-keyed maps accept upstream Sage syntax only: residue or terminal
     // symbol keys mapped to masses (variable mods: a mass or a mass array).
     let legacy = "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])";

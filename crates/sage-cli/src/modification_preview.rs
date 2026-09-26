@@ -207,6 +207,7 @@ fn rules(parameters: &Parameters, peptide: &Peptide) -> Vec<Value> {
             output.push(json!({"kind": "variable", "key": specificity.explicit_name(),
                 "mass": definition.mass, "name": definition.name.as_deref(),
                 "max_count": entry.max_count(),
+                "max_total_count": entry.max_total_count(),
                 "search_mode": entry.search_mode(),
                 "effective_max_count": if entry.search_mode() == SearchMode::MassOffset { Some(1) } else { entry.max_count() },
                 "eligible_sites": sites.into_iter().map(site_value).collect::<Vec<_>>() }));

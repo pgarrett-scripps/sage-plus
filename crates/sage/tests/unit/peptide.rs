@@ -776,6 +776,7 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
             specificity: ModificationSpecificity::Residue(b'S'),
             modification: phospho,
             max_count: Some(2),
+            max_total_count: None,
             site_mode: SiteMode::Both,
             count_group: 0,
         },
@@ -783,6 +784,7 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
             specificity: ModificationSpecificity::Residue(b'M'),
             modification: oxidation,
             max_count: Some(1),
+            max_total_count: None,
             site_mode: SiteMode::Both,
             count_group: 1,
         },
@@ -837,6 +839,7 @@ fn named_max_count_is_shared_across_residue_rules() {
         specificity: ModificationSpecificity::Residue(residue),
         modification: phospho.clone(),
         max_count: Some(1),
+        max_total_count: None,
         site_mode: SiteMode::Library,
         count_group: 0,
     });
