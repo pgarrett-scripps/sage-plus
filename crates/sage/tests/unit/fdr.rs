@@ -279,3 +279,112 @@ fn fasta_decoy_tags_outside_the_prefix_still_pair() {
         Some("sp|P1|X")
     );
 }
+
+fn scored(peptide_idx: u32, score: f32) -> Feature {
+    Feature {
+        peptide_idx: PeptideIx(peptide_idx),
+        discriminant_score: score,
+        protein_q: 42.0,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn picked_protein_counts_unique_proteins_and_skips_shared_peptides() {
+    let mut shared = peptide("SHAREDK", false);
+    shared.proteins = [Arc::<str>::from("P1"), Arc::<str>::from("P2")]
+        .into_iter()
+        .collect();
+    let db = IndexedDatabase {
+        peptides: vec![
+            protein_peptide("AAAAK", false, "P1"),
+            protein_peptide("CCCCK", false, "P2"),
+            protein_peptide("DDDDK", false, "P3"),
+            protein_peptide("EEEEK", false, "P4"),
+            protein_peptide("KFFFF", true, "P5"),
+            protein_peptide("KAAAA", true, "P1"),
+            shared,
+            // A second, weaker peptide of P1 must not change P1's score.
+            protein_peptide("GGGGK", false, "P1"),
+        ],
+        decoy_tag: "rev_".into(),
+        generate_decoys: true,
+        ..Default::default()
+    };
+    let mut features = vec![
+        scored(0, 10.0),
+        scored(1, 9.0),
+        scored(2, 8.0),
+        scored(3, 7.0),
+        scored(4, 1.0),
+        scored(5, 0.5),
+        scored(6, 50.0),
+        scored(7, 0.1),
+    ];
+    // Only one protein wins on the decoy side, so the KDE is underdetermined
+    // and target-decoy counts (+1) are used. Ranked protein scores:
+    //   P1 10, P2 9, P3 8, P4 7 (targets), rev_P5 1, rev_P1 0.5 (decoys)
+    // raw q = (1 + decoys) / targets: 1, 1/2, 1/3, 1/4, 2/4, 3/4
+    // after the reverse cumulative minimum: 1/4 x4, 1/2, 3/4.
+    let passing = picked_protein(&db, &mut features);
+    assert_eq!(passing, 0);
+    for feat in &features[0..4] {
+        assert!((feat.protein_q - 0.25).abs() < 1e-6, "{}", feat.protein_q);
+    }
+    assert!((features[4].protein_q - 0.5).abs() < 1e-6);
+    assert!((features[5].protein_q - 0.75).abs() < 1e-6);
+    // Shared peptides are excluded and keep their prior value.
+    assert_eq!(features[6].protein_q, 42.0);
+    // Every peptide of a protein inherits the protein's q-value.
+    assert!((features[7].protein_q - 0.25).abs() < 1e-6);
+}
+
+#[test]
+fn picked_precursor_assigns_count_q_values_per_charge_state() {
+    let quantified = |score: f64| QuantifiedPeak {
+        peak: crate::lfq::Peak {
+            score,
+            q_value: 42.0,
+            ..Default::default()
+        },
+        intensities: Vec::new(),
+        ms2_confirmed: Vec::new(),
+        ms2_confirmed_strict: Vec::new(),
+        file_evidence: Vec::new(),
+    };
+    let mut peaks = FnvHashMap::default();
+    // 20 targets at 100..81, one decoy at 50, one target at 40.
+    for i in 0..20u32 {
+        peaks.insert(
+            (PrecursorId::Charged((PeptideIx(i), 2)), false),
+            quantified(100.0 - i as f64),
+        );
+    }
+    peaks.insert(
+        (PrecursorId::Charged((PeptideIx(0), 2)), true),
+        quantified(50.0),
+    );
+    peaks.insert(
+        (PrecursorId::Combined(PeptideIx(99)), false),
+        quantified(40.0),
+    );
+
+    // Raw q at the 20th target is (1 + 0) / 20 = 0.05, which passes the 5%
+    // threshold; the decoy raises it to 2/20 and the last target to 2/21.
+    let passing = picked_precursor(&mut peaks);
+    assert_eq!(passing, 20);
+    for i in 0..20u32 {
+        let q = peaks[&(PrecursorId::Charged((PeptideIx(i), 2)), false)]
+            .peak
+            .q_value;
+        assert!((q - 0.05).abs() < 1e-6, "target {i}: {q}");
+    }
+    let decoy = peaks[&(PrecursorId::Charged((PeptideIx(0), 2)), true)]
+        .peak
+        .q_value;
+    let last = peaks[&(PrecursorId::Combined(PeptideIx(99)), false)]
+        .peak
+        .q_value;
+    assert!((decoy - 2.0 / 21.0).abs() < 1e-6, "{decoy}");
+    assert!((last - 2.0 / 21.0).abs() < 1e-6, "{last}");
+}
