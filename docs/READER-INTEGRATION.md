@@ -25,3 +25,5 @@ The trimmed HCD fixture also loses a dangling precursor link to scan 3163 outsid
 ## Recorded adoption qualification
 
 See `READER-ADOPTION-QUALIFICATION.json` for baseline and reader revisions, exact numerical comparisons, intentional metadata corrections and qualification limits. The three Bruker conversion cases match the prior implementation at zero numerical tolerance across 13,090 exported spectra. The two Thermo acquisitions preserve 5,455 scans in both profile and centroid modes. Sage preserves complete processed spectra for the Bruker DDA and DIA cases, while the larger Thermo acquisition now reads successfully. These checks qualify conversion and search input. They do not claim peptide search result equivalence.
+
+Dependency review confirmed that the file manager already uses object_store 0.14.1, Arrow and Parquet 59, and serde_arrow 0.15. The separate, existing HDF5 0.8.1 path still pulls the unmaintained paste and instant crates (RUSTSEC-2024-0436 and RUSTSEC-2024-0384). No advisory exception was added. Replacing that HDF5 integration is outside this reader migration.
