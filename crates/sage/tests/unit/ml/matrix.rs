@@ -140,7 +140,6 @@ fn element_access_is_bounds_checked() {
 }
 
 #[test]
-#[ignore = "bug: Matrix::get_mut does not bounds-check the column, so (0, cols) aliases (1, 0)"]
 fn get_mut_rejects_out_of_range_columns() {
     let mut mat = Matrix::new([1., 2., 3., 4.], 2, 2);
     assert!(mat.get_mut(0, 2).is_none());

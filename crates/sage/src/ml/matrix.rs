@@ -123,7 +123,11 @@ impl Matrix {
     }
 
     pub fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut f64> {
-        self.data.get_mut(self.cols * row + col)
+        if row >= self.rows || col >= self.cols {
+            None
+        } else {
+            self.data.get_mut(self.cols * row + col)
+        }
     }
 
     /// Return an iterator over values in a single row
