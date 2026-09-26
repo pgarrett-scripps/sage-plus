@@ -987,10 +987,19 @@ precursor.
 | M9 (+ ladder, siblings per precursor) | 1,367 | 2.8% | 23 | 9,021 | 12 (0.6%) |
 
 Against M6, yeast gains 4% (+55) with fewer entrapment hits, and mouse+pombe gains 23%
-(+1,708) while the estimated FDP falls from 1.0% to 0.6%. The plain mouse search has
-not been rerun with the M9 defaults (M7: 8,700). Plain non-glyco searches are unchanged
-at 8,674 (mouse) and 7,940 (yeast). These are fast-release numbers, and the release
-build needs a confirmation run.
+(+1,708) while the estimated FDP falls from 1.0% to 0.6%.
+
+Release confirmation (`m9rel`, release build of 55a21df with defaults):
+
+| run | yeast | non-HM | yeast mouse-protein hits | mouse (plain) | yeast s / GB | mouse s / GB |
+| --- | --- | --- | --- | --- | --- | --- |
+| M7 release | 1,328 | 2.7% | 24 | 8,700 | 110 / 5.6 | 99 / 4.5 |
+| M9 release | 1,367 | 2.8% | 23 | 9,305 | 110 / 5.6 | 116 / 4.6 |
+
+The release yeast numbers match the fast-release build exactly. Plain mouse gains 7%
+(+605) over M7, at 17% more wall time and 0.1 GB more RSS. Plain non-glyco searches are
+unchanged: 8,674 mouse PSMs at 1% (3,038 peptides, 1,120 proteins) and 7,940 yeast
+PSMs (1,071 peptides, 543 proteins).
 
 The remaining levers tested at M8 and M9 are each at or under the 2% noise level with
 the gate intact, or fail it:
