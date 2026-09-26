@@ -856,7 +856,7 @@ alongside the library, because the location table does not embed chemical masses
 - **prefilter_max_peaks**: Integer. Only each spectrum's most intense peaks are used by the
   prefilter (default: every processed peak). Fewer peaks make the spectrum index smaller and
   faster and keep fewer peptides.
-- **prefilter_low_memory**: Deprecated and ignored. Exact prefiltering always uses compact survivor
+- **prefilter_low_memory**: Deprecated and ignored. Prefiltering always uses compact survivor
   tracking.
 
 ## Quantification

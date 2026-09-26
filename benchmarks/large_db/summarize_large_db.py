@@ -17,6 +17,9 @@ against the annotated E. coli and yeast proteomes, with I and L equated.
 Narrow series: the same subsets searched with monoisotopic precursors only.
 Metaproteome series: fecal runs against the sample-specific
 metagenome database with the human reference.
+Threshold sweep: the ten-times subset with prefilter match thresholds and peak
+caps. Each prefilter run whose unfiltered twin completed also records how many
+accepted peptides the two share.
 
 Requires the `duckdb` Python package.
 """
@@ -138,6 +141,7 @@ def scaling(root: Path, receipt: dict,
                 r = row["residue_ratio"]
                 row["combined_fdp"] = 100 * entrapment * (1 + 1 / r) / len(peptides)
             row["_human"] = human
+            row["_peptides"] = {peptide for peptide, _ in peptides}
             if meta["multiple"] == 0 and meta["prefilter"]:
                 reference = human
         rows.append(row)
@@ -146,7 +150,7 @@ def scaling(root: Path, receipt: dict,
         if human is not None and reference:
             row["reference_peptides_retained"] = len(human & reference)
             row["reference_peptides"] = len(reference)
-    return rows, reference
+    return pair_overlap(rows), reference
 
 
 def normalize(sequence: str) -> str:
@@ -184,6 +188,7 @@ def six_frame(root: Path, annotated_microbes: list[Path]) -> list[dict]:
                     "microbial_peptides": len(microbial),
                     "microbial_annotated": len(annotated),
                     "microbial_unannotated": len(microbial) - len(annotated)}
+            row["_peptides"] = {peptide for peptide, _ in peptides}
             if meta["prefilter"]:
                 microbial_sets[meta["database"]] = {normalize(p) for p in microbial}
         rows.append(row)
@@ -191,7 +196,7 @@ def six_frame(root: Path, annotated_microbes: list[Path]) -> list[dict]:
         shared = len(microbial_sets["annotated"] & microbial_sets["six-frame"])
         for row in rows:
             row["microbial_shared_with_other_database"] = shared
-    return rows
+    return pair_overlap(rows)
 
 
 def metaproteome(root: Path) -> list[dict]:
@@ -207,7 +212,40 @@ def metaproteome(root: Path) -> list[dict]:
             psms, peptides = accepted(root / name)
             human = sum(is_human(proteins) for _, proteins in peptides)
             row |= {"accepted_psms": psms, "accepted_peptides": len(peptides),
-                    "human_peptides": human, "microbial_peptides": len(peptides) - human}
+                    "human_peptides": human, "microbial_peptides": len(peptides) - human,
+                    "_peptides": {peptide for peptide, _ in peptides}}
+        rows.append(row)
+    return pair_overlap(rows)
+
+
+def pair_overlap(rows: list[dict]) -> list[dict]:
+    """Record accepted peptides shared by each prefilter run and its completed
+    unfiltered twin, then drop the peptide sets."""
+    peptides = {row["name"]: row.pop("_peptides", None) for row in rows}
+    for row in rows:
+        mine = peptides[row["name"]]
+        other = peptides.get(row["name"].replace("-prefilter", "-full"))
+        if row["prefilter"] and mine is not None and other is not None:
+            row["peptides_shared_with_full"] = len(mine & other)
+    return rows
+
+
+def threshold_sweep(root: Path, receipt: dict) -> list[dict]:
+    if not (root / "large-db-runs.json").exists():
+        return []
+    rows = []
+    for name, record in load_runs(root).items():
+        meta = record["meta"]
+        row = {"name": name, "min_matched": meta["min_matched"], "max_peaks": meta["max_peaks"],
+               "outcome": outcome(record, root / name), **resources(record)}
+        if record["exit_code"] == 0:
+            psms, peptides = accepted(root / name)
+            human = sum(is_human(proteins) for _, proteins in peptides)
+            entrapment = len(peptides) - human
+            r = receipt["subsets"][meta["multiple"].rstrip("x")]["residues"] / receipt["human_residues"]
+            row |= {"accepted_psms": psms, "accepted_peptides": len(peptides),
+                    "human_peptides": human, "entrapment_peptides": entrapment,
+                    "combined_fdp": 100 * entrapment * (1 + 1 / r) / len(peptides)}
         rows.append(row)
     return rows
 
@@ -216,8 +254,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--runs", type=Path, help="run series directory (default: ROOT/runs)")
     args = parser.parse_args()
-    runs = args.root / "runs"
+    runs = args.runs or args.root / "runs"
     receipt = json.loads((args.root / "databases/scaling-databases.json").read_text())
     references = Path("/data/sage-plus-scientific/20260914/references")
     scaling_rows, reference = scaling(runs / "scaling", receipt)
@@ -230,6 +269,7 @@ def main() -> None:
         "six_frame": six_frame(runs / "six-frame",
                                [references / "ecoli.fasta", references / "yeast.fasta"]),
         "metaproteome": metaproteome(runs / "metaproteome"),
+        "threshold_sweep": threshold_sweep(runs / "threshold-sweep", receipt),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(summary, indent=1, sort_keys=True) + "\n")

@@ -51,19 +51,21 @@ def database_label(series, row):
     return f"{row['sample']}, sample metagenome"
 
 
-def identical_pairs(summary):
-    """Completed prefilter and unfiltered pairs, and how many have identical results."""
-    compared = same = 0
+def pairs(summary):
+    """Completed (prefilter, unfiltered) row pairs."""
+    found = []
     for series in ('scaling', 'six_frame', 'metaproteome'):
         rows = by_name(summary[series])
         for name, row in rows.items():
             other = rows.get(name.replace('-prefilter', '-full'))
-            if not name.endswith('-prefilter') or not other:
-                continue
-            if completed(row) and completed(other):
-                compared += 1
-                same += row['results_sha256'] == other['results_sha256']
-    return compared, same
+            if name.endswith('-prefilter') and other and completed(row) and completed(other):
+                found.append((row, other))
+    return found
+
+
+def sweep(summary, min_matched, max_peaks=None):
+    return next(row for row in summary['threshold_sweep']
+                if row['min_matched'] == min_matched and row['max_peaks'] == max_peaks)
 
 
 def add_large_db_stats(st):
@@ -88,7 +90,7 @@ def add_large_db_stats(st):
     st.add('large.human.psms', human['accepted_psms'], fmt=',',
            desc='Human-only accepted PSMs', sign='+')
 
-    for multiple in ('1x', '3x', '10x'):
+    for multiple in ('1x', '3x', '10x', '30x'):
         row = scaling[f'hek-igc-{multiple}-prefilter']
         st.add(f'large.{multiple}.fdp', row['combined_fdp'], fmt='.2f',
                desc=f'{multiple} combined entrapment FDP percent', between=(0, 5))
@@ -97,7 +99,7 @@ def add_large_db_stats(st):
         st.add(f'large.{multiple}.retained', 100 * row['reference_peptides_retained']
                / row['reference_peptides'], fmt='.1f',
                desc=f'{multiple} percent of human-only peptides still accepted', between=(0, 100))
-    for multiple in ('3x', '10x'):
+    for multiple in ('3x', '10x', '30x'):
         row = scaling[f'hek-igc-{multiple}-prefilter']
         counts = row['prefilter_counts']
         st.add(f'large.{multiple}.streamed', counts['streamed'] / 1e6, fmt='.1f',
@@ -119,12 +121,12 @@ def add_large_db_stats(st):
            desc='3x unfiltered wall minutes', sign='+')
     st.add('large.10x.full.need', scaling['hek-igc-10x-full']['refused_estimate_gib'],
            fmt='.1f', desc='GiB the 10x unfiltered preflight said it needed', sign='+')
-    st.add('large.30x.guard', scaling['hek-igc-30x-prefilter']['peak_rss_gib'], fmt='.1f',
-           desc='Peak RSS when the memory guard stopped the 30x prefilter search', between=(15, 18))
+    st.add('large.30x.psms', scaling['hek-igc-30x-prefilter']['accepted_psms'], fmt=',',
+           desc='30x accepted PSMs', sign='+')
     st.add('large.100x.need', scaling['hek-igc-100x-prefilter']['refused_estimate_gib'],
            fmt='.1f', desc='GiB the 100x preflight said the unmodified digest needed', sign='+')
 
-    for multiple in ('10x',):
+    for multiple in ('10x', '30x'):
         row = narrow[f'hek-igc-{multiple}-mono-prefilter']
         counts = row['prefilter_counts']
         st.add(f'large.mono.{multiple}.retention', 100 * counts['retained'] / counts['streamed'],
@@ -134,14 +136,32 @@ def add_large_db_stats(st):
                desc=f'{multiple} monoisotopic prefilter peak RSS GiB', between=(0, 16))
         st.add(f'large.mono.{multiple}.psms', row['accepted_psms'], fmt=',',
                desc=f'{multiple} monoisotopic accepted PSMs', sign='+')
-    st.add('large.mono.30x.need', narrow['hek-igc-30x-mono-prefilter']['refused_estimate_gib'],
-           fmt='.1f', desc='GiB the 30x monoisotopic final preflight said it needed', sign='+')
 
-    compared, same = identical_pairs(summary)
-    st.add('large.pairs.compared', compared, fmt=',',
+    compared = pairs(summary)
+    st.add('large.pairs.compared', len(compared), fmt=',',
            desc='Completed prefilter and unfiltered pairs', sign='+')
-    st.add('large.pairs.identical', same, fmt=',',
-           desc='Pairs with byte-identical results', sign='+')
+    st.add('large.pairs.min.shared', min(100 * pre['peptides_shared_with_full']
+                                         / full['accepted_peptides'] for pre, full in compared),
+           fmt='.1f', desc='Lowest percent of unfiltered accepted peptides also accepted with '
+           'the prefilter, across pairs', between=(90, 100))
+    st.add('large.pairs.max.psm.loss', max(100 * (1 - pre['accepted_psms'] / full['accepted_psms'])
+                                           for pre, full in compared),
+           fmt='.1f', desc='Largest percent drop in accepted PSMs with the prefilter, across pairs',
+           between=(0, 5))
+
+    exact, default = sweep(summary, 1), sweep(summary, 3)
+    for label, row in (('exact', exact), ('default', default)):
+        counts = row['prefilter_counts']
+        st.add(f'large.sweep.{label}.retention', 100 * counts['retained'] / counts['streamed'],
+               fmt='.0f', desc=f'10x prefilter retention percent, {label} threshold',
+               between=(0, 100))
+        st.add(f'large.sweep.{label}.rss', row['peak_rss_gib'], fmt='.1f',
+               desc=f'10x prefilter peak RSS GiB, {label} threshold', between=(0, 16))
+        st.add(f'large.sweep.{label}.fdp', row['combined_fdp'], fmt='.2f',
+               desc=f'10x combined entrapment FDP percent, {label} threshold', between=(0, 5))
+    st.add('large.sweep.psm.loss', 100 * (1 - default['accepted_psms'] / exact['accepted_psms']),
+           fmt='.1f', desc='Percent fewer 10x PSMs at the default threshold than at one match',
+           between=(0, 5))
 
     annotated, frames = six['lfq-annotated-full'], six['lfq-six-frame-full']
     st.add('large.six.annotated.peptides', annotated['database_peptides'] / 1e6, fmt='.1f',

@@ -139,15 +139,15 @@
       "path": "figures/large_db.png",
       "kind": "figure",
       "desc": "Large-database search cost, prefilter retention, and identifications.",
-      "hash": "sha256:9b0b32cdd0ef7d71ee7976de57e5d5dbfe0280254d7871026d415f10ad7a6752",
+      "hash": "sha256:644c0b67bc7c6990992c13776964507d09b0fa1cbb169a9f7950bc0bf7ff7cf2",
       "origin": {
         "by": "analysis/scripts/gen_large_db_figure.py",
-        "at": "2026-09-26T07:21:51Z"
+        "at": "2026-09-26T10:38:19Z"
       },
       "inputs": {
-        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
         "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
-        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
         "analysis/scripts/gen_large_db_figure.py": "sha256:98fee0b33a75fc1349bc4fc96d6dcfcd7e3e51c31c44398e51a80d5d4561f82f"
       }
     },
@@ -155,15 +155,15 @@
       "path": "figures/vector/large_db.svg",
       "kind": "figure",
       "desc": "Scalable companion to the large-database figure.",
-      "hash": "sha256:29c6b32e95d77d7d4b57c15c663acbaa370ca336690459ce29a0ab12177a6943",
+      "hash": "sha256:33bf29946d43c74c8f5b36258e2665f977d0e4d9689412ac58121c9abe3e609d",
       "origin": {
         "by": "analysis/scripts/gen_large_db_figure.py",
-        "at": "2026-09-26T07:21:51Z"
+        "at": "2026-09-26T10:38:19Z"
       },
       "inputs": {
-        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
         "analysis/scripts/_figure_style.py": "sha256:e53b6e083715a3e25367248a0016828300a88e38b758b46e5d478e920e39ec40",
-        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
         "analysis/scripts/gen_large_db_figure.py": "sha256:98fee0b33a75fc1349bc4fc96d6dcfcd7e3e51c31c44398e51a80d5d4561f82f"
       }
     },
@@ -945,14 +945,14 @@
       "path": "si/large_db_table.typ",
       "kind": "table",
       "desc": "Every large-database search with its outcome, cost, and identifications.",
-      "hash": "sha256:3ef331de64be7b4963ae1f3257c84e59bd2dd0d7e54697cc471ef30244b52d7a",
+      "hash": "sha256:7ffbd20e13b90668afc8b975cadc8f81cfdc816320d8e418b11848d5e857c5da",
       "origin": {
         "by": "analysis/scripts/gen_large_db_table.py",
-        "at": "2026-09-26T07:23:45Z"
+        "at": "2026-09-26T10:38:14Z"
       },
       "inputs": {
-        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:a44a9fe5b45e8d56b79d1c33585850c3194d6abd2b25b71296c35216b04e90c5",
-        "analysis/scripts/_large_db.py": "sha256:c093daf5e4394c5c961d7c70d3b7be621650a5241fc11abef0d6dc02626a9c91",
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
+        "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
         "analysis/scripts/gen_large_db_table.py": "sha256:c0277a01cd8b9a378d895e2e6f941f50b2832e47e1b0d0afdfab78153cfe67b7"
       }
     },
@@ -984,6 +984,21 @@
         "analysis/data/matched-fdp.json": "sha256:366dcc75b3a6f6973f9cf9e49ce64c8a4e68211e92229221ec248f27f99f0daa",
         "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
         "analysis/scripts/gen_matched_fdp_table.py": "sha256:f33bb8601dbe0d6176c70f7dbec5c624ce5856a75d027e05c2713927ed878978"
+      }
+    },
+    "tbl.prefilter-sweep": {
+      "path": "si/prefilter_sweep_table.typ",
+      "kind": "table",
+      "desc": "Prefilter match threshold and peak cap on the ten-times catalog subset.",
+      "hash": "sha256:566f981ca631a1276537e9da88ba48fecfa815ff584e98b723932aa8390421b3",
+      "origin": {
+        "by": "analysis/scripts/gen_prefilter_sweep_table.py",
+        "at": "2026-09-26T10:38:14Z"
+      },
+      "inputs": {
+        "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
+        "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
+        "analysis/scripts/gen_prefilter_sweep_table.py": "sha256:9675d8288ba67d847eb6aa8071dae27e348cb19d16e254f6f5395cfd84c225c8"
       }
     },
     "tbl.ptm-library": {

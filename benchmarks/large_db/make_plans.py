@@ -6,7 +6,7 @@ cleavage, 7 to 50 residues, fixed carbamidomethylation, 10 ppm precursor and
 20 ppm fragment tolerances) with an explicit 16 GiB memory limit and eight
 workers. Each database is searched with the prefilter and, where the memory
 preflight allows it, without. `--min-matched` and `--max-peaks` set the
-prefilter's match threshold and peak cap.
+prefilter's match threshold and peak cap; the threshold sweep sets its own.
 """
 
 from __future__ import annotations
@@ -121,8 +121,22 @@ def main() -> None:
                              {"series": "metaproteome", "sample": sample,
                               "database": "sample-specific"})
 
+    # Prefilter threshold and peak cap on one subset, prefilter arm only.
+    sweep = []
+    for minimum in (1, 2, 3, 4, 6):
+        for peaks in (None, 75, 50):
+            PREFILTER.clear()
+            PREFILTER["prefilter_min_matched_peaks"] = minimum
+            if peaks is not None:
+                PREFILTER["prefilter_max_peaks"] = peaks
+            sweep += pair(f"hek-igc-10x-n{minimum}-p{peaks or 'all'}",
+                          LARGE / "databases/human-igc-10x.fasta", [HEK],
+                          {"series": "threshold-sweep", "multiple": "10x",
+                           "min_matched": minimum, "max_peaks": peaks},
+                          modes=("prefilter",))
+
     for name, plan in (("scaling", scaling), ("narrow", narrow), ("six-frame", six_frame),
-                       ("metaproteome", metaproteome)):
+                       ("metaproteome", metaproteome), ("threshold-sweep", sweep)):
         (args.out / f"{name}.json").write_text(json.dumps(plan, indent=1))
 
 

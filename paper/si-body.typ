@@ -449,3 +449,14 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
     after prefiltering where it applied. PSMs and peptides are accepted at one
     percent q-value.],
 ) <tbl:si-large-db>
+
+#figure(
+  tbl("tbl.prefilter-sweep"),
+  caption: [Prefilter match threshold and peak cap on the HEK file against the
+    human reference with the ten-times catalog subset. Min. matches is the
+    preliminary fragment matches one precursor hypothesis needs to keep a
+    peptide, and Peaks limits the prefilter to each spectrum's most intense
+    peaks. Kept is the percent of streamed peptides retained. PSMs are accepted
+    at one percent q-value, and the entrapment FDP is combined at the peptide
+    level.],
+) <tbl:si-prefilter-sweep>
