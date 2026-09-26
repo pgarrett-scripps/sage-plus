@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.10] - 2026-09-25
+
 ### Added
 - Per-modification `max_total_count` for PTM-library searches. `max_count` now limits new
   (exhaustive) placements of a modification, and `max_total_count` limits all its placements,
