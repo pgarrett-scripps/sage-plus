@@ -294,6 +294,31 @@ Set `clip_n_term_met` to false to search only the FASTA sequences as written. Th
 rule is fixed to the MetAP residues; to search another processed form, put it in
 the FASTA.
 
+#### Ambiguous residues
+
+J (Ile or Leu) is always searched with the shared I/L mass and reported as J.
+Static or variable modifications declared on I or L do not apply to J.
+
+B (Asp or Asn), Z (Glu or Gln) and X (any residue) have no single mass. By
+default, peptides containing them are dropped with a warning. With
+`database.expand_ambiguous_residues: true`, each digest containing them is
+replaced by one peptide per combination: B becomes D or N, Z becomes E or Q,
+and X each of the 20 standard residues. Digests with more than
+`database.max_ambiguous_variants` (default 20, one X) combinations are dropped.
+The log reports how many digests were expanded, the variants created and the
+digests dropped.
+
+- Cleavage uses the residue as written: an X is never a K/R site, so
+  `PEPXIDEK` gives `PEPKIDEK` uncleaved, and `prev_aa`/`next_aa` report the
+  FASTA residues.
+- Each variant keeps its protein and position, and merges with the same
+  sequence from other proteins. The `database_peptide` results column shows
+  the FASTA sequence it came from.
+- Decoy proteins in the FASTA are expanded like targets; generated decoys are
+  reversed from the expanded targets.
+- Expansion happens per digest, so it applies equally with and without the
+  prefilter and in `--estimate`.
+
 
 ### Example configuration file
 
@@ -335,6 +360,8 @@ For additional information about configuration options and output file formats, 
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
     "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
+    "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
+    "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
     "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
   "quant": {                // Optional - specify only if TMT or LFQ
@@ -870,6 +897,11 @@ alongside the library, because the location table does not embed chemical masses
   when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
   and are protein N-terminal. Enzymatic digests only (default: true). See
   [Initiator methionine clipping](#initiator-methionine-clipping).
+- **expand_ambiguous_residues**: Boolean. Search peptides containing B, Z or X as every
+  sequence they may stand for (default: false, such peptides are dropped). See
+  [Ambiguous residues](#ambiguous-residues).
+- **max_ambiguous_variants**: Integer. Peptides that expand into more sequences than this are
+  dropped (default: 20; values below 1 become 1).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
   searching before building the search index. The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and
@@ -1261,6 +1293,7 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
 - `proteins`: Proteins containing the peptide sequence.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
 - `filename`: File containing this PSM
 - `scannr`: Spectrum identifier from mzML file.

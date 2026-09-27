@@ -1,4 +1,5 @@
 pub mod ambiguity;
+pub mod ambiguous_residues;
 pub mod cleavage;
 pub mod database;
 pub mod enzyme;

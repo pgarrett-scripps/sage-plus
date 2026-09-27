@@ -50,6 +50,22 @@ entries are retained below for provenance.
   the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
   sort order.
 
+### Added
+- `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
+  (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
+  for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
+  drops peptides with more combinations; the log reports expanded, created and dropped counts.
+  Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
+  prefilter are identical.
+- `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
+  expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
+
+### Changed
+- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
+  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
+  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
+  as L.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

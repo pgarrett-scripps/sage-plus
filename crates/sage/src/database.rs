@@ -71,6 +71,7 @@ impl From<EnzymeBuilder> for EnzymeParameters {
                 en.c_terminal.unwrap_or(true),
                 en.semi_enzymatic.unwrap_or(false),
             ),
+            ambiguous_variants: None,
         }
     }
 }
@@ -124,6 +125,15 @@ pub struct Builder {
     pub clip_n_term_met: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
+    /// Expand ambiguous FASTA residues into every residue they may stand
+    /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues
+    /// (default false: peptides containing B, X or Z are not searched).
+    /// J (Ile or Leu) is always searched with the I/L mass.
+    pub expand_ambiguous_residues: Option<bool>,
+    /// Peptides whose ambiguous residues expand into more sequences than
+    /// this are dropped (default 20, one X per peptide). Values below 1 are
+    /// normalized to 1.
+    pub max_ambiguous_variants: Option<usize>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
     /// Configured static, variable, and channel-aware modifications are applied.
@@ -202,6 +212,8 @@ impl Builder {
             generate_decoys: self.generate_decoys.unwrap_or(true),
             clip_n_term_met: self.clip_n_term_met.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
+            expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
+            max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter: self.prefilter.unwrap_or(false),
@@ -236,6 +248,8 @@ pub struct Parameters {
     pub generate_decoys: bool,
     pub clip_n_term_met: bool,
     pub fasta: String,
+    pub expand_ambiguous_residues: bool,
+    pub max_ambiguous_variants: usize,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
     pub prefilter: bool,
@@ -311,12 +325,34 @@ pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
 }
 
 impl Parameters {
-    /// Digest settings for this database, including initiator methionine
-    /// clipping.
+    /// Digest settings, including initiator methionine clipping and
+    /// ambiguous-residue expansion.
     pub fn enzyme_parameters(&self) -> EnzymeParameters {
-        EnzymeParameters {
-            clip_n_term_met: self.clip_n_term_met,
-            ..self.enzyme.clone().into()
+        let mut enzyme: EnzymeParameters = self.enzyme.clone().into();
+        enzyme.clip_n_term_met = self.clip_n_term_met;
+        enzyme.ambiguous_variants = self
+            .expand_ambiguous_residues
+            .then_some(self.max_ambiguous_variants);
+        enzyme
+    }
+
+    /// Log how many digests with ambiguous residues were expanded or
+    /// dropped. Only proteins with such residues are digested again.
+    pub fn log_ambiguous_expansion(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) {
+        if let Some(summary) =
+            fasta.ambiguous_expansion_summary(&self.enzyme_parameters(), custom_cleavages)
+        {
+            log::info!(
+                "expanded {} digest(s) with ambiguous residues (B, X, Z) into {} variant(s); dropped {} with more than {} variant(s) (database.max_ambiguous_variants)",
+                summary.expanded,
+                summary.variants,
+                summary.dropped,
+                self.max_ambiguous_variants,
+            );
         }
     }
 
@@ -1330,6 +1366,7 @@ impl Parameters {
                     next_aa: None,
                     missed_cleavages: 0,
                     position: Position::Full,
+                    expanded_from: None,
                 };
                 match Peptide::try_from(digest) {
                     Ok(p) => Some(p),

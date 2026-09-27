@@ -82,14 +82,16 @@ fn monoisotopic_rejects_non_residues() {
     assert_eq!(monoisotopic(b'a'), 0.0);
     assert_eq!(monoisotopic(b'1'), 0.0);
     assert_eq!(monoisotopic(b'-'), 0.0);
-    // Uppercase letters without an amino acid (B, J, X, Z) map to 0.
-    for ch in *b"BJXZ" {
+    // Ambiguous letters without a single mass (B, X, Z) map to 0.
+    for ch in *b"BXZ" {
         assert_eq!(monoisotopic(ch), 0.0, "{}", ch as char);
     }
     assert!((monoisotopic(b'G') - 57.02146).abs() < 1e-5);
     assert!((monoisotopic(b'W') - 186.07932).abs() < 1e-5);
     // Leucine and isoleucine are isobaric.
     assert_eq!(monoisotopic(b'L'), monoisotopic(b'I'));
+    // J (Ile or Leu) is scored with the shared I/L mass.
+    assert_eq!(monoisotopic(b'J'), monoisotopic(b'L'));
 }
 
 #[test]

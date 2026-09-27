@@ -699,6 +699,8 @@ fn digestion() {
         generate_decoys: false,
         clip_n_term_met: false,
         fasta: "none".into(),
+        expand_ambiguous_residues: false,
+        max_ambiguous_variants: 20,
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
@@ -810,13 +812,15 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
         assert!(sequences.contains(&("PEPTIDEK", false)));
         assert!(sequences.contains(&("LLLLLK", false)));
         assert!(sequences.contains(&("MSSWWHHK", false)));
+        // J (Ile or Leu) has the I/L mass and is kept as written.
+        assert!(sequences.contains(&("TTJTTR", false)));
         assert!(sequences.iter().any(|(_, decoy)| *decoy));
         for peptide in &peptides {
             assert!(
                 peptide
                     .sequence
                     .iter()
-                    .all(|residue| crate::mass::VALID_AA.contains(residue)),
+                    .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J'),
                 "{peptide:?}"
             );
             assert!(peptide.monoisotopic > 0.0);
@@ -828,7 +832,7 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
     assert!(database.peptides.iter().all(|peptide| peptide
         .sequence
         .iter()
-        .all(|residue| crate::mass::VALID_AA.contains(residue))));
+        .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J')));
 }
 
 #[test]
@@ -2241,4 +2245,61 @@ fn clipped_initiator_methionine_peptides_match_protein_n_terminal_motifs() {
     // The anchor still needs the protein N-terminus: an internal A does not
     // qualify.
     assert!(names.iter().all(|name| !name.contains("A[Nterm-A]A")));
+}
+
+fn ambiguous_parameters(expand: bool) -> Parameters {
+    Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(0),
+            min_len: Some(5),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        expand_ambiguous_residues: Some(expand),
+        ..Default::default()
+    }
+    .make_parameters()
+}
+
+#[test]
+fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
+    let fasta = || Fasta::parse(">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n".into(), "rev_", true).unwrap();
+
+    let off = ambiguous_parameters(false);
+    let on = ambiguous_parameters(true);
+    assert!(
+        on.estimate_memory(&fasta()).unmodified_peptides
+            > off.estimate_memory(&fasta()).unmodified_peptides
+    );
+
+    let database = off.build(fasta());
+    let peptide = database
+        .peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"GEPTIDEK")
+        .unwrap();
+    assert_eq!(peptide.proteins("rev_", true), "P2");
+    assert_eq!(peptide.database_peptide(), None);
+
+    let database = on.build(fasta());
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let target = find(b"GEPTIDEK");
+    assert_eq!(target.proteins("rev_", true), "P1;P2");
+    assert_eq!(target.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let variant = find(b"GEPWIDEK");
+    assert_eq!(variant.proteins("rev_", true), "P1");
+    assert_eq!(variant.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let decoy = find(b"GEDITPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.database_peptide().as_deref(), Some("GEDIXPEK"));
+    assert!(database
+        .peptides
+        .iter()
+        .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
 }

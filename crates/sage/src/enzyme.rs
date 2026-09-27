@@ -2,6 +2,7 @@ use fnv::FnvHashSet;
 use regex::Regex;
 use std::sync::Arc;
 
+use crate::ambiguous_residues;
 use crate::mass::VALID_AA;
 use crate::sequence::{PeptideSequence, ProteinSequence};
 
@@ -30,6 +31,11 @@ pub struct Digest {
     pub missed_cleavages: u8,
     /// Is this an N-terminal peptide of the protein?
     pub position: Position,
+    /// Source protein of a digest expanded from ambiguous FASTA residues
+    /// (B, X or Z). Its `sequence` is then a standalone allocation holding
+    /// one expansion, and `protein_start` locates the ambiguous span as
+    /// written in this protein. `None` for every other digest.
+    pub expanded_from: Option<ProteinSequence>,
 }
 
 #[derive(Clone)]
@@ -72,10 +78,17 @@ impl ProteinOccurrence {
     }
 
     fn with_source(digest: &Digest, protein_backed: bool) -> Self {
-        let (storage, offset) = digest.sequence.source();
-        let source = (digest.protein_start == Some(offset)
-            && (protein_backed || storage.as_bytes().len() > digest.sequence.len()))
-        .then_some(storage);
+        let source = match &digest.expanded_from {
+            // An expansion views its own allocation; its source is the
+            // protein the ambiguous span was cut from.
+            Some(protein) => digest.protein_start.map(|_| protein.clone()),
+            None => {
+                let (storage, offset) = digest.sequence.source();
+                (digest.protein_start == Some(offset)
+                    && (protein_backed || storage.as_bytes().len() > digest.sequence.len()))
+                .then_some(storage)
+            }
+        };
         Self {
             protein: digest.protein.clone(),
             start: digest.protein_start,
@@ -214,6 +227,7 @@ impl Digest {
             sequence: self.sequence.reversed_internal(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
+            expanded_from: self.expanded_from.clone(),
         }
     }
 }
@@ -233,6 +247,7 @@ impl std::hash::Hash for Digest {
     }
 }
 
+#[derive(Clone)]
 pub struct EnzymeParameters {
     /// Number of missed cleavages to produce
     pub missed_cleavages: u8,
@@ -245,6 +260,11 @@ pub struct EnzymeParameters {
     /// initiator methionine. See [`metap_clips`]. Ignored by non-specific
     /// digests.
     pub clip_n_term_met: bool,
+    /// When set, each digest with ambiguous residues (B, X or Z) is replaced
+    /// by one digest per residue combination, and digests with more
+    /// combinations than this are dropped. When `None`, such digests are
+    /// returned as written and dropped when converted to peptides.
+    pub ambiguous_variants: Option<usize>,
 }
 
 /// Residues that let methionine aminopeptidase (MetAP) remove an initiator
@@ -628,11 +648,48 @@ impl EnzymeParameters {
                     protein_start: Some(start as u32),
                     prev_aa: start.checked_sub(1).map(|index| sequence.as_bytes()[index]),
                     next_aa: sequence.as_bytes().get(end).copied(),
+                    expanded_from: None,
                 });
             }
         }
-        digests
+        match self.ambiguous_variants {
+            Some(max_variants) => expand_ambiguous(digests, protein_sequence, max_variants),
+            None => digests,
+        }
     }
+}
+
+/// Replace every digest containing B, X or Z by its expansions (see
+/// [`ambiguous_residues::expand`]), dropping digests with more than
+/// `max_variants` of them. Cleavage sites were already chosen from the
+/// residues as written, so an X is never a trypsin site.
+fn expand_ambiguous(
+    digests: Vec<Digest>,
+    protein: &ProteinSequence,
+    max_variants: usize,
+) -> Vec<Digest> {
+    if !ambiguous_residues::is_ambiguous(protein.as_bytes()) {
+        return digests;
+    }
+    let mut expanded = Vec::with_capacity(digests.len());
+    for digest in digests {
+        let count = ambiguous_residues::variant_count(digest.sequence.as_bytes());
+        if count == 1 {
+            expanded.push(digest);
+            continue;
+        }
+        if count > max_variants {
+            continue;
+        }
+        for variant in ambiguous_residues::expand(digest.sequence.as_bytes()) {
+            expanded.push(Digest {
+                sequence: variant.into(),
+                expanded_from: Some(protein.clone()),
+                ..digest.clone()
+            });
+        }
+    }
+    expanded
 }
 
 #[cfg(test)]
