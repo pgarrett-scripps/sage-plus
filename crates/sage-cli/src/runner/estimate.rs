@@ -4,26 +4,18 @@
 //! can be far from real usage, so they are only reported here and never stop
 //! a run; `max_memory_gb` is enforced on measured memory during the search.
 
-use super::{load_custom_cleavages, load_fasta, load_ptm_library, prefilter};
+use super::{load_custom_cleavages, load_fasta, load_ptm_library};
 use crate::input::Search;
 use sage_core::database::DatabaseMemoryEstimate;
 use std::fmt;
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-/// How a prefiltered search would split the database.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrefilterPlan {
-    pub chunk_size: usize,
-    pub digest_passes: u64,
-    pub chunks: u64,
-}
-
 #[derive(Debug, Clone)]
 pub struct MemoryEstimateReport {
     pub proteins: usize,
     pub database: DatabaseMemoryEstimate,
-    pub prefilter: Option<PrefilterPlan>,
+    pub prefilter: bool,
     pub max_memory_gb: Option<f64>,
     /// Configured inputs whose peptides the estimate does not count.
     pub not_counted: Vec<String>,
@@ -42,25 +34,6 @@ pub fn estimate_memory(parameters: &Search) -> anyhow::Result<MemoryEstimateRepo
     let database = database_parameters
         .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
 
-    let prefilter = database_parameters.prefilter.then(|| {
-        database_parameters.auto_calculate_prefilter_chunk_size(&fasta, database.modified_peptides);
-        let chunk_size = database_parameters.prefilter_chunk_size.max(1);
-        let digest_passes = prefilter::digest_passes(
-            prefilter::PrefilterBudgets::for_search(parameters).digest_bytes,
-            database.unmodified_peak_bytes,
-        );
-        let chunks = digest_passes.saturating_mul(prefilter::chunks_per_pass(
-            fasta.targets.len(),
-            chunk_size,
-            digest_passes,
-        ) as u64);
-        PrefilterPlan {
-            chunk_size,
-            digest_passes,
-            chunks,
-        }
-    });
-
     let mut not_counted = Vec::new();
     if let Some(peptides) = &database_parameters.peptides {
         not_counted.push(format!("peptide list `{peptides}`"));
@@ -69,7 +42,7 @@ pub fn estimate_memory(parameters: &Search) -> anyhow::Result<MemoryEstimateRepo
     Ok(MemoryEstimateReport {
         proteins: fasta.targets.len(),
         database,
-        prefilter,
+        prefilter: database_parameters.prefilter,
         max_memory_gb: parameters.max_memory_gb,
         not_counted,
     })
@@ -101,20 +74,14 @@ impl fmt::Display for MemoryEstimateReport {
             db.fragments,
             db.fragment_peak_bytes as f64 / GIB
         )?;
-        match &self.prefilter {
-            Some(plan) => {
-                writeln!(
-                    f,
-                    "  prefilter:            {} chunks of up to {} proteins, digested in {} pass(es)",
-                    plan.chunks, plan.chunk_size, plan.digest_passes
-                )?;
-                writeln!(
-                    f,
-                    "                        the final index holds only prefilter survivors, so it is \
-                     usually far smaller than the fragment figure above"
-                )?;
-            }
-            None => writeln!(f, "  prefilter:            off")?,
+        if self.prefilter {
+            writeln!(
+                f,
+                "  prefilter:            on; the final index holds only prefilter survivors, so \
+                 it is usually far smaller than the fragment figure above"
+            )?;
+        } else {
+            writeln!(f, "  prefilter:            off")?;
         }
         match self.max_memory_gb {
             Some(gib) => writeln!(

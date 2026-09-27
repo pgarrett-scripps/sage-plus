@@ -447,27 +447,37 @@ impl std::io::Write for EventLog {
     }
 }
 
-/// Batched spectrum indexes, and a digest streamed in many sequence buckets,
-/// must give the same results as one index over the whole digest.
+/// Proteins streamed through batched spectrum indexes must keep exactly the
+/// peptides the whole-digest prefilter keeps, and give the same search.
 #[test]
-fn prefilter_batches_and_digest_buckets_match_the_whole_digest() -> anyhow::Result<()> {
+fn streamed_prefilter_matches_the_whole_digest_search() -> anyhow::Result<()> {
     use super::prefilter::PrefilterBudgets;
     use crate::events::{CancellationToken, EventEmitter};
 
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let root = std::env::temp_dir().join(format!(
-        "sage-prefilter-budgets-{}-{}",
+        "sage-prefilter-stream-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos()
     ));
     std::fs::create_dir_all(&root)?;
-    let fasta = root.join("two-proteins.fasta");
+    let fasta = root.join("proteins.fasta");
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let q99536_sequence = q99536
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .collect::<String>();
+    // A copy of Q99536 shares every digest with it, and a protein carrying a
+    // reversed albumin digest (DLGEENFK -> DFNEEGLK) collides with that
+    // digest's generated decoy, so both the streamed and shared paths run.
     std::fs::write(
         &fasta,
-        std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?
-            + "\n>sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n",
+        q99536
+            + "\n>sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n"
+            + &format!(">sp|COPY|Q99536_COPY\n{q99536_sequence}\n")
+            + ">sp|REV|REVERSED_DIGEST\nMSSRDFNEEGLKAGSEYR\n",
     )?;
     // Three files in batches of two: a full batch and a partial one.
     let mzml = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
@@ -481,20 +491,44 @@ fn prefilter_batches_and_digest_buckets_match_the_whole_digest() -> anyhow::Resu
         serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
     config["database"]["fasta"] = fasta.display().to_string().into();
     config["database"]["prefilter"] = true.into();
-    config["database"]["prefilter_chunk_size"] = 1.into();
     config["mzml_paths"] = serde_json::json!(inputs);
     config["batch_size"] = 2.into();
+    let tiny_index = PrefilterBudgets { index_bytes: 1 };
 
-    let run = |name: &str, budgets: Option<PrefilterBudgets>| -> anyhow::Result<_> {
-        let output = root.join(name);
+    let search = |name: &str, budgets: Option<PrefilterBudgets>| -> anyhow::Result<_> {
         let mut config = config.clone();
-        config["output_directory"] = output.display().to_string().into();
+        config["output_directory"] = root.join(name).display().to_string().into();
         let input: crate::input::Input = serde_json::from_value(config)?;
         let mut search = input.build()?;
         search.prefilter_budgets = budgets;
+        Ok(search)
+    };
+
+    // Survivors, compared directly against the whole-digest prefilter.
+    let runner = super::Runner::new_with_control(
+        search("peptides", Some(tiny_index))?,
+        2,
+        EventEmitter::from_writer(EventLog::default()),
+        CancellationToken::default(),
+    )?;
+    let mut database = runner.database_parameters.clone();
+    super::load_ptm_library(&mut database)?;
+    let proteins = super::load_fasta(&database)?;
+    let cleavages = super::load_custom_cleavages(&database, &proteins)?;
+    let whole = runner.prefilter_whole_digest(2, &proteins, cleavages.as_ref())?;
+    let (streamed, _) = runner.prefilter_peptides(2, proteins, cleavages)?;
+    assert!(!whole.is_empty());
+    assert!(
+        whole.len() < 1000,
+        "the prefilter should drop most peptides"
+    );
+    assert_eq!(streamed, whole);
+
+    let run = |name: &str, budgets: Option<PrefilterBudgets>| -> anyhow::Result<_> {
+        let output = root.join(name);
         let log = EventLog::default();
         let runner = super::Runner::new_with_control(
-            search,
+            search(name, budgets)?,
             2,
             EventEmitter::from_writer(log.clone()),
             CancellationToken::default(),
@@ -518,24 +552,9 @@ fn prefilter_batches_and_digest_buckets_match_the_whole_digest() -> anyhow::Resu
     };
 
     let (whole_events, whole) = run("whole", None)?;
-    let tiny_index = PrefilterBudgets {
-        index_bytes: 1,
-        ..PrefilterBudgets::from_max_memory(None)
-    };
     let (batched_events, batched) = run("batched", Some(tiny_index))?;
-    // One byte per pass streams the digest in the maximum number of buckets.
-    let (streamed_events, streamed) = run(
-        "streamed",
-        Some(PrefilterBudgets {
-            digest_bytes: 1,
-            index_bytes: 1,
-        }),
-    )?;
-
     assert_eq!(whole, batched);
-    assert_eq!(whole, streamed);
     assert_eq!(whole_events, batched_events);
-    assert_eq!(whole_events, streamed_events);
     for kind in ["file_started", "file_completed"] {
         let count = whole_events.iter().filter(|event| *event == kind).count();
         assert_eq!(count, 3, "{kind} emitted {count} times");

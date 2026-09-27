@@ -397,7 +397,7 @@ fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
     let mut config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
         workspace.join("tests/config.json"),
     )?)?;
-    // The prefilter only runs when the FASTA has more proteins than one chunk.
+    // Two proteins, so the prefilter streams more than one.
     let fasta = root.join("two-proteins.fasta");
     std::fs::write(
         &fasta,
@@ -406,7 +406,6 @@ fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
     )?;
     config["database"]["fasta"] = serde_json::Value::String(fasta.display().to_string());
     config["database"]["prefilter"] = serde_json::Value::Bool(true);
-    config["database"]["prefilter_chunk_size"] = serde_json::Value::from(1);
     let prefilter_config = root.join("prefilter.json");
     std::fs::write(&prefilter_config, serde_json::to_string(&config)?)?;
     for (run, config) in [workspace.join("tests/config.json"), prefilter_config]

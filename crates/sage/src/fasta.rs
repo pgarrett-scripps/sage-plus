@@ -120,30 +120,40 @@ impl Fasta {
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
         keep: impl Fn(&Digest) -> bool + Sync + Send,
     ) -> Vec<Digest> {
-        self.targets
-            .par_iter()
-            .flat_map_iter(|(protein, sequence)| {
-                let boundaries = custom_cleavages
-                    .map(|library| library.boundaries_for(protein))
-                    .unwrap_or_default();
-                enzyme
-                    .digest_protein_with_custom_cleavages(sequence, protein.clone(), boundaries)
-                    .into_iter()
-                    .filter(|digest| keep(digest))
-                    .filter_map(|mut digest| {
-                        if protein.contains(&self.decoy_tag) {
-                            if !self.generate_decoys {
-                                digest.decoy = true;
-                                Some(digest)
-                            } else {
-                                None
-                            }
-                        } else {
-                            Some(digest)
-                        }
-                    })
+        (0..self.targets.len())
+            .into_par_iter()
+            .flat_map_iter(|index| {
+                let mut digests = self.digest_protein(index, enzyme, custom_cleavages);
+                digests.retain(|digest| keep(digest));
+                digests
             })
             .collect()
+    }
+
+    /// Digest protein `index` of [`Self::targets`]. Proteins carrying the
+    /// decoy tag give decoy digests, or none when decoys are generated.
+    pub fn digest_protein(
+        &self,
+        index: usize,
+        enzyme: &EnzymeParameters,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> Vec<Digest> {
+        let (protein, sequence) = &self.targets[index];
+        let is_decoy = protein.contains(&self.decoy_tag);
+        if is_decoy && self.generate_decoys {
+            return Vec::new();
+        }
+        let boundaries = custom_cleavages
+            .map(|library| library.boundaries_for(protein))
+            .unwrap_or_default();
+        let mut digests =
+            enzyme.digest_protein_with_custom_cleavages(sequence, protein.clone(), boundaries);
+        if is_decoy {
+            for digest in &mut digests {
+                digest.decoy = true;
+            }
+        }
+        digests
     }
 
     pub fn iter_chunks(&self, chunk_size: usize) -> impl Iterator<Item = Self> + '_ {

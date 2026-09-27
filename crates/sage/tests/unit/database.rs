@@ -171,26 +171,6 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
 }
 
 #[test]
-fn sequence_coherent_partition_never_splits_terminal_variants() {
-    let chunks = Parameters::partition_digests_by_sequence(
-        vec![
-            digest_group("PEPTIDER", Position::Internal),
-            digest_group("SEQUENCEK", Position::Full),
-            digest_group("PEPTIDER", Position::Nterm),
-        ],
-        1,
-    );
-
-    assert_eq!(chunks.len(), 2);
-    assert!(chunks.iter().any(|chunk| {
-        chunk.len() == 2
-            && chunk
-                .iter()
-                .all(|group| group.reference.sequence == "PEPTIDER")
-    }));
-}
-
-#[test]
 fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
     let parameters = Builder::default().make_parameters();
     let target_sequences = ["PEPTIDER".into(), "PEDITPER".into()]
@@ -207,23 +187,17 @@ fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
 }
 
 #[test]
-fn sequence_buckets_pair_targets_with_their_reversals() {
+fn sequence_hashes_pair_targets_with_their_reversals() {
     for sequence in ["PEPTIDER", "PEDITPER", "AK", "K", "MPEPTIDEK", ""] {
         let reversed = PeptideSequence::from(sequence).reversed_internal();
-        for buckets in [1, 2, 7, 64] {
-            let bucket = sequence_bucket(sequence.as_bytes(), buckets);
-            assert!(bucket < buckets);
-            assert_eq!(bucket, sequence_bucket(reversed.as_bytes(), buckets));
-        }
+        let (forward, reverse) = sequence_hashes(sequence.as_bytes());
+        assert_eq!(reverse, sequence_hashes(reversed.as_bytes()).0);
+        assert_eq!(forward, sequence_hashes(reversed.as_bytes()).1);
     }
-    let buckets = (0..200)
-        .map(|n| sequence_bucket(format!("PEPTIDE{n}K").as_bytes(), 4))
+    let hashes = (0..200)
+        .map(|n| sequence_hashes(format!("PEPTIDE{n}K").as_bytes()).0)
         .collect::<HashSet<_>>();
-    assert_eq!(
-        buckets.len(),
-        4,
-        "hash should spread sequences over buckets"
-    );
+    assert_eq!(hashes.len(), 200);
 }
 
 /// Identity of a generated peptide, independent of chunking.
@@ -247,7 +221,7 @@ fn peptide_keys(mut peptides: Vec<Peptide>) -> Vec<PeptideKey> {
 }
 
 #[test]
-fn bucketed_digests_expand_to_the_whole_database() {
+fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
     // PEDITPER is the internal reversal of PEPTIDER, so its decoy collides
     // with a target from another protein; the buckets must keep them together.
     // With FASTA decoys, rev_c supplies decoys that must still be checked
@@ -280,6 +254,7 @@ fn bucketed_digests_expand_to_the_whole_database() {
             }),
         ),
     ];
+    let mut shared_exercised = false;
     for (generate_decoys, config) in configs {
         let fasta = Fasta::parse(fasta.to_string(), "rev_", generate_decoys).unwrap();
         let mut builder: Builder = serde_json::from_value(config).unwrap();
@@ -288,48 +263,63 @@ fn bucketed_digests_expand_to_the_whole_database() {
         let whole = peptide_keys(parameters.digest(&fasta));
         assert!(whole.iter().any(|key| key.1), "no decoys generated");
 
-        for buckets in [1, 2, 3, 8] {
-            let mut streamed = Vec::new();
-            let mut groups = 0;
-            for bucket in 0..buckets {
-                let digests = parameters.digest_unmodified_bucket(&fasta, None, bucket, buckets);
-                groups += digests.len();
-                let targets = digests
-                    .iter()
-                    .filter(|digest| !digest.reference.decoy)
-                    .map(|digest| digest.reference.sequence.clone())
-                    .collect::<HashSet<_>>();
-                streamed.extend(parameters.modify_digests_with_target_sequences(digests, &targets));
-            }
-            assert_eq!(groups, parameters.digest_unmodified(&fasta).len());
-            assert_eq!(
-                peptide_keys(streamed),
-                whole,
-                "{buckets} buckets, generate_decoys {generate_decoys}"
-            );
-        }
-    }
-}
+        // As the streamed prefilter does: digests whose sequence and decoy
+        // sequence are unique are expanded one protein at a time without a
+        // target check; the rest are grouped and expanded together.
+        let enzyme: EnzymeParameters = parameters.enzyme.clone().into();
+        let digests = (0..fasta.targets.len())
+            .map(|index| fasta.digest_protein(index, &enzyme, None))
+            .collect::<Vec<_>>();
+        let mut hashes = digests
+            .iter()
+            .flatten()
+            .flat_map(|digest| {
+                let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
+                std::iter::once(forward).chain(generate_decoys.then_some(reverse))
+            })
+            .collect::<Vec<_>>();
+        hashes.sort_unstable();
+        let shared = hashes
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect::<HashSet<_>>();
+        let is_shared = |digest: &crate::enzyme::Digest| {
+            let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
+            shared.contains(&forward) || (generate_decoys && shared.contains(&reverse))
+        };
 
-#[test]
-fn unmodified_byte_estimate_matches_the_full_estimate() {
-    let fasta = Fasta::parse(
-        ">a\nMPEPTIDERSEQMENCEKAMPLIFIERK\n>b\nPEDITPERGGMKWHATEVERK\n".to_string(),
-        "rev_",
-        true,
-    )
-    .unwrap();
-    let builder: Builder = serde_json::from_value(serde_json::json!({
-        "variable_mods": {"M": [15.9949]}
-    }))
-    .unwrap();
-    let parameters = builder.make_parameters();
-    let full = parameters.estimate_memory_with_custom_cleavages(&fasta, None);
-    assert!(full.unmodified_peak_bytes > 0);
-    assert_eq!(
-        parameters.estimate_unmodified_bytes(&fasta, None),
-        full.unmodified_peak_bytes
-    );
+        let mut deferred = Vec::new();
+        let mut streamed = parameters.with_digest_expander(|expander| {
+            let mut streamed = Vec::new();
+            for protein in &digests {
+                let mut peptides = Vec::new();
+                for digest in protein {
+                    if is_shared(digest) {
+                        deferred.push(digest.clone());
+                        continue;
+                    }
+                    let group = DigestGroup {
+                        origins: vec![ProteinOccurrence::of_protein_digest(digest)],
+                        reference: digest.clone(),
+                    };
+                    peptides.extend(expander.expand(group, None));
+                }
+                expander.reorder(&mut peptides);
+                streamed.extend(peptides);
+            }
+            streamed
+        });
+        shared_exercised |= !deferred.is_empty();
+        streamed.extend(parameters.modify_digests(crate::enzyme::group_protein_digests(deferred)));
+        parameters.reorder_peptides_with_labels(&mut streamed);
+        assert_eq!(
+            peptide_keys(streamed),
+            whole,
+            "generate_decoys {generate_decoys}"
+        );
+    }
+    assert!(shared_exercised, "no shared digests exercised");
 }
 
 #[test]
@@ -703,7 +693,6 @@ fn digestion() {
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
-        prefilter_chunk_size: 0,
         prefilter_min_matched_peaks: 1,
         prefilter_max_peaks: None,
         loaded_ptm_library: None,

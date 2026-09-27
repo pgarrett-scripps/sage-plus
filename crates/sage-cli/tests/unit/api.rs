@@ -239,9 +239,9 @@ fn estimate_reports_the_database_without_searching() -> anyhow::Result<()> {
     assert_eq!(report.proteins, 1);
     assert!(report.database.modified_peptides >= report.database.unmodified_peptides);
     assert!(report.database.fragments > 0);
-    let plan = report.prefilter.as_ref().expect("prefilter plan");
-    assert!(plan.chunks >= 1 && plan.digest_passes >= 1);
+    assert!(report.prefilter);
     let text = report.to_string();
+    assert!(text.contains("prefilter:            on"));
     assert!(text.contains("never limits a run"));
     assert!(text.contains("fragments:"));
     Ok(())

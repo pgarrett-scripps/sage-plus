@@ -44,6 +44,8 @@ pub enum EventKind {
         spectra_files: usize,
     },
     DatabaseStarted,
+    /// No longer emitted: the streamed prefilter needs no in-run estimate.
+    /// Kept because downstream benchmark scripts still look for it.
     DatabaseEstimated {
         unmodified_peptides: u64,
         modified_peptides: u64,

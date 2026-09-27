@@ -1643,7 +1643,8 @@
           ]
         },
         "prefilter_chunk_size": {
-          "description": "Number of sequences to handle simultaneously when pre-filtering the db",
+          "deprecated": true,
+          "description": "Deprecated and ignored. The prefilter streams proteins one at a time.",
           "format": "uint",
           "minimum": 0,
           "type": [

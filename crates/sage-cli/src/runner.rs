@@ -116,6 +116,15 @@ impl LabelGroupIndex {
 }
 
 fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
+    close_pairs(keep, |index| {
+        database
+            .paired_peptide_index(sage_core::database::PeptideIx(index as u32))
+            .map(|pair| pair.0 as usize)
+    });
+}
+
+/// Add the target or decoy partner, given by `pair_of`, of every kept peptide.
+fn close_pairs(keep: &AtomicBitSet, pair_of: impl Fn(usize) -> Option<usize> + Sync) {
     // Pairs are resolved in parallel and repeated until no partner is added,
     // so the closure does not depend on visit order.
     let mut frontier = (0..keep.len())
@@ -126,9 +135,7 @@ fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
         frontier = frontier
             .into_par_iter()
             .filter_map(|index| {
-                let pair = database
-                    .paired_peptide_index(sage_core::database::PeptideIx(index as u32))?
-                    .0 as usize;
+                let pair = pair_of(index)?;
                 (!keep.contains(pair)).then_some(pair)
             })
             .collect::<Vec<_>>();
@@ -772,23 +779,6 @@ impl Runner {
                 }
             }
 
-            // Estimates only size the prefilter; they never stop a run. Use
-            // `--estimate` to preview memory before searching.
-            let mut unmodified_bytes = None;
-            if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
-                let full_estimate = database_parameters
-                    .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-                events.emit(EventKind::DatabaseEstimated {
-                    unmodified_peptides: full_estimate.unmodified_peptides,
-                    modified_peptides: full_estimate.modified_peptides,
-                    fragments: full_estimate.fragments,
-                    peak_bytes: full_estimate.peak_bytes(),
-                });
-                unmodified_bytes = Some(full_estimate.unmodified_peak_bytes);
-                database_parameters
-                    .auto_calculate_prefilter_chunk_size(&fasta, full_estimate.modified_peptides);
-            }
-
             match database_parameters.prefilter {
                 false => {
                     let digests = database_parameters
@@ -796,38 +786,21 @@ impl Runner {
                     database_parameters.modify_digests(digests)
                 }
                 true => {
-                    if database_parameters.prefilter_chunk_size >= fasta.targets.len() {
-                        database_parameters
-                            .digest_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
-                    } else {
-                        info!(
-                            "using {} db chunks of size {}",
-                            fasta
-                                .targets
-                                .len()
-                                .div_ceil(database_parameters.prefilter_chunk_size),
-                            database_parameters.prefilter_chunk_size,
-                        );
-                        let mini_runner = Self {
-                            database: IndexedDatabase::default(),
-                            parameters: parameters.clone(),
-                            database_parameters: database_parameters.clone(),
-                            start,
-                            events: events.clone(),
-                            cancellation: cancellation.clone(),
-                            retained_spectra: Default::default(),
-                            mass_recalibration: Default::default(),
-                        };
-                        let (peptides, retained) = mini_runner.prefilter_peptides(
-                            parallel,
-                            fasta,
-                            custom_cleavages,
-                            unmodified_bytes,
-                        )?;
-                        retained_spectra = retained;
-                        reordered = true;
-                        peptides
-                    }
+                    let mini_runner = Self {
+                        database: IndexedDatabase::default(),
+                        parameters: parameters.clone(),
+                        database_parameters: database_parameters.clone(),
+                        start,
+                        events: events.clone(),
+                        cancellation: cancellation.clone(),
+                        retained_spectra: Default::default(),
+                        mass_recalibration: Default::default(),
+                    };
+                    let (peptides, retained) =
+                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
+                    retained_spectra = retained;
+                    reordered = true;
+                    peptides
                 }
             }
         } else {
