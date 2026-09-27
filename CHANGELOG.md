@@ -35,6 +35,8 @@ entries are retained below for provenance.
   (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
   for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
   drops peptides with more combinations; the log reports expanded, created and dropped counts.
+  FASTA proteins containing B, Z or X are logged at info level when expansion is on, and with a
+  warning that their peptides are not searched when it is off.
   Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
   prefilter are identical. A PTM library record at a B, Z or X position validates, also in
   strict mode, when its residue is one the FASTA residue expands to, and modifies only that

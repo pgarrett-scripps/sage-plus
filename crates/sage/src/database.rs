@@ -359,6 +359,41 @@ impl Parameters {
         enzyme
     }
 
+    /// How FASTA proteins with B, X or Z are searched: an info message when
+    /// `expand_ambiguous_residues` expands their peptides, a warning when
+    /// they are dropped, and `None` when there are no such proteins.
+    pub fn ambiguous_proteins_message(&self, fasta: &Fasta) -> Option<(log::Level, String)> {
+        let proteins = fasta.ambiguous_protein_count();
+        if proteins == 0 {
+            return None;
+        }
+        let prefix = format!(
+            "{proteins} FASTA protein(s) contain residues without a single mass (B, X or Z)"
+        );
+        Some(match self.expand_ambiguous_residues {
+            true => (
+                log::Level::Info,
+                format!(
+                    "{prefix}; peptides containing them are expanded into up to {} variant(s) each (database.max_ambiguous_variants)",
+                    self.max_ambiguous_variants
+                ),
+            ),
+            false => (
+                log::Level::Warn,
+                format!(
+                    "{prefix}; peptides containing them are not searched unless database.expand_ambiguous_residues is true"
+                ),
+            ),
+        })
+    }
+
+    /// Log [`Self::ambiguous_proteins_message`].
+    pub fn log_ambiguous_proteins(&self, fasta: &Fasta) {
+        if let Some((level, message)) = self.ambiguous_proteins_message(fasta) {
+            log::log!(level, "{message}");
+        }
+    }
+
     /// Log how many digests with ambiguous residues were expanded or
     /// dropped. Only proteins with such residues are digested again.
     pub fn log_ambiguous_expansion(

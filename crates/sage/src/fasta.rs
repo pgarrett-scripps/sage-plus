@@ -1,7 +1,6 @@
 use crate::ambiguous_residues;
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
-use crate::mass::monoisotopic;
 use crate::sequence::ProteinSequence;
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -78,21 +77,6 @@ impl Fasta {
             return Err(FastaError::NoSequences);
         }
 
-        let nonstandard = targets
-            .iter()
-            .filter(|(_, sequence)| {
-                sequence
-                    .as_str()
-                    .bytes()
-                    .any(|residue| monoisotopic(residue) == 0.0)
-            })
-            .count();
-        if nonstandard > 0 {
-            log::warn!(
-                "{nonstandard} FASTA protein(s) contain residues without a single mass (B, X or Z); peptides containing them are searched only with database.expand_ambiguous_residues"
-            );
-        }
-
         Ok(Fasta {
             targets,
             decoy_tag,
@@ -155,6 +139,15 @@ impl Fasta {
             }
         }
         digests
+    }
+
+    /// Number of proteins containing B, X or Z, residues without a single
+    /// mass, whose peptides are expanded or dropped at digestion.
+    pub fn ambiguous_protein_count(&self) -> usize {
+        self.targets
+            .par_iter()
+            .filter(|(_, sequence)| ambiguous_residues::is_ambiguous(sequence.as_bytes()))
+            .count()
     }
 
     /// Counts of digests with ambiguous residues that `enzyme` expands or

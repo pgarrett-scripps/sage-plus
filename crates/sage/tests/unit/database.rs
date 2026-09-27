@@ -2423,6 +2423,40 @@ fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
 }
 
 #[test]
+fn ambiguous_proteins_are_reported_as_expanded_or_dropped() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPJIDEK\n>P3\nMRBZK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    assert_eq!(fasta.ambiguous_protein_count(), 2);
+    let (level, message) = ambiguous_parameters(true)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Info);
+    assert!(message.starts_with("2 FASTA protein(s)"), "{message}");
+    assert!(
+        message.contains("expanded into up to 20 variant(s)"),
+        "{message}"
+    );
+    let (level, message) = ambiguous_parameters(false)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Warn);
+    assert!(
+        message.contains("not searched unless database.expand_ambiguous_residues"),
+        "{message}"
+    );
+    // J alone carries the I/L mass and needs neither.
+    let fasta = Fasta::parse(">P2\nMRGEPJIDEK\n".into(), "rev_", true).unwrap();
+    assert_eq!(
+        ambiguous_parameters(false).ambiguous_proteins_message(&fasta),
+        None
+    );
+}
+
+#[test]
 fn expanded_peptides_report_substitutions() {
     let fasta = Fasta::parse(
         ">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n>P3\nMRABEZAK\n>P4\nMRSAMPLEK\n".into(),
