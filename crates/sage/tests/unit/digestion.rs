@@ -149,3 +149,36 @@ fn clipped_initiator_methionine_peptides_start_the_protein() {
         TerminusClass::SemiN
     );
 }
+
+#[test]
+fn expanded_ambiguous_peptides_are_classified_as_written() {
+    let enzyme = trypsin();
+    let at = |protein: &str, start: usize, len: usize| ProteinOccurrence {
+        protein: "P1".into(),
+        start: Some(start as u32),
+        prev_aa: start.checked_sub(1).map(|index| protein.as_bytes()[index]),
+        next_aa: protein.as_bytes().get(start + len).copied(),
+        source: Some(protein.into()),
+        met_clipped: false,
+    };
+    // DEPXIDEK searched as DEPKIDEK: the X was never a cleavage site.
+    let written_x = "AAKDEPXIDEKGG";
+    let as_k = peptide("DEPKIDEK", false, vec![at(written_x, 3, 8)]);
+    // XEPTIDEK after a K searched as PEPTIDEK: the K-X bond was cleaved.
+    let leading_x = "AAKXEPTIDEKGG";
+    let as_p = peptide("PEPTIDEK", false, vec![at(leading_x, 3, 8)]);
+    assert_eq!(
+        classify_peptide(&enzyme, &as_p, true),
+        Some(TerminusClass::Enzymatic)
+    );
+    let summary = summarize(Some(&enzyme), true, [&as_k, &as_p]);
+    assert_eq!(summary.missed_cleavages_0, 2);
+    assert_eq!(summary.semi_n, 0);
+
+    // A generated decoy carries its target's occurrence and is judged on
+    // the reversed written span.
+    let decoy = peptide("DEDIKPEK", true, vec![at(written_x, 3, 8)]);
+    let summary = summarize(Some(&enzyme), true, [&decoy]);
+    assert_eq!(summary.decoy_peptides, 1);
+    assert_eq!(summary.semi_n + summary.semi_c + summary.non_enzymatic, 0);
+}

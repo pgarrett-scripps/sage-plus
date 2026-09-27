@@ -43,7 +43,8 @@ entries are retained below for provenance.
   row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
   and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
   and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
-  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. A one-line
+  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. Peptides
+  expanded from ambiguous residues are classified on the FASTA residues as written. A one-line
   summary is logged. The run-summary schema stays at
   version 9.
 - Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
