@@ -49,6 +49,7 @@ maud = "0.27.0"
 report-builder = "0.1.1"
 
 [dev-dependencies]
+boon = "0.6"
 parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
 
 # malloc_trim (glibc) and getrusage (peak RSS fallback).

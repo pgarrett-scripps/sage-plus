@@ -16,6 +16,9 @@ entries are retained below for provenance.
 - `run-summary.json` records `peak_rss_bytes`, the process's peak resident memory (Linux `VmHWM`,
   else `getrusage`; `null` where unavailable), and the end of the run logs it. The field is
   optional and the run-summary schema stays at version 9.
+- Published schemas for `run-summary.json` (`schemas/run-summary.v9.schema.json`, JSON Schema),
+  `digestion.tsv` and `diagnostic_ions.tsv` (`schemas/*.v1.tsv.schema.json`, Table Schema). An
+  integration test validates real outputs against them.
 
 ## [v0.1.0-beta.12] - 2026-09-27
 
