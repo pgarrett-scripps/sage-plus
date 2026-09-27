@@ -693,8 +693,8 @@ impl Runner {
                 vec![0.0; filenames.len()]
             };
 
-            // Mmedian MS1 mass accuracy for each file, using feature.delta_mass
-            let median_ms1_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
+            // Median signed precursor error (observed - theoretical, ppm) per file.
+            let median_ms1_mass_bias_per_file: Vec<f32> = (0..filenames.len())
                 .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
                         (feature.file_id == file_id
@@ -706,8 +706,23 @@ impl Runner {
                 })
                 .collect();
 
-            // Median MS2 mass accuracy for each file, using feature.average_ppm
-            let median_ms2_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
+            // Median signed fragment error per file. `average_ppm` is an
+            // absolute error and cannot show a bias, so the bias comes from
+            // the signed, intensity-weighted `signed_fragment_ppm`.
+            let median_ms2_mass_bias_per_file: Vec<f32> = (0..filenames.len())
+                .map(|file_id| {
+                    median_finite(features.iter().filter_map(|feature| {
+                        (feature.file_id == file_id
+                            && feature.label == 1
+                            && feature.spectrum_q <= global_q_value_filter)
+                            .then_some(feature.signed_fragment_ppm)
+                    }))
+                    .unwrap_or(f32::NAN)
+                })
+                .collect();
+
+            // Median absolute fragment error per file (spread, never negative).
+            let median_ms2_abs_error_per_file: Vec<f32> = (0..filenames.len())
                 .map(|file_id| {
                     median_finite(features.iter().filter_map(|feature| {
                         (feature.file_id == file_id
@@ -796,8 +811,9 @@ impl Runner {
                                 th { "Proteins" }
                                 th { "Total MS1 Intensity" }
                                 th { "Total MS2 Intensity" }
-                                th { "Median MS1 Delta Mass" }
-                                th { "Median MS2 Delta Mass" }
+                                th { "Median MS1 Mass Bias (ppm)" }
+                                th { "Median MS2 Mass Bias (ppm)" }
+                                th { "Median MS2 Absolute Error (ppm)" }
                                 th { "Median RT Deviation" }
                                 th { "Median IM Deviation" }
                                 th { "Average Peptide Length" }
@@ -814,8 +830,9 @@ impl Runner {
                                     td { (num_protein_targets_per_file[i]) }
                                     td { (total_lfq_intensity_per_file[i]) }
                                     td { (total_ms2_intensity_per_file[i]) }
-                                    td { (median_ms1_mass_accuracy_per_file[i]) }
-                                    td { (median_ms2_mass_accuracy_per_file[i]) }
+                                    td { (median_ms1_mass_bias_per_file[i]) }
+                                    td { (median_ms2_mass_bias_per_file[i]) }
+                                    td { (median_ms2_abs_error_per_file[i]) }
                                     td { (median_rt_deviation_per_file[i]) }
                                     td { (median_im_deviation_per_file[i]) }
                                     td { (avg_peptide_length_per_file[i]) }

@@ -2,7 +2,7 @@ use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
     missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
     sort_features_by_discriminant, spectrum_id_occurrences, LabelGroupIndex, OutputTarget,
-    RunSummary, SpectrumAccumulator,
+    RunSummary, SpectrumAccumulator, ToleranceRecommendation,
 };
 
 #[test]
@@ -178,6 +178,10 @@ fn older_run_summaries_receive_compatible_defaults() {
     .unwrap();
 
     assert_eq!(summary.schema_version, 1);
+    assert_eq!(
+        summary.recommended_tolerances,
+        ToleranceRecommendation::default()
+    );
     assert!(!summary.ptm_localization.enabled);
     assert_eq!(summary.quantification.lfq_features, 0);
 }
@@ -363,8 +367,8 @@ fn report_keeps_same_basename_files_separate() {
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 2);
     // PSM targets and average precursor charge are per input file.
-    assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
-    assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
+    assert_eq!((rows[0][1], rows[0][12]), ("2", "2"));
+    assert_eq!((rows[1][1], rows[1][12]), ("1", "3"));
 }
 
 #[test]
@@ -561,4 +565,102 @@ fn streamed_prefilter_matches_the_whole_digest_search() -> anyhow::Result<()> {
     }
     std::fs::remove_dir_all(root)?;
     Ok(())
+}
+
+#[test]
+fn report_shows_signed_fragment_bias() {
+    let (directory, _) = temporary_output("report-bias");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    // A uniform -4 ppm fragment shift: the absolute error is 4 ppm, the bias -4.
+    let feature = |delta_mass| Feature {
+        label: 1,
+        peptide_idx: PeptideIx(0),
+        delta_mass,
+        average_ppm: 4.0,
+        signed_fragment_ppm: -4.0,
+        ..Feature::default()
+    };
+    let features = vec![feature(-2.0), feature(-3.0), feature(-2.5)];
+    let path = runner
+        .write_report(&features, None, &["run.mzML".to_string()])
+        .unwrap();
+    let html = std::fs::read_to_string(path.to_file_path().unwrap()).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+
+    assert!(html.contains("Median MS2 Mass Bias (ppm)"));
+    assert!(html.contains("Median MS2 Absolute Error (ppm)"));
+    let body = html.split("<tbody>").nth(1).unwrap();
+    let cells = body
+        .split("<td>")
+        .skip(1)
+        .map(|cell| cell.split("</td>").next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!((cells[6], cells[7], cells[8]), ("-2.5", "-4", "4"));
+}
+
+#[test]
+fn tolerance_recommendation_uses_confident_signed_errors() {
+    let confident = |i: usize| Feature {
+        rank: 1,
+        label: 1,
+        spectrum_q: 0.001,
+        // Precursor: -2 ppm bias, errors -3/-2/-1.
+        delta_mass: -2.0 + (i % 3) as f32 - 1.0,
+        // Fragment: +3 ppm bias; each PSM's ions spread by 2 ppm.
+        signed_fragment_ppm: 3.0,
+        average_ppm: 3.0,
+        fragment_ppm_sd: 2.0,
+        ..Feature::default()
+    };
+    let mut features = (0..150).map(confident).collect::<Vec<_>>();
+    // Decoys, lower ranks and non-confident PSMs are ignored.
+    for excluded in [
+        Feature {
+            label: -1,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+        Feature {
+            rank: 2,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+        Feature {
+            spectrum_q: 0.5,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+    ] {
+        features.extend(std::iter::repeat_n(excluded, 60));
+    }
+
+    let recommendation = ToleranceRecommendation::from_features(&features);
+    assert_eq!(recommendation.psms, 150);
+    assert!(recommendation.skipped.is_none());
+    let precursor = recommendation.precursor.unwrap();
+    assert_eq!(precursor.bias_ppm, -2.0);
+    // |-2| + 4 * 1.4826 = 7.93 -> 10 ppm.
+    assert_eq!(precursor.recommended_ppm, Some(10.0));
+    let fragment = recommendation.fragment.unwrap();
+    assert_eq!(fragment.bias_ppm, 3.0);
+    // |3| + 4 * 2 = 11 -> 20 ppm.
+    assert_eq!(fragment.recommended_ppm, Some(20.0));
+    assert_eq!(
+        recommendation.log_line(),
+        "recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 150 PSMs)"
+    );
+
+    let few = ToleranceRecommendation::from_features(&features[..99]);
+    assert_eq!(few.psms, 99);
+    assert!(few.precursor.is_none() && few.fragment.is_none());
+    assert!(few.log_line().contains("skipped (99 confident PSMs"));
 }

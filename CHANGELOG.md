@@ -9,6 +9,29 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- The documentation no longer promises that upstream Sage configurations load unchanged.
+  The basic symbol-keyed modification form still works; new options use named definitions.
+
+### Added
+- `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
+  robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering
+  `|bias| + 4 × sigma`, from rank-1 target PSMs at 1% spectrum q-value (at least 100). The log
+  prints one `recommended tolerances: ...` line. The field is optional and the run-summary
+  schema stays at version 9.
+- Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
+  `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
+  Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.
+
+### Fixed
+- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
+  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
+  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
+  renamed `Median MS1 Mass Bias (ppm)`.
+- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
+  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
+  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

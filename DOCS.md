@@ -408,6 +408,7 @@ The enzyme section contains parameters related to the enzyme used for digestion.
 - **max_len**: Integer. The maximum AA length of peptides to search (default: 50).
 - **cleave_at**: String. Amino acids to cleave at (default: 'KR').
 - **restrict**: String. Do not cleave if one of these amino acids follows the cleavage site (default: 'P').
+- Both accept only the uppercase one-letter codes `ACDEFGHIKLMNPQRSTVWYUO`; `cleave_at` also accepts `""` and `"$"`. Ambiguity codes such as `B`, `Z`, `J` and `X`, lowercase letters and other symbols are configuration errors.
 - **c_terminal**: Boolean. Cleave at the C-terminus of matching amino acids (default:true).
 
 Example: 
@@ -724,8 +725,9 @@ limited. Static and variable occupancy is reflected in generated variants.
 
 #### Symbol-keyed configurations
 
-Upstream Sage's symbol-keyed syntax still loads, so one configuration can drive both
-Sage and Sage Plus. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
+The basic symbol-keyed form still loads for simple searches. Sage Plus does not aim to
+accept upstream Sage configurations: the two have diverged, and new options are added only
+as named definitions. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
 followed by a residue). Static values are masses; variable values are mass arrays,
 for example `"static_mods": {"C": 57.021464}` and `"variable_mods": {"M": [15.9949]}`.
 
@@ -1204,7 +1206,9 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
+  - `recommended_tolerances` suggests precursor and fragment tolerances from the rank-1 target PSMs at 1% spectrum q-value, pooled over all files. For each, `bias_ppm` is the median signed error (observed − theoretical), `sigma_ppm` is 1.4826 × the median absolute deviation around it, `required_ppm` is `|bias_ppm| + 4 × sigma_ppm`, and `recommended_ppm` is the smallest of ±5, 10, 20, 50 and 100 ppm that covers `required_ppm` (`null` when even 100 ppm does not). Precursor errors are `precursor_ppm`. Fragment errors start from each PSM's signed, intensity-weighted mean fragment error; the spread of those means understates how far single ions stray, so the median within-PSM standard deviation of the ion errors is added in quadrature to `sigma_ppm`. All errors are raw, before any `mass_recalibration`. Fewer than 100 such PSMs leave both estimates `null` and set `skipped`. The log prints the same result, for example `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`. Only PSMs inside the configured windows are measured, so a recommendation at or above a configured half-width means the window may be clipping real errors: widen it and search again.
+  - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"

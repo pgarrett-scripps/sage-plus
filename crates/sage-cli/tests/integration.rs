@@ -182,6 +182,11 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    // One test spectrum is far below the PSMs needed for a recommendation.
+    assert!(summary["recommended_tolerances"]["skipped"]
+        .as_str()
+        .unwrap()
+        .contains("fewer than the 100 needed"));
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 19);
@@ -267,6 +272,15 @@ fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
         .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid modification key `KK`"));
+    std::fs::write(&config, r#"{"database":{"enzyme":{"cleave_at":"KB"}}}"#)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg(&config)
+        .args(["--preview-modifications", "KAKAK"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains("unsupported residues `B`"), "{stderr}");
     std::fs::remove_dir_all(root)?;
     Ok(())
 }

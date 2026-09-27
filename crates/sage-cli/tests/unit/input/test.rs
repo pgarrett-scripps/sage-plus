@@ -649,3 +649,22 @@ fn quant_options_fill_unset_fields_from_defaults() {
             .into();
     assert_eq!((level_two.level, level_two.sn), (2, false));
 }
+
+#[test]
+fn unsupported_enzyme_residues_fail_validation() {
+    for (enzyme, expected) in [
+        (serde_json::json!({"cleave_at": "KRB"}), "cleave_at"),
+        (serde_json::json!({"restrict": "X"}), "restrict"),
+    ] {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "database": { "fasta": "test.fasta", "enzyme": enzyme },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"]
+        }))
+        .unwrap();
+        let error = input.validate().unwrap_err().to_string();
+        assert!(error.contains(expected), "{error}");
+        assert!(error.contains("unsupported residues"), "{error}");
+    }
+}
