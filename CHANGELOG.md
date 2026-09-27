@@ -23,7 +23,9 @@ entries are retained below for provenance.
   as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
   N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
   semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
-  prefilter, and the memory estimate include them. Non-specific digests and peptide TSV input
+  prefilter, and the memory estimate include them. FASTA-supplied decoy proteins are clipped by
+  the same rule as written, so fully reversed decoys (ending in `M`) rarely gain peptides; use
+  generated decoys for a balanced search space. Non-specific digests and peptide TSV input
   are unchanged. A motif's `<` anchor matches at residue 2 only for occurrences digested with
   clipping, so a peptide that is protein N-terminal in another protein no longer satisfies it
   at residue 2 when clipping is off or the digest is non-specific; the exported site library

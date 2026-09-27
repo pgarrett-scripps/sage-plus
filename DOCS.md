@@ -287,9 +287,12 @@ missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
   reported once, as the clipped N-terminal peptide.
 - Protein coordinates stay relative to the FASTA sequence: a clipped peptide
   starts at protein position 2 and its previous residue is the M.
-- Generated decoys are reversed clipped peptides and are N-terminal too. FASTA
-  decoy proteins are clipped by the same rule on their own sequence. The
-  prefilter produces the same clipped peptides as the full database.
+- Generated decoys are reversed clipped peptides and are N-terminal too, so
+  targets and decoys stay balanced (`generate_decoys: true`, the recommended
+  setup). FASTA decoy proteins are clipped by the same rule on the sequence as
+  written; a fully reversed decoy protein ends in `...[GASTCPV]M` and is rarely
+  clipped, so FASTA-supplied decoys get fewer added peptides than their targets.
+  The prefilter produces the same clipped peptides as the full database.
 - Clipping applies to enzymatic digests, including no digestion (`"$"`, which
   adds the whole protein without its Met). A non-specific digest already
   contains every peptide from residue 2 and is unchanged. Peptide TSV input is
