@@ -69,6 +69,24 @@ pub fn is_expansion_of(database: &[u8], peptide: &[u8]) -> bool {
         })
 }
 
+/// `residue` with I, L and J mapped to one symbol (L), so sequences that
+/// differ only in Ile/Leu/(Ile or Leu) compare equal.
+pub const fn isoleucine_leucine_canonical(residue: u8) -> u8 {
+    match residue {
+        b'I' | b'J' => b'L',
+        other => other,
+    }
+}
+
+/// Are `left` and `right` equal once I, L and J are one symbol?
+pub fn isoleucine_leucine_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(&a, &b)| isoleucine_leucine_canonical(a) == isoleucine_leucine_canonical(b))
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/ambiguous_residues.rs"]
 mod test;

@@ -792,3 +792,23 @@ fn metap_clipping_does_not_count_a_cut_after_the_methionine_as_missed() {
     assert_eq!(clipped[0].position, Position::Nterm);
     assert_eq!(clipped[0].missed_cleavages, 0);
 }
+
+#[test]
+fn group_reference_is_the_most_enzymatic_occurrence() {
+    // "a" sorts before "b". In "a", ASEQK starts the protein but K-P is not a
+    // trypsin site, so it is semi-enzymatic; in "b" it is the fully enzymatic
+    // Met-clipped N-terminal peptide. Both are protein N-terminal.
+    let enzyme = clipping_trypsin(true, true);
+    let mut digests = enzyme.digest("ASEQKPLLR", Arc::from("a"));
+    digests.extend(enzyme.digest("MASEQKGLLR", Arc::from("b")));
+    let groups = group_digests(digests);
+    let group = groups
+        .iter()
+        .find(|group| {
+            &group.reference.sequence[..] == b"ASEQK" && group.reference.position == Position::Nterm
+        })
+        .unwrap();
+    assert_eq!(group.origins.len(), 2);
+    assert!(!group.reference.semi_enzymatic);
+    assert_eq!(&*group.reference.protein, "b");
+}

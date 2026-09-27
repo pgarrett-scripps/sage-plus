@@ -708,13 +708,18 @@ impl ModificationSpecificity {
                 // written; see `ambiguous_residues`.
                 (Some((protein, start, span)), _) if is_expansion_of(span, sequence) => collect(
                     sequence,
-                    MotifContext::in_digested_protein(protein, start, len, position),
+                    MotifContext::in_digested_protein(protein, start, len, occurrence.met_clipped),
                     false,
                 ),
                 (Some((protein, start, span)), Some(target)) if is_expansion_of(span, target) => {
                     collect(
                         target,
-                        MotifContext::in_digested_protein(protein, start, len, position),
+                        MotifContext::in_digested_protein(
+                            protein,
+                            start,
+                            len,
+                            occurrence.met_clipped,
+                        ),
                         true,
                     )
                 }

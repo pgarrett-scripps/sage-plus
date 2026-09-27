@@ -6,8 +6,11 @@
 //! many target peptides in each class are false, and that count is
 //! subtracted class by class before rates are formed.
 
+use crate::ambiguous_residues::{is_ambiguous, is_expansion_of};
+use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Enzyme, ProteinOccurrence, METAP_SECOND_RESIDUES};
 use crate::peptide::Peptide;
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 /// How a peptide's termini sit against its protein.
@@ -67,14 +70,31 @@ pub fn classify_occurrence(
     occurrence: &ProteinOccurrence,
     clip_n_term_met: bool,
 ) -> TerminusClass {
+    classify_occurrence_with_custom_cleavages(enzyme, sequence, occurrence, clip_n_term_met, &[])
+}
+
+/// [`classify_occurrence`] where a terminus at one of `custom_boundaries`
+/// (zero-based offsets into the occurrence's protein, as in
+/// [`ValidatedCustomCleavageLibrary::boundaries_for`]) is also enzymatic.
+pub fn classify_occurrence_with_custom_cleavages(
+    enzyme: &Enzyme,
+    sequence: &[u8],
+    occurrence: &ProteinOccurrence,
+    clip_n_term_met: bool,
+    custom_boundaries: &[usize],
+) -> TerminusClass {
     let (Some(&first), Some(&last)) = (sequence.first(), sequence.last()) else {
         return TerminusClass::Enzymatic;
     };
+    let custom = |offset: usize| custom_boundaries.contains(&offset);
+    let start = occurrence.start.map(|start| start as usize);
     let n_enzymatic = at_protein_n_terminus(sequence, occurrence, clip_n_term_met)
+        || start.is_some_and(custom)
         || occurrence
             .prev_aa
             .is_some_and(|previous| enzyme.cleaves_between(previous, first));
     let c_enzymatic = at_protein_c_terminus(occurrence)
+        || start.is_some_and(|start| custom(start + sequence.len()))
         || occurrence
             .next_aa
             .is_some_and(|next| enzyme.cleaves_between(last, next));
@@ -84,12 +104,28 @@ pub fn classify_occurrence(
 /// Classify a peptide at its most enzymatic protein occurrence (the one with
 /// the most enzymatic termini, first on ties). `None` when the peptide has
 /// no recorded protein occurrence.
+///
+/// A peptide expanded from ambiguous FASTA residues (B, X or Z) is judged on
+/// its residues as written, as the digest cleaved them: an X searched as P
+/// after a K is still a cleavage product.
 pub fn classify_peptide(
     enzyme: &Enzyme,
     peptide: &Peptide,
     clip_n_term_met: bool,
 ) -> Option<TerminusClass> {
-    let sequence = peptide.sequence.as_bytes();
+    classify_cleavages(enzyme, peptide, clip_n_term_met, None).1
+}
+
+/// Missed cleavages and termini class of `peptide` at its most enzymatic
+/// occurrence, fewest missed cleavages first on ties; see
+/// [`classify_peptide`]. Without occurrences, missed cleavages are counted
+/// on the sequence and the class is `None`.
+fn classify_cleavages(
+    enzyme: &Enzyme,
+    peptide: &Peptide,
+    clip_n_term_met: bool,
+    custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+) -> (usize, Option<TerminusClass>) {
     let rank = |class: TerminusClass| match class {
         TerminusClass::Enzymatic => 0,
         TerminusClass::SemiN | TerminusClass::SemiC => 1,
@@ -98,8 +134,55 @@ pub fn classify_peptide(
     peptide
         .protein_sites
         .iter()
-        .map(|occurrence| classify_occurrence(enzyme, sequence, occurrence, clip_n_term_met))
-        .min_by_key(|&class| rank(class))
+        .map(|occurrence| {
+            let written = as_written(peptide, occurrence);
+            let custom_boundaries = custom_cleavages
+                .map(|library| library.boundaries_for(&occurrence.protein))
+                .unwrap_or_default();
+            (
+                classify_occurrence_with_custom_cleavages(
+                    enzyme,
+                    &written,
+                    occurrence,
+                    clip_n_term_met,
+                    custom_boundaries,
+                ),
+                missed_cleavages(enzyme, &written),
+            )
+        })
+        .min_by_key(|&(class, missed)| (rank(class), missed))
+        .map(|(class, missed)| (missed, Some(class)))
+        .unwrap_or_else(|| (missed_cleavages(enzyme, peptide.sequence.as_bytes()), None))
+}
+
+/// `peptide`'s residues as written in the FASTA at `occurrence`. Only a
+/// peptide expanded from ambiguous residues differs from its sequence; a
+/// generated decoy's span is reversed like the decoy.
+fn as_written<'a>(peptide: &'a Peptide, occurrence: &'a ProteinOccurrence) -> Cow<'a, [u8]> {
+    let sequence = peptide.sequence.as_bytes();
+    let len = sequence.len();
+    let span = occurrence
+        .source
+        .as_ref()
+        .zip(occurrence.start)
+        .and_then(|(protein, start)| {
+            let start = start as usize;
+            protein.as_bytes().get(start..start + len)
+        });
+    let Some(span) = span.filter(|span| is_ambiguous(span)) else {
+        return Cow::Borrowed(sequence);
+    };
+    if is_expansion_of(span, sequence) {
+        return Cow::Borrowed(span);
+    }
+    let mut reversed = span.to_vec();
+    if len > 2 {
+        reversed[1..len - 1].reverse();
+    }
+    match is_expansion_of(&reversed, sequence) {
+        true => Cow::Owned(reversed),
+        false => Cow::Borrowed(sequence),
+    }
 }
 
 /// Enzymatic sites inside `sequence`, counted from the residues themselves so
@@ -208,6 +291,20 @@ pub fn summarize<'a, I>(
 where
     I: IntoIterator<Item = &'a Peptide>,
 {
+    summarize_with_custom_cleavages(enzyme, clip_n_term_met, None, peptides)
+}
+
+/// [`summarize`] where termini at the search's custom cleavage sites count
+/// as enzymatic, as the digest produced them.
+pub fn summarize_with_custom_cleavages<'a, I>(
+    enzyme: Option<&Enzyme>,
+    clip_n_term_met: bool,
+    custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    peptides: I,
+) -> DigestionSummary
+where
+    I: IntoIterator<Item = &'a Peptide>,
+{
     let mut seen = HashSet::new();
     let mut targets = DigestionCounts::default();
     let mut decoys = DigestionCounts::default();
@@ -216,10 +313,7 @@ where
             continue;
         }
         let (missed, class) = match enzyme {
-            Some(enzyme) => (
-                missed_cleavages(enzyme, peptide.sequence.as_bytes()),
-                classify_peptide(enzyme, peptide, clip_n_term_met),
-            ),
+            Some(enzyme) => classify_cleavages(enzyme, peptide, clip_n_term_met, custom_cleavages),
             None => (0, Some(TerminusClass::Enzymatic)),
         };
         if peptide.decoy {

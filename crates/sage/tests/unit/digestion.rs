@@ -12,6 +12,7 @@ fn occurrence(prev_aa: Option<u8>, next_aa: Option<u8>) -> ProteinOccurrence {
         prev_aa,
         next_aa,
         source: None,
+        met_clipped: false,
     }
 }
 
@@ -146,5 +147,72 @@ fn clipped_initiator_methionine_peptides_start_the_protein() {
     assert_eq!(
         classify_occurrence(&enzyme, b"ASPEPTIDEK", &internal, true),
         TerminusClass::SemiN
+    );
+}
+
+#[test]
+fn expanded_ambiguous_peptides_are_classified_as_written() {
+    let enzyme = trypsin();
+    let at = |protein: &str, start: usize, len: usize| ProteinOccurrence {
+        protein: "P1".into(),
+        start: Some(start as u32),
+        prev_aa: start.checked_sub(1).map(|index| protein.as_bytes()[index]),
+        next_aa: protein.as_bytes().get(start + len).copied(),
+        source: Some(protein.into()),
+        met_clipped: false,
+    };
+    // DEPXIDEK searched as DEPKIDEK: the X was never a cleavage site.
+    let written_x = "AAKDEPXIDEKGG";
+    let as_k = peptide("DEPKIDEK", false, vec![at(written_x, 3, 8)]);
+    // XEPTIDEK after a K searched as PEPTIDEK: the K-X bond was cleaved.
+    let leading_x = "AAKXEPTIDEKGG";
+    let as_p = peptide("PEPTIDEK", false, vec![at(leading_x, 3, 8)]);
+    assert_eq!(
+        classify_peptide(&enzyme, &as_p, true),
+        Some(TerminusClass::Enzymatic)
+    );
+    let summary = summarize(Some(&enzyme), true, [&as_k, &as_p]);
+    assert_eq!(summary.missed_cleavages_0, 2);
+    assert_eq!(summary.semi_n, 0);
+
+    // A generated decoy carries its target's occurrence and is judged on
+    // the reversed written span.
+    let decoy = peptide("DEDIKPEK", true, vec![at(written_x, 3, 8)]);
+    let summary = summarize(Some(&enzyme), true, [&decoy]);
+    assert_eq!(summary.decoy_peptides, 1);
+    assert_eq!(summary.semi_n + summary.semi_c + summary.non_enzymatic, 0);
+}
+
+#[test]
+fn custom_cleavage_termini_are_enzymatic() {
+    use crate::cleavage::CustomCleavageLibrary;
+    use crate::fasta::Fasta;
+    let enzyme = trypsin();
+    // A processing site between SIGNAL and PEPTIDEK.
+    let protein = "MAAKSIGNALPEPTIDEKGG";
+    let fasta = Fasta::parse(format!(">P1\n{protein}\n"), "rev_", true).unwrap();
+    let library = CustomCleavageLibrary::from_tsv("protein\tposition\tcontext\nP1\t9\t\n")
+        .unwrap()
+        .validate(&fasta)
+        .unwrap();
+    assert_eq!(library.boundaries_for("P1"), &[10]);
+    let at = |start: usize, len: usize| ProteinOccurrence {
+        protein: "P1".into(),
+        start: Some(start as u32),
+        prev_aa: Some(protein.as_bytes()[start - 1]),
+        next_aa: protein.as_bytes().get(start + len).copied(),
+        source: Some(protein.into()),
+        met_clipped: false,
+    };
+    let mature = peptide("PEPTIDEK", false, vec![at(10, 8)]);
+    let signal = peptide("SIGNAL", false, vec![at(4, 6)]);
+
+    let plain = summarize(Some(&enzyme), true, [&mature, &signal]);
+    assert_eq!((plain.semi_n, plain.semi_c), (1, 1));
+    let custom =
+        summarize_with_custom_cleavages(Some(&enzyme), true, Some(&library), [&mature, &signal]);
+    assert_eq!(
+        (custom.semi_n, custom.semi_c, custom.non_enzymatic),
+        (0, 0, 0)
     );
 }

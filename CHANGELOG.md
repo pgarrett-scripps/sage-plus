@@ -23,38 +23,55 @@ entries are retained below for provenance.
   as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
   N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
   semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
-  prefilter, and the memory estimate include them. Non-specific digests and peptide TSV input
-  are unchanged. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
+  prefilter, and the memory estimate include them. FASTA-supplied decoy proteins are clipped by
+  the same rule as written, so fully reversed decoys (ending in `M`) rarely gain peptides; use
+  generated decoys for a balanced search space. Non-specific digests and peptide TSV input
+  are unchanged. A motif's `<` anchor matches at residue 2 only for occurrences digested with
+  clipping, so a peptide that is protein N-terminal in another protein no longer satisfies it
+  at residue 2 when clipping is off or the digest is non-specific; the exported site library
+  follows the same rule. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
   this adds 0.9% digests.
 - `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
   (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
   for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
   drops peptides with more combinations; the log reports expanded, created and dropped counts.
   Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
-  prefilter are identical.
+  prefilter are identical. A PTM library record at a B, Z or X position validates, also in
+  strict mode, when its residue is one the FASTA residue expands to, and modifies only that
+  variant.
+- `database.merge_isoleucine_leucine` (default true) merges peptides that differ only in I,
+  L and J, with the same modifications and decoy flag, into one peptide listing every
+  protein. It keeps the most enzymatic occurrence and shows the sequence of the twin found
+  first in protein order; generated decoys merge the same way. Previously twins tied
+  (`delta_next` 0) and split protein inference. Set false for the previous behavior.
 - `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
   expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
 - Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
   row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
   and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
   and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
-  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. A one-line
+  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. Peptides
+  expanded from ambiguous residues are classified on the FASTA residues as written, and a
+  terminus at a custom cleavage site counts as enzymatic. A one-line
   summary is logged. The run-summary schema stays at
   version 9.
 - Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
   1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
   percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
   A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
-  searches already read and adds about 1% to spectrum reading; Bruker TDF files are checked
-  only when MS1 is read (LFQ or DIA).
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files, DDA and
+  diaPASEF, are checked only with `quant.lfq`, which reads their MS1 frames.
 - Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
   fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
   user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
   `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
   spectra containing each ion is logged and written to `run-summary.json` under
   `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
+  DIA files are scanned on their raw wide-window MS2 before pseudo-spectrum conversion;
+  timsTOF diaPASEF files only when `quant.lfq` makes Sage read their raw frames.
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
-  `sage_core::digestion` classifies and summarizes peptide termini;
+  `sage_core::digestion` classifies and summarizes peptide termini (optionally with custom
+  cleavage sites);
   `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
 - The README credits NIST [sageRecon](https://github.com/usnistgov/sageRecon), which inspired
   initiator Met clipping, ambiguous-residue expansion, the QC outputs, and tolerance
@@ -68,7 +85,11 @@ entries are retained below for provenance.
   search space.
 - When the same peptide comes from digests with different enzymatic state, the kept copy is now
   the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
-  sort order.
+  sort order or protein accession order. This also holds between proteins that share a
+  peptide at the same terminal position (for example a Met-clipped fully enzymatic N-terminal
+  peptide and a semi-enzymatic N-terminal copy in another protein). A FASTA copy is kept over a peptide TSV copy, whose placeholder state (whole protein, fully
+  enzymatic) would otherwise let protein-terminal modification rules apply to an internal
+  FASTA peptide.
 - FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
   peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
   modifications declared on I or L do not apply to J. Retention-time and mobility models embed J

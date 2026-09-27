@@ -276,16 +276,23 @@ missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
 - Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
   sites and PTM-library `protein_n_term` records apply to them (for example,
   N-terminal acetylation of the new first residue), and a motif's `<` anchor
-  matches at residue 2.
+  matches at residue 2. The anchor matches there only for peptides digested with
+  clipping on, both during the search and in the exported site library, so with
+  `clip_n_term_met` false or a non-specific digest residue 2 is an ordinary
+  internal position even when the peptide is protein N-terminal in another
+  protein.
 - Their enzymatic state and missed cleavages are those of the unclipped
   N-terminal peptide, so they are never semi-enzymatic because of the clip. A
   semi-enzymatic or custom-cleavage peptide that already starts at residue 2 is
   reported once, as the clipped N-terminal peptide.
 - Protein coordinates stay relative to the FASTA sequence: a clipped peptide
   starts at protein position 2 and its previous residue is the M.
-- Generated decoys are reversed clipped peptides and are N-terminal too. FASTA
-  decoy proteins are clipped by the same rule on their own sequence. The
-  prefilter produces the same clipped peptides as the full database.
+- Generated decoys are reversed clipped peptides and are N-terminal too, so
+  targets and decoys stay balanced (`generate_decoys: true`, the recommended
+  setup). FASTA decoy proteins are clipped by the same rule on the sequence as
+  written; a fully reversed decoy protein ends in `...[GASTCPV]M` and is rarely
+  clipped, so FASTA-supplied decoys get fewer added peptides than their targets.
+  The prefilter produces the same clipped peptides as the full database.
 - Clipping applies to enzymatic digests, including no digestion (`"$"`, which
   adds the whole protein without its Met). A non-specific digest already
   contains every peptide from residue 2 and is unchanged. Peptide TSV input is
@@ -299,6 +306,29 @@ the FASTA.
 
 J (Ile or Leu) is always searched with the shared I/L mass and reported as J.
 Static or variable modifications declared on I or L do not apply to J.
+
+I, L and J have the same mass, so peptides that differ only in them (twins,
+such as `PEPIDEK`, `PEPLDEK` and `PEPJDEK`) give identical spectra. With
+`database.merge_isoleucine_leucine: true` (the default) twins become one
+peptide when their modifications (positions and masses) and decoy flag also
+match:
+
+- The merged peptide lists every twin's proteins and positions. Its
+  enzymatic state (`semi_enzymatic`, missed cleavages, terminal position) is
+  the most enzymatic twin's, as for a peptide found in several proteins.
+- It shows the sequence of the twin found first in protein order (by
+  accession, then position). Generated decoys merge the same way, so each
+  merged target keeps one decoy, and a generated decoy that is a twin of a
+  target is dropped like a decoy equal to a target.
+- A modification declared only on I or only on L keeps the modified twin
+  apart (J carries neither); the unmodified twins still merge.
+- Merging happens in the shared deduplication step, so results with and
+  without the prefilter are identical. `--estimate` counts digests before
+  deduplication and stays an overcount.
+
+With `merge_isoleucine_leucine: false`, twins stay separate peptides: the
+best PSM ties with a twin (`delta_next` 0) and protein inference sees the
+twins' proteins as separate groups.
 
 B (Asp or Asn), Z (Glu or Gln) and X (any residue) have no single mass. By
 default, peptides containing them are dropped with a warning. With
@@ -319,6 +349,14 @@ digests dropped.
   reversed from the expanded targets.
 - Expansion happens per digest, so it applies equally with and without the
   prefilter and in `--estimate`.
+- Only FASTA digests are expanded: a `database.peptides` TSV row containing
+  B, Z or X is skipped with a warning even with expansion on.
+- A `database.ptm_library` record at a B, Z or X position matches when its
+  residue is one the FASTA residue expands to (N at a B, for example), also
+  with `strict: true`, and modifies only that variant. Without expansion such
+  a record is a mismatch: strict libraries abort, others warn. A record whose
+  residue is itself B, Z or X never applies, because no searched peptide
+  contains it.
 
 
 ### Example configuration file
@@ -363,6 +401,7 @@ For additional information about configuration options and output file formats, 
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
     "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
+    "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
     "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
   "quant": {                // Optional - specify only if TMT or LFQ
@@ -904,6 +943,9 @@ alongside the library, because the location table does not embed chemical masses
   [Ambiguous residues](#ambiguous-residues).
 - **max_ambiguous_variants**: Integer. Peptides that expand into more sequences than this are
   dropped (default: 20; values below 1 become 1).
+- **merge_isoleucine_leucine**: Boolean. Merge peptides that differ only in I, L and J into
+  one peptide listing all their proteins (default: true). See
+  [Ambiguous residues](#ambiguous-residues).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
   searching before building the search index. The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and
@@ -1259,7 +1301,7 @@ Notes:
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
-- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable.
+- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable. A peptide present in both the FASTA and a peptide TSV keeps the FASTA copy's protein position, enzymatic state and missed cleavages, so protein-terminal modification rules follow the FASTA; the TSV row only adds its protein.
 
 ## Spectrum Paths
 
@@ -1377,7 +1419,7 @@ The summary counts distinct peptide sequences (modifications ignored), not PSMs,
 - `non_enzymatic`: Peptides with neither terminus produced by the enzyme.
 - `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: Each count as a percentage of `peptides`; `missed_cleavage_pct` covers peptides with at least one missed cleavage.
 
-A terminus is enzymatic when it is a protein terminus or the enzyme cuts the bond between the flanking residue and the peptide. A peptide found in several proteins is classified at its most enzymatic occurrence. Ragged and non-enzymatic peptides can only be identified when the database contains them, so these rates are zero for a fully enzymatic search unless semi-enzymatic digestion (`semi_enzymatic`), custom cleavage sites, or a peptide list add such peptides. Peptides without recorded protein occurrences (for example from a peptide list without flanking residues) count towards `peptides` and missed cleavages but not towards the termini classes. Non-specific digestion (`cleave_at: ""`) reports every peptide as enzymatic with no missed cleavages.
+A terminus is enzymatic when it is a protein terminus, a custom cleavage site of that protein (`custom_cleavage_sites`), or the enzyme cuts the bond between the flanking residue and the peptide. A peptide found in several proteins is classified at its most enzymatic occurrence. A peptide expanded from ambiguous FASTA residues (`expand_ambiguous_residues`) is classified on its residues as written, as the digest cleaved them: an X searched as K or R is not a missed cleavage, and an X searched as P after a K does not make the N-terminus ragged. Ragged and non-enzymatic peptides can only be identified when the database contains them, so these rates are zero for a fully enzymatic search unless semi-enzymatic digestion (`semi_enzymatic`) or a peptide list add such peptides. Peptides without recorded protein occurrences (for example from a peptide list without flanking residues) count towards `peptides` and missed cleavages but not towards the termini classes. Non-specific digestion (`cleave_at: ""`) reports every peptide as enzymatic with no missed cleavages.
 
 ### Polymer contamination (`qc.polymers`)
 
@@ -1385,7 +1427,7 @@ Detergents and plastics ionize as ladders of peaks one repeat unit apart. Sage s
 
 For each file, `qc.polymers` reports the number of centroided MS1 spectra scanned (`ms1_spectra`), profile MS1 spectra skipped (`skipped_profile_spectra`), the summed MS1 intensity (`total_ion_current`), and per polymer the ladder intensity and its percent of the MS1 TIC (`polymers[].tic_pct`). A log line gives the shares per file. When one polymer carries more than 5% of a file's MS1 TIC, Sage logs a warning and records it in `run-summary.json` `warnings` with code `polymer_contamination`.
 
-The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, whose MS1 frames are only read for `quant.lfq` or DIA, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
+The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, DDA or diaPASEF, whose MS1 frames are only read with `quant.lfq`, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
 
 ### Diagnostic ions (`diagnostic_ions.tsv`)
 
@@ -1396,5 +1438,7 @@ With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configur
 - `ion`: Configured ion name.
 - `mz`: Observed m/z of the matched peak.
 - `relative_intensity`: Matched peak intensity divided by the summed intensity of the spectrum's raw peaks.
+
+In DIA pseudo mode the scan runs on the raw wide-window MS2 spectra before they are converted to pseudo-spectra, by design: diagnostic ions are fragments of whatever co-isolated in the window, so `scannr` names the raw window scan, not a pseudo-spectrum. timsTOF diaPASEF pseudo-spectra are built straight from the frames, so their raw window spectra are read, and scanned, only with `quant.lfq`; without it a diaPASEF file has no QC entry.
 
 A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).

@@ -208,6 +208,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 prev_aa: Some(b'K'),
                 next_aa: Some(b'R'),
                 source: None,
+                met_clipped: false,
             },
             ProteinOccurrence {
                 protein: Arc::from("P67890"),
@@ -215,6 +216,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 prev_aa: None,
                 next_aa: None,
                 source: None,
+                met_clipped: false,
             },
         ]),
         ..Peptide::default()
@@ -269,6 +271,7 @@ fn results_report_ambiguous_database_peptides() -> parquet::errors::Result<()> {
                 prev_aa: Some(b'K'),
                 next_aa: Some(b'R'),
                 source,
+                met_clipped: false,
             }]),
             ..Peptide::default()
         });

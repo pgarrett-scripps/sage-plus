@@ -596,6 +596,21 @@ impl Runner {
         )
     }
 
+    /// Combine a diaPASEF file's regular read (MS1 frames and raw window MS2)
+    /// with its pseudo-spectra: the raw spectra feed the QC scans first, then
+    /// only their MS1 is kept next to the pseudo-spectra.
+    pub(super) fn tdf_dia_with_ms1(
+        &self,
+        file_id: usize,
+        mut spectra: Vec<sage_core::spectrum::RawSpectrum>,
+        pseudo: &mut Vec<sage_core::spectrum::RawSpectrum>,
+    ) -> Vec<sage_core::spectrum::RawSpectrum> {
+        self.collect_file_qc(file_id, &spectra);
+        spectra.retain(|x| x.ms_level == 1);
+        spectra.append(pseudo);
+        spectra
+    }
+
     /// `search_events` controls the per-file progress events
     /// (`file_started`, `file_completed`, `spectra_processed`). Rereads after
     /// the search has reported completion pass `false`; read failures are
@@ -677,11 +692,7 @@ impl Runner {
                         self.parameters.bruker_config,
                         true,
                     )
-                    .map(|mut s| {
-                        s.retain(|x| x.ms_level == 1);
-                        s.append(&mut pseudo);
-                        s
-                    }),
+                    .map(|s| self.tdf_dia_with_ms1(file_id, s, &mut pseudo)),
                     res => res,
                 }
             } else {
