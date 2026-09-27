@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.12] - 2026-09-27
+
 ### Added
 - `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
   robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering

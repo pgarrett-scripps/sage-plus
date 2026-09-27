@@ -37,6 +37,7 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Interleaved fragment-bucket search and chunked peptide expansion | beta.12 | Each fragment-index bucket was searched on its own, and one parallel collect of modified peptides kept per-thread pages alive through the index build | Identical PSMs; the search phase is 19-27% faster on closed searches, and peak memory without the prefilter drops 10-18% |
 | Spectrum-indexed exact prefilter | beta.7 | The chunked prefilter rebuilt a fragment index and reread spectra for every database chunk | Same retained peptides and results; 1.2 to 41 times faster than Beta 6 prefiltering ([results](benchmarks/PREFILTER.md)) |
 | Protein-backed peptide sequences and compact modification records | beta.2 | Every generated peptide allocated its own sequence and a dense modification vector | 29.5% less peak memory on a conventional search and 38.9% less with variable modifications ([results](benchmarks/RESULTS.md)) |
 | Lossless six-byte fragment index | beta.2 | Fragment records dominate index memory in large searches | Smaller index with exact masses and bounded search buckets |
@@ -48,6 +49,8 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Initiator methionine clipping (`clip_n_term_met`, on by default) | beta.12 | Proteins whose Met is removed by methionine aminopeptidase lost their true N-terminal peptides | Clipped peptides count as protein N-terminal, so N-terminal acetylation applies; 1% FDR PSMs rose 3.2% on HEK SILAC |
+| Ambiguous residues (J as I/L, `expand_ambiguous_residues`, `merge_isoleucine_leucine`) | beta.12 | Peptides with B, Z, J or X were dropped, and I/L twins tied and split protein inference | J is scored as I/L; B, Z and X can be searched as the residues they stand for, reported in a `substitutions` column; I/L twins merge into one peptide |
 | Streamed prefilter with a four-match default | beta.11 | The prefilter digested the whole database, or chunks of it, before filtering, and a 100x gut catalog search ran out of memory | Proteins stream through the spectrum index in parallel; 10x and 30x searches take about half the time with identical PSMs, and at four matches the 100x search finishes in 19 GiB |
 | Separate library and new-site limits per modification (`max_total_count`) | beta.10 | A library site used up its modification's `max_count`, so a known K14ac blocked a new K18ac | `max_count` limits new placements and `max_total_count` limits all placements; the memory preflight now counts variants exactly instead of overestimating PTM-library searches |
 | Motif modification sites (`motif:N*-{P}-[ST]`) | beta.8 | Residue sites could not require a sequence context such as the N-glycosylation sequon or a kinase motif | PROSITE-style patterns are evaluated against the source protein, including residues beyond the peptide, with mirrored decoys and motif-restricted localization |
@@ -87,6 +90,7 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| QC outputs (digestion summary, polymer check, `diagnostic_ions`) | beta.12 | Digestion efficiency, polymer contamination and diagnostic ions needed separate tools | `digestion.tsv`, polymer percentages of MS1 TIC, opt-in `diagnostic_ions.tsv`, and recommended tolerances in `run-summary.json` |
 | Acquisition groups (MS2 analyzer and activation) | beta.9 | Hybrid methods mix Orbitrap, ion-trap, Astral, and TOF scans with HCD, CID, ETD, EThcD, and ETciD activation | Each spectrum carries its analyzer and activation from Thermo filters, mzML/mzMLb terms, or Bruker TDF, so fragment recalibration never pools groups |
 | Calibrated timsTOF ion mobility | beta.7 | timsrust interpolates 1/K0 between the acquisition limits instead of applying the instrument calibration | Reported 1/K0 equals the Bruker SDK value; the old scale was off by up to 0.054 1/K0 on a PXD070049 run, with nearly unchanged identifications ([validation](benchmarks/BETA7_RELEASE.md)). `bruker_config.ion_mobility_scale: "linear"` restores the old scale |
 | mzMLb input | beta.2 | Compressed HDF5 spectra required conversion | Read directly in standard builds |
