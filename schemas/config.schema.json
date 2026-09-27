@@ -2080,6 +2080,15 @@
         }
       ]
     },
+    "threads": {
+      "description": "Worker threads for parallel work (default: all cores, or\n`RAYON_NUM_THREADS` when set). The `--threads` flag overrides it.",
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "wide_window": {
       "type": [
         "boolean",

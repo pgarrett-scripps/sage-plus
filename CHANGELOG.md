@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `--threads <N>` and the configuration key `threads` set the worker thread count (the flag wins;
+  `RAYON_NUM_THREADS` still applies when neither is set, then all cores). The effective count is
+  logged and recorded in `run-summary.json` as `execution.rayon_threads`.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added

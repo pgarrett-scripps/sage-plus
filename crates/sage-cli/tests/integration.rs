@@ -872,6 +872,7 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .arg("--output_directory")
         .arg(root.join("output"))
         .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .args(["--threads", "2"])
         .output()?;
     assert!(
         result.status.success(),
@@ -891,6 +892,7 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    assert_eq!(summary["execution"]["rayon_threads"], 2);
     let total = &summary["qc"]["digestion"]["total"];
     assert!(total["target_peptides"].as_u64().is_some());
     assert_eq!(

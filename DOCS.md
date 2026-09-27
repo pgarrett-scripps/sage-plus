@@ -99,6 +99,9 @@ Options:
           Number of files to search in parallel (default = number of CPUs/2)
       --write-pin
           Write percolator-compatible `.pin` output files
+      --threads <N>
+          Number of worker threads; overrides `threads` from the configuration file
+          (default: all cores, or RAYON_NUM_THREADS when set)
       --max-memory <GiB>
           Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
           (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
@@ -467,6 +470,7 @@ For additional information about configuration options and output file formats, 
   },
   "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its measured memory reaches this many GiB; 0 disables
   "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
+  "threads": 8,             // Optional[int] {default=all cores}: worker threads; `--threads` overrides, RAYON_NUM_THREADS applies when neither is set
   "output_directory": "s3://bucket/prefix", // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
     "local/path.mzML",
@@ -1114,6 +1118,7 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **max_memory_gb**: Number. Abort the search if Sage's measured (resident) memory reaches this many GiB. Zero disables this limit (default: disabled). It also sizes the prefilter's streamed digest and spectrum batches.
 - **min_free_memory_gb**: Ignored since Beta 11 and accepted only so older configurations still parse. Keeping memory free for other programs is left to the system.
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
+- **threads**: Integer, at least 1. Number of worker threads used for parallel work (database build, search, rescoring, quantification). The `--threads` command-line option overrides this value. When neither is set, Sage uses the `RAYON_NUM_THREADS` environment variable if present, and otherwise every core. The effective count is logged at startup (`using N worker threads`) and recorded in `run-summary.json` as `execution.rayon_threads`. `threads` does not change `batch_size`, whose default still follows the CPU count.
 
 Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts and whether the prefilter is on, and exits without reading spectra.
 
