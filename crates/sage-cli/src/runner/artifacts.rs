@@ -118,7 +118,8 @@ impl Runner {
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.ptm-sites.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_ptm_sites(&records)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_ptm_sites(&records, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
@@ -222,7 +223,8 @@ impl Runner {
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.protein-sites.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_protein_sites(&records)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_protein_sites(&records, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
@@ -365,7 +367,8 @@ impl Runner {
                 .then_with(|| a.attachment.cmp(&b.attachment))
         });
         let parquet_path = self.make_path("results.sage.ptm-library.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_ptm_library(&sites)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_ptm_library(&sites, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&parquet_path, bytes)?;
 
         let tsv_path = self.make_path("results.sage.ptm-library.tsv");

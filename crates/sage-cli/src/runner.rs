@@ -273,6 +273,9 @@ pub struct Runner {
     file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
     /// Custom cleavage sites of the searched FASTA, for the digestion summary.
     custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
+    /// Provenance key-value pairs for Parquet footers, set before outputs are
+    /// written.
+    parquet_provenance: Vec<(String, String)>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -411,6 +414,10 @@ pub struct RunProvenance {
     pub mzmlb_enabled: bool,
     pub input_identity_mode: String,
     pub inputs: Vec<InputIdentity>,
+    /// The provenance record written to every Parquet footer, keyed as there
+    /// without the `sage.` prefix. Absent in summaries from before Beta 13.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<crate::provenance::Provenance>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -912,6 +919,7 @@ impl Runner {
                         mass_recalibration: Default::default(),
                         file_qc: file_qc.clone(),
                         custom_cleavages: None,
+                        parquet_provenance: Vec::new(),
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -1014,6 +1022,7 @@ impl Runner {
             mass_recalibration: Default::default(),
             file_qc,
             custom_cleavages: custom_cleavage_sites,
+            parquet_provenance: Vec::new(),
         })
     }
 }

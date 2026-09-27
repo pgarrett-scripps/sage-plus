@@ -18,12 +18,12 @@ fn build_spectral_library_schema_version(has_labels: bool) -> parquet::errors::R
 pub fn serialize_spectral_library(
     entries: &[SpectralLibraryEntry],
     settings: &SpectralLibrarySettings,
+    provenance: &[(String, String)],
 ) -> parquet::errors::Result<Vec<u8>> {
     let has_labels = entries.iter().any(|entry| entry.label_channel.is_some());
     let schema = build_spectral_library_schema_version(has_labels)?;
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("spectral_library".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
@@ -55,8 +55,9 @@ pub fn serialize_spectral_library(
                 "sage.spectral_library.min_fragment_frequency".into(),
                 Some(settings.min_fragment_frequency.to_string()),
             ),
-        ]))
-        .build();
+        ],
+        provenance,
+    )?;
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
     let rows = entries
         .iter()

@@ -110,13 +110,13 @@ pub fn serialize_features(
     filenames: &[String],
     database: &IndexedDatabase,
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let schema = build_results_schema(has_labels)?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
@@ -126,8 +126,9 @@ pub fn serialize_features(
                 "sage.output_filter.spectrum_q_max".into(),
                 Some(output_psm_q_value.to_string()),
             ),
-        ]))
-        .build();
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
     let mut writer = SerializedFileWriter::new(buf, schema.into(), options.into())?;
@@ -365,35 +366,32 @@ pub fn serialize_features(
 }
 
 pub fn build_matched_fragment_schema() -> parquet::errors::Result<Type> {
-    let msg = r#"
-        message schema {
-            required int64 psm_id;
-            required byte_array fragment_type (utf8);
-            required int32 fragment_ordinals;
-            required int32 fragment_charge;
-            required float fragment_mz_experimental;
-            required float fragment_mz_calculated;
-            required float neutral_loss;
-            required float fragment_intensity;
-        }
-    "#;
-
-    parquet::schema::parser::parse_message_type(msg)
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../../schemas/matched_fragments.sage.v1.parquet.schema"
+    ))
 }
 
 pub fn serialize_matched_fragments(
     features: &[&Feature],
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let schema = build_matched_fragment_schema()?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![KeyValue::new(
-            "sage.output_filter.spectrum_q_max".into(),
-            Some(output_psm_q_value.to_string()),
-        )]))
-        .build();
+    let options = writer_properties(
+        vec![
+            KeyValue::new(
+                "sage.schema.name".into(),
+                Some("matched_fragments.sage".into()),
+            ),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.output_filter.spectrum_q_max".into(),
+                Some(output_psm_q_value.to_string()),
+            ),
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
 
