@@ -2,10 +2,20 @@
 
 ## PSM output
 
+Directions: "larger is better" or "smaller is better". Columns not listed here are descriptive;
+DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
+
 - `hyperscore`: X!Tandem-style fragment-match score for the candidate PSM; larger is better.
+- `delta_next`: hyperscore minus the next-ranked candidate's hyperscore; larger is better.
+- `delta_best`: best candidate's hyperscore minus this candidate's, 0 for rank 1; smaller is better.
+- `matched_peaks`, `longest_b`, `longest_y`, `longest_y_pct`, `matched_intensity_pct`, `ms2_intensity`: fragment-match evidence; larger is better. `longest_y_pct` is a fraction from 0 to 1. `ms2_intensity` is the summed intensity of matched fragments.
+- `precursor_ppm`, `fragment_ppm`, `calibrated_precursor_ppm`, `calibrated_fragment_ppm`: mass errors; closer to zero is better.
+- `delta_rt_model`, `delta_mobility`: absolute differences from the predicted value; smaller is better.
+- `poisson`: log10 of the Poisson probability mass of the PSM's matched-peak count, with the expected count set to the mean over the spectrum's scored candidates. Always 0 or negative. It is a point probability, not a tail p-value. For top-ranked PSMs, which match more peaks than the mean, smaller (more negative) is better.
 - `sage_discriminant_score`: linear-discriminant score used to order PSMs for spectrum-level target-decoy competition; larger is better.
-- `posterior_error`: estimated local false-identification probability for the PSM; smaller is better.
-- `spectrum_q`, `peptide_q`, `protein_q`, `protein_group_q`: monotonic minimum estimated false-discovery rates at the named aggregation level; smaller is better.
+- `posterior_error`: log10 of the estimated posterior error probability (local false-identification probability) for the PSM. Always 0 or negative; -324 marks a probability that underflows to zero. Smaller is better.
+- `spectrum_q`, `peptide_q`, `protein_q`, `protein_group_q`: monotonic minimum estimated false-discovery rates at the named aggregation level; smaller is better. `protein_q` and `protein_group_q` use only peptides unique to one protein or one group; shared peptides are assigned 1.
+- `spectral_angle`, `explained_library_intensity`, `explained_query_intensity` in PSM output: retained for schema compatibility and always 0.
 
 ## LFQ output
 

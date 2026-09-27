@@ -14,9 +14,15 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.
+- `matched_fragments.sage.v1.parquet.schema` describes `matched_fragments.sage.parquet`, one row per
+  matched fragment ion of a retained PSM.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.
+They also embed the run provenance keys (`sage.provenance.version`, `sage.version`,
+`sage.git_commit`, `sage.config`, `sage.inputs`, `sage.fasta`, `sage.database_inputs`,
+`sage.protein_inference`), described in DOCS.md under "Output provenance". Provenance keys are
+versioned by `sage.provenance.version`, separately from the table schema.
 
 `results.sage.parquet` and `matched_fragments.sage.parquet` also embed the inclusive output cutoff as `sage.output_filter.spectrum_q_max`. Every fragment row belongs to a PSM retained in `results.sage.parquet` under that cutoff.
 

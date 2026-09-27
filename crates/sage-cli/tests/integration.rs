@@ -930,3 +930,98 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn parquet_footers_and_run_summary_record_provenance() -> anyhow::Result<()> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-provenance-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["quant"] = serde_json::json!({ "lfq": true });
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 9);
+    let provenance = &summary["provenance"]["metadata"];
+    assert_eq!(provenance["version"], env!("CARGO_PKG_VERSION"));
+    let fasta = &provenance["fasta"];
+    let fasta_sha256 = fasta["sha256"].as_str().expect("FASTA is always hashed");
+    assert_eq!(fasta_sha256.len(), 64);
+    assert_eq!(fasta["decoys"]["strategy"], "generated");
+    assert_eq!(fasta["decoys"]["decoy_tag"], "rev_");
+    assert_eq!(fasta["uniprot"]["organisms"][0]["taxonomy_id"], 9606);
+    let input = &provenance["inputs"][0];
+    assert_eq!(input["name"], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert!(input["sha256"].is_null());
+    assert_eq!(input["sha256_skipped"], "record_input_hashes is off");
+    assert!(provenance["config"]["output_paths"].is_null());
+    assert_eq!(provenance["config"]["record_input_hashes"], false);
+
+    let mut files = std::fs::read_dir(root.join("output"))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    files.retain(|path| path.extension().is_some_and(|ext| ext == "parquet"));
+    files.sort();
+    let names = files
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "lfq.parquet",
+            "matched_fragments.sage.parquet",
+            "results.sage.parquet"
+        ]
+    );
+    for path in files {
+        let reader = SerializedFileReader::new(std::fs::File::open(&path)?)?;
+        let footer = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| (entry.key, entry.value.unwrap_or_default()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let name = path.display();
+        assert!(footer.contains_key("sage.schema.name"), "{name}");
+        assert_eq!(footer["sage.provenance.version"], "1", "{name}");
+        assert_eq!(footer["sage.version"], env!("CARGO_PKG_VERSION"), "{name}");
+        for key in [
+            "sage.config",
+            "sage.inputs",
+            "sage.fasta",
+            "sage.database_inputs",
+            "sage.protein_inference",
+        ] {
+            let value: serde_json::Value = serde_json::from_str(&footer[key])?;
+            assert_eq!(&value, &provenance[&key["sage.".len()..]], "{name}: {key}");
+        }
+        let fasta: serde_json::Value = serde_json::from_str(&footer["sage.fasta"])?;
+        assert_eq!(fasta["sha256"], fasta_sha256, "{name}");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

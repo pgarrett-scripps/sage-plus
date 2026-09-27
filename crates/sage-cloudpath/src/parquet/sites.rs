@@ -97,20 +97,23 @@ fn ptm_library_schema() -> parquet::errors::Result<Type> {
     )
 }
 
-pub fn serialize_ptm_library(sites: &[PtmLibrarySite]) -> parquet::errors::Result<Vec<u8>> {
+pub fn serialize_ptm_library(
+    sites: &[PtmLibrarySite],
+    provenance: &[(String, String)],
+) -> parquet::errors::Result<Vec<u8>> {
     if sites.iter().any(|site| site.position >= i32::MAX as u32) {
         return Err(parquet::errors::ParquetError::General(
             "PTM library position exceeds the int32 schema limit".into(),
         ));
     }
     let schema = ptm_library_schema()?;
-    let options = WriterProperties::builder()
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("ptm_library".into())),
             KeyValue::new("sage.schema.version".into(), Some("2".into())),
-        ]))
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .build();
+        ],
+        provenance,
+    )?;
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
     for sites in sites.chunks(65536) {
         let mut rg = writer.next_row_group()?;
@@ -361,15 +364,18 @@ fn protein_site_schema() -> parquet::errors::Result<Type> {
     )
 }
 
-pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
+pub fn serialize_ptm_sites(
+    records: &[PtmSiteRecord],
+    provenance: &[(String, String)],
+) -> parquet::errors::Result<Vec<u8>> {
     let schema = ptm_site_schema()?;
-    let options = WriterProperties::builder()
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("ptm_sites".into())),
             KeyValue::new("sage.schema.version".into(), Some("2".into())),
-        ]))
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .build();
+        ],
+        provenance,
+    )?;
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
 
     for records in records.chunks(65536) {
@@ -533,15 +539,18 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
     writer.into_inner().map(|bytes| bytes.to_vec())
 }
 
-pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
+pub fn serialize_protein_sites(
+    records: &[ProteinSiteRecord],
+    provenance: &[(String, String)],
+) -> parquet::errors::Result<Vec<u8>> {
     let schema = protein_site_schema()?;
-    let options = WriterProperties::builder()
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("protein_sites".into())),
             KeyValue::new("sage.schema.version".into(), Some("2".into())),
-        ]))
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .build();
+        ],
+        provenance,
+    )?;
     let mut writer = SerializedFileWriter::new(Vec::new(), schema.into(), options.into())?;
 
     for records in records.chunks(65536) {

@@ -18,6 +18,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     areas: &HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
     filenames: &[String],
     database: &IndexedDatabase,
+    provenance: &[(String, String)],
 ) -> parquet::errors::Result<Vec<u8>> {
     if let Some((_, quantified)) = areas.iter().find(|(_, quantified)| {
         quantified.intensities.len() != filenames.len()
@@ -63,9 +64,8 @@ pub fn serialize_lfq<H: BuildHasher>(
         })
         .unwrap_or_default();
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("lfq".into())),
             KeyValue::new(
                 "sage.lfq.q_value_scope".into(),
@@ -79,8 +79,9 @@ pub fn serialize_lfq<H: BuildHasher>(
                 "sage.schema.version".into(),
                 Some(if has_labels { "4" } else { "3" }.into()),
             ),
-        ]))
-        .build();
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
     let mut writer = SerializedFileWriter::new(buf, schema.into(), options.into())?;
