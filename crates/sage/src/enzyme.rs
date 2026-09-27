@@ -309,6 +309,22 @@ impl Enzyme {
         }
     }
 
+    /// Whether this enzyme cuts the bond between residues `left` and `right`,
+    /// by the rule [`Enzyme::cleavage_sites`] applies inside a protein: the
+    /// residue on the cleaved side matches the cleavage set and `right` is not
+    /// a restricted residue. The `$` (no-cleavage) enzyme never cuts a bond.
+    pub fn cleaves_between(&self, left: u8, right: u8) -> bool {
+        let site = if self.c_terminal { left } else { right };
+        if !site.is_ascii() {
+            return false;
+        }
+        let mut buffer = [0u8; 4];
+        let site = (site as char).encode_utf8(&mut buffer);
+        let matched = self.regex.find(site).is_some_and(|found| !found.is_empty());
+        let restricted = right.is_ascii_uppercase() && self.skip_suffix[(right - b'A') as usize];
+        matched && !restricted
+    }
+
     pub fn cleavage_sites(&self, sequence: &str) -> Vec<DigestSite> {
         let mut sites = Vec::new();
         let mut left = 0;

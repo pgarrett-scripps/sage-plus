@@ -658,3 +658,55 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn quality_control_outputs_are_written() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-qc-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("digestion: "), "{stderr}");
+
+    let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
+    let lines = digestion.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 3, "{digestion}");
+    assert!(lines[0].starts_with("file\ttarget_peptides\tdecoy_peptides\tpeptides\t"));
+    assert!(lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\t"));
+    assert!(lines[2].starts_with("total\t"));
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 9);
+    let total = &summary["qc"]["digestion"]["total"];
+    assert!(total["target_peptides"].as_u64().is_some());
+    assert_eq!(
+        summary["qc"]["digestion"]["files"][0]["file"],
+        "LQSRPAAPPAPGPGQLTLR.mzML"
+    );
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

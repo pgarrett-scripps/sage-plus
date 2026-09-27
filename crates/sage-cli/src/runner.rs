@@ -307,6 +307,10 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
+    /// Quality-control summaries (digestion, and the optional MS1 and MS2
+    /// checks when enabled).
+    #[serde(default)]
+    pub qc: qc::QcRunStats,
     pub output_paths: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<crate::events::RunWarning>,
@@ -905,6 +909,7 @@ pub mod estimate;
 mod execution;
 mod postprocess;
 pub(crate) mod prefilter;
+pub mod qc;
 mod search;
 
 #[cfg(test)]

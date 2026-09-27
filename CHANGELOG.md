@@ -9,6 +9,16 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
+  row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
+  and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
+  and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
+  decoy peptides class by class. A one-line summary is logged. The run-summary schema stays at
+  version 9.
+- Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
+  `sage_core::digestion` classifies and summarizes peptide termini.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

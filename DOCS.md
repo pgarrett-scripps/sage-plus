@@ -139,6 +139,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`; see [Quality-control outputs](#quality-control-outputs).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -1204,7 +1205,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
@@ -1274,3 +1275,21 @@ These columns provide comprehensive information about each candidate peptide spe
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
+
+## Quality-control outputs
+
+Every search summarizes how the sample was digested. The summary is written to `digestion.tsv` and to `run-summary.json` under `qc.digestion`, and a one-line summary is logged.
+
+### Digestion summary (`digestion.tsv`)
+
+The summary counts distinct peptide sequences (modifications ignored), not PSMs, from rank-1 PSMs with spectrum and peptide q-values of at most 0.01. Decoy peptides passing the same filter estimate the false targets: each count is the number of distinct target peptides minus the number of distinct decoy peptides in the same class, floored at zero. `digestion.tsv` has one row per input file and a final `total` row; the total counts each sequence once across all files, so it is not the sum of the file rows.
+
+- `file`: Input file name, or `total`.
+- `target_peptides` / `decoy_peptides`: Distinct target and decoy sequences passing the filter.
+- `peptides`: Denominator of every rate: `target_peptides - decoy_peptides`.
+- `missed_cleavages_0`, `missed_cleavages_1`, `missed_cleavages_2_plus`: Peptides with 0, 1, and 2 or more internal enzymatic sites. Sites are counted from the residues with the configured enzyme rule (`cleave_at`, `restrict`, `c_terminal`), so semi-enzymatic and custom-cleavage peptides are counted the same way.
+- `semi_n` / `semi_c`: Peptides whose N-terminus (ragged N-terminus) or C-terminus (ragged C-terminus) was not produced by the enzyme, while the other terminus was.
+- `non_enzymatic`: Peptides with neither terminus produced by the enzyme.
+- `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: Each count as a percentage of `peptides`; `missed_cleavage_pct` covers peptides with at least one missed cleavage.
+
+A terminus is enzymatic when it is a protein terminus or the enzyme cuts the bond between the flanking residue and the peptide. A peptide found in several proteins is classified at its most enzymatic occurrence. Ragged and non-enzymatic peptides can only be identified when the database contains them, so these rates are zero for a fully enzymatic search unless semi-enzymatic digestion (`semi_enzymatic`), custom cleavage sites, or a peptide list add such peptides. Peptides without recorded protein occurrences (for example from a peptide list without flanking residues) count towards `peptides` and missed cleavages but not towards the termini classes. Non-specific digestion (`cleave_at: ""`) reports every peptide as enzymatic with no missed cleavages.

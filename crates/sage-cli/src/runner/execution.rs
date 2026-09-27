@@ -389,6 +389,10 @@ impl Runner {
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
 
+        let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let path = self.write_digestion(&digestion)?;
+        self.parameters.output_paths.push(path);
+
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
                 &output_features,
@@ -640,6 +644,7 @@ impl Runner {
                     })
                     .collect(),
             },
+            qc: super::qc::QcRunStats { digestion },
             output_paths,
         };
         self.cancellation.check()?;

@@ -1,6 +1,7 @@
 pub mod ambiguity;
 pub mod cleavage;
 pub mod database;
+pub mod digestion;
 pub mod enzyme;
 pub mod fasta;
 pub mod fdr;
