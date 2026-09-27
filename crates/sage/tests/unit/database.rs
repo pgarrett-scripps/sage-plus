@@ -370,6 +370,100 @@ fn chunked_modification_matches_a_single_pass() {
 }
 
 #[test]
+fn chunked_modification_matches_a_single_pass_with_libraries() {
+    use crate::modification::{NeutralLossMode, SiteMode, VariableModification};
+    use crate::ptm_library::{PtmLibrary, PtmLibrarySite};
+
+    // LLPEPTIDESK is shared by P1 and P3; only P3 lists its T as a site, so
+    // library sites must attach per origin.
+    let fasta = Fasta::parse(
+        ">P1\nMSTKLLPEPTIDESKAAKAPEPTIDERQQQKSSYR\n\
+         >P2\nMKSTSYKPEDITPERGGSKWHATEVERK\n\
+         >P3\nMGGKLLPEPTIDESKLLSTYRSAMPLER\n"
+            .into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let cleavages = CustomCleavageLibrary::from_tsv(
+        "protein\tposition\tcontext\nP1\t22\tAPEPT|IDER\nP2\t11\tPEDIT|PERG\n",
+    )
+    .unwrap()
+    .validate(&fasta)
+    .unwrap();
+    let phospho = |site_mode| {
+        vec![VarModEntry::Detailed(VariableModification {
+            search_mode: SearchMode::Database,
+            mass: 79.96633,
+            max_count: Some(2),
+            max_total_count: Some(3),
+            name: Some("Phospho".into()),
+            neutral_losses: vec![],
+            neutral_loss_mode: NeutralLossMode::Optional,
+            site_mode,
+            channel_offsets: Default::default(),
+        })]
+    };
+    let builder = Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(2),
+            min_len: Some(3),
+            max_len: Some(30),
+            ..Default::default()
+        }),
+        peptide_min_mass: Some(0.0),
+        max_variable_mods: Some(2),
+        max_total_variable_mods: Some(3),
+        variable_mods: Some(HashMap::from([
+            ("S".into(), phospho(SiteMode::Both)),
+            ("T".into(), phospho(SiteMode::Library)),
+        ])),
+        ..Default::default()
+    };
+    let mut parameters = builder.make_parameters();
+    let site = |protein: &str, position, residue| PtmLibrarySite {
+        attachment: Default::default(),
+        protein: Arc::from(protein),
+        position,
+        residue,
+        modification: Arc::from("Phospho"),
+    };
+    parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
+        site("P1", 2, b'T'),
+        site("P1", 13, b'S'),
+        site("P2", 3, b'T'),
+        site("P3", 9, b'T'),
+        site("P3", 18, b'T'),
+    ])));
+
+    let digests = parameters.digest_unmodified_with_custom_cleavages(&fasta, Some(&cleavages));
+    assert!(digests.len() > 8, "too few digest groups to chunk");
+    assert!(
+        digests.iter().any(|group| group.origins.len() > 1),
+        "no shared digest group"
+    );
+    let targets = digests
+        .iter()
+        .filter(|digest| !digest.reference.decoy)
+        .map(|digest| parameters.decoy_collision_key(&digest.reference.sequence))
+        .collect::<HashSet<_>>();
+    let single = parameters.modify_digest_chunks(digests.clone(), &targets, usize::MAX);
+    assert!(
+        single.iter().any(|peptide| !peptide.decoy
+            && (0..peptide.sequence.len()).any(|ix| peptide.modification_at(ix) != 0.0)),
+        "no modified target peptide"
+    );
+    for chunk_groups in [0, 1, 2, 7] {
+        let chunked = parameters.modify_digest_chunks(digests.clone(), &targets, chunk_groups);
+        // Same peptides in the same order, not just the same set.
+        assert!(
+            chunked == single,
+            "chunk size {chunk_groups} changed the output"
+        );
+    }
+}
+
+#[test]
 fn modification_variants_share_target_and_decoy_sequence_storage() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "variable_mods": {"M": [15.9949]}
