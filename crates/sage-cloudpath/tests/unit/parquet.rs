@@ -256,6 +256,54 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
 }
 
 #[test]
+fn results_report_ambiguous_database_peptides() -> parquet::errors::Result<()> {
+    let protein: sage_core::sequence::ProteinSequence = "MKPEPXIDER".into();
+    let mut database = IndexedDatabase::default();
+    for (sequence, source) in [("PEPTIDE", Some(protein.clone())), ("PEPKIDE", None)] {
+        database.peptides.push(Peptide {
+            sequence: sequence.as_bytes().into(),
+            proteins: vec![Arc::from("P1")].into(),
+            protein_sites: Arc::from([ProteinOccurrence {
+                protein: Arc::from("P1"),
+                start: Some(2),
+                prev_aa: Some(b'K'),
+                next_aa: Some(b'R'),
+                source,
+            }]),
+            ..Peptide::default()
+        });
+    }
+    let features = [0, 1].map(|index| Feature {
+        peptide_idx: PeptideIx(index),
+        ..Feature::default()
+    });
+
+    let bytes = serialize_features(
+        &features.iter().collect::<Vec<_>>(),
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let rows = reader
+        .get_row_iter(None)?
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    let database_peptides = rows
+        .iter()
+        .map(|row| {
+            row.get_column_iter()
+                .find(|(name, _)| name.as_str() == "database_peptide")
+                .map(|(_, field)| field.to_string())
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(database_peptides, ["\"PEPXIDE\"", "null"]);
+    Ok(())
+}
+
+#[test]
 fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<()> {
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
