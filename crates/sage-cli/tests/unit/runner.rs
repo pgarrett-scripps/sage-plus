@@ -664,3 +664,39 @@ fn tolerance_recommendation_uses_confident_signed_errors() {
     assert!(few.precursor.is_none() && few.fragment.is_none());
     assert!(few.log_line().contains("skipped (99 confident PSMs"));
 }
+
+#[test]
+fn diapasef_files_get_quality_control_scans() {
+    let (directory, _) = temporary_output("tdf-dia-qc");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [path.clone()],
+        "dia": { "mode": "pseudo" },
+        "quant": { "lfq": true },
+        "diagnostic_ions": true,
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    let url = Url::from_file_path(std::fs::canonicalize(&path).unwrap()).unwrap();
+    let (ms1, _) = runner
+        .read_processed_spectra_with_ms1(&[url], 0, 1, true, false)
+        .unwrap();
+    assert!(!ms1.is_empty());
+
+    // The raw MS1 frames and window MS2 spectra are scanned before only the
+    // MS1 is kept next to the pseudo-spectra.
+    let file_qc = runner.file_qc.lock().unwrap();
+    let qc = file_qc.get(&0).expect("diaPASEF file scanned");
+    assert!(qc.polymers.as_ref().is_some_and(|p| p.ms1_spectra > 0));
+    assert!(qc
+        .diagnostic_ions
+        .as_ref()
+        .is_some_and(|scan| scan.ms2_spectra > 0));
+    drop(file_qc);
+    std::fs::remove_dir_all(directory).ok();
+}

@@ -52,14 +52,16 @@ entries are retained below for provenance.
   1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
   percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
   A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
-  searches already read and adds about 1% to spectrum reading; Bruker TDF files are checked
-  only when MS1 is read (LFQ or DIA).
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files, DDA and
+  diaPASEF, are checked only with `quant.lfq`, which reads their MS1 frames.
 - Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
   fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
   user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
   `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
   spectra containing each ion is logged and written to `run-summary.json` under
   `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
+  DIA files are scanned on their raw wide-window MS2 before pseudo-spectrum conversion;
+  timsTOF diaPASEF files only when `quant.lfq` makes Sage read their raw frames.
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
   `sage_core::digestion` classifies and summarizes peptide termini (optionally with custom
   cleavage sites);

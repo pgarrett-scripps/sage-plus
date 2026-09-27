@@ -1392,7 +1392,7 @@ Detergents and plastics ionize as ladders of peaks one repeat unit apart. Sage s
 
 For each file, `qc.polymers` reports the number of centroided MS1 spectra scanned (`ms1_spectra`), profile MS1 spectra skipped (`skipped_profile_spectra`), the summed MS1 intensity (`total_ion_current`), and per polymer the ladder intensity and its percent of the MS1 TIC (`polymers[].tic_pct`). A log line gives the shares per file. When one polymer carries more than 5% of a file's MS1 TIC, Sage logs a warning and records it in `run-summary.json` `warnings` with code `polymer_contamination`.
 
-The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, whose MS1 frames are only read for `quant.lfq` or DIA, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
+The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, DDA or diaPASEF, whose MS1 frames are only read with `quant.lfq`, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
 
 ### Diagnostic ions (`diagnostic_ions.tsv`)
 
@@ -1403,5 +1403,7 @@ With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configur
 - `ion`: Configured ion name.
 - `mz`: Observed m/z of the matched peak.
 - `relative_intensity`: Matched peak intensity divided by the summed intensity of the spectrum's raw peaks.
+
+In DIA pseudo mode the scan runs on the raw wide-window MS2 spectra before they are converted to pseudo-spectra, by design: diagnostic ions are fragments of whatever co-isolated in the window, so `scannr` names the raw window scan, not a pseudo-spectrum. timsTOF diaPASEF pseudo-spectra are built straight from the frames, so their raw window spectra are read, and scanned, only with `quant.lfq`; without it a diaPASEF file has no QC entry.
 
 A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).
