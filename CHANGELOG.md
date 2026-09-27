@@ -9,6 +9,19 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Every Parquet output records run provenance in its key-value footer: `sage.version`,
+  `sage.git_commit`, the effective configuration (`sage.config`), spectrum files with sizes
+  (`sage.inputs`), the FASTA with its SHA-256, protein and decoy counts, decoy strategy and
+  UniProt organisms (`sage.fasta`), hashed peptide, cleavage-site and PTM-library inputs
+  (`sage.database_inputs`), and the protein inference strategy (`sage.protein_inference`).
+  `run-summary.json` holds the same object under `provenance.metadata`; its schema stays at
+  version 9. See "Output provenance" in DOCS.md.
+- `record_input_hashes` (default false) also records the SHA-256 of each local spectrum file.
+  It reads each file once more.
+- `matched_fragments.sage.parquet` now carries `sage.schema.name` and `sage.schema.version`, and
+  its schema is published as `schemas/matched_fragments.sage.v1.parquet.schema`.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added

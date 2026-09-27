@@ -161,6 +161,65 @@ Parquet is the canonical analytical output format. Sage does not emit parallel T
 
 The versioned physical schemas and score definitions are published in [`schemas/`](schemas/). Canonical Parquet files embed `sage.schema.name` and `sage.schema.version` metadata so downstream tools can select the matching contract.
 
+#### Output provenance
+
+Every Parquet file Sage writes carries the run's provenance in its key-value footer. The same
+keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage.parquet`,
+`lfq.parquet`, `spectral_library.sage.parquet`, and the PTM-localization tables
+`results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet` and
+`results.sage.ptm-library.parquet`. They follow each file's own keys (`sage.schema.name`,
+`sage.schema.version`, filters).
+
+| Key | Value |
+| --- | --- |
+| `sage.provenance.version` | Version of this key set, currently `1`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.12`. |
+| `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
+| `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
+| `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
+| `sage.fasta` | JSON, described below, or `null` for a peptide-list-only search. |
+| `sage.database_inputs` | JSON list of the peptide TSV, custom cleavage sites and PTM library, each with a `role` and always hashed. |
+| `sage.protein_inference` | JSON. The protein inference strategy; see [Protein inference](#protein-inference). |
+
+`sage.fasta` holds `path`, `size_bytes`, `sha256`, `proteins`, `target_proteins` and
+`decoy_proteins`. It also holds `decoys`, with `strategy` (`generated` or `supplied`), `method`
+(`reversed_peptide_keep_termini` for generated decoys), `decoy_tag`, `target_peptides` and
+`decoy_peptides`. When headers carry UniProt fields it adds `uniprot`: counts of reviewed (`sp|`)
+and unreviewed (`tr|`) entries, and up to 20 organisms from `OS=` and `OX=` with protein counts.
+UniProt FASTA headers do not state a release, so none is recorded. The FASTA sha256 identifies
+the exact file. Protein counts include decoy entries in the FASTA whether or not they are
+searched.
+
+All hashes are SHA-256 of the bytes as stored, so a gzip file hashes like `sha256sum` on the
+`.gz`. Files are streamed in 1 MiB chunks and never loaded whole. Remote database files are
+streamed from object storage.
+
+The FASTA, peptide TSV and PTM library are always hashed. Spectrum files are hashed only when
+`record_input_hashes` is true (default false). Hashing reads every spectrum file once more at the
+end of the search. `sha256sum` on a 0.97 GB mzML already in page cache takes 2.7 s, about
+0.36 GB/s per core. Files are hashed in parallel. A file not in cache also costs a disk read. Remote
+spectrum files and directory inputs such as Bruker `.d` are never hashed and record the reason
+in `sha256_skipped`.
+
+`run-summary.json` holds the same object under `provenance.metadata`, with `sage.` removed from
+each key. The run-summary schema stays at version 9.
+
+Read the footer with pyarrow:
+
+```python
+import json, pyarrow.parquet as pq
+meta = pq.read_schema("results.sage.parquet").metadata
+fasta = json.loads(meta[b"sage.fasta"])
+print(meta[b"sage.version"].decode(), fasta["sha256"])
+```
+
+or with DuckDB:
+
+```sql
+SELECT decode(key) AS key, decode(value) AS value
+FROM parquet_kv_metadata('results.sage.parquet');
+```
+
 #### Memory guard
 
 A search can balloon in memory — most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To prevent a runaway search from exhausting RAM and freezing the host, Sage runs a lightweight background watchdog that terminates the process **cleanly** (exit code 137) if either:
@@ -1108,6 +1167,7 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
+- **record_input_hashes**: Boolean. Record the SHA-256 of every local spectrum file in the output provenance (default: false). It reads each file once more, at about 0.36 GB/s per core. The FASTA and other database files are always hashed. See [Output provenance](#output-provenance).
 - **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
 - **spectral_library**: Object. Build an empirical library from confident target PSMs. See [Empirical Spectral Libraries](#empirical-spectral-libraries).
 - **output_filter.psm_q_value**: Float from 0 to 1. Maximum spectrum-level PSM q-value written to `results.sage.parquet` and `matched_fragments.sage.parquet` (default: 0.1). The boundary is inclusive. Set it to `1.0` to retain every scored PSM. This is an output-only filter: scoring, FDR estimation, LFQ, PTM localization, `.pin` output, and the HTML report continue to use their existing inputs and thresholds. Target and decoy PSMs that pass the threshold are retained so downstream target-decoy analyses remain possible.
