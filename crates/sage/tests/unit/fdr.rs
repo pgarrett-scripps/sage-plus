@@ -388,3 +388,64 @@ fn picked_precursor_assigns_count_q_values_per_charge_state() {
     assert!((decoy - 2.0 / 21.0).abs() < 1e-6, "{decoy}");
     assert!((last - 2.0 / 21.0).abs() < 1e-6, "{last}");
 }
+
+#[test]
+fn site_q_values_match_hand_counted_target_decoy_answer() {
+    // Ten target sites scored 10..1 and two decoy sites tied at 5.5. Two equal
+    // decoy scores leave the posterior-error model underdetermined, so the
+    // +1-corrected counts give the exact answer:
+    //   targets 10..6: best FDR (1 + 0) / 5 = 0.2
+    //   decoys at 5.5 and targets 5..1: best FDR (1 + 2) / 10 = 0.3
+    let mut evidence = (1..=10)
+        .rev()
+        .map(|score| (score as f32, false))
+        .collect::<Vec<_>>();
+    evidence.push((5.5, true));
+    evidence.push((5.5, true));
+    let q = site_q_values(&evidence);
+    for (ix, &(score, decoy)) in evidence.iter().enumerate() {
+        let expected = if !decoy && score >= 6.0 { 0.2 } else { 0.3 };
+        assert!(
+            (q[ix] - expected).abs() < 1e-6,
+            "score {score} decoy {decoy}: q {} != {expected}",
+            q[ix]
+        );
+    }
+}
+
+#[test]
+fn site_q_values_count_every_decoy_site_and_share_ties() {
+    // Enough decoys for the posterior-error model: targets on 5..15, decoys on
+    // 0..8, plus one decoy tied with three target rows of one shared site.
+    let mut evidence = (0..400)
+        .map(|i| (5.0 + i as f32 / 40.0, false))
+        .chain((0..100).map(|i| (i as f32 / 12.5, true)))
+        .collect::<Vec<_>>();
+    let tied = 7.0123;
+    let tie_rows = evidence.len()..evidence.len() + 4;
+    evidence.extend([(tied, false), (tied, true), (tied, false), (tied, false)]);
+    let q = site_q_values(&evidence);
+
+    let tie_q = q[tie_rows.start];
+    assert!(q[tie_rows].iter().all(|&value| value == tie_q));
+
+    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
+    assert!(order.windows(2).all(|pair| q[pair[0]] <= q[pair[1]]));
+    assert!(q.iter().all(|value| (0.0..=1.0).contains(value)));
+
+    // Without the decoys every target would be accepted at the best q; the
+    // decoy sites must raise q in the region where they score.
+    let targets_only = evidence
+        .iter()
+        .filter(|(_, decoy)| !decoy)
+        .copied()
+        .collect::<Vec<_>>();
+    let q_targets_only = site_q_values(&targets_only);
+    let low_target = evidence
+        .iter()
+        .position(|&(score, decoy)| !decoy && score == 5.0)
+        .unwrap();
+    assert!(q[low_target] > 0.05);
+    assert!(q_targets_only.iter().all(|&value| value < 0.01));
+}
