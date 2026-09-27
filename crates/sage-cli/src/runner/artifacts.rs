@@ -265,6 +265,11 @@ impl Runner {
                 .enzyme_parameters()
                 .enzyme
                 .is_some();
+        // Merged I/L twins and expanded B, Z or X spans differ from the
+        // displayed peptide, so locate peptides residue by residue.
+        use sage_core::ambiguous_residues::{peptide_starts, residue_fits};
+        let merge_isoleucine_leucine = self.database_parameters.merge_isoleucine_leucine;
+        let expand_ambiguous = self.database_parameters.expand_ambiguous_residues;
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
         for row in self.collect_site_rows(features, filenames) {
@@ -290,7 +295,12 @@ impl Runner {
                     .filter(|occurrence| occurrence.protein.as_ref() == protein)
                     .filter_map(|occurrence| occurrence.start)
                     .collect::<Vec<_>>();
-                for (start, _) in sequence.match_indices(&row.peptide_sequence) {
+                for start in peptide_starts(
+                    sequence.as_bytes(),
+                    row.peptide_sequence.as_bytes(),
+                    merge_isoleucine_leucine,
+                    expand_ambiguous,
+                ) {
                     if !known_starts.is_empty() && !known_starts.contains(&(start as u32)) {
                         continue;
                     }
@@ -337,15 +347,27 @@ impl Runner {
                         continue;
                     }
                     let protein_position = start + peptide_position;
-                    if sequence.as_bytes().get(protein_position) == Some(&row.residue) {
-                        sites.insert(sage_core::ptm_library::PtmLibrarySite {
-                            attachment: row.attachment,
-                            protein: Arc::from(protein),
-                            position: protein_position as u32,
-                            residue: row.residue,
-                            modification: Arc::from(row.modification.as_str()),
-                        });
-                    }
+                    let Some(&written) = sequence.as_bytes().get(protein_position) else {
+                        continue;
+                    };
+                    // An I/L twin records the FASTA residue, which is what a
+                    // reloaded library is checked against; an expanded B, Z
+                    // or X keeps the residue searched.
+                    let residue =
+                        if residue_fits(written, row.residue, merge_isoleucine_leucine, false) {
+                            written
+                        } else if residue_fits(written, row.residue, false, expand_ambiguous) {
+                            row.residue
+                        } else {
+                            continue;
+                        };
+                    sites.insert(sage_core::ptm_library::PtmLibrarySite {
+                        attachment: row.attachment,
+                        protein: Arc::from(protein),
+                        position: protein_position as u32,
+                        residue,
+                        modification: Arc::from(row.modification.as_str()),
+                    });
                 }
             }
         }
