@@ -535,6 +535,95 @@ fn ptm_library_sites_match_with_and_without_prefilter() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The synthetic spectrum is ASPEPTIDEAAK, which this FASTA holds only after
+/// its initiator methionine: a clipped protein N-terminal peptide. It is found,
+/// fully enzymatic, with the default initiator Met clipping and the same with
+/// and without the prefilter, and not at all when clipping is off.
+#[test]
+fn clipped_initiator_methionine_peptides_match_with_and_without_prefilter() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-met-clip-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let fasta_path = root.join("proteins.fasta");
+    std::fs::write(
+        &fasta_path,
+        format!("{q99536}\n>sp|CLIP|CLIPPED\nMASPEPTIDEAAKGGLLR\n"),
+    )?;
+
+    let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        workspace.join("tests/synthetic/config.json"),
+    )?)?;
+    config["database"]["fasta"] = fasta_path.display().to_string().into();
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["write_pin"] = true.into();
+
+    let run = |name: &str, prefilter: bool, clip: Option<bool>| -> anyhow::Result<_> {
+        let run_root = root.join(name);
+        std::fs::create_dir_all(&run_root)?;
+        let mut config = config.clone();
+        config["database"]["prefilter"] = prefilter.into();
+        if let Some(clip) = clip {
+            config["database"]["clip_n_term_met"] = clip.into();
+        }
+        let config_path = run_root.join("config.json");
+        std::fs::write(&config_path, serde_json::to_vec(&config)?)?;
+        run_sage_with_events(&workspace, &config_path, &run_root)?;
+
+        let pin = std::fs::read_to_string(run_root.join("output/results.sage.pin"))?;
+        let mut lines = pin.lines();
+        let headers = lines
+            .next()
+            .expect("pin header")
+            .split('\t')
+            .collect::<Vec<_>>();
+        let column = |name: &str| headers.iter().position(|h| *h == name).expect(name);
+        let columns = [
+            "SpecId",
+            "Label",
+            "Peptide",
+            "Proteins",
+            "semi_enzymatic",
+            "missed_cleavages",
+            "ln(hyperscore)",
+            "matched_peaks",
+        ]
+        .map(column);
+        let mut psms = lines
+            .map(|line| {
+                let fields = line.split('\t').collect::<Vec<_>>();
+                columns.map(|idx| fields[idx].to_string())
+            })
+            .collect::<Vec<_>>();
+        psms.sort();
+        Ok(psms)
+    };
+
+    let without = run("prefilter-false", false, None)?;
+    let with = run("prefilter-true", true, None)?;
+    let clipped = without
+        .iter()
+        .find(|psm| psm[2] == "ASPEPTIDEAAK")
+        .unwrap_or_else(|| panic!("the clipped peptide is not identified: {without:?}"));
+    assert_eq!(clipped[1], "1");
+    assert_eq!(clipped[3], "sp|CLIP|CLIPPED");
+    assert_eq!(clipped[4], "0", "a clipped peptide is not semi-enzymatic");
+    assert_eq!(without, with, "prefilter changed the clipped peptide PSMs");
+
+    let unclipped = run("no-clip", false, Some(false))?;
+    assert!(
+        unclipped.iter().all(|psm| psm[2] != "ASPEPTIDEAAK"),
+        "{unclipped:?}"
+    );
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// End-to-end N-glycosylation motif search on a synthetic spectrum. The sequon
 /// of the identified peptide is completed by the residue after it, so the
 /// search, localization, and reusable library all need protein context.
