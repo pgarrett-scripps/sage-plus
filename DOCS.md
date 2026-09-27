@@ -1439,6 +1439,13 @@ charges, less `min_ion_index` at each end), M the MS1 spectra, and T the worker 
 - **Files**: total time is roughly linear in the number of files. Files are loaded in batches of
   `batch_size`.
 
+### Limiting CPU cores
+
+Sage uses one Rayon thread pool with one worker per logical core. Set the `RAYON_NUM_THREADS`
+environment variable to use fewer, for example `RAYON_NUM_THREADS=8 sage config.json`.
+`run-summary.json` records the count used in `execution.rayon_threads`. `batch_size` controls how
+many files are loaded at once, not the thread count.
+
 # Interpreting Sage Output
 
 The `results.sage.parquet` file contains the following columns:
