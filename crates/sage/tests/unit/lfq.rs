@@ -353,6 +353,47 @@ fn file_evidence_exposes_a_weak_signal_despite_a_strong_shared_peak() {
 }
 
 #[test]
+fn paired_decoy_evidence_searches_its_own_warp_at_the_target_peak() {
+    // File 0 of the decoy is flat noise; file 1 has a clean envelope two bins
+    // before the target's apex (bin 3). A null target row would get a warp
+    // search towards the reference, so the paired decoy row gets one too.
+    let decoy = Traces {
+        dot_product: Matrix::new(
+            [
+                0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 6.0, 10.0, 6.0, 1.0, 0.0, 0.0, 0.0,
+            ],
+            2,
+            7,
+        ),
+        spectral_angle: Matrix::new(
+            [
+                0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.9, 1.0, 0.9, 0.4, 0.0, 0.0, 0.0,
+            ],
+            2,
+            7,
+        ),
+        reference_file_id: 0,
+    };
+    let settings = LfqSettings {
+        spectral_angle: 0.5,
+        ..Default::default()
+    };
+
+    let mut target = traces();
+    let (_, _, _, window) = target.integrate_window(&settings).unwrap();
+    assert_eq!(window.rt, 3);
+    assert_eq!(window.shifts, vec![0, 0]);
+    let paired = decoy.clone().paired_evidence(&window, &settings);
+
+    let noise = paired[0].as_ref().unwrap();
+    assert!(noise.score < 0.05, "{noise:?}");
+    let aligned = paired[1].as_ref().unwrap();
+    assert_eq!(aligned.rt_shift_bins, -2);
+    assert!(aligned.score > 0.5, "{aligned:?}");
+    assert_eq!(aligned.extraction_q_value, None);
+}
+
+#[test]
 fn file_evidence_does_not_invent_a_score_for_a_missing_trace() {
     let mut trace = traces();
     trace.dot_product.row_slice_mut(1).fill(0.0);
@@ -550,9 +591,25 @@ fn mbr_traces_one_anchor_across_files_deterministically() {
         .map(|evidence| evidence.as_ref().unwrap().transfer_candidate)
         .collect::<Vec<_>>();
     assert_eq!(transfers, vec![false, true, true]);
+    // The paired decoy is evaluated in every file of the target's grid.
+    assert_eq!(peak.paired_decoy_evidence.len(), 3);
 
+    let extraction_q = |mut peaks: HashMap<_, QuantifiedPeak, fnv::FnvBuildHasher>| {
+        crate::fdr::extraction_q_values(&mut peaks);
+        peaks[&key]
+            .file_evidence
+            .iter()
+            .map(|evidence| {
+                let q = evidence.as_ref().unwrap().extraction_q_value;
+                q.expect("every target row with a signal has a q-value")
+                    .to_bits()
+            })
+            .collect::<Vec<_>>()
+    };
+    let q_values = extraction_q(first.clone());
     for _ in 0..20 {
         let repeat = pool.install(|| map.quantify(&db, &spectra, &alignments));
+        assert_eq!(extraction_q(repeat.clone()), q_values);
         let repeat = &repeat[&key];
         assert_eq!(repeat.intensities, peak.intensities);
         assert_eq!(repeat.peak.score.to_bits(), peak.peak.score.to_bits());

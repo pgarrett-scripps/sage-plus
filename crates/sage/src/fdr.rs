@@ -430,6 +430,54 @@ pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPe
     passing
 }
 
+/// Assign a target-decoy q-value to every target (precursor, file) LFQ extraction.
+///
+/// Every target file row with an integrated signal competes, whether the
+/// precursor was identified by MS2 in that file or transferred into it. Each
+/// target row has one potential competitor: its shifted decoy evaluated at the
+/// target's own peak in the same file (`QuantifiedPeak::paired_decoy_evidence`).
+/// Rows are ranked by the per-file `FileEvidence::score` and q-values follow
+/// from cumulative target and decoy counts with a +1 correction, as for the
+/// precursor-level q-value. Returns the number of target rows at 1% FDR.
+pub fn extraction_q_values<H: BuildHasher>(
+    peaks: &mut HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
+) -> usize {
+    let mut rows = peaks
+        .iter()
+        .filter(|((_, decoy), _)| !decoy)
+        .flat_map(|(&(id, _), quantified)| {
+            let targets = quantified.file_evidence.iter().enumerate();
+            let decoys = quantified.paired_decoy_evidence.iter().enumerate();
+            targets
+                .map(|(file, evidence)| (file, false, evidence))
+                .chain(decoys.map(|(file, evidence)| (file, true, evidence)))
+                .filter_map(move |(file, decoy, evidence)| {
+                    evidence.as_ref().map(|evidence| Row {
+                        ix: (id, decoy, file),
+                        decoy,
+                        score: evidence.score as f32,
+                        q: 1.0,
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    // Ties share a q-value, so the input order cannot change the result.
+    let passing = assign_count_q_values(&mut rows, 0.01);
+    let q_values = rows
+        .into_iter()
+        .filter(|row| !row.decoy)
+        .map(|row| (row.ix, row.q))
+        .collect::<FnvHashMap<_, _>>();
+    for (&(id, decoy), quantified) in peaks.iter_mut() {
+        for (file, evidence) in quantified.file_evidence.iter_mut().enumerate() {
+            if let Some(evidence) = evidence {
+                evidence.extraction_q_value = q_values.get(&(id, decoy, file)).copied();
+            }
+        }
+    }
+    passing
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/fdr.rs"]
 mod tests;

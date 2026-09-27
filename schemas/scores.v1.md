@@ -25,7 +25,7 @@ DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
 - `intensity`: integrated MS1 signal for the precursor/file row. Null means no positive finite signal was integrated; zero is not used as a missing-value sentinel.
 - `ms2_confirmed`: whether the same precursor has an accepted target PSM in that acquisition file at `lfq_settings.peptide_q_value`. This is direct-identification evidence, not a statement that a different LFQ algorithm was used. Every LFQ intensity is produced by the same cross-run feature-tracing workflow.
 
-## LFQ file evidence in schemas 3 and 4
+## LFQ file evidence in schemas 3 to 6
 
 - `ms2_confirmed_strict`: direct target evidence passing both PSM and peptide q-values at `lfq_settings.peptide_q_value`. The original `ms2_confirmed` field continues to require only peptide acceptance.
 - `file_spectral_angle`: isotope agreement in this file at the selected shared apex.
@@ -33,5 +33,7 @@ DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
 - `file_rt_shift_bins`: signed local warp offset in retention-time grid bins.
 - `file_score`: experimental ranking score combining isotope agreement, trace similarity and warp proximity. It is not a probability or q-value and is not used to filter output.
 - `transfer_candidate`: MBR is enabled and the underlying target precursor lacks strict direct evidence in this file. Shifted decoys use the underlying target's eligibility. Null indicates no integrated signal.
+
+- `extraction_q_value` (schemas 5 and 6): target-decoy q-value of this precursor/file extraction, computed for every target row with an integrated signal, MS2-backed rows and transfers alike. Each target precursor's shifted decoy is evaluated at the target's own peak (same apex, integration window and reference trace), with the same per-file warp search towards that reference; the resulting paired decoy rows compete with target rows by `file_score` in one pool across files, with cumulative counts, a +1 correction and monotonic q-values. Decoy precursor rows are null. It does not replace the precursor-level `q_value`, is not used to filter output, and is not calibrated for transfers (see `benchmarks/SCIENTIFIC_HARDENING.md`).
 
 All file diagnostics are null when intensity is null. Metadata identifies the precursor q-value scope and marks the file score as experimental and uncalibrated. The exact score definition and development validation are documented in `benchmarks/SCIENTIFIC_HARDENING.md`.

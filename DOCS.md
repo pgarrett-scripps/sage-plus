@@ -1595,6 +1595,8 @@ grouping off) and the grouping peptide q-value.
 - `filename`: Acquisition file represented by this row.
 - `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
+- `ms2_confirmed_strict`, `file_score`, `file_spectral_angle`, `file_trace_cosine`, `file_rt_shift_bins`, `transfer_candidate`: per-file evidence diagnostics, defined in [`schemas/scores.v1.md`](schemas/scores.v1.md).
+- `extraction_q_value`: Per-row (precursor and file) extraction q-value, given for every target row with a signal, MS2-backed and transferred alike. Each target's shifted decoy is evaluated at the target's own peak, and these paired decoy rows compete with all target rows by `file_score`. Null for decoy precursors and for rows without a signal. It is a diagnostic: it does not filter output, does not replace the precursor `q_value`, and on a pure-human control roughly a fifth of transfers passing 1% were still foreign-species, so it is not a calibrated transfer FDR. `lfq_settings.mbr` defaults are unchanged.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
 
