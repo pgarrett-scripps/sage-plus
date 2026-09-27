@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.11] - 2026-09-26
+
 ### Added
 - `prefilter_min_matched_peaks` (default 4) and `prefilter_max_peaks` (default: all peaks). The
   prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least

@@ -48,6 +48,7 @@ Other benefits describe the intended effect and have not all been validated inde
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Streamed prefilter with a four-match default | beta.11 | The prefilter digested the whole database, or chunks of it, before filtering, and a 100x gut catalog search ran out of memory | Proteins stream through the spectrum index in parallel; 10x and 30x searches take about half the time with identical PSMs, and at four matches the 100x search finishes in 19 GiB |
 | Separate library and new-site limits per modification (`max_total_count`) | beta.10 | A library site used up its modification's `max_count`, so a known K14ac blocked a new K18ac | `max_count` limits new placements and `max_total_count` limits all placements; the memory preflight now counts variants exactly instead of overestimating PTM-library searches |
 | Motif modification sites (`motif:N*-{P}-[ST]`) | beta.8 | Residue sites could not require a sequence context such as the N-glycosylation sequon or a kinase motif | PROSITE-style patterns are evaluated against the source protein, including residues beyond the peptide, with mirrored decoys and motif-restricted localization |
 | Named modifications with explicit sites | beta.6 | Residue keys could not separate a terminal group from the residue at that terminus, or exclude terminal residues | One definition and one occurrence limit across attachment rules such as `first_residue:K`, `internal_residue:K`, and `peptide_n_term` |
