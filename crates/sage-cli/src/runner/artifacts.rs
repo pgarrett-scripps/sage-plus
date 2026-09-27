@@ -287,15 +287,19 @@ impl Runner {
                     if !known_starts.is_empty() && !known_starts.contains(&(start as u32)) {
                         continue;
                     }
-                    let position = match (
-                        start == 0,
-                        start + row.peptide_sequence.len() == sequence.len(),
-                    ) {
-                        (true, true) => sage_core::enzyme::Position::Full,
-                        (true, false) => sage_core::enzyme::Position::Nterm,
-                        (false, true) => sage_core::enzyme::Position::Cterm,
-                        _ => sage_core::enzyme::Position::Internal,
-                    };
+                    // A peptide at offset 1 of a clippable protein starts at
+                    // the protein N-terminus left by initiator Met removal.
+                    let n_term = start == 0
+                        || (start == 1
+                            && self.database_parameters.clip_n_term_met
+                            && sage_core::enzyme::metap_clips(sequence.as_bytes()));
+                    let position =
+                        match (n_term, start + row.peptide_sequence.len() == sequence.len()) {
+                            (true, true) => sage_core::enzyme::Position::Full,
+                            (true, false) => sage_core::enzyme::Position::Nterm,
+                            (false, true) => sage_core::enzyme::Position::Cterm,
+                            _ => sage_core::enzyme::Position::Internal,
+                        };
                     let attachment = row.attachment.site(
                         peptide_position as u32,
                         row.peptide_sequence.len(),
@@ -311,10 +315,11 @@ impl Runner {
                                     .sites_in_context(
                                         row.peptide_sequence.as_bytes(),
                                         position,
-                                        sage_core::motif::MotifContext::in_protein(
+                                        sage_core::motif::MotifContext::in_digested_protein(
                                             sequence.as_bytes(),
                                             start,
                                             row.peptide_sequence.len(),
+                                            position,
                                         ),
                                     )
                                     .contains(&site)

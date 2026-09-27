@@ -705,11 +705,15 @@ impl ModificationSpecificity {
             match (protein, &reversed) {
                 (Some((protein, start, span)), _) if span == sequence => collect(
                     sequence,
-                    MotifContext::in_protein(protein, start, len),
+                    MotifContext::in_digested_protein(protein, start, len, position),
                     false,
                 ),
                 (Some((protein, start, span)), Some(target)) if span == target.as_slice() => {
-                    collect(target, MotifContext::in_protein(protein, start, len), true)
+                    collect(
+                        target,
+                        MotifContext::in_digested_protein(protein, start, len, position),
+                        true,
+                    )
                 }
                 // Inconsistent coordinates cannot vouch for a motif.
                 (Some(_), _) => {}

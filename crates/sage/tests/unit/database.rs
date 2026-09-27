@@ -2220,3 +2220,25 @@ fn clipped_initiator_methionine_peptides_take_protein_n_terminal_mods() {
         .iter()
         .all(|peptide| !peptide.sequence.starts_with("ASPEPT")));
 }
+
+#[test]
+fn clipped_initiator_methionine_peptides_match_protein_n_terminal_motifs() {
+    let fasta = Fasta::parse(">P1\nMASPEPTIDEAAKGGLLR\n".into(), "rev_", true).unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5},
+        "peptide_min_mass": 100.0,
+        "variable_mods": {"Nterm-A": {"mass": 10.0, "sites": ["motif:<A*"]}},
+        "generate_decoys": false,
+    }))
+    .unwrap()
+    .make_parameters();
+    let names = parameters
+        .digest(&fasta)
+        .iter()
+        .map(|peptide| peptide.to_string())
+        .collect::<HashSet<_>>();
+    assert!(names.contains("A[Nterm-A]SPEPTIDEAAK"), "{names:?}");
+    // The anchor still needs the protein N-terminus: an internal A does not
+    // qualify.
+    assert!(names.iter().all(|name| !name.contains("A[Nterm-A]A")));
+}

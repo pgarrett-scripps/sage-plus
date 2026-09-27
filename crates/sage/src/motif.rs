@@ -148,6 +148,27 @@ impl<'a> MotifContext<'a> {
             right_boundary: end == protein.len(),
         }
     }
+
+    /// [`Self::in_protein`] for an occurrence digested at `position`. A
+    /// protein N-terminal peptide at offset 1 comes from a protein whose
+    /// initiator methionine was clipped, so the methionine is not a flank
+    /// and the peptide starts at the protein N-terminus.
+    pub fn in_digested_protein(
+        protein: &'a [u8],
+        start: usize,
+        len: usize,
+        position: Position,
+    ) -> Self {
+        let mut context = Self::in_protein(protein, start, len);
+        if start == 1
+            && matches!(position, Position::Nterm | Position::Full)
+            && crate::enzyme::metap_clips(protein)
+        {
+            context.left = &protein[..0];
+            context.left_boundary = true;
+        }
+        context
+    }
 }
 
 impl SiteMotif {
