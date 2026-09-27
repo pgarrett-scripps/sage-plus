@@ -1,4 +1,4 @@
-use super::{resolve_batch_size, Input, OutputFilter, PtmLocalizationSettings};
+use super::{resolve_batch_size, resolve_threads, Input, OutputFilter, PtmLocalizationSettings};
 use sage_core::diagnostic::{default_ions, DiagnosticIonsConfig};
 use sage_core::{
     database::EnzymeBuilder,
@@ -370,6 +370,31 @@ fn deserialize_runtime_memory_settings() -> Result<(), serde_json::Error> {
 }
 
 #[test]
+fn threads_config_parses_and_cli_takes_precedence() -> Result<(), serde_json::Error> {
+    let base = serde_json::json!({
+        "database": { "fasta": "test.fasta" },
+        "precursor_tol": { "ppm": [-10.0, 10.0] },
+        "fragment_tol": { "ppm": [-20.0, 20.0] },
+        "mzml_paths": ["test.mzML"],
+    });
+    let unset: Input = serde_json::from_value(base.clone())?;
+    assert_eq!(unset.threads, None);
+    let mut config = base;
+    config["threads"] = serde_json::json!(3);
+    let input: Input = serde_json::from_value(config)?;
+    assert_eq!(input.threads, Some(3));
+    assert!(input.validate().is_ok());
+
+    // `--threads` wins; the config applies without it; neither leaves the
+    // choice to Rayon (RAYON_NUM_THREADS, then all cores).
+    assert_eq!(resolve_threads(Some(8), Some(3)), Some(8));
+    assert_eq!(resolve_threads(None, Some(3)), Some(3));
+    assert_eq!(resolve_threads(Some(8), None), Some(8));
+    assert_eq!(resolve_threads(None, None), None);
+    Ok(())
+}
+
+#[test]
 fn batch_size_must_be_positive() {
     assert!(resolve_batch_size(Some(0)).is_err());
     assert_eq!(resolve_batch_size(Some(3)).unwrap(), 3);
@@ -579,6 +604,11 @@ fn each_logical_constraint_reports_its_own_message() {
         ),
         ("max_memory_gb", serde_json::json!(-1.0), ""),
         ("batch_size", serde_json::json!(0), "batch_size"),
+        (
+            "threads",
+            serde_json::json!(0),
+            "`threads` must be greater than zero",
+        ),
         (
             "precursor_tol",
             serde_json::json!({"pct": [-1, 1]}),

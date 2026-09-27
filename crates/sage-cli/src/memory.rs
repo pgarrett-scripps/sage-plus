@@ -50,6 +50,54 @@ fn trim_allocator_impl() -> AllocatorTrimResult {
     AllocatorTrimResult::Unsupported
 }
 
+/// Peak resident set size of this process since it started, in bytes.
+///
+/// Read from `VmHWM` in `/proc/self/status` on Linux, falling back to
+/// `getrusage` `ru_maxrss` on Unix. `None` where neither is available. The
+/// value covers the whole process, so a library caller running several jobs
+/// sees the highest peak so far.
+pub fn peak_rss_bytes() -> Option<u64> {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| parse_vm_hwm(&status))
+        .or_else(max_rss_from_rusage)
+}
+
+/// `VmHWM` of a `/proc/<pid>/status` file, converted from KiB to bytes.
+fn parse_vm_hwm(status: &str) -> Option<u64> {
+    let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;
+    let mut fields = line["VmHWM:".len()..].split_whitespace();
+    let value = fields.next()?.parse::<u64>().ok()?;
+    match fields.next() {
+        Some("kB") | None => value.checked_mul(1024),
+        Some(_) => None,
+    }
+}
+
+#[cfg(unix)]
+fn max_rss_from_rusage() -> Option<u64> {
+    // SAFETY: `getrusage` only writes into the zeroed struct we pass it.
+    let usage = unsafe {
+        let mut usage = std::mem::zeroed::<libc::rusage>();
+        if libc::getrusage(libc::RUSAGE_SELF, &mut usage) != 0 {
+            return None;
+        }
+        usage
+    };
+    let max_rss = u64::try_from(usage.ru_maxrss).ok().filter(|&rss| rss > 0)?;
+    // macOS reports bytes; Linux and the BSDs report KiB.
+    if cfg!(target_os = "macos") {
+        Some(max_rss)
+    } else {
+        max_rss.checked_mul(1024)
+    }
+}
+
+#[cfg(not(unix))]
+fn max_rss_from_rusage() -> Option<u64> {
+    None
+}
+
 #[derive(Clone)]
 pub enum MemoryLimitBehavior {
     TerminateProcess,

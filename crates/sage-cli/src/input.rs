@@ -78,6 +78,10 @@ pub struct Search {
     pub max_memory_gb: Option<f64>,
     /// Number of input files to load and search at once.
     pub batch_size: usize,
+    /// Configured Rayon worker threads; omitted when unset (all cores, or
+    /// `RAYON_NUM_THREADS`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<usize>,
 
     pub ptm_localization: PtmLocalizationSettings,
     pub spectral_library: SpectralLibrarySettings,
@@ -171,6 +175,10 @@ pub struct Input {
     pub min_free_memory_gb: Option<f64>,
     #[schemars(range(min = 1))]
     pub batch_size: Option<usize>,
+    /// Worker threads for parallel work (default: all cores, or
+    /// `RAYON_NUM_THREADS` when set). The `--threads` flag overrides it.
+    #[schemars(range(min = 1))]
+    pub threads: Option<usize>,
 
     pub ptm_localization: Option<PtmLocalizationSettings>,
     pub spectral_library: Option<SpectralLibrarySettings>,
@@ -402,6 +410,14 @@ impl Input {
         if let Some(max_memory_gb) = matches.get_one::<f64>("max-memory").copied() {
             input.max_memory_gb = Some(max_memory_gb);
         }
+        input.threads = resolve_threads(
+            matches
+                .try_get_one::<usize>("threads")
+                .ok()
+                .flatten()
+                .copied(),
+            input.threads,
+        );
 
         // Only override the config-file value when the flag is explicitly set.
         if matches.get_flag("localize") {
@@ -582,6 +598,10 @@ impl Input {
         );
         self.memory_limits()?;
         resolve_batch_size(self.batch_size)?;
+        ensure!(
+            self.threads != Some(0),
+            "`threads` must be greater than zero"
+        );
         if let Some(bruker) = &self.bruker_config {
             bruker.denoise.validate()?;
         }
@@ -791,6 +811,7 @@ impl Input {
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
             max_memory_gb: memory_limits.max_gib(),
             batch_size,
+            threads: self.threads,
             ptm_localization,
             spectral_library,
             mass_shift_ppm: self
@@ -808,6 +829,13 @@ impl Input {
     pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
         MemoryLimits::from_gib(self.max_memory_gb)
     }
+}
+
+/// Worker thread count: the `--threads` flag wins over the configuration's
+/// `threads`. `None` leaves the choice to Rayon, which honours
+/// `RAYON_NUM_THREADS` and otherwise uses every core.
+pub fn resolve_threads(cli: Option<usize>, config: Option<usize>) -> Option<usize> {
+    cli.or(config)
 }
 
 fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
