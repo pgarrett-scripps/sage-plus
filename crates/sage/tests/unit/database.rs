@@ -2646,6 +2646,16 @@ fn isoleucine_leucine_twins_merge_into_one_peptide() {
 }
 
 #[test]
+fn twins_from_one_protein_list_it_once() {
+    let fasta = Fasta::parse(">a\nGGRAPEPIDEKAPEPLDEKR\n".into(), "rev_", true).unwrap();
+    let peptides = isoleucine_leucine_parameters(true, serde_json::json!({})).digest(&fasta);
+    let targets = isoleucine_leucine_twins(&peptides, false);
+    assert_eq!(targets.len(), 1, "{targets:?}");
+    assert_eq!(targets[0].proteins.as_slice(), &["a".into()]);
+    assert_eq!(targets[0].protein_sites.len(), 2);
+}
+
+#[test]
 fn modifications_on_isoleucine_or_leucine_keep_twins_apart() {
     let fasta = Fasta::parse(
         ">a\nGGRAPEPIDEKR\n>b\nLLRAPEPLDEKGGWR\n>c\nSSRAPEPJDEKWWK\n".into(),

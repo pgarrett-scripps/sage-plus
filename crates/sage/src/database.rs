@@ -1447,9 +1447,11 @@ impl Parameters {
                     .then(a.decoy.cmp(&b.decoy))
             });
         }
-        target_decoys
-            .par_iter_mut()
-            .for_each(|peptide| peptide.proteins.sort_unstable());
+        target_decoys.par_iter_mut().for_each(|peptide| {
+            // Merged I/L/J twins from one protein list it once.
+            peptide.proteins.sort_unstable();
+            peptide.proteins.dedup();
+        });
 
         let num_dropped = init_size - target_decoys.len();
         log::trace!(
