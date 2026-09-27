@@ -846,6 +846,45 @@ impl Peptide {
         }
     }
 
+    /// FASTA spans, as written, that this peptide was expanded from when they
+    /// contain ambiguous residues (B, X or Z), joined by `;`. A generated
+    /// decoy reports its target's span reversed the same way. `None` when no
+    /// occurrence was expanded.
+    pub fn database_peptide(&self) -> Option<String> {
+        use crate::ambiguous_residues::{is_ambiguous, is_expansion_of};
+        let len = self.sequence.len();
+        let mut spans = self
+            .protein_sites
+            .iter()
+            .filter_map(|site| {
+                let start = site.start? as usize;
+                let span = site.source.as_ref()?.as_bytes().get(start..start + len)?;
+                if !is_ambiguous(span) {
+                    return None;
+                }
+                if is_expansion_of(span, &self.sequence) {
+                    return Some(span.to_vec());
+                }
+                let mut reversed = span.to_vec();
+                if len > 2 {
+                    reversed[1..len - 1].reverse();
+                }
+                is_expansion_of(&reversed, &self.sequence).then_some(reversed)
+            })
+            .collect::<Vec<_>>();
+        if spans.is_empty() {
+            return None;
+        }
+        spans.sort_unstable();
+        spans.dedup();
+        Some(
+            spans
+                .iter()
+                .map(|span| String::from_utf8_lossy(span))
+                .join(";"),
+        )
+    }
+
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
         let sites = self.rule_sites(target);
         if !self.modifications.is_empty() {

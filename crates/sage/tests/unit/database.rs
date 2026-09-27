@@ -698,6 +698,8 @@ fn digestion() {
         decoy_tag: "rev_".into(),
         generate_decoys: false,
         fasta: "none".into(),
+        expand_ambiguous_residues: false,
+        max_ambiguous_variants: 20,
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
@@ -2168,4 +2170,61 @@ fn same_peptidoform_compares_chemistry_decoy_state_and_sequence() {
     assert!(!same_peptidoform(oxidized, &decoy));
     // Reversing twice restores the same chemical peptidoform.
     assert!(same_peptidoform(oxidized, &oxidized.reverse().reverse()));
+}
+
+fn ambiguous_parameters(expand: bool) -> Parameters {
+    Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(0),
+            min_len: Some(5),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        expand_ambiguous_residues: Some(expand),
+        ..Default::default()
+    }
+    .make_parameters()
+}
+
+#[test]
+fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
+    let fasta = || Fasta::parse(">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n".into(), "rev_", true).unwrap();
+
+    let off = ambiguous_parameters(false);
+    let on = ambiguous_parameters(true);
+    assert!(
+        on.estimate_memory(&fasta()).unmodified_peptides
+            > off.estimate_memory(&fasta()).unmodified_peptides
+    );
+
+    let database = off.build(fasta());
+    let peptide = database
+        .peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"GEPTIDEK")
+        .unwrap();
+    assert_eq!(peptide.proteins("rev_", true), "P2");
+    assert_eq!(peptide.database_peptide(), None);
+
+    let database = on.build(fasta());
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let target = find(b"GEPTIDEK");
+    assert_eq!(target.proteins("rev_", true), "P1;P2");
+    assert_eq!(target.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let variant = find(b"GEPWIDEK");
+    assert_eq!(variant.proteins("rev_", true), "P1");
+    assert_eq!(variant.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let decoy = find(b"GEDITPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.database_peptide().as_deref(), Some("GEDIXPEK"));
+    assert!(database
+        .peptides
+        .iter()
+        .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
 }

@@ -6,6 +6,7 @@ fn whole_protein_digest(length: usize) -> EnzymeParameters {
         min_len: length,
         max_len: length,
         enzyme: None,
+        ambiguous_variants: None,
     }
 }
 
@@ -165,5 +166,92 @@ fn rejects_invalid_residue_with_line_number() {
             line: 2,
             residue: 't'
         }
+    );
+}
+
+fn trypsin(ambiguous_variants: Option<usize>) -> EnzymeParameters {
+    EnzymeParameters {
+        missed_cleavages: 0,
+        min_len: 2,
+        max_len: 50,
+        enzyme: crate::enzyme::Enzyme::new("KR", "P", true, false),
+        ambiguous_variants,
+    }
+}
+
+fn digest_sequences(digests: &[Digest]) -> Vec<(&str, Option<u32>, bool)> {
+    let mut sequences = digests
+        .iter()
+        .map(|digest| {
+            (
+                digest.sequence.as_str(),
+                digest.protein_start,
+                digest.expanded_from.is_some(),
+            )
+        })
+        .collect::<Vec<_>>();
+    sequences.sort();
+    sequences
+}
+
+#[test]
+fn ambiguous_residues_are_expanded_per_digest() {
+    let fasta = Fasta::parse(">P1\nPEPXIDEKAABAAK\n".into(), "rev_", true).unwrap();
+
+    // As written, digests keep B and X and are dropped as peptides later.
+    assert_eq!(
+        digest_sequences(&fasta.digest(&trypsin(None))),
+        vec![("AABAAK", Some(8), false), ("PEPXIDEK", Some(0), false)]
+    );
+
+    let digests = fasta.digest(&trypsin(Some(20)));
+    let sequences = digest_sequences(&digests);
+    assert_eq!(sequences.len(), 22);
+    assert!(sequences.contains(&("AADAAK", Some(8), true)));
+    assert!(sequences.contains(&("AANAAK", Some(8), true)));
+    assert!(sequences.contains(&("PEPTIDEK", Some(0), true)));
+    // Cleavage follows the FASTA residue: an X expanded to K is not a site.
+    assert!(sequences.contains(&("PEPKIDEK", Some(0), true)));
+    for digest in &digests {
+        assert_eq!(digest.protein.as_ref(), "P1");
+        assert_eq!(
+            digest.expanded_from.as_ref().unwrap().as_str(),
+            "PEPXIDEKAABAAK"
+        );
+    }
+
+    // One X exceeds two variants; the B peptide is still expanded.
+    assert_eq!(
+        digest_sequences(&fasta.digest(&trypsin(Some(2)))),
+        vec![("AADAAK", Some(8), true), ("AANAAK", Some(8), true)]
+    );
+    assert_eq!(
+        fasta.ambiguous_expansion_summary(&trypsin(Some(2)), None),
+        Some(AmbiguousExpansionSummary {
+            expanded: 1,
+            variants: 2,
+            dropped: 1,
+        })
+    );
+    assert_eq!(fasta.ambiguous_expansion_summary(&trypsin(None), None), None);
+}
+
+#[test]
+fn supplied_decoys_are_expanded_like_targets() {
+    let fasta = Fasta::parse(">P1\nAABAAK\n>rev_P1\nAAZAAK\n".into(), "rev_", false).unwrap();
+    let digests = fasta.digest(&trypsin(Some(20)));
+    let mut decoys = digests
+        .iter()
+        .map(|digest| (digest.sequence.as_str(), digest.decoy))
+        .collect::<Vec<_>>();
+    decoys.sort();
+    assert_eq!(
+        decoys,
+        vec![
+            ("AADAAK", false),
+            ("AAEAAK", true),
+            ("AANAAK", false),
+            ("AAQAAK", true)
+        ]
     );
 }

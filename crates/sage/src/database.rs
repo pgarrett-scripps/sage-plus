@@ -70,6 +70,7 @@ impl From<EnzymeBuilder> for EnzymeParameters {
                 en.c_terminal.unwrap_or(true),
                 en.semi_enzymatic.unwrap_or(false),
             ),
+            ambiguous_variants: None,
         }
     }
 }
@@ -118,6 +119,15 @@ pub struct Builder {
     pub generate_decoys: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
+    /// Expand ambiguous FASTA residues into every residue they may stand
+    /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues
+    /// (default false: peptides containing B, X or Z are not searched).
+    /// J (Ile or Leu) is always searched with the I/L mass.
+    pub expand_ambiguous_residues: Option<bool>,
+    /// Peptides whose ambiguous residues expand into more sequences than
+    /// this are dropped (default 20, one X per peptide). Values below 1 are
+    /// normalized to 1.
+    pub max_ambiguous_variants: Option<usize>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
     /// Configured static, variable, and channel-aware modifications are applied.
@@ -184,6 +194,8 @@ impl Builder {
             ptm_library: self.ptm_library,
             generate_decoys: self.generate_decoys.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
+            expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
+            max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter: self.prefilter.unwrap_or(false),
@@ -217,6 +229,8 @@ pub struct Parameters {
     pub decoy_tag: String,
     pub generate_decoys: bool,
     pub fasta: String,
+    pub expand_ambiguous_residues: bool,
+    pub max_ambiguous_variants: usize,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
     pub prefilter: bool,
@@ -292,6 +306,35 @@ pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
 }
 
 impl Parameters {
+    /// Digest settings, including ambiguous-residue expansion.
+    pub fn enzyme_parameters(&self) -> EnzymeParameters {
+        let mut enzyme: EnzymeParameters = self.enzyme.clone().into();
+        enzyme.ambiguous_variants = self
+            .expand_ambiguous_residues
+            .then_some(self.max_ambiguous_variants);
+        enzyme
+    }
+
+    /// Log how many digests with ambiguous residues were expanded or
+    /// dropped. Only proteins with such residues are digested again.
+    pub fn log_ambiguous_expansion(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) {
+        if let Some(summary) =
+            fasta.ambiguous_expansion_summary(&self.enzyme_parameters(), custom_cleavages)
+        {
+            log::info!(
+                "expanded {} digest(s) with ambiguous residues (B, X, Z) into {} variant(s); dropped {} with more than {} variant(s) (database.max_ambiguous_variants)",
+                summary.expanded,
+                summary.variants,
+                summary.dropped,
+                self.max_ambiguous_variants,
+            );
+        }
+    }
+
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
         let max_len = self.enzyme.max_len.unwrap_or(50);
         if max_len > u8::MAX as usize {
@@ -714,7 +757,7 @@ impl Parameters {
     ) -> DatabaseMemoryEstimate {
         const ALLOCATION_OVERHEAD: u64 = 16;
 
-        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
         let rules = self.variable_modifications();
 
@@ -1044,7 +1087,7 @@ impl Parameters {
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
     ) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
-        let enzyme = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let digests = fasta.digest_with_custom_cleavages(&enzyme, custom_cleavages);
 
         log::trace!("grouping digests");
@@ -1296,6 +1339,7 @@ impl Parameters {
                     next_aa: None,
                     missed_cleavages: 0,
                     position: Position::Full,
+                    expanded_from: None,
                 };
                 match Peptide::try_from(digest) {
                     Ok(p) => Some(p),

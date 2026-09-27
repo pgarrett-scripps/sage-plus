@@ -16,6 +16,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
         Digest {
             decoy: false,
@@ -27,6 +28,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
     ];
 
@@ -45,6 +47,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
         Digest {
             decoy: false,
@@ -56,6 +59,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
     ];
 
@@ -80,6 +84,7 @@ fn trypsin() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -113,6 +118,7 @@ fn trypsin_missed_cleavage() {
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -150,6 +156,7 @@ fn trypsin_missed_cleavage_2() {
         max_len: 50,
         missed_cleavages: 2,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -178,6 +185,7 @@ fn test_trypsin_pro() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -199,6 +207,7 @@ fn test_asp_n() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("D", "", false, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -228,6 +237,7 @@ fn test_chymotrypsin_pro() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("FYWL", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -254,6 +264,7 @@ fn nonspecific_digest_5() {
         max_len: 5,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -283,6 +294,7 @@ fn nonspecific_digest_5_7() {
         max_len: 7,
         missed_cleavages: 0,
         enzyme: Enzyme::new("", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -304,6 +316,7 @@ fn no_digest() {
         max_len: usize::MAX,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -328,6 +341,7 @@ fn preserve_repeated_sequence_coordinates() {
         max_len: usize::MAX,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -351,6 +365,7 @@ fn mini_semi_trypsin() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, true),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -401,6 +416,7 @@ fn semi_trypsin_trypsin_missed_cleavage() {
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, true),
+        ambiguous_variants: None,
     };
 
     for (digest, expected) in tryp
@@ -438,6 +454,7 @@ fn custom_cleavages_add_both_sides_with_missed_cleavages() {
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let digests = tryp.digest_with_custom_cleavages(sequence, Arc::default(), &[8]);
@@ -462,6 +479,7 @@ fn existing_enzyme_boundary_does_not_add_duplicates() {
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let ordinary = tryp.digest(sequence, Arc::default());
@@ -477,6 +495,7 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
     let sequences = no_digest
         .digest_with_custom_cleavages(sequence, Arc::default(), &[4])
@@ -492,6 +511,7 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
         max_len: 5,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
     assert_eq!(
         nonspecific.digest(sequence, Arc::default()),
@@ -507,6 +527,7 @@ fn nonspecific_digest_spans_share_one_protein_allocation() {
         max_len: 3,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
     let digests =
         nonspecific.digest_protein_with_custom_cleavages(&sequence, Arc::from("protein"), &[]);
@@ -527,6 +548,7 @@ fn grouping_uses_sequence_content_instead_of_storage_identity() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
     let first: ProteinSequence = "PEPTIDE".into();
     let second: ProteinSequence = "PEPTIDE".into();
@@ -570,6 +592,7 @@ fn quickcheck_semi_missed_cleavages(RandomSequence { sequence }: RandomSequence)
         max_len: 50,
         missed_cleavages: 2,
         enzyme: Enzyme::new("KR", "", true, true),
+        ambiguous_variants: None,
     };
 
     for digest in tryp.digest(&sequence, Arc::default()) {

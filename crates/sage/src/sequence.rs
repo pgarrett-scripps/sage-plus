@@ -6,13 +6,13 @@ use std::ops::{Deref, Range};
 use std::sync::{Arc, OnceLock};
 
 /// One protein-sized allocation shared by every peptide span derived from it.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SequenceStorage {
     bytes: Box<[u8]>,
 }
 
 /// An immutable protein sequence that can cheaply produce peptide spans.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProteinSequence {
     storage: Arc<SequenceStorage>,
 }

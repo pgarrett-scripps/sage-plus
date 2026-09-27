@@ -781,6 +781,7 @@ impl Runner {
                 }
             }
 
+            database_parameters.log_ambiguous_expansion(&fasta, custom_cleavages.as_ref());
             match database_parameters.prefilter {
                 false => {
                     let digests = database_parameters

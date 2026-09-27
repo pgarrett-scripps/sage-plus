@@ -195,6 +195,7 @@ fn full() {
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let peptides = tryp
@@ -387,6 +388,7 @@ fn test_psuedo_forward() {
         min_len: 3,
         max_len: 30,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let fwd = "MADEEKLPPGWEKRMSRSSGRVYYFNHITNASQWERPSGN";
