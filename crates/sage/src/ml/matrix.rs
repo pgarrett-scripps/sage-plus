@@ -123,7 +123,11 @@ impl Matrix {
     }
 
     pub fn get_mut(&mut self, row: usize, col: usize) -> Option<&mut f64> {
-        self.data.get_mut(self.cols * row + col)
+        if row >= self.rows || col >= self.cols {
+            None
+        } else {
+            self.data.get_mut(self.cols * row + col)
+        }
     }
 
     /// Return an iterator over values in a single row
@@ -155,12 +159,12 @@ impl Matrix {
     }
 
     pub fn is_close(&self, rhs: &Self, eps: f64) -> bool {
-        if self.cols != self.rows {
+        if self.rows != rhs.rows || self.cols != rhs.cols {
             return false;
         }
 
         for i in 0..self.rows {
-            for j in 0..self.rows {
+            for j in 0..self.cols {
                 if (self[(i, j)] - rhs[(i, j)]).abs() > eps {
                     return false;
                 }

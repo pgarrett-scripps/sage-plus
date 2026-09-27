@@ -278,3 +278,64 @@ fn constant_feature_columns_are_ignored() {
             .expect("fits");
     assert_eq!(regularized.coef[1], 0.0);
 }
+
+#[test]
+fn failure_messages_are_specific() {
+    assert_eq!(
+        LdaFailure::TooFewPsms {
+            targets: 3,
+            decoys: 0
+        }
+        .to_string(),
+        "too few PSMs to fit (3 targets, 0 decoys; need 20 of each)"
+    );
+    assert_eq!(
+        LdaFailure::NonFinite.to_string(),
+        "features or coefficients are not finite"
+    );
+    assert_eq!(
+        LdaFailure::SingularScatter.to_string(),
+        "within-class scatter matrix is singular"
+    );
+    assert_eq!(
+        LdaFailure::Degenerate.to_string(),
+        "model does not separate targets from decoys"
+    );
+    let boxed: Box<dyn std::error::Error> = Box::new(LdaFailure::Degenerate);
+    assert!(boxed.to_string().contains("separate"));
+}
+
+#[test]
+fn feature_rows_debug_print_with_names() {
+    let mut row = [0.0; 20];
+    row[0] = 1.0;
+    row[19] = 2.5;
+    let text = format!("{:?}", Features(&row));
+    assert!(
+        text.starts_with("{\"rank\": 1.0, \"charge\": 0.0,"),
+        "{text}"
+    );
+    assert!(text.ends_with("\"sqrt(delta_ims_model)\": 2.5}"), "{text}");
+}
+
+#[test]
+fn fallback_discriminant_hand_values() {
+    let feature = |poisson: f64, longest_y_pct: f32| Feature {
+        poisson,
+        longest_y_pct,
+        ..Default::default()
+    };
+    // ln(1 + (e - 1)) = 1, plus 0.3 / 3
+    let f = fallback_discriminant(&feature(-(std::f64::consts::E - 1.0), 0.3));
+    assert!((f - 1.1).abs() < 1e-5, "{f}");
+    // An underflowed probability is capped, not infinite.
+    assert_eq!(
+        fallback_discriminant(&feature(f64::NEG_INFINITY, 0.0)),
+        FALLBACK_POISSON_CAP
+    );
+    // NaN Poisson and non-finite longest_y count as zero.
+    assert_eq!(fallback_discriminant(&feature(f64::NAN, f32::NAN)), 0.0);
+    assert_eq!(fallback_discriminant(&feature(0.0, f32::INFINITY)), 0.0);
+    // ln_1p(-poisson) for positive poisson > 1 is NaN, which also counts as zero.
+    assert!((fallback_discriminant(&feature(2.0, 0.6)) - 0.2).abs() < 1e-6);
+}

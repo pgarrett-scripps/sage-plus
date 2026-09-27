@@ -256,3 +256,7 @@ pub fn build_orphans(
 fn apex_intensity(window: &Channel, hill: &CompactHill) -> f32 {
     window.intensity(hill, hill.apex as i64)
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/pseudo.rs"]
+mod tests;

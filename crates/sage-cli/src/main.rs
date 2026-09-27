@@ -137,7 +137,7 @@ fn main() -> anyhow::Result<()> {
                 .value_parser(value_parser!(f64))
                 .help(
                     "Override `max_memory_gb` from the parameter file. Sage aborts \
-                     if its resident memory exceeds this many GiB; 0 disables the limit.",
+                     if its measured memory reaches this many GiB; 0 disables the limit.",
                 )
                 .value_hint(ValueHint::Other),
         )
@@ -166,6 +166,16 @@ fn main() -> anyhow::Result<()> {
             .requires("preview-modifications").default_value("100")
             .value_parser(value_parser!(u32).range(1..=10000))
             .help("Maximum variants returned by the modification preview"))
+        .arg(
+            Arg::new("estimate")
+                .long("estimate")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with("validate-only")
+                .help(
+                    "Print a rough database memory estimate and exit without searching. \
+                     Estimates never stop a run; `max_memory_gb` is enforced on measured memory",
+                ),
+        )
         .arg(
             Arg::new("validate-only")
                 .long("validate-only")
@@ -235,6 +245,7 @@ fn main() -> anyhow::Result<()> {
         .get_one::<bool>("validate-only")
         .copied()
         .unwrap_or(false);
+    let estimate_only = matches.get_flag("estimate");
     let events = match matches.get_one::<String>("events-jsonl") {
         Some(path) if path == "-" => EventEmitter::from_writer(std::io::stdout()),
         Some(path) => EventEmitter::from_writer(BufWriter::new(File::create(path)?)),
@@ -262,6 +273,11 @@ fn main() -> anyhow::Result<()> {
             terminate_on_memory_limit: true,
         },
     );
+
+    if estimate_only {
+        print!("{}", runner.estimate()?);
+        return Ok(());
+    }
 
     if validate_only {
         runner.validate()?;

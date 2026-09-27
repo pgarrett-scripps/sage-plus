@@ -590,7 +590,6 @@ impl Runner {
                 parallelism: parallel,
                 rayon_threads: rayon::current_num_threads(),
                 max_memory_gb: self.parameters.max_memory_gb,
-                min_free_memory_gb: self.parameters.min_free_memory_gb,
             },
             inputs: input_stats,
             modifications: ModificationRunStats {

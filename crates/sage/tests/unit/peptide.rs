@@ -882,3 +882,346 @@ fn static_modification_names_are_rendered() {
     let peptides = peptide.apply(&[], &static_mods, 0, None);
     assert_eq!(peptides[0].to_string(), "AC[Carbamidomethyl]K");
 }
+
+fn plain_peptide(sequence: &str) -> Peptide {
+    Peptide::try_from(Digest {
+        sequence: sequence.into(),
+        ..Default::default()
+    })
+    .unwrap()
+}
+
+#[test]
+fn static_terminal_mod_yields_to_variable_terminal_mod() {
+    use ModificationSpecificity::*;
+    let static_mods = HashMap::from([(PeptideN(None), 42.0f32)]);
+    let variants =
+        plain_peptide("PEPK").apply(&[(PeptideN(None), 12.0, None)], &static_mods, 1, None);
+    let rendered = variants.iter().map(ToString::to_string).collect::<Vec<_>>();
+    // The static group fills the free N-terminus, but never stacks on top of
+    // a variable modification that already occupies it.
+    assert_eq!(rendered, vec!["[+42]-PEPK", "[+12]-PEPK"]);
+    let base = plain_peptide("PEPK").monoisotopic;
+    assert!((variants[0].monoisotopic - (base + 42.0)).abs() < 1e-3);
+    assert!((variants[1].monoisotopic - (base + 12.0)).abs() < 1e-3);
+}
+
+#[test]
+fn static_terminal_and_residue_mods_both_apply_and_add_mass() {
+    use ModificationSpecificity::*;
+    let static_mods = HashMap::from([(Residue(b'C'), 57.0f32), (PeptideC(None), 1.0)]);
+    let peptide = plain_peptide("ACCK");
+    let base = peptide.monoisotopic;
+    let variants = peptide.apply(&[], &static_mods, 0, None);
+    assert_eq!(variants.len(), 1);
+    assert_eq!(variants[0].to_string(), "AC[+57]C[+57]K-[+1]");
+    assert_eq!(variants[0].cterm, Some(1.0));
+    assert!((variants[0].monoisotopic - (base + 115.0)).abs() < 1e-3);
+}
+
+#[test]
+fn modified_decoys_mirror_internal_positions_and_keep_terminal_mods() {
+    use ModificationSpecificity::*;
+    let variants = plain_peptide("ACDEFK").apply(
+        &[
+            (Residue(b'C'), 57.0f32, None),
+            (Residue(b'K'), 8.0, None),
+            (PeptideN(None), 42.0, None),
+        ],
+        &HashMap::default(),
+        3,
+        None,
+    );
+    let target = variants
+        .iter()
+        .find(|peptide| peptide.to_string() == "[+42]-AC[+57]DEFK[+8]")
+        .unwrap();
+    let decoy = target.reverse();
+    assert!(decoy.decoy);
+    assert_eq!(decoy.to_string(), "[+42]-AFEDC[+57]K[+8]");
+    assert_eq!(decoy.label(), -1);
+    assert_eq!(target.label(), 1);
+    assert_eq!(decoy.monoisotopic, target.monoisotopic);
+    assert_eq!(decoy.nterm, Some(42.0));
+    assert_eq!(decoy.modification_at(4), 57.0);
+    assert_eq!(decoy.modification_at(1), 0.0);
+    // Reversing twice restores the target exactly.
+    let restored = decoy.reverse();
+    assert!(!restored.decoy);
+    assert_eq!(restored.to_string(), target.to_string());
+    assert_eq!(restored.modification_at(1), 57.0);
+}
+
+#[test]
+fn two_residue_decoys_keep_sequence_and_modifications() {
+    use ModificationSpecificity::*;
+    let variants = plain_peptide("CK").apply(
+        &[(Residue(b'C'), 57.0f32, None)],
+        &HashMap::default(),
+        1,
+        None,
+    );
+    let decoy = variants[1].reverse();
+    assert!(decoy.decoy);
+    assert_eq!(decoy.to_string(), "C[+57]K");
+}
+
+#[test]
+fn decoy_protein_names_follow_generation_mode() {
+    let mut peptide = plain_peptide("PEPK");
+    peptide.proteins = smallvec::smallvec![Arc::from("P1"), Arc::from("P2")];
+    assert_eq!(peptide.proteins("rev_", true), "P1;P2");
+    let decoy = peptide.reverse();
+    assert_eq!(decoy.proteins("rev_", true), "rev_P1;rev_P2");
+    // FASTA-supplied decoys already carry their tag.
+    assert_eq!(decoy.proteins("rev_", false), "P1;P2");
+}
+
+#[test]
+fn mass_offset_variants_match_indexed_variant_mass_exactly() {
+    use ModificationSpecificity::*;
+    let peptide = plain_peptide("PEPMK");
+    let oxidation = Arc::new(ModificationDefinition::bare(15.9949));
+    let indexed = peptide
+        .clone()
+        .apply(
+            &[(Residue(b'M'), 15.9949f32, None)],
+            &HashMap::default(),
+            1,
+            None,
+        )
+        .pop()
+        .unwrap();
+    let offset = peptide.with_mass_offset(Site::Sequence(3), &oxidation);
+    assert_eq!(offset.to_string(), "PEPM[+15.9949]K");
+    assert_eq!(offset.to_string(), indexed.to_string());
+    assert_eq!(offset.monoisotopic, indexed.monoisotopic);
+    // The source peptide is untouched.
+    assert!(peptide.modifications.is_empty());
+
+    // A decoy takes its target's mass bit for bit.
+    let decoy = peptide.reverse();
+    assert_eq!(decoy.to_string(), "PMPEK");
+    let decoy_offset = decoy.with_mass_offset(Site::Sequence(1), &oxidation);
+    assert_eq!(decoy_offset.to_string(), "PM[+15.9949]PEK");
+    assert_eq!(decoy_offset.monoisotopic, offset.monoisotopic);
+}
+
+#[test]
+fn mass_offsets_on_terminal_sites_stack_with_existing_terminal_mods() {
+    use ModificationSpecificity::*;
+    let acetylated = plain_peptide("PEPK")
+        .apply(
+            &[(PeptideN(None), 12.0f32, None)],
+            &HashMap::default(),
+            1,
+            None,
+        )
+        .pop()
+        .unwrap();
+    // Unlike indexed terminal mods, a search-time mass offset explains an
+    // extra delta, so it adds to whatever the terminus already carries.
+    let offset =
+        acetylated.with_mass_offset(Site::Nterm, &Arc::new(ModificationDefinition::bare(42.0)));
+    assert_eq!(offset.nterm, Some(54.0));
+    assert_eq!(offset.to_string(), "[+12][+42]-PEPK");
+    assert!((offset.monoisotopic - (acetylated.monoisotopic + 42.0)).abs() < 1e-3);
+
+    let named = plain_peptide("PEPK").with_mass_offset(
+        Site::Cterm,
+        &detailed_mod(0.984, "Amidated", &[], NeutralLossMode::Optional),
+    );
+    assert_eq!(named.cterm, Some(0.984));
+    assert_eq!(named.to_string(), "PEPK-[Amidated]");
+}
+
+#[test]
+fn modification_count_matches_site_rule_and_mass() {
+    use ModificationSpecificity::*;
+    let variants = plain_peptide("MSMK").apply(
+        &[(Residue(b'M'), 16.0f32, None), (PeptideN(None), 42.0, None)],
+        &HashMap::default(),
+        3,
+        None,
+    );
+    let full = variants
+        .iter()
+        .find(|peptide| peptide.to_string() == "[+42]-M[+16]SM[+16]K")
+        .unwrap();
+    assert_eq!(full.modification_count(Residue(b'M'), 16.0), 2);
+    assert_eq!(full.modification_count(PeptideN(None), 42.0), 1);
+    assert_eq!(full.modification_count(Residue(b'M'), 32.0), 0);
+    assert_eq!(full.modification_count(PeptideN(Some(b'M')), 16.0), 1);
+    assert_eq!(full.modification_count(Residue(b'S'), 16.0), 0);
+    assert_eq!(variants[0].modification_count(Residue(b'M'), 16.0), 0);
+
+    // Peptides parsed from mass deltas only carry terminal masses.
+    let legacy = Peptide {
+        sequence: (&b"AK"[..]).into(),
+        nterm: Some(42.0),
+        cterm: Some(1.0),
+        ..Peptide::default()
+    };
+    assert_eq!(legacy.modification_count(PeptideN(None), 42.0), 1);
+    assert_eq!(legacy.modification_count(PeptideC(None), 1.0), 1);
+    assert_eq!(legacy.modification_count(PeptideC(None), 42.0), 0);
+}
+
+#[test]
+fn relocating_a_modification_moves_only_the_matching_mass() {
+    use ModificationSpecificity::*;
+    let peptide = plain_peptide("SASK")
+        .apply(
+            &[(Residue(b'S'), 79.97f32, None), (Residue(b'K'), 8.0, None)],
+            &HashMap::default(),
+            2,
+            None,
+        )
+        .into_iter()
+        .find(|peptide| peptide.to_string() == "S[+79.97]ASK[+8]")
+        .unwrap();
+
+    let mut moved = peptide.clone();
+    moved.relocate_modification_mass(79.97, &[0, 2], &[2], 0.01);
+    assert_eq!(moved.to_string(), "SAS[+79.97]K[+8]");
+    assert_eq!(moved.applied_modifications().len(), 2);
+
+    // Index `len` addresses the N-terminus.
+    let mut to_nterm = peptide.clone();
+    to_nterm.relocate_modification_mass(79.97, &[0, 4], &[4], 0.01);
+    assert_eq!(to_nterm.nterm, Some(79.97));
+    assert_eq!(to_nterm.to_string(), "[+79.97]-SASK[+8]");
+
+    // No applied modification has this mass: nothing changes.
+    let mut unchanged = peptide.clone();
+    unchanged.relocate_modification_mass(42.0, &[0, 2], &[2], 0.01);
+    assert_eq!(unchanged.to_string(), peptide.to_string());
+}
+
+#[test]
+fn peptide_errors_describe_the_rejected_input() {
+    let error = Peptide::try_from(Digest {
+        sequence: "PÉP".into(),
+        ..Default::default()
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "invalid peptide sequence: PÉP");
+    let error = PeptideError::SequenceTooLong {
+        length: 300,
+        maximum: 255,
+    };
+    assert_eq!(
+        error.to_string(),
+        "peptide has 300 residues, but compact modification encoding supports at most 255"
+    );
+}
+
+/// Enumerate acetylation of KAKAK (lysines at 0, 2 and 4) with a library
+/// that supports position 0, returning the modified positions of each variant.
+fn library_acetyl_variants(
+    max_count: Option<usize>,
+    max_total_count: Option<usize>,
+    site_mode: SiteMode,
+    max_exhaustive_mods: usize,
+    max_total_mods: usize,
+) -> Vec<Vec<u32>> {
+    let rules = vec![VariableRule {
+        specificity: ModificationSpecificity::Residue(b'K'),
+        modification: detailed_mod(42.0106, "Acetyl", &[], NeutralLossMode::Optional),
+        max_count,
+        max_total_count,
+        site_mode,
+        count_group: 0,
+    }];
+    let library = vec![LibrarySite {
+        attachment: Default::default(),
+        position: 0,
+        modification: Arc::from("Acetyl"),
+    }];
+    let static_mods = HashMap::new();
+    let labels = LabelModificationCache::new(rules.iter().map(|rule| &rule.modification), &[]);
+    let lookup = ModificationLookup::for_rules(&rules, &static_mods, &[], &labels).unwrap();
+    let plan = ModificationPlan::new(
+        &rules,
+        &static_mods,
+        lookup,
+        max_exhaustive_mods,
+        max_total_mods,
+        None,
+    );
+    let mut variants = plain_peptide("KAKAK")
+        .apply_rules(&plan, &library)
+        .iter()
+        .map(|peptide| {
+            peptide
+                .applied_modifications()
+                .map(|applied| match applied.site {
+                    Site::Sequence(index) => index,
+                    site => panic!("unexpected site {site:?}"),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    variants.sort();
+    variants
+}
+
+#[test]
+fn library_placements_skip_the_exhaustive_budget_but_not_the_total_budget() {
+    use SiteMode::*;
+    // One new placement allowed; the library site at 0 is free.
+    assert_eq!(
+        library_acetyl_variants(None, None, Both, 1, 3),
+        vec![vec![], vec![0], vec![0, 2], vec![0, 4], vec![2], vec![4]]
+    );
+    // The total budget still counts library placements.
+    assert_eq!(
+        library_acetyl_variants(None, None, Both, 3, 1),
+        vec![vec![], vec![0], vec![2], vec![4]]
+    );
+    // No exhaustive budget: only library placements remain.
+    assert_eq!(
+        library_acetyl_variants(None, None, Both, 0, 3),
+        vec![vec![], vec![0]]
+    );
+}
+
+#[test]
+fn max_count_limits_new_sites_and_max_total_count_limits_all_sites() {
+    use SiteMode::*;
+    // max_count 1 alone also caps the total at 1 (max_total_count defaults to it).
+    assert_eq!(
+        library_acetyl_variants(Some(1), None, Both, 3, 3),
+        vec![vec![], vec![0], vec![2], vec![4]]
+    );
+    // Raising the total lets one library site join one new site.
+    assert_eq!(
+        library_acetyl_variants(Some(1), Some(2), Both, 3, 3),
+        vec![vec![], vec![0], vec![0, 2], vec![0, 4], vec![2], vec![4]]
+    );
+    // A total cap without max_count bounds every placement.
+    assert_eq!(
+        library_acetyl_variants(None, Some(2), Both, 3, 3).len(),
+        1 + 3 + 3
+    );
+    // max_count 1 with a total of 3 still forbids two new sites.
+    let variants = library_acetyl_variants(Some(1), Some(3), Both, 3, 3);
+    assert!(!variants.contains(&vec![0, 2, 4]));
+    assert!(!variants.contains(&vec![2, 4]));
+    assert!(variants.contains(&vec![0, 4]));
+}
+
+#[test]
+fn site_mode_decides_which_candidates_exist() {
+    use SiteMode::*;
+    // Library mode keeps only library-supported sites.
+    assert_eq!(
+        library_acetyl_variants(Some(1), None, Library, 3, 3),
+        vec![vec![], vec![0]]
+    );
+    // Exhaustive mode ignores the library, so site 0 consumes max_count.
+    assert_eq!(
+        library_acetyl_variants(Some(1), Some(3), Exhaustive, 3, 3),
+        vec![vec![], vec![0], vec![2], vec![4]]
+    );
+}

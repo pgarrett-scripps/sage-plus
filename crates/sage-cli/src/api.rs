@@ -1,6 +1,7 @@
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use crate::input::Input;
 use crate::memory;
+use crate::runner::estimate::{estimate_memory, MemoryEstimateReport};
 use crate::runner::{RunSummary, Runner};
 use crate::telemetry::Telemetry;
 
@@ -68,6 +69,14 @@ impl SageRunner {
                 .unwrap_or_default(),
         });
         self.options.events.check()
+    }
+
+    /// Rough database memory preview; reads the FASTA but runs no search.
+    pub fn estimate(self) -> anyhow::Result<MemoryEstimateReport> {
+        self.validate()?;
+        let mut input = self.input;
+        input.batch_size.get_or_insert(self.options.parallel);
+        estimate_memory(&input.build()?)
     }
 
     pub fn run(self) -> anyhow::Result<JobResult> {

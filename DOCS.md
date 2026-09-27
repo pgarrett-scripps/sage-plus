@@ -358,8 +358,7 @@ For additional information about configuration options and output file formats, 
   "output_filter": {         // Optional: rows written to PSM and matched-fragment Parquet files
     "psm_q_value": 0.1       // Optional[float] {default=0.1}: maximum spectrum-level q-value, inclusive
   },
-  "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its resident memory reaches this many GiB; 0 disables
-  "min_free_memory_gb": 2,  // Optional[float] {default=null}: stop Sage if system-available memory falls to this many GiB; 0 disables
+  "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its measured memory reaches this many GiB; 0 disables
   "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
   "output_directory": "s3://bucket/prefix", // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
@@ -374,8 +373,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.10
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.10 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.11
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.11 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -832,25 +831,29 @@ alongside the library, because the location table does not embed chemical masses
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
-  searching before building the search index. The spectra are indexed once, and the database is
-  generated in chunks and streamed through the spectrum index, so no fragment index is built for
-  discarded peptides. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
+  searching before building the search index. The spectra are indexed once, and proteins are
+  streamed through the spectrum index in parallel: each protein is digested, modified, and
+  checked on its own, and only its survivors are kept, so neither the whole digest nor a
+  fragment index for discarded peptides is ever held. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
   offset) of a spectrum has at least `prefilter_min_matched_peaks` preliminary fragment matches,
   counted as the search counts them. Targets, paired decoys, and label-channel partners are
-  retained together. The default of three matches keeps a small fraction of a large database and
+  retained together. The default of four matches keeps a small fraction of a large database and
   can drop a few weak identifications. With `prefilter_min_matched_peaks: 1` and no
   `prefilter_max_peaks`, every peptide that could enter the preliminary search is kept, and the
   results equal a full database search.
   The spectrum index is limited to a quarter of `max_memory_gb`, or 8 GiB without a limit. Larger
-  inputs are indexed in file batches, and the database is streamed once per batch. Set the
-  `SAGE_PREFILTER_INDEX_GB` environment variable to override the budget. Spectra read by the
+  inputs are indexed in file batches, and the proteins are streamed once per batch. Spectra read by the
   prefilter are kept for the search, from the first file batch up to the same budget, so those
   files are read and processed once. If keeping them would push the final fragment index past
   the memory limit, they are released and read again by the search.
-- **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
-  A value of zero selects the chunk size from the estimated number of modified peptides.
+  Digests whose sequence, or generated decoy sequence, occurs more than once in the database
+  (shared peptides, repeated proteins, decoy collisions) are set aside while streaming, grouped
+  with every digest that shares the sequence or its decoy, and each group is filtered as a
+  small database of its own, as a whole-database digest would filter it, so results are
+  unchanged.
+- **prefilter_chunk_size**: Deprecated and ignored; accepted so older configurations parse.
 - **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor
-  hypothesis of a spectrum needs to keep a peptide (default: 3, and never more than
+  hypothesis of a spectrum needs to keep a peptide (default: 4, and never more than
   `min_matched_peaks`). Preliminary fragments skip the first `min_ion_index` ions, so this counts
   fewer ions than `min_matched_peaks`. Set it to 1 for results identical to a full search.
 - **prefilter_max_peaks**: Integer. Only each spectrum's most intense peaks are used by the
@@ -978,11 +981,11 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
 - **spectral_library**: Object. Build an empirical library from confident target PSMs. See [Empirical Spectral Libraries](#empirical-spectral-libraries).
 - **output_filter.psm_q_value**: Float from 0 to 1. Maximum spectrum-level PSM q-value written to `results.sage.parquet` and `matched_fragments.sage.parquet` (default: 0.1). The boundary is inclusive. Set it to `1.0` to retain every scored PSM. This is an output-only filter: scoring, FDR estimation, LFQ, PTM localization, `.pin` output, and the HTML report continue to use their existing inputs and thresholds. Target and decoy PSMs that pass the threshold are retained so downstream target-decoy analyses remain possible.
-- **max_memory_gb**: Number. Abort the search if Sage's resident memory reaches this many GiB. Zero disables this limit (default: disabled).
-- **min_free_memory_gb**: Number. Abort the search if system-available memory falls to this many GiB, preserving capacity for the operating system and other applications. Zero disables this limit (default: disabled).
+- **max_memory_gb**: Number. Abort the search if Sage's measured (resident) memory reaches this many GiB. Zero disables this limit (default: disabled). It also sizes the prefilter's streamed digest and spectrum batches.
+- **min_free_memory_gb**: Ignored since Beta 11 and accepted only so older configurations still parse. Keeping memory free for other programs is left to the system.
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
 
-When either memory limit is enabled, Sage estimates the unmodified digest, variable-modification expansion, and fragment/index sizes before allocating them. Unsafe database searches return an error before expansion begins. Estimates are conservative and are backed by a runtime memory monitor for allocations outside database construction.
+Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts and whether the prefilter is on, and exits without reading spectra.
 
 ## DIA pseudo-spectrum search
 

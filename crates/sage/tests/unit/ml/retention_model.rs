@@ -403,3 +403,120 @@ fn basic_retention_predictions_ignore_redundant_and_permuted_columns() {
         "column permutation moved predictions by {reordered:e}"
     );
 }
+
+fn oxidized(sequence: &[u8]) -> Peptide {
+    let modifications = sequence
+        .iter()
+        .map(|&residue| if residue == b'M' { 15.994_915 } else { 0.0 })
+        .collect::<Vec<f32>>();
+    Peptide {
+        sequence: sequence.to_vec().into(),
+        modifications: crate::peptide::CompactModifications::from_dense(modifications),
+        ..Peptide::default()
+    }
+}
+
+fn offset_data() -> (IndexedDatabase, Vec<Feature>) {
+    let oxidation = (ModificationSpecificity::Residue(b'M'), 15.994_915);
+    let db = IndexedDatabase {
+        peptides: vec![oxidized(b"PEMK"), oxidized(b"MPMK"), oxidized(b"PEPK")],
+        // A duplicate key collapses; a key no peptide carries gets no offset.
+        model_mods: vec![
+            oxidation,
+            oxidation,
+            (ModificationSpecificity::Residue(b'S'), 79.966_33),
+        ],
+        ..IndexedDatabase::default()
+    };
+    let features = [0.625f32, 0.75, 0.5625]
+        .into_iter()
+        .enumerate()
+        .map(|(index, aligned_rt)| Feature {
+            peptide_idx: PeptideIx(index as u32),
+            label: 1,
+            spectrum_q: 0.001,
+            aligned_rt,
+            predicted_rt: 0.5,
+            ..Feature::default()
+        })
+        .collect();
+    (db, features)
+}
+
+#[test]
+fn ptm_offsets_are_ridge_regressed_residuals_per_modification() {
+    let (db, features) = offset_data();
+    let model = PtmOffsetModel::fit(&db, &features, &[0, 1, 2], 1.0).unwrap();
+    assert_eq!(model.keys.len(), 2);
+    // Oxidation counts [1, 2, 0], residuals [0.125, 0.25, 0.0625]:
+    // offset = (1 * 0.125 + 2 * 0.25) / (1 + 4 + ridge 1).
+    let oxidation = 0.625 / 6.0;
+    for (key, offset) in model.keys.iter().zip(&model.offsets) {
+        let want = if key.0 == ModificationSpecificity::Residue(b'M') {
+            oxidation
+        } else {
+            0.0
+        };
+        assert!((offset - want).abs() < 1e-12, "{offset}");
+    }
+    assert!((model.predict(&db[PeptideIx(1)]) - 2.0 * oxidation).abs() < 1e-12);
+    assert_eq!(model.predict(&db[PeptideIx(2)]), 0.0);
+
+    // Without modification keys there is nothing to fit.
+    let bare = IndexedDatabase {
+        peptides: db.peptides.clone(),
+        ..IndexedDatabase::default()
+    };
+    assert!(PtmOffsetModel::fit(&bare, &features, &[0, 1, 2], 1.0).is_none());
+}
+
+/// A seed that puts the two oxidized peptides in different folds, so each is
+/// corrected by a model trained on the other. Two folds never split them: the
+/// hash parity depends only on the residues.
+fn split_seed(folds: usize) -> u64 {
+    (0..1000)
+        .find(|&seed| peptide_fold(b"PEMK", folds, seed) != peptide_fold(b"MPMK", folds, seed))
+        .unwrap()
+}
+
+#[test]
+fn ptm_offsets_leave_unmodified_peptides_and_refresh_deltas() {
+    let settings = RetentionTimeSettings {
+        folds: 3,
+        seed: split_seed(3),
+        ptm_regularization: 1.0,
+        ..RetentionTimeSettings::default()
+    };
+    let (db, mut features) = offset_data();
+    let mut without_decoy = features.clone();
+    apply_ptm_offsets(&db, &mut without_decoy, &settings);
+    // A decoy never trains the offsets: a late decoy changes nothing.
+    features.push(Feature {
+        peptide_idx: PeptideIx(1),
+        label: -1,
+        aligned_rt: 0.9,
+        predicted_rt: 0.5,
+        ..Feature::default()
+    });
+    apply_ptm_offsets(&db, &mut features, &settings);
+    for (with, without) in features.iter().zip(&without_decoy) {
+        assert_eq!(with.predicted_rt, without.predicted_rt);
+    }
+    // Oxidation residuals are all positive, so both oxidized targets move up.
+    assert!(
+        features[0].predicted_rt > 0.5,
+        "{}",
+        features[0].predicted_rt
+    );
+    assert!(features[1].predicted_rt > features[0].predicted_rt);
+    // The unmodified peptide keeps its prediction.
+    assert_eq!(features[2].predicted_rt, 0.5);
+    assert_eq!(features[2].delta_rt_model, 0.0625);
+    for feature in &features {
+        assert!((0.0..=1.0).contains(&feature.predicted_rt));
+        assert_eq!(
+            feature.delta_rt_model,
+            (feature.aligned_rt - feature.predicted_rt).abs()
+        );
+    }
+}

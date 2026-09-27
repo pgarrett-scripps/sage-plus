@@ -41,13 +41,14 @@ Other benefits describe the intended effect and have not all been validated inde
 | Protein-backed peptide sequences and compact modification records | beta.2 | Every generated peptide allocated its own sequence and a dense modification vector | 29.5% less peak memory on a conventional search and 38.9% less with variable modifications ([results](benchmarks/RESULTS.md)) |
 | Lossless six-byte fragment index | beta.2 | Fragment records dominate index memory in large searches | Smaller index with exact masses and bounded search buckets |
 | Compact spectrum storage | beta.2 | Loaded spectra repeat fragment and charge data | Lower resident memory for large file batches |
-| Memory estimation, `max_memory_gb`, and `min_free_memory_gb` | beta.1 | Large searches could exhaust workstation memory | Oversized searches are rejected before they start, and running searches stop before the limit |
+| Memory estimation and `max_memory_gb` | beta.1 | Large searches could exhaust workstation memory | Running searches stop when measured memory reaches the limit; since Beta 11, estimates are only previewed with `--estimate` and never stop a run |
 | Configurable `batch_size` | beta.1 | Only a command-line option controlled file batching | Batching can be set per configuration |
 
 ### Modifications and PTMs
 
 | Feature | Since | Why it was added | Benefit |
 |---|---|---|---|
+| Streamed prefilter with a four-match default | beta.11 | The prefilter digested the whole database, or chunks of it, before filtering, and a 100x gut catalog search ran out of memory | Proteins stream through the spectrum index in parallel; 10x and 30x searches take about half the time with identical PSMs, and at four matches the 100x search finishes in 19 GiB |
 | Separate library and new-site limits per modification (`max_total_count`) | beta.10 | A library site used up its modification's `max_count`, so a known K14ac blocked a new K18ac | `max_count` limits new placements and `max_total_count` limits all placements; the memory preflight now counts variants exactly instead of overestimating PTM-library searches |
 | Motif modification sites (`motif:N*-{P}-[ST]`) | beta.8 | Residue sites could not require a sequence context such as the N-glycosylation sequon or a kinase motif | PROSITE-style patterns are evaluated against the source protein, including residues beyond the peptide, with mirrored decoys and motif-restricted localization |
 | Named modifications with explicit sites | beta.6 | Residue keys could not separate a terminal group from the residue at that terminus, or exclude terminal residues | One definition and one occurrence limit across attachment rules such as `first_residue:K`, `internal_residue:K`, and `peptide_n_term` |
@@ -106,7 +107,9 @@ Other benefits describe the intended effect and have not all been validated inde
 
 Database prefiltering keeps every peptide that can match a fragment in any spectrum, then builds
 the search index from those peptides only. It gives the same results as a full search. Beta 7
-indexes the spectra once and streams the generated peptides through that index.
+indexes the spectra once and streams the generated peptides through that index. The next
+release streams proteins through it in parallel, one per worker, so the whole digest is never
+held.
 
 | Workload | Beta 6 prefilter | Beta 7 prefilter | No prefilter | Peptides kept |
 |---|---:|---:|---:|---:|

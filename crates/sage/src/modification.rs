@@ -908,6 +908,11 @@ impl FromStr for ModificationSpecificity {
         let (kind, residue) = s.split_once(':').map_or((s, None), |(k, r)| (k, Some(r)));
         let aa = match residue {
             Some(r) if r.len() == 1 && VALID_AA.contains(&r.as_bytes()[0]) => Some(r.as_bytes()[0]),
+            Some(r) if r.chars().count() == 1 => {
+                return Err(InvalidModification::InvalidResidue(
+                    r.chars().next().unwrap(),
+                ))
+            }
             Some(_) => return Err(InvalidModification::TooLong(s.into())),
             None => None,
         };

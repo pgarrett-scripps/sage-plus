@@ -1211,6 +1211,44 @@ mod mass_offsets {
             .is_empty());
     }
 
+    fn scored(scorer: &Scorer, query: &ProcessedSpectrum) -> Vec<(PeptideIx, serde_json::Value)> {
+        scorer
+            .score(query)
+            .into_iter()
+            .map(|feature| {
+                let mut json = serde_json::to_value(&feature).unwrap();
+                // A process-wide counter, different on every call
+                json.as_object_mut().unwrap().remove("psm_id");
+                (feature.peptide_idx, json)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn with_db_keeps_every_setting_and_swaps_the_database() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let original = Scorer {
+            annotate_matches: true,
+            ..scorer(&expanded, true)
+        };
+
+        let same = original.with_db(&expanded);
+        let original_hits = scored(&original, &query);
+        assert!(!original_hits.is_empty());
+        assert_eq!(scored(&same, &query), original_hits);
+
+        // Against another database it scores like a scorer built for it
+        let direct = Scorer {
+            annotate_matches: true,
+            ..scorer(&offset, true)
+        };
+        let swapped = original.with_db(&offset);
+        assert!(std::ptr::eq(swapped.db, &offset));
+        assert_eq!(scored(&swapped, &query), scored(&direct, &query));
+    }
+
     #[test]
     fn cloned_scorer_and_matched_peak_indices_leave_normal_scoring_unchanged() {
         let expanded = database(SearchMode::Database);

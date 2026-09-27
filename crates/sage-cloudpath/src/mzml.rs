@@ -546,11 +546,15 @@ impl MzMLReader {
                                 activation,
                             );
                             activation = Activation::Unknown;
-                            let allow = self
-                                .ms_level
-                                .as_ref()
-                                .map(|&level| level == spectrum.ms_level)
-                                .unwrap_or(true);
+                            // A spectrum discarded mid-parse (zero TIC or a filtered
+                            // MS level) leaves `state` empty; never emit its
+                            // reset placeholder.
+                            let allow = state.is_some()
+                                && self
+                                    .ms_level
+                                    .as_ref()
+                                    .map(|&level| level == spectrum.ms_level)
+                                    .unwrap_or(true);
 
                             if spectrum
                                 .fragment_charges

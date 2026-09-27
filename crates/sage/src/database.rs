@@ -125,12 +125,12 @@ pub struct Builder {
     /// Path to a protein-specific custom cleavage-site TSV or Parquet file.
     /// Required columns: `protein`, `position`; optional column: `context`.
     pub custom_cleavage_sites: Option<String>,
-    /// Number of sequences to handle simultaneously when pre-filtering the db
+    /// Deprecated and ignored. The prefilter streams proteins one at a time.
     pub prefilter_chunk_size: Option<usize>,
     /// Pre-filter the database to minimize memory usage
     pub prefilter: Option<bool>,
     /// Preliminary fragment matches one precursor hypothesis of a spectrum
-    /// needs for the prefilter to keep a peptide (default 3).
+    /// needs for the prefilter to keep a peptide (default 4).
     pub prefilter_min_matched_peaks: Option<u16>,
     /// Only each spectrum's most intense peaks are used by the prefilter
     /// (default: every processed peak).
@@ -158,6 +158,9 @@ impl Builder {
         if self.prefilter_low_memory.is_some() {
             log::warn!("database.prefilter_low_memory is deprecated and ignored");
         }
+        if self.prefilter_chunk_size.is_some() {
+            log::warn!("database.prefilter_chunk_size is deprecated and ignored");
+        }
         let bucket_size = self.bucket_size.unwrap_or(8192).next_power_of_two();
         let max_variable_mods = self.max_variable_mods.map(|x| x.max(1)).unwrap_or(2);
         let max_total_variable_mods = self
@@ -183,9 +186,8 @@ impl Builder {
             fasta: self.fasta.unwrap_or_default(),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
-            prefilter_chunk_size: self.prefilter_chunk_size.unwrap_or(0),
             prefilter: self.prefilter.unwrap_or(false),
-            prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(3).max(1),
+            prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(4).max(1),
             prefilter_max_peaks: self.prefilter_max_peaks.filter(|&n| n > 0),
             loaded_ptm_library: None,
         }
@@ -217,7 +219,6 @@ pub struct Parameters {
     pub fasta: String,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
-    pub prefilter_chunk_size: usize,
     pub prefilter: bool,
     pub prefilter_min_matched_peaks: u16,
     pub prefilter_max_peaks: Option<usize>,
@@ -246,6 +247,48 @@ pub struct DatabaseMemoryEstimate {
     pub unmodified_peak_bytes: u64,
     pub modified_peak_bytes: u64,
     pub fragment_peak_bytes: u64,
+}
+
+impl DatabaseMemoryEstimate {
+    /// Largest of the three stage peaks.
+    pub fn peak_bytes(&self) -> u64 {
+        self.unmodified_peak_bytes
+            .max(self.modified_peak_bytes)
+            .max(self.fragment_peak_bytes)
+    }
+}
+
+/// Estimated bytes one unmodified digest of `sequence_len` residues holds.
+fn digest_bytes(sequence_len: u64) -> u64 {
+    const ALLOCATION_OVERHEAD: u64 = 16;
+    (std::mem::size_of::<Digest>() as u64)
+        .saturating_add(sequence_len)
+        .saturating_add(ALLOCATION_OVERHEAD)
+}
+
+/// Hashes of a peptide sequence and of its internal reversal, the sequence
+/// of the decoy generated from it. Equal sequences hash equally; unequal
+/// sequences rarely do.
+pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let step = |hash: u64, byte: &u8| (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+    let forward = sequence.iter().fold(OFFSET, step);
+    let reversed = match sequence {
+        [first, middle @ .., last] if !middle.is_empty() => {
+            let hash = step(OFFSET, first);
+            let hash = middle.iter().rev().fold(hash, step);
+            step(hash, last)
+        }
+        _ => forward,
+    };
+    // FNV's low bits mix poorly; finish with a SplitMix64 round.
+    let mix = |mut hash: u64| {
+        hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        hash ^ (hash >> 31)
+    };
+    (mix(forward), mix(reversed))
 }
 
 impl Parameters {
@@ -712,9 +755,7 @@ impl Parameters {
                         unmodified_peptides: 1,
                         modified_peptides: variants,
                         fragments: variants.saturating_mul(fragments_per_variant),
-                        digest_bytes: (std::mem::size_of::<Digest>() as u64)
-                            .saturating_add(sequence_len)
-                            .saturating_add(ALLOCATION_OVERHEAD),
+                        digest_bytes: digest_bytes(sequence_len),
                         peptide_bytes: variants.saturating_mul(bytes_per_variant),
                     });
                 }
@@ -992,25 +1033,6 @@ impl Parameters {
         variable_variants.saturating_mul(self.label_channels().len().max(1) as u64)
     }
 
-    pub fn auto_calculate_prefilter_chunk_size(
-        &mut self,
-        fasta: &Fasta,
-        estimated_modified_peptides: u64,
-    ) {
-        const MAX_PEPS_PER_CHUNK: usize = 2usize.pow(23);
-        self.prefilter_chunk_size = match self.prefilter_chunk_size {
-            0 => {
-                let chunk_count = estimated_modified_peptides
-                    .saturating_add(MAX_PEPS_PER_CHUNK as u64 - 1)
-                    / MAX_PEPS_PER_CHUNK as u64;
-                let chunk_count = chunk_count.max(1);
-                ((fasta.targets.len() as u64).saturating_add(chunk_count - 1) / chunk_count).max(1)
-                    as usize
-            }
-            x => x,
-        };
-    }
-
     /// Digest and group proteins without applying variable modifications.
     pub fn digest_unmodified(&self, fasta: &Fasta) -> Vec<DigestGroup> {
         self.digest_unmodified_with_custom_cleavages(fasta, None)
@@ -1053,10 +1075,29 @@ impl Parameters {
         digests: Vec<DigestGroup>,
         target_sequences: &HashSet<PeptideSequence>,
     ) -> Vec<Peptide> {
+        log::trace!("modifying peptides");
+        let mut target_decoys = self.with_digest_expander(|expander| {
+            digests
+                .into_par_iter()
+                .flat_map_iter(|group| expander.expand(group, Some(target_sequences)))
+                .collect::<Vec<_>>()
+        });
+        self.reorder_peptides_with_labels(&mut target_decoys);
+        target_decoys
+    }
+
+    /// Sort and deduplicate peptides as [`Self::modify_digests`] does,
+    /// merging label channels with this database's reference channel.
+    pub fn reorder_peptides_with_labels(&self, target_decoys: &mut Vec<Peptide>) {
+        Self::reorder_peptides_with_reference(target_decoys, self.label_reference().as_deref());
+    }
+
+    /// Run `f` with a [`DigestExpander`] for this database's modification
+    /// rules, so the rules are prepared once for many digest groups.
+    pub fn with_digest_expander<R>(&self, f: impl FnOnce(&DigestExpander<'_>) -> R) -> R {
         let mods = self.variable_modifications();
         let static_mods = self.static_modifications();
         let label_channels = self.label_channels();
-        let label_reference = self.label_reference();
         let label_modifications = LabelModificationCache::new(
             mods.iter()
                 .map(|rule| &rule.modification)
@@ -1078,137 +1119,15 @@ impl Parameters {
             self.max_total_variable_mods,
             self.max_combinations,
         );
-        let library = self.loaded_ptm_library.as_deref();
-
-        log::trace!("modifying peptides");
-        let mut target_decoys = digests
-            .into_par_iter()
-            .flat_map_iter(|group| {
-                let expand = |peptide: Peptide, library_sites: &[LibrarySite]| {
-                    let decoy_sequence = self
-                        .generate_decoys
-                        .then(|| peptide.sequence.reversed_internal());
-                    peptide
-                        .apply_rules(&modification_plan, library_sites)
-                        .into_iter()
-                        .flat_map(|peptide| {
-                            if label_channels.is_empty() {
-                                vec![peptide]
-                            } else {
-                                label_channels
-                                    .iter()
-                                    .map(|channel| {
-                                        peptide.clone().apply_label_channel(
-                                            channel.clone(),
-                                            &label_modifications,
-                                        )
-                                    })
-                                    .collect()
-                            }
-                        })
-                        .filter(|peptide| {
-                            peptide.monoisotopic >= self.peptide_min_mass
-                                && peptide.monoisotopic <= self.peptide_max_mass
-                        })
-                        .flat_map(|peptide| {
-                            if let Some(sequence) = &decoy_sequence {
-                                vec![peptide.reverse_with_sequence(sequence.clone()), peptide]
-                                    .into_iter()
-                            } else {
-                                vec![peptide].into_iter()
-                            }
-                        })
-                        .filter(|peptide| {
-                            !peptide.decoy || !target_sequences.contains(&(peptide.sequence[..]))
-                        })
-                        .collect::<Vec<_>>()
-                };
-
-                match library {
-                    None => Peptide::try_from(group)
-                        .map(|peptide| expand(peptide, &[]))
-                        .unwrap_or_default(),
-                    Some(library) => {
-                        let reference = group.reference;
-                        group
-                            .origins
-                            .into_iter()
-                            .flat_map(|origin| {
-                                let mut digest = reference.clone();
-                                digest.protein = origin.protein.clone();
-                                digest.protein_start = origin.start;
-                                digest.prev_aa = origin.prev_aa;
-                                digest.next_aa = origin.next_aa;
-                                let Ok(mut peptide) = Peptide::try_from(digest) else {
-                                    return Vec::new();
-                                };
-                                peptide.proteins = smallvec::smallvec![origin.protein.clone()];
-                                // The reference sequence views another protein;
-                                // keep this origin's own source for motif rules.
-                                peptide.protein_sites = Arc::from([origin.clone()]);
-                                let start = origin.start.unwrap_or_default();
-                                let end = start.saturating_add(peptide.sequence.len() as u32);
-                                let library_sites = library
-                                    .sites_for(&origin.protein)
-                                    .iter()
-                                    .filter(|site| (start..end).contains(&site.position))
-                                    .filter_map(|site| {
-                                        let position = site.position - start;
-                                        (peptide.sequence.get(position as usize)
-                                            == Some(&site.residue))
-                                        .then(|| LibrarySite {
-                                            attachment: site.attachment,
-                                            position,
-                                            modification: site.modification.clone(),
-                                        })
-                                    })
-                                    .collect::<Vec<_>>();
-                                expand(peptide, &library_sites)
-                            })
-                            .collect()
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-
-        Self::reorder_peptides_with_reference(&mut target_decoys, label_reference.as_deref());
-
-        target_decoys
+        f(&DigestExpander {
+            parameters: self,
+            plan: modification_plan,
+            label_channels: &label_channels,
+            label_modifications: &label_modifications,
+            label_reference: self.label_reference(),
+            library: self.loaded_ptm_library.as_deref(),
+        })
     }
-
-    /// Partition digest groups without splitting equal raw sequences. This
-    /// keeps terminal variants and protein occurrences together so a modified
-    /// peptidoform is generated in exactly one prefilter chunk.
-    pub fn partition_digests_by_sequence(
-        mut digests: Vec<DigestGroup>,
-        chunk_size: usize,
-    ) -> Vec<Vec<DigestGroup>> {
-        let chunk_size = chunk_size.max(1);
-        digests.sort_unstable_by(|left, right| {
-            left.reference
-                .sequence
-                .cmp(&right.reference.sequence)
-                .then_with(|| left.reference.position.cmp(&right.reference.position))
-                .then_with(|| left.reference.decoy.cmp(&right.reference.decoy))
-        });
-
-        let mut chunks = Vec::new();
-        let mut chunk: Vec<DigestGroup> = Vec::new();
-        for digest in digests {
-            let sequence_changed = chunk
-                .last()
-                .is_some_and(|previous| previous.reference.sequence != digest.reference.sequence);
-            if sequence_changed && chunk.len() >= chunk_size {
-                chunks.push(std::mem::take(&mut chunk));
-            }
-            chunk.push(digest);
-        }
-        if !chunk.is_empty() {
-            chunks.push(chunk);
-        }
-        chunks
-    }
-
     pub fn digest(&self, fasta: &Fasta) -> Vec<Peptide> {
         self.digest_with_custom_cleavages(fasta, None)
     }
@@ -1613,6 +1532,124 @@ impl Parameters {
             label_channels,
             decoy_tag: self.decoy_tag,
             decoy_pairing: Vec::new(),
+        }
+    }
+}
+
+/// Expands unmodified digest groups into modified target and decoy peptides.
+/// See [`Parameters::with_digest_expander`].
+pub struct DigestExpander<'a> {
+    parameters: &'a Parameters,
+    plan: ModificationPlan<'a>,
+    label_channels: &'a [Arc<str>],
+    label_modifications: &'a LabelModificationCache,
+    label_reference: Option<Arc<str>>,
+    library: Option<&'a PtmLibrary>,
+}
+
+impl DigestExpander<'_> {
+    /// Database parameters the expander was built from.
+    pub fn parameters(&self) -> &Parameters {
+        self.parameters
+    }
+
+    /// Sort and deduplicate expanded peptides, as
+    /// [`Parameters::modify_digests`] does.
+    pub fn reorder(&self, target_decoys: &mut Vec<Peptide>) {
+        Parameters::reorder_peptides_with_reference(target_decoys, self.label_reference.as_deref());
+    }
+
+    /// Modified peptides and generated decoys of one digest group, unsorted.
+    /// Decoys whose sequence is in `target_sequences` are dropped; `None`
+    /// skips that check for groups known not to collide with any target.
+    pub fn expand(
+        &self,
+        group: DigestGroup,
+        target_sequences: Option<&HashSet<PeptideSequence>>,
+    ) -> Vec<Peptide> {
+        let parameters = self.parameters;
+        let expand = |peptide: Peptide, library_sites: &[LibrarySite]| {
+            let decoy_sequence = parameters
+                .generate_decoys
+                .then(|| peptide.sequence.reversed_internal());
+            peptide
+                .apply_rules(&self.plan, library_sites)
+                .into_iter()
+                .flat_map(|peptide| {
+                    if self.label_channels.is_empty() {
+                        vec![peptide]
+                    } else {
+                        self.label_channels
+                            .iter()
+                            .map(|channel| {
+                                peptide
+                                    .clone()
+                                    .apply_label_channel(channel.clone(), self.label_modifications)
+                            })
+                            .collect()
+                    }
+                })
+                .filter(|peptide| {
+                    peptide.monoisotopic >= parameters.peptide_min_mass
+                        && peptide.monoisotopic <= parameters.peptide_max_mass
+                })
+                .flat_map(|peptide| {
+                    if let Some(sequence) = &decoy_sequence {
+                        vec![peptide.reverse_with_sequence(sequence.clone()), peptide].into_iter()
+                    } else {
+                        vec![peptide].into_iter()
+                    }
+                })
+                .filter(|peptide| {
+                    !peptide.decoy
+                        || !target_sequences
+                            .is_some_and(|targets| targets.contains(&(peptide.sequence[..])))
+                })
+                .collect::<Vec<_>>()
+        };
+
+        match self.library {
+            None => Peptide::try_from(group)
+                .map(|peptide| expand(peptide, &[]))
+                .unwrap_or_default(),
+            Some(library) => {
+                let reference = group.reference;
+                group
+                    .origins
+                    .into_iter()
+                    .flat_map(|origin| {
+                        let mut digest = reference.clone();
+                        digest.protein = origin.protein.clone();
+                        digest.protein_start = origin.start;
+                        digest.prev_aa = origin.prev_aa;
+                        digest.next_aa = origin.next_aa;
+                        let Ok(mut peptide) = Peptide::try_from(digest) else {
+                            return Vec::new();
+                        };
+                        peptide.proteins = smallvec::smallvec![origin.protein.clone()];
+                        // The reference sequence views another protein;
+                        // keep this origin's own source for motif rules.
+                        peptide.protein_sites = Arc::from([origin.clone()]);
+                        let start = origin.start.unwrap_or_default();
+                        let end = start.saturating_add(peptide.sequence.len() as u32);
+                        let library_sites = library
+                            .sites_for(&origin.protein)
+                            .iter()
+                            .filter(|site| (start..end).contains(&site.position))
+                            .filter_map(|site| {
+                                let position = site.position - start;
+                                (peptide.sequence.get(position as usize) == Some(&site.residue))
+                                    .then(|| LibrarySite {
+                                        attachment: site.attachment,
+                                        position,
+                                        modification: site.modification.clone(),
+                                    })
+                            })
+                            .collect::<Vec<_>>();
+                        expand(peptide, &library_sites)
+                    })
+                    .collect()
+            }
         }
     }
 }

@@ -432,3 +432,133 @@ fn sidecar_outputs_are_registered_written_once_and_listed() {
     assert_eq!(runner.parameters.output_paths.len(), before + 1);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[derive(Clone, Default)]
+struct EventLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for EventLog {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Proteins streamed through batched spectrum indexes must keep exactly the
+/// peptides the whole-digest prefilter keeps, and give the same search.
+#[test]
+fn streamed_prefilter_matches_the_whole_digest_search() -> anyhow::Result<()> {
+    use super::prefilter::PrefilterBudgets;
+    use crate::events::{CancellationToken, EventEmitter};
+
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-prefilter-stream-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let fasta = root.join("proteins.fasta");
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let q99536_sequence = q99536
+        .lines()
+        .filter(|line| !line.starts_with('>'))
+        .collect::<String>();
+    // A copy of Q99536 shares every digest with it, and a protein carrying a
+    // reversed albumin digest (DLGEENFK -> DFNEEGLK) collides with that
+    // digest's generated decoy, so both the streamed and shared paths run.
+    std::fs::write(
+        &fasta,
+        q99536
+            + "\n>sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n"
+            + &format!(">sp|COPY|Q99536_COPY\n{q99536_sequence}\n")
+            + ">sp|REV|REVERSED_DIGEST\nMSSRDFNEEGLKAGSEYR\n",
+    )?;
+    // Three files in batches of two: a full batch and a partial one.
+    let mzml = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let inputs = (0..3)
+        .map(|idx| {
+            let path = root.join(format!("run{idx}.mzML"));
+            std::fs::copy(&mzml, &path).map(|_| path.display().to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta.display().to_string().into();
+    config["database"]["prefilter"] = true.into();
+    config["mzml_paths"] = serde_json::json!(inputs);
+    config["batch_size"] = 2.into();
+    let tiny_index = PrefilterBudgets { index_bytes: 1 };
+
+    let search = |name: &str, budgets: Option<PrefilterBudgets>| -> anyhow::Result<_> {
+        let mut config = config.clone();
+        config["output_directory"] = root.join(name).display().to_string().into();
+        let input: crate::input::Input = serde_json::from_value(config)?;
+        let mut search = input.build()?;
+        search.prefilter_budgets = budgets;
+        Ok(search)
+    };
+
+    // Survivors, compared directly against the whole-digest prefilter.
+    let runner = super::Runner::new_with_control(
+        search("peptides", Some(tiny_index))?,
+        2,
+        EventEmitter::from_writer(EventLog::default()),
+        CancellationToken::default(),
+    )?;
+    let mut database = runner.database_parameters.clone();
+    super::load_ptm_library(&mut database)?;
+    let proteins = super::load_fasta(&database)?;
+    let cleavages = super::load_custom_cleavages(&database, &proteins)?;
+    let whole = runner.prefilter_whole_digest(2, &proteins, cleavages.as_ref())?;
+    let (streamed, _) = runner.prefilter_peptides(2, proteins, cleavages)?;
+    assert!(!whole.is_empty());
+    assert!(
+        whole.len() < 1000,
+        "the prefilter should drop most peptides"
+    );
+    assert_eq!(streamed, whole);
+
+    let run = |name: &str, budgets: Option<PrefilterBudgets>| -> anyhow::Result<_> {
+        let output = root.join(name);
+        let log = EventLog::default();
+        let runner = super::Runner::new_with_control(
+            search(name, budgets)?,
+            2,
+            EventEmitter::from_writer(log.clone()),
+            CancellationToken::default(),
+        )?;
+        runner.run_with_summary(2)?;
+        // Timestamps and job identity differ between runs, and files within
+        // a batch may be read in parallel, so only sorted event kinds count.
+        let mut events = String::from_utf8(log.0.lock().unwrap().clone())?
+            .lines()
+            .map(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .map(|event| event["event"].as_str().unwrap_or("").to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        events.sort();
+        let results = ["results.sage.parquet", "matched_fragments.sage.parquet"]
+            .map(|file| std::fs::read(output.join(file)))
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((events, results))
+    };
+
+    let (whole_events, whole) = run("whole", None)?;
+    let (batched_events, batched) = run("batched", Some(tiny_index))?;
+    assert_eq!(whole, batched);
+    assert_eq!(whole_events, batched_events);
+    for kind in ["file_started", "file_completed"] {
+        let count = whole_events.iter().filter(|event| *event == kind).count();
+        assert_eq!(count, 3, "{kind} emitted {count} times");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

@@ -171,26 +171,6 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
 }
 
 #[test]
-fn sequence_coherent_partition_never_splits_terminal_variants() {
-    let chunks = Parameters::partition_digests_by_sequence(
-        vec![
-            digest_group("PEPTIDER", Position::Internal),
-            digest_group("SEQUENCEK", Position::Full),
-            digest_group("PEPTIDER", Position::Nterm),
-        ],
-        1,
-    );
-
-    assert_eq!(chunks.len(), 2);
-    assert!(chunks.iter().any(|chunk| {
-        chunk.len() == 2
-            && chunk
-                .iter()
-                .all(|group| group.reference.sequence == "PEPTIDER")
-    }));
-}
-
-#[test]
 fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
     let parameters = Builder::default().make_parameters();
     let target_sequences = ["PEPTIDER".into(), "PEDITPER".into()]
@@ -204,6 +184,150 @@ fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
 
     assert_eq!(peptides.len(), 1);
     assert!(!peptides[0].decoy);
+}
+
+#[test]
+fn sequence_hashes_pair_targets_with_their_reversals() {
+    for sequence in ["PEPTIDER", "PEDITPER", "AK", "K", "MPEPTIDEK", ""] {
+        let reversed = PeptideSequence::from(sequence).reversed_internal();
+        let (forward, reverse) = sequence_hashes(sequence.as_bytes());
+        assert_eq!(reverse, sequence_hashes(reversed.as_bytes()).0);
+        assert_eq!(forward, sequence_hashes(reversed.as_bytes()).1);
+    }
+    let hashes = (0..200)
+        .map(|n| sequence_hashes(format!("PEPTIDE{n}K").as_bytes()).0)
+        .collect::<HashSet<_>>();
+    assert_eq!(hashes.len(), 200);
+}
+
+/// Identity of a generated peptide, independent of chunking.
+type PeptideKey = (String, bool, bool, u8, Vec<String>, usize);
+
+fn peptide_keys(mut peptides: Vec<Peptide>) -> Vec<PeptideKey> {
+    Parameters::reorder_peptides(&mut peptides);
+    peptides
+        .iter()
+        .map(|peptide| {
+            (
+                peptide.to_string(),
+                peptide.decoy,
+                peptide.semi_enzymatic,
+                peptide.missed_cleavages,
+                peptide.proteins.iter().map(|p| p.to_string()).collect(),
+                peptide.protein_sites.len(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
+    // PEDITPER is the internal reversal of PEPTIDER, so its decoy collides
+    // with a target from another protein; the buckets must keep them together.
+    // With FASTA decoys, rev_c supplies decoys that must still be checked
+    // against targets in the same bucket.
+    let fasta = ">a\nMPEPTIDERSEQMENCEKAMPLIFIERKPEPTIDEKLLMSTK\n\
+                 >b\nPEDITPERGGMKWHATEVERKMMKSAMPLEPEPTIDERK\n\
+                 >rev_c\nREDITPEPKSEQUENCEKPEPTIDERK\n";
+    let configs = [
+        (
+            true,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 2, "min_len": 3},
+                "variable_mods": {"M": [15.9949], "^E": [-18.010565]},
+                "static_mods": {"C": 57.021464},
+                "max_variable_mods": 2
+            }),
+        ),
+        (
+            true,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 1, "min_len": 4, "semi_enzymatic": true},
+                "variable_mods": {"M": [15.9949]}
+            }),
+        ),
+        (
+            false,
+            serde_json::json!({
+                "enzyme": {"missed_cleavages": 1, "min_len": 4},
+                "variable_mods": {"M": [15.9949]}
+            }),
+        ),
+    ];
+    let mut shared_exercised = false;
+    for (generate_decoys, config) in configs {
+        let fasta = Fasta::parse(fasta.to_string(), "rev_", generate_decoys).unwrap();
+        let mut builder: Builder = serde_json::from_value(config).unwrap();
+        builder.generate_decoys = Some(generate_decoys);
+        let parameters = builder.make_parameters();
+        let whole = peptide_keys(parameters.digest(&fasta));
+        assert!(whole.iter().any(|key| key.1), "no decoys generated");
+
+        // As the streamed prefilter does: digests whose sequence and decoy
+        // sequence are unique are expanded one protein at a time without a
+        // target check; the rest are expanded per canonical key.
+        let enzyme: EnzymeParameters = parameters.enzyme.clone().into();
+        let digests = (0..fasta.targets.len())
+            .map(|index| fasta.digest_protein(index, &enzyme, None))
+            .collect::<Vec<_>>();
+        // A sequence, its decoy, and a target equal to that decoy share a
+        // canonical key; palindromes always collide with their own decoy.
+        let key = |digest: &crate::enzyme::Digest| {
+            let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
+            match generate_decoys {
+                true if forward == reverse => u64::MAX,
+                true => forward.min(reverse),
+                false => forward,
+            }
+        };
+        let mut keys = digests.iter().flatten().map(key).collect::<Vec<_>>();
+        keys.sort_unstable();
+        let shared = keys
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .chain(generate_decoys.then_some(u64::MAX))
+            .collect::<HashSet<_>>();
+        let is_shared = |digest: &crate::enzyme::Digest| shared.contains(&key(digest));
+
+        let mut deferred = Vec::new();
+        let mut streamed = parameters.with_digest_expander(|expander| {
+            let mut streamed = Vec::new();
+            for protein in &digests {
+                let mut peptides = Vec::new();
+                for digest in protein {
+                    if is_shared(digest) {
+                        deferred.push(digest.clone());
+                        continue;
+                    }
+                    let group = DigestGroup {
+                        origins: vec![ProteinOccurrence::of_protein_digest(digest)],
+                        reference: digest.clone(),
+                    };
+                    peptides.extend(expander.expand(group, None));
+                }
+                expander.reorder(&mut peptides);
+                streamed.extend(peptides);
+            }
+            streamed
+        });
+        shared_exercised |= !deferred.is_empty();
+        // Each shared key is filtered as its own small database.
+        let mut units = BTreeMap::<u64, Vec<_>>::new();
+        for digest in deferred {
+            units.entry(key(&digest)).or_default().push(digest);
+        }
+        for unit in units.into_values() {
+            streamed.extend(parameters.modify_digests(crate::enzyme::group_protein_digests(unit)));
+        }
+        parameters.reorder_peptides_with_labels(&mut streamed);
+        assert_eq!(
+            peptide_keys(streamed),
+            whole,
+            "generate_decoys {generate_decoys}"
+        );
+    }
+    assert!(shared_exercised, "no shared digests exercised");
 }
 
 #[test]
@@ -577,7 +701,6 @@ fn digestion() {
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
-        prefilter_chunk_size: 0,
         prefilter_min_matched_peaks: 1,
         prefilter_max_peaks: None,
         loaded_ptm_library: None,
@@ -1537,4 +1660,510 @@ fn max_total_count_must_cover_max_count() {
     assert!(error
         .to_string()
         .contains("max_total_count must be at least max_count"));
+}
+
+fn json_parameters(value: serde_json::Value) -> Parameters {
+    serde_json::from_value::<Builder>(value)
+        .unwrap()
+        .make_parameters()
+}
+
+#[test]
+fn make_parameters_normalizes_modification_limits() {
+    let parameters = Builder::default().make_parameters();
+    assert_eq!(parameters.max_variable_mods, 2);
+    assert_eq!(parameters.max_total_variable_mods, 2);
+    assert_eq!(parameters.max_combinations, None);
+    assert!(parameters.generate_decoys);
+    assert_eq!(parameters.decoy_tag, "rev_");
+    assert_eq!(parameters.bucket_size, 8192);
+
+    let parameters = Builder {
+        max_variable_mods: Some(0),
+        max_total_variable_mods: Some(0),
+        max_combinations: Some(0),
+        bucket_size: Some(1000),
+        ..Default::default()
+    }
+    .make_parameters();
+    assert_eq!(parameters.max_variable_mods, 1);
+    assert_eq!(parameters.max_total_variable_mods, 1);
+    assert_eq!(parameters.max_combinations, Some(1));
+    assert_eq!(parameters.bucket_size, 1024);
+
+    // The total budget can never fall below the per-peptide new-site budget.
+    let parameters = Builder {
+        max_variable_mods: Some(3),
+        max_total_variable_mods: Some(1),
+        ..Default::default()
+    }
+    .make_parameters();
+    assert_eq!(parameters.max_total_variable_mods, 3);
+    let parameters = Builder {
+        max_variable_mods: Some(1),
+        max_total_variable_mods: Some(4),
+        ..Default::default()
+    }
+    .make_parameters();
+    assert_eq!(
+        (
+            parameters.max_variable_mods,
+            parameters.max_total_variable_mods
+        ),
+        (1, 4)
+    );
+    assert!(parameters
+        .validate_ptm_library(&PtmLibrary::default())
+        .is_ok());
+}
+
+#[test]
+fn ptm_validation_rejects_conflicting_static_and_variable_definitions() {
+    let empty = PtmLibrary::default();
+
+    // Two different fixed definitions that can land on the same residue.
+    let error = json_parameters(serde_json::json!({
+        "static_mods": {
+            "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
+            "Other": {"mass": 58.0, "sites": ["first_residue:C"]}
+        }
+    }))
+    .validate_ptm_library(&empty)
+    .unwrap_err();
+    assert!(
+        error.starts_with("conflicting static modifications at"),
+        "{error}"
+    );
+
+    // Distinct residues do not conflict.
+    assert!(json_parameters(serde_json::json!({
+        "static_mods": {
+            "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
+            "Other": {"mass": 58.0, "sites": ["K"]}
+        }
+    }))
+    .validate_ptm_library(&empty)
+    .is_ok());
+
+    let error = json_parameters(serde_json::json!({
+        "static_mods": {"Acetyl": {"mass": 42.010565, "sites": ["K"]}},
+        "variable_mods": {"Acetyl": {"mass": 42.010565, "sites": ["S"]}}
+    }))
+    .validate_ptm_library(&empty)
+    .unwrap_err();
+    assert!(
+        error.starts_with("modification `Acetyl` is defined in both static_mods and variable_mods"),
+        "{error}"
+    );
+
+    let mut parameters = Builder::default().make_parameters();
+    parameters.max_variable_mods = 3;
+    parameters.max_total_variable_mods = 2;
+    assert_eq!(
+        parameters.validate_ptm_library(&empty).unwrap_err(),
+        "database.max_total_variable_mods must be at least database.max_variable_mods"
+    );
+}
+
+#[test]
+fn ptm_validation_requires_limits_and_names_for_library_modifications() {
+    use crate::ptm_library::PtmLibrarySite;
+    let empty = PtmLibrary::default();
+    let library = |modification: &str| {
+        PtmLibrary::new(vec![PtmLibrarySite {
+            attachment: Default::default(),
+            protein: "P1".into(),
+            position: 0,
+            residue: b'K',
+            modification: modification.into(),
+        }])
+    };
+
+    // A configured PTM library requires every variable modification to be bounded.
+    let mut parameters = json_parameters(serde_json::json!({
+        "variable_mods": {"Oxidation": {"mass": 15.994915, "sites": ["M"]}}
+    }));
+    assert!(parameters.validate_ptm_library(&empty).is_ok());
+    parameters.ptm_library = Some(PtmLibrarySettings {
+        path: "sites.tsv".into(),
+        strict: true,
+    });
+    assert!(parameters
+        .validate_ptm_library(&empty)
+        .unwrap_err()
+        .starts_with("all variable modifications require `max_count` or `max_total_count`"));
+
+    // Library-driven site modes need a name and a limit.
+    let error = json_parameters(serde_json::json!({
+        "variable_mods": {"Acetyl": {"mass": 42.010565, "sites": ["K"], "site_mode": "both"}}
+    }))
+    .validate_ptm_library(&empty)
+    .unwrap_err();
+    assert!(
+        error.starts_with("variable modifications using `library` or `both` require `name`"),
+        "{error}"
+    );
+
+    let bounded = |site_mode: &str| {
+        json_parameters(serde_json::json!({
+            "variable_mods": {
+                "Acetyl": {"mass": 42.010565, "sites": ["K"], "max_count": 1, "site_mode": site_mode}
+            }
+        }))
+    };
+    assert!(bounded("library")
+        .validate_ptm_library(&library("Acetyl"))
+        .is_ok());
+    assert!(bounded("both")
+        .validate_ptm_library(&library("Acetyl"))
+        .is_ok());
+    assert_eq!(
+        bounded("exhaustive")
+            .validate_ptm_library(&library("Acetyl"))
+            .unwrap_err(),
+        "PTM library modification `Acetyl` must use site_mode `library` or `both`"
+    );
+    assert_eq!(
+        bounded("both")
+            .validate_ptm_library(&library("Methyl"))
+            .unwrap_err(),
+        "PTM library references undefined modification `Methyl`"
+    );
+}
+
+#[test]
+fn ptm_validation_rejects_inconsistent_named_database_modifications() {
+    use crate::modification::{NeutralLossMode, VariableModification};
+    let entry = |mass: f32, max_count: Option<usize>| {
+        VarModEntry::Detailed(VariableModification {
+            mass,
+            max_count,
+            max_total_count: None,
+            name: Some("Acetyl".into()),
+            neutral_losses: Vec::new(),
+            neutral_loss_mode: NeutralLossMode::Optional,
+            site_mode: SiteMode::Exhaustive,
+            search_mode: SearchMode::Database,
+            channel_offsets: Default::default(),
+        })
+    };
+    let validate = |k: VarModEntry, s: VarModEntry| {
+        Builder {
+            variable_mods: Some(
+                [("K".to_string(), vec![k]), ("S".to_string(), vec![s])]
+                    .into_iter()
+                    .collect(),
+            ),
+            ..Default::default()
+        }
+        .make_parameters()
+        .validate_ptm_library(&PtmLibrary::default())
+    };
+    assert!(validate(entry(42.0, Some(1)), entry(42.0, Some(1))).is_ok());
+    for (k, s) in [
+        (entry(42.0, Some(1)), entry(43.0, Some(1))),
+        (entry(42.0, Some(1)), entry(42.0, Some(2))),
+        (entry(42.0, None), entry(42.0, Some(1))),
+    ] {
+        assert_eq!(
+            validate(k, s).unwrap_err(),
+            "variable modification `Acetyl` has inconsistent definitions across specificities"
+        );
+    }
+}
+
+#[test]
+fn ptm_validation_rejects_mass_offsets_with_label_channels() {
+    let error = json_parameters(serde_json::json!({
+        "static_mods": {
+            "SILAC-K": {"mass": 0.0, "channel_offsets": {"light": 0.0, "heavy": 8.014199}, "sites": ["K"]}
+        },
+        "variable_mods": {
+            "Phospho": {"mass": 79.966331, "sites": ["S"], "search_mode": "mass_offset"}
+        }
+    }))
+    .validate_ptm_library(&PtmLibrary::default())
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "mass_offset modifications cannot be combined with channel-aware labels"
+    );
+}
+
+#[test]
+fn channel_validation_rejects_incomplete_or_redundant_channels() {
+    let validate = |static_mods: serde_json::Value| {
+        json_parameters(serde_json::json!({"static_mods": static_mods})).validate_channels()
+    };
+    assert!(validate(serde_json::json!({"C": 57.021464})).is_ok());
+    assert!(validate(serde_json::json!({
+        "SILAC-K": {"mass": 0.0, "channel_offsets": {"heavy": 8.014199}, "sites": ["K"]}
+    }))
+    .unwrap_err()
+    .contains("at least two channels"));
+    assert!(validate(serde_json::json!({
+        "SILAC-K": {"mass": 0.0, "channel_offsets": {"light": 0.0, "heavy": 8.0}, "sites": ["K"]},
+        "SILAC-R": {"mass": 0.0, "channel_offsets": {"light": 0.0, "medium": 6.0}, "sites": ["R"]}
+    }))
+    .unwrap_err()
+    .contains("same channel names"));
+    assert!(validate(serde_json::json!({
+        "SILAC-K": {"mass": 0.0, "channel_offsets": {"light": 0.0, "heavy": 0.0}, "sites": ["K"]}
+    }))
+    .unwrap_err()
+    .contains("at least one non-zero offset"));
+    // `medium` and `heavy` shift K by the same amount, so they cannot be told apart.
+    let error = validate(serde_json::json!({
+        "SILAC-K": {
+            "mass": 0.0,
+            "channel_offsets": {"light": 0.0, "medium": 8.0, "heavy": 8.0},
+            "sites": ["K"]
+        }
+    }))
+    .unwrap_err();
+    assert!(error.contains("is chemically identical"), "{error}");
+}
+
+#[test]
+fn mass_offset_modifications_group_specificities_by_definition() {
+    let parameters = json_parameters(serde_json::json!({
+        "variable_mods": {
+            "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "search_mode": "mass_offset"},
+            "Oxidation": {"mass": 15.994915, "sites": ["M"], "search_mode": "mass_offset"},
+            "Acetyl": {"mass": 42.010565, "sites": ["K"]}
+        },
+        "generate_decoys": false, "peptide_min_mass": 0
+    }));
+    parameters
+        .validate_ptm_library(&PtmLibrary::default())
+        .unwrap();
+    let offsets = parameters.mass_offset_modifications();
+    assert_eq!(offsets.len(), 2);
+    let group = |name: &str| {
+        offsets
+            .iter()
+            .find(|offset| offset.definition.name.as_deref() == Some(name))
+            .unwrap()
+    };
+    assert_eq!(
+        group("Phospho").specificities,
+        vec![
+            ModificationSpecificity::Residue(b'S'),
+            ModificationSpecificity::Residue(b'T'),
+            ModificationSpecificity::Residue(b'Y'),
+        ]
+    );
+    assert_eq!(
+        group("Oxidation").specificities,
+        vec![ModificationSpecificity::Residue(b'M')]
+    );
+    assert!(offsets
+        .iter()
+        .all(|offset| offset.site_mode == SiteMode::Exhaustive));
+
+    // Only the database-mode modification is expanded into the index.
+    let peptides = parameters.modify_digests(group_digests(vec![positional_digest(
+        "MSKTY",
+        Position::Internal,
+    )]));
+    let mut strings = peptides.iter().map(ToString::to_string).collect::<Vec<_>>();
+    strings.sort();
+    assert_eq!(strings, vec!["MSKTY", "MSK[Acetyl]TY"]);
+}
+
+#[test]
+fn reversed_decoys_of_modified_targets_mirror_sites_and_keep_mass() {
+    let parameters = json_parameters(serde_json::json!({
+        "variable_mods": {"Oxidation": {"mass": 15.994915, "sites": ["M"]}},
+        "generate_decoys": false, "peptide_min_mass": 0
+    }));
+    let targets = parameters.modify_digests(group_digests(vec![positional_digest(
+        "PEPMK",
+        Position::Full,
+    )]));
+    assert_eq!(targets.len(), 2);
+    let peptides = parameters.add_reversed_decoys(targets);
+    assert_eq!(peptides.len(), 4);
+    let mut decoys = peptides
+        .iter()
+        .filter(|peptide| peptide.decoy)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    decoys.sort();
+    assert_eq!(decoys, vec!["PMPEK", "PM[Oxidation]PEK"]);
+    // Sorted by mass, each decoy sits beside its target with an identical mass.
+    for pair in peptides.chunks(2) {
+        assert_ne!(pair[0].decoy, pair[1].decoy);
+        assert_eq!(pair[0].monoisotopic, pair[1].monoisotopic);
+    }
+    assert!(peptides
+        .windows(2)
+        .all(|pair| pair[0].monoisotopic <= pair[1].monoisotopic));
+
+    // Already-decoy peptides pass through; re-adding decoys adds nothing.
+    let again = parameters.add_reversed_decoys(peptides.clone());
+    assert_eq!(again.len(), 4);
+
+    // A reversal that reproduces another target's sequence is dropped, with
+    // or without its modification (PEPM[Oxidation]K reverses to PM[Oxidation]PEK).
+    let targets = parameters.modify_digests(group_digests(vec![
+        positional_digest("PEPMK", Position::Full),
+        positional_digest("PMPEK", Position::Full),
+    ]));
+    assert_eq!(targets.len(), 4);
+    let peptides = parameters.add_reversed_decoys(targets);
+    assert_eq!(peptides.len(), 4);
+    assert!(peptides.iter().all(|peptide| !peptide.decoy));
+}
+
+#[test]
+fn preflight_variant_counts_match_generated_peptides() {
+    let fasta = Fasta::parse(">P1\nMCKMSTKPEPCMR\n".into(), "rev_", false).unwrap();
+    let base = |modifications: serde_json::Value| {
+        let mut value = serde_json::json!({
+            "generate_decoys": false, "peptide_min_mass": 0, "peptide_max_mass": 100000,
+            "enzyme": {"min_len": 1, "max_len": 50, "missed_cleavages": 1,
+                       "cleave_at": "KR", "restrict": "P"}
+        });
+        for (key, entry) in modifications.as_object().unwrap() {
+            value[key] = entry.clone();
+        }
+        value
+    };
+    let oxidation = serde_json::json!({"mass": 15.994915, "sites": ["M"]});
+    let cases = [
+        serde_json::json!({
+            "static_mods": {"Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}},
+            "variable_mods": {"Oxidation": oxidation},
+            "max_variable_mods": 2
+        }),
+        serde_json::json!({
+            "variable_mods": {
+                "Oxidation": oxidation,
+                "Acetyl": {"mass": 42.010565, "sites": ["protein_n_term", "peptide_n_term:K"]},
+                "Phospho": {"mass": 79.966331, "sites": ["S", "T"], "max_count": 1}
+            },
+            "max_variable_mods": 3
+        }),
+        serde_json::json!({
+            "variable_mods": {
+                "Oxidation": oxidation,
+                "Phospho": {"mass": 79.966331, "sites": ["S", "T"], "max_count": 1}
+            },
+            "max_variable_mods": 3,
+            "max_combinations": 4
+        }),
+        serde_json::json!({
+            "static_mods": {"TMT": {"mass": 229.162932, "sites": ["peptide_n_term", "K"]}},
+            "variable_mods": {
+                "Oxidation": oxidation,
+                "Amidated": {"mass": -0.984016, "sites": ["peptide_c_term"]}
+            },
+            "max_variable_mods": 2
+        }),
+        serde_json::json!({
+            "variable_mods": {
+                "Oxidation": {"mass": 15.994915, "sites": ["M"], "max_count": 2},
+                "Deamidated": {"mass": 0.984016, "sites": ["internal_residue:K"]}
+            },
+            "max_variable_mods": 1,
+            "max_total_variable_mods": 3
+        }),
+    ];
+    for case in cases {
+        let parameters = json_parameters(base(case.clone()));
+        parameters
+            .validate_ptm_library(&PtmLibrary::default())
+            .unwrap();
+        let generated = parameters.digest(&fasta).len() as u64;
+        let estimated = parameters.estimate_memory(&fasta).modified_peptides;
+        assert_eq!(estimated, generated, "{case}");
+    }
+}
+
+#[test]
+fn paired_peptide_index_links_targets_and_generated_decoys() {
+    let fasta = Fasta::parse(">P1\nMCKMSTKPEPCMR\n".into(), "rev_", false).unwrap();
+    let build = |generate_decoys: bool, min_len: usize| {
+        json_parameters(serde_json::json!({
+            "variable_mods": {"Oxidation": {"mass": 15.994915, "sites": ["M"]}},
+            "generate_decoys": generate_decoys, "peptide_min_mass": 0,
+            "enzyme": {"min_len": min_len, "max_len": 50, "missed_cleavages": 0,
+                       "cleave_at": "KR", "restrict": "P"}
+        }))
+        .build(fasta.clone())
+    };
+
+    // MCK reverses to itself, so neither of its forms receives a decoy or a pair.
+    let database = build(true, 3);
+    assert_eq!(database.peptides.len(), 10);
+    let unpaired = (0..database.peptides.len())
+        .filter(|&index| {
+            database
+                .paired_peptide_index(PeptideIx(index as u32))
+                .is_none()
+        })
+        .map(|index| database.peptides[index].to_string())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        unpaired,
+        ["MCK", "M[Oxidation]CK"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
+
+    // MSTKPEPCMR: four oxidation forms, each with a reversed decoy.
+    let database = build(true, 4);
+    let targets = database.peptides.iter().filter(|p| !p.decoy).count();
+    assert_eq!(targets, 4);
+    assert_eq!(database.peptides.len(), 8);
+    for (index, peptide) in database.peptides.iter().enumerate() {
+        let index = PeptideIx(index as u32);
+        let paired = database
+            .paired_peptide_index(index)
+            .unwrap_or_else(|| panic!("{peptide} has no pair"));
+        let partner = &database[paired];
+        assert_ne!(partner.decoy, peptide.decoy);
+        assert_eq!(partner.monoisotopic, peptide.monoisotopic);
+        assert_eq!(partner.to_string(), peptide.reverse().to_string());
+        assert_eq!(database.paired_peptide_index(paired), Some(index));
+    }
+
+    let database = build(false, 4);
+    assert!(!database.peptides.is_empty());
+    assert!((0..database.peptides.len()).all(|index| database
+        .paired_peptide_index(PeptideIx(index as u32))
+        .is_none()));
+    assert_eq!(
+        database.paired_peptide_index(PeptideIx(database.peptides.len() as u32 + 5)),
+        None
+    );
+}
+
+#[test]
+fn same_peptidoform_compares_chemistry_decoy_state_and_sequence() {
+    let parameters = json_parameters(serde_json::json!({
+        "variable_mods": {"Oxidation": {"mass": 15.994915, "sites": ["M"]}},
+        "generate_decoys": false, "peptide_min_mass": 0
+    }));
+    let variants = parameters.modify_digests(group_digests(vec![positional_digest(
+        "PEPMK",
+        Position::Full,
+    )]));
+    let unmodified = variants
+        .iter()
+        .find(|peptide| peptide.to_string() == "PEPMK")
+        .unwrap();
+    let oxidized = variants
+        .iter()
+        .find(|peptide| peptide.to_string() == "PEPM[Oxidation]K")
+        .unwrap();
+    assert!(same_peptidoform(oxidized, &oxidized.clone()));
+    assert!(!same_peptidoform(unmodified, oxidized));
+    let mut decoy = oxidized.clone();
+    decoy.decoy = true;
+    assert!(!same_peptidoform(oxidized, &decoy));
+    // Reversing twice restores the same chemical peptidoform.
+    assert!(same_peptidoform(oxidized, &oxidized.reverse().reverse()));
 }

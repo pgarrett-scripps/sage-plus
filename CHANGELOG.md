@@ -9,17 +9,51 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.11] - 2026-09-26
+
 ### Added
-- `prefilter_min_matched_peaks` (default 3) and `prefilter_max_peaks` (default: all peaks). The
+- `prefilter_min_matched_peaks` (default 4) and `prefilter_max_peaks` (default: all peaks). The
   prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
   `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
   `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
+- The prefilter streams proteins through the spectrum index in parallel, one protein per
+  worker, instead of digesting the database whole or in chunks. Digests shared between proteins
+  or colliding with a generated decoy are grouped by sequence and filtered group by group, so the
+  retained peptides are unchanged. Its memory no longer grows with the full digest.
+- `sage config.json --estimate` prints a rough database memory estimate (peptides, fragments,
+  whether the prefilter is on) and exits without searching.
+- Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
+  key (for example intra- vs inter-protein crosslinks or glycan classes) with the same
+  conventions as `spectrum_q_value`. `Scorer::with_db` builds a scorer with the same settings
+  against another `IndexedDatabase`. Search results are unchanged.
 
 ### Changed
+- Memory estimates no longer refuse or stop a search. Estimates could not predict database size
+  reliably (PTM libraries, custom cleavages, peptide lists) and rejected searches that would
+  have fit. `max_memory_gb` is now enforced only on measured memory. Use `--estimate` for a
+  preview.
+- `prefilter_chunk_size` is deprecated and ignored with a warning; turning the prefilter on
+  always prefilters. The `database_estimated` event is no longer emitted, and
+  `prefilter_chunk_size` no longer appears in the parameters written to `results.json`.
+- The `SAGE_PREFILTER_INDEX_GB` environment variable is removed; the prefilter's budgets come
+  only from `max_memory_gb`.
+- `min_free_memory_gb` is ignored with a warning. It is still accepted so older configurations
+  parse; keeping memory free for other programs is left to the system.
 - The prefilter now requires three preliminary fragment matches by default instead of one. On a
   human plus 10x gut catalog search it kept 19% of peptides instead of 76%, halved peak memory,
   and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
   to keep the previous exact behavior.
+- The default `prefilter_min_matched_peaks` is now four. Against three on human plus gut
+  catalog searches it accepted 1.3% fewer PSMs at 10x and 0.5% fewer at 30x, used 60% and 46%
+  less peak memory, and let the 100x search finish in 19 GiB (14,459 PSMs in 451 s).
+
+### Fixed
+- mzML files read without an MS-level filter no longer gain an empty spectrum (blank id, MS
+  level 0) for every spectrum with zero total ion current.
+- A modification site such as `peptide_n_term:Z` now reports an invalid residue instead of a
+  too-long specificity.
+- `Matrix::get_mut` returns `None` for an out-of-range column instead of another row's entry,
+  and `Matrix::is_close` compares shapes and every entry of non-square matrices.
 
 ## [v0.1.0-beta.10] - 2026-09-25
 

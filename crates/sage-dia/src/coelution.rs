@@ -226,3 +226,7 @@ pub fn score(
     }
     out
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/coelution.rs"]
+mod tests;

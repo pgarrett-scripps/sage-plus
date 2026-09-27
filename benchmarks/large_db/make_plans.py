@@ -34,7 +34,6 @@ BASE = {
                    "missed_cleavages": 1, "restrict": "P"},
         "generate_decoys": True,
         "static_mods": {"C": 57.021464},
-        "prefilter_chunk_size": 0,
     },
     "deisotope": True,
     "fragment_tol": {"ppm": [-20, 20]},

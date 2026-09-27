@@ -27,8 +27,7 @@
         "sites": ["S", "T", "Y"]
       }
     },
-    "prefilter": true,
-    "prefilter_chunk_size": 200
+    "prefilter": true
   },
   "deisotope": true,
   "fragment_tol": {

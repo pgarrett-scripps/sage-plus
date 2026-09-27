@@ -240,8 +240,7 @@ THREADS=16 \
 just bench /absolute/path/to/config.json
 ```
 
-`PREFILTER_CHUNK_SIZE` controls the fixed prefilter chunk size. Defaults can also be placed in a
-repository-root `.env` file because the Justfile enables dotenv loading.
+Defaults can also be placed in a repository-root `.env` file because the Justfile enables dotenv loading.
 
 Use `MEMORY_PEPTIDES=2000000 just bench-memory` to resize the optional generated database workload.
 

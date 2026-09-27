@@ -450,8 +450,8 @@ pub struct SpectrumIndex {
     global_cost: f64,
 }
 
-/// Per-thread scratch space.
-struct Scratch {
+/// Per-thread scratch space for [`SpectrumIndex::matches`].
+pub struct Scratch {
     stamp: Vec<u32>,
     /// Preliminary matches per probe, valid where `stamp` is current.
     counts: Vec<u16>,
@@ -497,7 +497,7 @@ impl SpectrumIndex {
         self.min_matched_peaks
     }
 
-    fn scratch(&self) -> Scratch {
+    pub fn scratch(&self) -> Scratch {
         Scratch {
             stamp: vec![0; self.probes()],
             counts: vec![0; self.probes()],
@@ -520,6 +520,17 @@ impl SpectrumIndex {
                 }
             },
         );
+    }
+
+    /// Whether `peptide` has at least `min_matched_peaks` preliminary matches
+    /// to one precursor hypothesis of any spectrum, as in [`Self::filter`].
+    pub fn matches(
+        &self,
+        parameters: &Parameters,
+        peptide: &Peptide,
+        scratch: &mut Scratch,
+    ) -> bool {
+        self.retains(parameters, peptide, scratch)
     }
 
     fn retains(&self, parameters: &Parameters, peptide: &Peptide, scratch: &mut Scratch) -> bool {

@@ -5,7 +5,6 @@ repeats := env_var_or_default("REPEATS", "3")
 warmups := env_var_or_default("WARMUPS", "1")
 threads := env_var_or_default("THREADS", "8")
 memory_peptides := env_var_or_default("MEMORY_PEPTIDES", "1000000")
-prefilter_chunk_size := env_var_or_default("PREFILTER_CHUNK_SIZE", "1000")
 
 default:
     @just --list
@@ -56,7 +55,7 @@ bench-search config:
 
 # Compare exact prefiltering off and on in the candidate working tree.
 bench-prefilter config:
-    python3 benchmarks/benchmark.py prefilter --config "{{config}}" --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}" --prefilter-chunk-size "{{prefilter_chunk_size}}"
+    python3 benchmarks/benchmark.py prefilter --config "{{config}}" --repeats "{{repeats}}" --warmups "{{warmups}}" --threads "{{threads}}"
 
 # Compare peak memory using a generated pre-digested peptide database.
 bench-memory:
