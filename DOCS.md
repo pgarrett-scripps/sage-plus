@@ -326,6 +326,12 @@ digests dropped.
   reversed from the expanded targets.
 - Expansion happens per digest, so it applies equally with and without the
   prefilter and in `--estimate`.
+- A `database.ptm_library` record at a B, Z or X position matches when its
+  residue is one the FASTA residue expands to (N at a B, for example), also
+  with `strict: true`, and modifies only that variant. Without expansion such
+  a record is a mismatch: strict libraries abort, others warn. A record whose
+  residue is itself B, Z or X never applies, because no searched peptide
+  contains it.
 
 
 ### Example configuration file

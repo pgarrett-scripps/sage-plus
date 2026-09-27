@@ -36,7 +36,9 @@ entries are retained below for provenance.
   for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
   drops peptides with more combinations; the log reports expanded, created and dropped counts.
   Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
-  prefilter are identical.
+  prefilter are identical. A PTM library record at a B, Z or X position validates, also in
+  strict mode, when its residue is one the FASTA residue expands to, and modifies only that
+  variant.
 - `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
   expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
 - Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total

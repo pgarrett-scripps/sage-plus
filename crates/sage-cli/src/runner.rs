@@ -705,6 +705,18 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
 }
 
 /// Load `database.ptm_library`, if configured, into the database parameters.
+/// Does a PTM library record's residue match the FASTA residue at its
+/// position? With ambiguous-residue expansion on, a B, Z or X in the FASTA
+/// also matches any residue it expands to, since the record is applied to
+/// that expanded peptide.
+fn library_residue_matches(fasta: Option<u8>, record: u8, expand_ambiguous: bool) -> bool {
+    fasta.is_some_and(|written| {
+        written == record
+            || (expand_ambiguous
+                && sage_core::ambiguous_residues::is_expansion_of(&[written], &[record]))
+    })
+}
+
 fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> {
     if let Some(settings) = database_parameters.ptm_library.clone() {
         let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
@@ -850,7 +862,11 @@ impl Runner {
                             site.position + 1
                         )),
                         Some(sequence)
-                            if sequence.get(site.position as usize) != Some(&site.residue) =>
+                            if !library_residue_matches(
+                                sequence.get(site.position as usize).copied(),
+                                site.residue,
+                                database_parameters.expand_ambiguous_residues,
+                            ) =>
                         {
                             invalid.push(format!(
                                 "{}:{} expects residue {}",

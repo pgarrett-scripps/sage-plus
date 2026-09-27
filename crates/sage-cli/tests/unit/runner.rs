@@ -700,3 +700,57 @@ fn diapasef_files_get_quality_control_scans() {
     drop(file_qc);
     std::fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+fn ptm_library_records_match_expanded_ambiguous_residues() {
+    let (directory, root) = temporary_output("ptm-ambiguous");
+    std::fs::create_dir_all(&root).unwrap();
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let fasta = root.join("proteins.fasta");
+    // One-based position 6 is the B of MKPEPBIDEK.
+    std::fs::write(&fasta, ">P1\nMKPEPBIDEKRAAAGGGK\n").unwrap();
+    let library = root.join("sites.tsv");
+    std::fs::write(
+        &library,
+        "protein\tposition\tresidue\tmodification\nP1\t6\tN\tDeamidated\n",
+    )
+    .unwrap();
+    let runner = |expand: bool| {
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": {
+                "fasta": fasta.to_string_lossy(),
+                "expand_ambiguous_residues": expand,
+                "prefilter": false,
+                "variable_mods": {
+                    "Deamidated": {
+                        "mass": 0.984016, "sites": ["N"], "site_mode": "library", "max_count": 1
+                    }
+                },
+                "ptm_library": { "path": library.to_string_lossy(), "strict": true },
+            },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        super::Runner::new(input.build().unwrap(), 1)
+    };
+
+    // Without expansion the B cannot stand for the recorded N.
+    let error = runner(false).err().expect("strict library aborts");
+    assert!(format!("{error:#}").contains("expects residue N"), "{error:#}");
+
+    // With expansion the record validates and modifies the N variant only.
+    let runner = runner(true).unwrap();
+    let modified = runner
+        .database
+        .peptides
+        .iter()
+        .filter(|peptide| !peptide.decoy && !peptide.modifications.is_empty())
+        .map(|peptide| String::from_utf8_lossy(&peptide.sequence).to_string())
+        .collect::<Vec<_>>();
+    assert!(!modified.is_empty());
+    assert!(modified.iter().all(|sequence| sequence.contains("PEPNIDEK")), "{modified:?}");
+    std::fs::remove_dir_all(directory).ok();
+}
