@@ -515,6 +515,10 @@ pub struct QuantificationRunStats {
     pub lfq_features: usize,
     pub tmt: Option<String>,
     pub tmt_features: usize,
+    /// Per-channel reporter-ion coverage over all quantified spectra. Missing
+    /// channels are counted, not averaged in as 0. Absent without TMT.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tmt_channels: Vec<sage_core::tmt::ReporterChannelSummary>,
     #[serde(default)]
     pub ms1_label_channels: usize,
     #[serde(default)]

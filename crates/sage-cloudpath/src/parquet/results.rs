@@ -65,9 +65,13 @@ fn write_reporter_ions(
 
     // https://docs.rs/parquet/44.0.0/parquet/column/index.html
     // Using the low level API here is not very pleasant...
-    let def_levels = vec![3; channels];
+    // Definition levels: 0 = no reporter spectrum (null list), 2 = channel
+    // not observed (null element), 3 = observed intensity. Only observed
+    // intensities are passed as values.
     let mut rep_levels = vec![1; channels];
     rep_levels[0] = 0;
+    let mut def_levels = Vec::with_capacity(channels);
+    let mut values = Vec::with_capacity(channels);
 
     let col = column.typed::<FloatType>();
     for feature in features {
@@ -80,7 +84,19 @@ fn write_reporter_ions(
             // MS3 reporter spectra are keyed to their MS2 scan's first occurrence.
             .or_else(|| scan_map.get(&(feature.file_id, feature.spec_id.as_str(), 0)));
         if let Some(rs) = rs {
-            col.write_batch(&rs.peaks, Some(&def_levels), Some(&rep_levels))?;
+            debug_assert_eq!(rs.peaks.len(), channels);
+            def_levels.clear();
+            values.clear();
+            for peak in &rs.peaks {
+                match peak {
+                    Some(intensity) => {
+                        def_levels.push(3);
+                        values.push(*intensity);
+                    }
+                    None => def_levels.push(2),
+                }
+            }
+            col.write_batch(&values, Some(&def_levels), Some(&rep_levels))?;
         } else {
             col.write_batch(&[], Some(&[0]), Some(&[0]))?;
         }

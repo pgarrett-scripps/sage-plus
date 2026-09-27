@@ -345,6 +345,12 @@ impl Runner {
         }
         let lfq_features = areas.as_ref().map(|areas| areas.len()).unwrap_or_default();
         let tmt_features = outputs.quant.len();
+        let tmt_channels = match &self.parameters.quant.tmt {
+            Some(isobaric) if !outputs.quant.is_empty() => {
+                sage_core::tmt::summarize_channels(&outputs.quant, &isobaric.headers())
+            }
+            _ => Vec::new(),
+        };
         self.cancellation.check()?;
         self.events.check()?;
 
@@ -594,6 +600,7 @@ impl Runner {
                     .as_ref()
                     .map(|tmt| format!("{tmt:?}").to_lowercase()),
                 tmt_features,
+                tmt_channels,
                 ms1_label_channels: self.database.label_channels.len(),
                 ms1_label_reference: self.database.label_reference.as_deref().map(str::to_owned),
             },

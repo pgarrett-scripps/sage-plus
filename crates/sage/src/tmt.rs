@@ -2,7 +2,7 @@
 #![allow(clippy::excessive_precision)]
 use crate::mass::{Tolerance, PROTON};
 use crate::scoring::Feature;
-use crate::spectrum::{self, ProcessedSpectrum};
+use crate::spectrum::ProcessedSpectrum;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -80,8 +80,16 @@ pub struct Quant<'ms3> {
     pub spectrum: &'ms3 ProcessedSpectrum,
 }
 
-/// Return a vector containing the peaks closest to the m/zs defined in
-/// `labels`, within a given tolerance window.
+/// Return, for each m/z in `labels`, the most intense peak within the given
+/// tolerance window, or `None` when the channel was not observed.
+///
+/// Only finite, strictly positive intensities count as an observation. A
+/// zero-intensity centroid (some converters keep them) is not a detected
+/// peak, and a non-finite value can only come from dividing by a zero or
+/// missing noise estimate in signal-to-noise mode. Such peaks are skipped, so
+/// a real peak in the same window is still used and a window with none of
+/// them is reported as missing instead of 0.
+///
 /// This function is MS-level agnostic, so it can be used for either MS2 or MS3
 /// quant.
 pub fn find_reporter_ions(
@@ -90,17 +98,69 @@ pub fn find_reporter_ions(
     labels: &[f32],
     label_tolerance: Tolerance,
 ) -> Vec<Option<f32>> {
+    debug_assert_eq!(masses.len(), intensities.len());
     labels
         .iter()
         .map(|&label| {
-            spectrum::select_most_intense_peak(
-                masses,
-                intensities,
-                label,
-                label_tolerance,
-                Some(-PROTON),
-            )
-            .map(|idx| intensities[idx])
+            let (lo, hi) = label_tolerance.bounds(label);
+            let (lo, hi) = (lo - PROTON, hi - PROTON);
+            let start = masses.partition_point(|mass| mass.total_cmp(&lo).is_lt());
+            let mut best: Option<f32> = None;
+            for (&mass, &intensity) in masses[start..].iter().zip(&intensities[start..]) {
+                if mass.total_cmp(&hi).is_gt() {
+                    break;
+                }
+                if mass < lo || !intensity.is_finite() || intensity <= 0.0 {
+                    continue;
+                }
+                if best.is_none_or(|max| intensity >= max) {
+                    best = Some(intensity);
+                }
+            }
+            best
+        })
+        .collect()
+}
+
+/// Per-channel coverage of isobaric reporter ions across quantified spectra.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReporterChannelSummary {
+    /// Channel header, e.g. `tmt_126`.
+    pub channel: String,
+    /// Spectra in which the channel was observed.
+    pub observed: usize,
+    /// Spectra in which the channel was not observed (written as null).
+    pub missing: usize,
+    /// Median intensity over the spectra where the channel was observed;
+    /// `None` when it was never observed. Missing channels are skipped, never
+    /// counted as 0.
+    pub median_intensity: Option<f32>,
+}
+
+/// Summarise reporter-ion coverage per channel. Missing channels are counted
+/// as missing and excluded from the intensity statistics.
+pub fn summarize_channels(quant: &[TmtQuant], headers: &[String]) -> Vec<ReporterChannelSummary> {
+    headers
+        .iter()
+        .enumerate()
+        .map(|(channel, header)| {
+            let mut observed = quant
+                .iter()
+                .filter_map(|q| q.peaks.get(channel).copied().flatten())
+                .collect::<Vec<f32>>();
+            let missing = quant.len() - observed.len();
+            observed.sort_unstable_by(f32::total_cmp);
+            let median_intensity = match observed.len() {
+                0 => None,
+                n if n % 2 == 1 => Some(observed[n / 2]),
+                n => Some((observed[n / 2 - 1] + observed[n / 2]) / 2.0),
+            };
+            ReporterChannelSummary {
+                channel: header.clone(),
+                observed: observed.len(),
+                missing,
+                median_intensity,
+            }
         })
         .collect()
 }
@@ -199,7 +259,9 @@ pub struct TmtQuant {
     /// reporter ions. MS3 reporter spectra refer to their MS2 scan and use 0.
     pub occurrence: usize,
     pub ion_injection_time: f32,
-    pub peaks: Vec<f32>,
+    /// Reporter intensity per channel, in `Isobaric::reporter_masses` order.
+    /// `None` means the channel was not observed; it is never filled with 0.
+    pub peaks: Vec<Option<f32>>,
 }
 
 /// Quantify isobaric tags from an MS2 or MS3 spectrum
@@ -249,10 +311,7 @@ pub fn quantify(
                 &spectrum.intensities,
                 isobaric_labels.reporter_masses(),
                 isobaric_tolerance,
-            )
-            .into_iter()
-            .map(|peak| peak.unwrap_or_default())
-            .collect();
+            );
 
             Some(TmtQuant {
                 spec_id,
