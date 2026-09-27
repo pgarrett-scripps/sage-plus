@@ -384,6 +384,13 @@ impl Runner {
             output_psm_q_value
         );
 
+        let provenance = crate::provenance::Provenance::collect(
+            &self.parameters,
+            &self.database_parameters,
+            &self.database,
+        );
+        self.parquet_provenance = provenance.parquet_metadata();
+
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
             &outputs.quant,
@@ -391,6 +398,7 @@ impl Runner {
             &filenames,
             &self.database,
             output_psm_q_value,
+            &self.parquet_provenance,
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -410,6 +418,7 @@ impl Runner {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
                 &output_features,
                 output_psm_q_value,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("matched_fragments.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -424,6 +433,7 @@ impl Runner {
             let bytes = sage_cloudpath::parquet::serialize_spectral_library(
                 &library_entries,
                 &self.parameters.spectral_library,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("spectral_library.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -452,7 +462,12 @@ impl Runner {
         }
 
         if let Some(areas) = &areas {
-            let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
+            let bytes = sage_cloudpath::parquet::serialize_lfq(
+                areas,
+                &filenames,
+                &self.database,
+                &self.parquet_provenance,
+            )?;
 
             let path = self.make_path("lfq.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -548,6 +563,7 @@ impl Runner {
                 mzmlb_enabled: cfg!(feature = "mzmlb"),
                 input_identity_mode: "path_size_mtime".into(),
                 inputs: input_identities,
+                metadata: Some(provenance),
             },
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),

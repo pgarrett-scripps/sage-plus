@@ -12,6 +12,7 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 pub use url::Url;
 
 pub mod denoise;
+pub mod hash;
 pub mod mgf;
 pub mod mzml;
 #[cfg(feature = "mzmlb")]

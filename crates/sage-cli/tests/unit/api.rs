@@ -136,6 +136,10 @@ fn configured_batching_overrides_legacy_api_parallelism() -> anyhow::Result<()> 
             .iter()
             .all(|input| input.size_bytes.is_some()));
         let bytes = std::fs::read(root.join(batch.to_string()).join("results.sage.parquet"))?;
+        // Compare the column data, not the footer: its provenance records the
+        // configuration, including the batch size and output directory.
+        let footer_len = u32::from_le_bytes(bytes[bytes.len() - 8..bytes.len() - 4].try_into()?);
+        let bytes = bytes[..bytes.len() - 8 - footer_len as usize].to_vec();
         if let Some(previous) = &result_bytes {
             assert_eq!(&bytes, previous);
         }

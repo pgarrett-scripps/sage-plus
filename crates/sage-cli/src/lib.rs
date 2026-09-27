@@ -5,5 +5,6 @@ pub mod input;
 pub mod memory;
 pub mod modification_preview;
 pub mod output;
+pub mod provenance;
 pub mod runner;
 pub mod telemetry;

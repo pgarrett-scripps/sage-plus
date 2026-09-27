@@ -105,6 +105,9 @@ pub struct Search {
     #[serde(skip_serializing)]
     pub annotate_matches: bool,
 
+    /// Hash every local spectrum file (SHA-256) into the output provenance.
+    pub record_input_hashes: bool,
+
     pub score_type: ScoreType,
 
     /// DIA search mode; omitted from results.json when off.
@@ -186,6 +189,11 @@ pub struct Input {
     pub diagnostic_ions: Option<DiagnosticIonsConfig>,
 
     pub annotate_matches: Option<bool>,
+    /// Record the SHA-256 of every local spectrum file in the Parquet footers
+    /// and `run-summary.json` (default false). Each file is read once more after
+    /// the search, at disk speed; remote files are never hashed. The FASTA and
+    /// other database files are always hashed.
+    pub record_input_hashes: Option<bool>,
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
@@ -761,6 +769,7 @@ impl Input {
             min_matched_peaks: self.min_matched_peaks.unwrap_or(4),
             max_fragment_charge: self.max_fragment_charge,
             annotate_matches: self.annotate_matches.unwrap_or(false),
+            record_input_hashes: self.record_input_hashes.unwrap_or(false),
             precursor_charge: self.precursor_charge.unwrap_or((2, 4)),
             override_precursor_charge: self.override_precursor_charge.unwrap_or(false),
             isotope_errors: self.isotope_errors.unwrap_or((0, 0)),
