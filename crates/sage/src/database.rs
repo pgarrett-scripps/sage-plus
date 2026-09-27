@@ -291,6 +291,10 @@ pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
     (mix(forward), mix(reversed))
 }
 
+/// Digest groups expanded per parallel pass in
+/// [`Parameters::modify_digests_with_target_sequences`].
+const MODIFY_DIGEST_CHUNK_GROUPS: usize = 1 << 16;
+
 impl Parameters {
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
         let max_len = self.enzyme.max_len.unwrap_or(50);
@@ -1075,12 +1079,41 @@ impl Parameters {
         digests: Vec<DigestGroup>,
         target_sequences: &HashSet<PeptideSequence>,
     ) -> Vec<Peptide> {
+        self.modify_digest_chunks(digests, target_sequences, MODIFY_DIGEST_CHUNK_GROUPS)
+    }
+
+    fn modify_digest_chunks(
+        &self,
+        digests: Vec<DigestGroup>,
+        target_sequences: &HashSet<PeptideSequence>,
+        chunk_groups: usize,
+    ) -> Vec<Peptide> {
         log::trace!("modifying peptides");
-        let mut target_decoys = self.with_digest_expander(|expander| {
-            digests
-                .into_par_iter()
-                .flat_map_iter(|group| expander.expand(group, Some(target_sequences)))
-                .collect::<Vec<_>>()
+        // Expand in fixed-size chunks of digest groups. A single parallel
+        // `collect` over every group builds per-thread pieces the size of the
+        // whole peptide list; once they are concatenated and freed, the
+        // allocator keeps most of those pages, so they sit under the fragment
+        // index build and raise peak memory. Chunking bounds the pieces to one
+        // chunk, whose pages the next chunk reuses. Chunks are appended in
+        // order, so the output order is unchanged. Adapted from
+        // theGreatHerrLebert/sage ccce5da (chunked peptide materialisation).
+        let mut target_decoys = Vec::new();
+        self.with_digest_expander(|expander| {
+            let mut digests = digests.into_iter();
+            loop {
+                let chunk = digests
+                    .by_ref()
+                    .take(chunk_groups.max(1))
+                    .collect::<Vec<_>>();
+                if chunk.is_empty() {
+                    break;
+                }
+                target_decoys.par_extend(
+                    chunk
+                        .into_par_iter()
+                        .flat_map_iter(|group| expander.expand(group, Some(target_sequences))),
+                );
+            }
         });
         self.reorder_peptides_with_labels(&mut target_decoys);
         target_decoys

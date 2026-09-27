@@ -9,6 +9,16 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Lower peak memory without the prefilter. Modified peptides are now expanded in chunks of 65,536
+  digest groups instead of one parallel collect over the whole digest. The single collect left
+  per-thread pieces as large as the whole peptide list, and the allocator kept their pages
+  through the fragment index build, where peak memory occurs. Peptides come out in the same
+  order and PSMs are byte-identical. Human reviewed FASTA, 8 threads, 3 runs: peak RSS 1.44-1.53
+  GB to 1.25 GB with standard mods, and 7.76-8.30 GB to 7.00 GB with broad PTMs (seven variable
+  mods, 18.4 million peptides); wall time unchanged. Adapted from theGreatHerrLebert/sage
+  (commit ccce5da, chunked peptide materialisation).
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added
