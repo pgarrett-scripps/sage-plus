@@ -9,6 +9,25 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Site-level FDR for PTM site reports. `results.sage.protein-sites.parquet` gains `site_score`
+  (best supporting PSM discriminant score) and `site_q_value`, a target-decoy q-value estimated
+  over protein sites with the same model as the peptide and protein levels.
+  `results.sage.ptm-sites.parquet` gains `site_q_value`, the best q-value of the protein sites
+  each row supports. Filter on `site_q_value <= 0.01` for 1% site FDR. Schemas `protein_sites`
+  and `ptm_sites` move to version 3 (`schemas/*.v3.parquet.schema`); all version 2 columns are
+  kept, and `best_spectrum_q` is documented as a PSM-level minimum, not a site FDR.
+- `run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and
+  `protein_sites_at_one_percent_fdr` under `ptm_localization`. The fields are optional and the
+  run-summary schema version is unchanged.
+
+### Changed
+- PTM localization also runs on decoy PSMs that pass `ptm_localization.psm_q_value`, so decoy
+  sites exist to count. Decoy PSMs stay out of the false-localization-rate competition and take
+  the target curve's localization q-value at their own score, so every PSM and localization gate
+  is applied identically to targets and decoys before site FDR is estimated (HC-FDR-04). Site
+  reports, the PTM library and `localized_psms` still contain target PSMs only.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added
