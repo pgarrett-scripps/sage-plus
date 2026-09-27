@@ -1529,6 +1529,13 @@
             "null"
           ]
         },
+        "clip_n_term_met": {
+          "description": "Also search each protein with its initiator methionine removed when\nthe second residue is G, A, S, T, C, P, or V (MetAP clipping). The\nclipped peptides are protein N-terminal. Enzymatic digests only.\nDefault: true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "custom_cleavage_sites": {
           "description": "Path to a protein-specific custom cleavage-site TSV or Parquet file.\nRequired columns: `protein`, `position`; optional column: `context`.",
           "type": [

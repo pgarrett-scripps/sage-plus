@@ -28,7 +28,7 @@ impl Runner {
     ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
         let started = Instant::now();
-        let enzyme: EnzymeParameters = db_params.enzyme.clone().into();
+        let enzyme = db_params.enzyme_parameters();
         let shared = SharedSequences::scan(
             &fasta,
             &enzyme,

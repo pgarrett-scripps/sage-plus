@@ -32,6 +32,24 @@ entries are retained below for provenance.
   `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
   residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
 
+### Added
+- Initiator methionine clipping, on by default (`database.clip_n_term_met`, default true).
+  Proteins starting with M followed by G, A, S, T, C, P, or V are also digested without the Met,
+  as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
+  N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
+  semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
+  prefilter, and the memory estimate include them. Non-specific digests and peptide TSV input
+  are unchanged. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
+  this adds 0.9% digests.
+
+### Changed
+- Results change with the new default: searches of FASTA proteins with a clippable Met gain the
+  clipped N-terminal peptides and their decoys. Set `clip_n_term_met` to false for the previous
+  search space.
+- When the same peptide comes from digests with different enzymatic state, the kept copy is now
+  the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
+  sort order.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

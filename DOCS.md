@@ -261,6 +261,39 @@ Normal digest peptides remain unchanged. Context mismatches and terminal or
 out-of-range positions are errors; sites without context are accepted with a
 warning.
 
+#### Initiator methionine clipping
+
+Methionine aminopeptidase (MetAP) removes a protein's initiator methionine when
+the second residue is small: G, A, S, T, C, P, or V. With
+`database.clip_n_term_met` set to true (the default), each FASTA protein that
+starts with M followed by one of those residues is also digested as if the Met
+were gone. Clipping is often incomplete, so the unclipped peptides stay; only
+peptides starting at residue 2 are added. For `MSDEREVAEAK` with trypsin and one
+missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
+`MSDEREVAEAK`.
+
+- Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
+  sites and PTM-library `protein_n_term` records apply to them (for example,
+  N-terminal acetylation of the new first residue), and a motif's `<` anchor
+  matches at residue 2.
+- Their enzymatic state and missed cleavages are those of the unclipped
+  N-terminal peptide, so they are never semi-enzymatic because of the clip. A
+  semi-enzymatic or custom-cleavage peptide that already starts at residue 2 is
+  reported once, as the clipped N-terminal peptide.
+- Protein coordinates stay relative to the FASTA sequence: a clipped peptide
+  starts at protein position 2 and its previous residue is the M.
+- Generated decoys are reversed clipped peptides and are N-terminal too. FASTA
+  decoy proteins are clipped by the same rule on their own sequence. The
+  prefilter produces the same clipped peptides as the full database.
+- Clipping applies to enzymatic digests, including no digestion (`"$"`, which
+  adds the whole protein without its Met). A non-specific digest already
+  contains every peptide from residue 2 and is unchanged. Peptide TSV input is
+  searched as written.
+
+Set `clip_n_term_met` to false to search only the FASTA sequences as written. The
+rule is fixed to the MetAP residues; to search another processed form, put it in
+the FASTA.
+
 
 ### Example configuration file
 
@@ -300,6 +333,7 @@ For additional information about configuration options and output file formats, 
     "max_combinations": 8,  // Optional[int] {default=null} Limit total variants per peptide
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
+    "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
@@ -832,6 +866,10 @@ alongside the library, because the location table does not embed chemical masses
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
+- **clip_n_term_met**: Boolean. Also digest each protein without its initiator methionine
+  when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
+  and are protein N-terminal. Enzymatic digests only (default: true). See
+  [Initiator methionine clipping](#initiator-methionine-clipping).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
   searching before building the search index. The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and
