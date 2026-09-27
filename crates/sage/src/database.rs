@@ -2013,6 +2013,125 @@ impl FragmentIndex {
     pub fn bucket(&self, bucket: usize) -> impl Iterator<Item = Theoretical> + '_ {
         self.bucket_search(bucket, 0, u32::MAX)
     }
+
+    /// Resolve the precursor-scoped fragment range of many buckets at once.
+    ///
+    /// Writes one absolute `[first, last)` range into `fragments` per entry of
+    /// `buckets`, identical to the range [`Self::bucket_search`] selects. A
+    /// binary search is a chain of dependent loads, so one search at a time
+    /// leaves the core waiting on a single cache miss. Here `LANES` buckets
+    /// are stepped in lockstep, each with independent lower and upper
+    /// searches, so up to `2 * LANES` misses are in flight together. The
+    /// design follows Matteo Lacki's interleaved page-bound resolver
+    /// (MatteoLacki/sage 950641f, MIT).
+    fn resolve_bucket_ranges(
+        &self,
+        buckets: &[u32],
+        peptide_lo: u32,
+        peptide_hi: u32,
+        out: &mut Vec<(u32, u32)>,
+    ) {
+        /// Buckets resolved together. Two searches each, sized against the
+        /// core's outstanding-miss capacity rather than a vector width.
+        const LANES: usize = 16;
+        const SLOTS: usize = 2 * LANES;
+
+        out.clear();
+        out.reserve(buckets.len());
+        if self.fragments.is_empty() {
+            out.extend(buckets.iter().map(|&bucket| {
+                let start = self.buckets[bucket as usize].start;
+                (start, start)
+            }));
+            return;
+        }
+        let fragments = self.fragments.as_slice();
+
+        for chunk in buckets.chunks(LANES) {
+            // Even slots search `id < peptide_lo`, odd slots `id <= peptide_hi`,
+            // exactly the two `partition_point` predicates of `bucket_search`.
+            let mut base = [0usize; SLOTS];
+            let mut size = [0usize; SLOTS];
+            let mut longest = 0usize;
+            for (lane, &bucket) in chunk.iter().enumerate() {
+                let bucket = self.buckets[bucket as usize];
+                let (start, len) = (bucket.start as usize, (bucket.end - bucket.start) as usize);
+                // An empty bucket probes index 0 (always valid here) without
+                // moving; its result is taken from `start` below.
+                let start = if len == 0 { 0 } else { start };
+                base[2 * lane] = start;
+                base[2 * lane + 1] = start;
+                size[2 * lane] = len;
+                size[2 * lane + 1] = len;
+                longest = longest.max(len);
+            }
+
+            // Branchless halving with a fixed trip count: a converged or
+            // unused slot has `half == 0`, re-reads its own `base` and stays.
+            let steps = usize::BITS - longest.saturating_sub(1).leading_zeros();
+            for _ in 0..steps {
+                for slot in 0..SLOTS {
+                    let half = size[slot] / 2;
+                    let mid = base[slot] + half;
+                    // SAFETY: `mid < base + size <= bucket.end <= fragments.len()`
+                    // when `size > 1`; otherwise `half == 0` and `mid == base`,
+                    // which is in bounds for a non-empty bucket and is index 0
+                    // for an empty or unused slot.
+                    let id = unsafe { fragments.get_unchecked(mid) }.peptide_index();
+                    let go_right = if slot % 2 == 0 {
+                        id < peptide_lo
+                    } else {
+                        id <= peptide_hi
+                    };
+                    base[slot] = if go_right { mid } else { base[slot] };
+                    size[slot] -= half;
+                }
+            }
+
+            for (lane, &bucket) in chunk.iter().enumerate() {
+                let bucket = self.buckets[bucket as usize];
+                if bucket.start == bucket.end {
+                    out.push((bucket.start, bucket.start));
+                    continue;
+                }
+                let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
+                let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
+                let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
+                out.push((first as u32, last as u32));
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn range_iter(&self, bucket: usize, first: u32, last: u32) -> FragmentIter<'_> {
+        FragmentIter {
+            fragments: &self.fragments[first as usize..last as usize],
+            mass_prefix: self.buckets[bucket].mass_prefix,
+            next: 0,
+        }
+    }
+}
+
+/// Per-thread scratch for [`IndexedQuery::page_search_batch`], reused across
+/// spectra so the batched path allocates nothing in steady state.
+#[derive(Default)]
+struct BatchSearchScratch {
+    /// Per window: fragment bounds and its span in `entries`.
+    windows: Vec<(f32, f32, u32, u32)>,
+    /// One bucket per (window, bucket) pair, in emission order.
+    entries: Vec<u32>,
+    /// `(bucket, entry)` pairs sorted by bucket for de-duplication.
+    order: Vec<(u32, u32)>,
+    /// Distinct buckets and their resolved ranges.
+    distinct: Vec<u32>,
+    resolved: Vec<(u32, u32)>,
+    /// Resolved range per entry.
+    ranges: Vec<(u32, u32)>,
+}
+
+thread_local! {
+    static BATCH_SEARCH_SCRATCH: std::cell::RefCell<BatchSearchScratch> =
+        std::cell::RefCell::new(BatchSearchScratch::default());
 }
 
 struct FragmentIter<'a> {
@@ -2358,27 +2477,130 @@ impl IndexedQuery<'_> {
                 .fragments
                 .bucket_search(page, peptide_lo, peptide_hi)
                 .filter(move |frag| {
-                    // This looks somewhat complicated, but it's a consequence of
-                    // how the `binary_search_slice` function works - it will return
-                    // the set of indices that maximally cover the desired range - the exact
-                    // `left` and `right` indices may be valid, or just outside of the range.
-                    // Anything interior of `left` and `right` is guaranteed to be within the
-                    // precursor tolerance, so we just need to check the edge cases
-                    //
-                    // Previously, a direct lookup to check the mass of the current fragment was
-                    // performed, but the pointer indirection + float comparison can slow down
-                    // open searches by as much as 2x!!
-                    // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
-                    (frag.peptide_index.0 > self.pre_idx_lo as u32
-                        || (frag.peptide_index.0 == self.pre_idx_lo as u32
-                            && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
-                        && (frag.peptide_index.0 < self.pre_idx_hi as u32
-                            || (frag.peptide_index.0 == self.pre_idx_hi as u32
-                                && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
-                        && frag.fragment_mz >= fragment_lo
-                        && frag.fragment_mz <= fragment_hi
+                    self.accepts(frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi)
                 })
         })
+    }
+
+    /// Final per-fragment check shared by the single and batched searches.
+    #[inline(always)]
+    fn accepts(
+        &self,
+        frag: &Theoretical,
+        fragment_lo: f32,
+        fragment_hi: f32,
+        precursor_lo: f32,
+        precursor_hi: f32,
+    ) -> bool {
+        // This looks somewhat complicated, but it's a consequence of
+        // how the `binary_search_slice` function works - it will return
+        // the set of indices that maximally cover the desired range - the exact
+        // `left` and `right` indices may be valid, or just outside of the range.
+        // Anything interior of `left` and `right` is guaranteed to be within the
+        // precursor tolerance, so we just need to check the edge cases
+        //
+        // Previously, a direct lookup to check the mass of the current fragment was
+        // performed, but the pointer indirection + float comparison can slow down
+        // open searches by as much as 2x!!
+        // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
+        (frag.peptide_index.0 > self.pre_idx_lo as u32
+            || (frag.peptide_index.0 == self.pre_idx_lo as u32
+                && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
+            && (frag.peptide_index.0 < self.pre_idx_hi as u32
+                || (frag.peptide_index.0 == self.pre_idx_hi as u32
+                    && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
+            && frag.fragment_mz >= fragment_lo
+            && frag.fragment_mz <= fragment_hi
+    }
+
+    /// Batched equivalent of calling [`Self::page_search`] and then
+    /// [`Self::page_search_shifted`] for every shift, for each mass in turn.
+    ///
+    /// Matches are emitted in exactly that order. Every bucket's
+    /// precursor-scoped range depends only on the bucket, because the
+    /// peptide range is fixed for this query, so each distinct bucket is
+    /// resolved once for the whole spectrum and all of them are resolved
+    /// with interleaved binary searches. Adapted from Matteo Lacki's
+    /// `page_search_batch` (MatteoLacki/sage 062f7b3 and 950641f, MIT).
+    pub fn page_search_batch(
+        &self,
+        masses: impl IntoIterator<Item = f32>,
+        shifts: &[f32],
+        mut on_match: impl FnMut(Theoretical),
+    ) {
+        let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
+        let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
+        let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
+
+        BATCH_SEARCH_SCRATCH.with(|scratch| {
+            let mut scratch = scratch.borrow_mut();
+            let BatchSearchScratch {
+                windows,
+                entries,
+                order,
+                distinct,
+                resolved,
+                ranges,
+            } = &mut *scratch;
+            windows.clear();
+            entries.clear();
+
+            let mut push_window = |fragment_lo: f32, fragment_hi: f32| {
+                let (left, right) =
+                    fragment_bucket_slice(&self.db.min_value, fragment_lo, fragment_hi);
+                let first = entries.len() as u32;
+                entries.extend(left as u32..right as u32);
+                windows.push((fragment_lo, fragment_hi, first, entries.len() as u32));
+            };
+            for mass in masses {
+                let (fragment_lo, fragment_hi) = self.fragment_tol.bounds(mass);
+                push_window(fragment_lo, fragment_hi);
+                for &shift in shifts {
+                    push_window(fragment_lo - shift, fragment_hi - shift);
+                }
+            }
+
+            // Resolve each distinct bucket once.
+            order.clear();
+            order.extend(
+                entries
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, &bucket)| (bucket, entry as u32)),
+            );
+            order.sort_unstable();
+            distinct.clear();
+            distinct.extend(order.iter().map(|&(bucket, _)| bucket));
+            distinct.dedup();
+            self.db
+                .fragments
+                .resolve_bucket_ranges(distinct, peptide_lo, peptide_hi, resolved);
+            ranges.clear();
+            ranges.resize(entries.len(), (0, 0));
+            let mut group = 0;
+            for &(bucket, entry) in order.iter() {
+                if distinct[group] != bucket {
+                    group += 1;
+                }
+                ranges[entry as usize] = resolved[group];
+            }
+
+            for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
+                for entry in first as usize..last as usize {
+                    let (lo, hi) = ranges[entry];
+                    for frag in self
+                        .db
+                        .fragments
+                        .range_iter(entries[entry] as usize, lo, hi)
+                    {
+                        if self.accepts(&frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi)
+                        {
+                            on_match(frag);
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 
