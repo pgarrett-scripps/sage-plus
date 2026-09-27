@@ -115,6 +115,7 @@ impl LabelGroupIndex {
     }
 }
 
+#[cfg(test)]
 fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
     close_pairs(keep, |index| {
         database
@@ -124,6 +125,7 @@ fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
 }
 
 /// Add the target or decoy partner, given by `pair_of`, of every kept peptide.
+#[cfg(test)]
 fn close_pairs(keep: &AtomicBitSet, pair_of: impl Fn(usize) -> Option<usize> + Sync) {
     // Pairs are resolved in parallel and repeated until no partner is added,
     // so the closure does not depend on visit order.

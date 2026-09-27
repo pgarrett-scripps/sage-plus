@@ -265,29 +265,30 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
 
         // As the streamed prefilter does: digests whose sequence and decoy
         // sequence are unique are expanded one protein at a time without a
-        // target check; the rest are grouped and expanded together.
+        // target check; the rest are expanded per canonical key.
         let enzyme: EnzymeParameters = parameters.enzyme.clone().into();
         let digests = (0..fasta.targets.len())
             .map(|index| fasta.digest_protein(index, &enzyme, None))
             .collect::<Vec<_>>();
-        let mut hashes = digests
-            .iter()
-            .flatten()
-            .flat_map(|digest| {
-                let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
-                std::iter::once(forward).chain(generate_decoys.then_some(reverse))
-            })
-            .collect::<Vec<_>>();
-        hashes.sort_unstable();
-        let shared = hashes
+        // A sequence, its decoy, and a target equal to that decoy share a
+        // canonical key; palindromes always collide with their own decoy.
+        let key = |digest: &crate::enzyme::Digest| {
+            let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
+            match generate_decoys {
+                true if forward == reverse => u64::MAX,
+                true => forward.min(reverse),
+                false => forward,
+            }
+        };
+        let mut keys = digests.iter().flatten().map(key).collect::<Vec<_>>();
+        keys.sort_unstable();
+        let shared = keys
             .windows(2)
             .filter(|pair| pair[0] == pair[1])
             .map(|pair| pair[0])
+            .chain(generate_decoys.then_some(u64::MAX))
             .collect::<HashSet<_>>();
-        let is_shared = |digest: &crate::enzyme::Digest| {
-            let (forward, reverse) = sequence_hashes(digest.sequence.as_bytes());
-            shared.contains(&forward) || (generate_decoys && shared.contains(&reverse))
-        };
+        let is_shared = |digest: &crate::enzyme::Digest| shared.contains(&key(digest));
 
         let mut deferred = Vec::new();
         let mut streamed = parameters.with_digest_expander(|expander| {
@@ -311,7 +312,14 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
             streamed
         });
         shared_exercised |= !deferred.is_empty();
-        streamed.extend(parameters.modify_digests(crate::enzyme::group_protein_digests(deferred)));
+        // Each shared key is filtered as its own small database.
+        let mut units = BTreeMap::<u64, Vec<_>>::new();
+        for digest in deferred {
+            units.entry(key(&digest)).or_default().push(digest);
+        }
+        for unit in units.into_values() {
+            streamed.extend(parameters.modify_digests(crate::enzyme::group_protein_digests(unit)));
+        }
         parameters.reorder_peptides_with_labels(&mut streamed);
         assert_eq!(
             peptide_keys(streamed),

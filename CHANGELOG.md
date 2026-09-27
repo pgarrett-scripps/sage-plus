@@ -16,8 +16,8 @@ entries are retained below for provenance.
   `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
 - The prefilter streams proteins through the spectrum index in parallel, one protein per
   worker, instead of digesting the database whole or in chunks. Digests shared between proteins
-  or colliding with a generated decoy are filtered together, so the retained peptides are
-  unchanged. Its memory no longer grows with the full digest.
+  or colliding with a generated decoy are grouped by sequence and filtered group by group, so the
+  retained peptides are unchanged. Its memory no longer grows with the full digest.
 - `sage config.json --estimate` prints a rough database memory estimate (peptides, fragments,
   whether the prefilter is on) and exits without searching.
 - Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
