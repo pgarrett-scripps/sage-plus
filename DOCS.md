@@ -306,6 +306,9 @@ the FASTA.
 
 J (Ile or Leu) is always searched with the shared I/L mass and reported as J.
 Static or variable modifications declared on I or L do not apply to J.
+A J peptide stays a separate peptide from its identical I and L twins: they
+have the same mass, so the best PSM ties with a twin (`delta_next` 0) and
+protein inference sees the twins' proteins as separate groups.
 
 B (Asp or Asn), Z (Glu or Gln) and X (any residue) have no single mass. By
 default, peptides containing them are dropped with a warning. With
@@ -326,6 +329,8 @@ digests dropped.
   reversed from the expanded targets.
 - Expansion happens per digest, so it applies equally with and without the
   prefilter and in `--estimate`.
+- Only FASTA digests are expanded: a `database.peptides` TSV row containing
+  B, Z or X is skipped with a warning even with expansion on.
 - A `database.ptm_library` record at a B, Z or X position matches when its
   residue is one the FASTA residue expands to (N at a B, for example), also
   with `strict: true`, and modifies only that variant. Without expansion such
