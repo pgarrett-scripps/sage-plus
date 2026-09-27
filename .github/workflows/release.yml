@@ -140,6 +140,7 @@ jobs:
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
           cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
+          cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage" "$archive/"
           tar czf "$archive.tar.gz" "$archive"
@@ -153,6 +154,7 @@ jobs:
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
           cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
+          cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$archive/"
           7z a "$archive.zip" "$archive"
@@ -212,6 +214,8 @@ jobs:
           cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
           mkdir -p .release/docker/vendor/filemanager
           cp vendor/filemanager/LICENSE vendor/filemanager/LICENSE-APACHE .release/docker/vendor/filemanager/
+          mkdir -p .release/docker/crates/sage/data
+          cp crates/sage/data/LICENSE-unimod.txt .release/docker/crates/sage/data/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4

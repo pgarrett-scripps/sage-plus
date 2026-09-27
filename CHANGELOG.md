@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
+  `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
+  Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.
+
 ### Fixed
 - The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
   so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed

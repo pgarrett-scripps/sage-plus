@@ -36,3 +36,24 @@ fn labels_first_write_wins() {
     assert_eq!(label_for(m).as_deref(), Some("MyMod"));
     assert!(label_for(0.000_001).is_none());
 }
+
+#[test]
+fn unimod_licence_ships_with_release_artifacts() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let licence = std::fs::read_to_string(root.join("data/LICENSE-unimod.txt")).unwrap();
+    assert!(licence.contains("Copyright (C) 2002-2006 Unimod"));
+    assert!(licence.contains("DESIGN SCIENCE LICENSE"));
+    assert!(licence.contains("END OF TERMS AND CONDITIONS"));
+
+    let workspace = root.join("../..");
+    let read = |path: &str| std::fs::read_to_string(workspace.join(path)).unwrap();
+    // Both binary archives and the Docker context copy the licence.
+    assert_eq!(
+        read(".github/workflows/release.yml")
+            .matches("crates/sage/data/LICENSE-unimod.txt")
+            .count(),
+        3
+    );
+    assert!(read("Dockerfile").contains("/app/licenses/unimod.txt"));
+    assert!(read("THIRD_PARTY_NOTICES.md").contains("## Unimod"));
+}
