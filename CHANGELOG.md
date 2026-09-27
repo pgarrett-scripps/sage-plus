@@ -22,6 +22,22 @@ entries are retained below for provenance.
 - `matched_fragments.sage.parquet` now carries `sage.schema.name` and `sage.schema.version`, and
   its schema is published as `schemas/matched_fragments.sage.v1.parquet.schema`.
 
+### Documentation
+- The PSM column list in DOCS.md now matches `results.sage.parquet`. `label` and `ms1_intensity`
+  are removed, the `delta_bext` and `pepide_len` typos are fixed, and `protein_groups`,
+  `num_protein_groups`, `protein_group_q` and the other missing columns are added. Every score
+  states whether higher or lower is better.
+- `poisson` and `posterior_error` are documented as log10 values, as Sage has always written
+  them. `ms2_intensity` is the matched fragment intensity, and `longest_y_pct` is a fraction.
+- New "Protein inference" section: IDPicker parsimony grouping (`protein_grouping`,
+  `protein_grouping_peptide_fdr`), picked-protein and picked protein-group FDR over unique
+  peptides, and the q-value estimator.
+- The LFQ `q_value` is described as a cumulative target-decoy count, not picked competition.
+- The `generate_decoys` default is documented as true, which the code has always used.
+- Sage does no protein rollup, intensity normalization or imputation; DOCS.md now says so.
+- New "Performance and complexity" section, with `RAYON_NUM_THREADS` for limiting cores.
+- `benchmarks/GROUNDING.md` maps each grounding rule to its tests and lists the gaps.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added
