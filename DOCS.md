@@ -1369,7 +1369,7 @@ Example configuration:
 }
 ```
 
-For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification identity it carries, sage:
+For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification identity it carries, sage:
 1. recovers candidate residue and terminal attachments from the configured sites and library restrictions,
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
@@ -1381,8 +1381,27 @@ The current implementation combines one AScore-inspired, site-determining-ion st
 
 Two Parquet site reports are written:
 
-- **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, and `site_probabilities`.
-- **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, including `best_localization_q_value`.
+- **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
+- **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
+
+### Site-level FDR
+
+`site_q_value` is a target-decoy q-value estimated at the site level, separately from the PSM, peptide and protein levels. Use `site_q_value <= 0.01` to report sites at 1% site FDR.
+
+1. Decoy PSMs pass through the same gates as target PSMs: spectrum q-value ≤ `ptm_localization.psm_q_value`, localization, no impossible-site decoy win, and localization q-value ≤ `ptm_localization.localization_q_value`. Decoy PSMs never enter the false-localization-rate competition. Each takes the localization q-value of the target competition at its own score, so the localization cutoff is the same score threshold for both.
+2. Target and decoy site rows are collapsed with the same key: protein, modified peptide, position in the peptide, modification and attachment. Decoy sites sit on decoy proteins.
+3. Each site is scored by the best discriminant score of its supporting PSMs, the same score used for PSM, peptide and protein FDR.
+4. Target and decoy sites compete without pairing. Q-values come from the same posterior-error model as the peptide and protein levels, or from +1-corrected target-decoy counts when that model is underdetermined. Tied site scores share the most conservative q-value in the tie.
+
+Site FDR is about identity: is this modified site on this protein real? Localization confidence is a separate question and stays in `best_localization_probability` and `best_localization_q_value`.
+
+Every filter comes before estimation. Site FDR is estimated once, on exactly the set of sites written to the report, so no filter is applied afterwards. Filtering by `site_q_value` is the estimated cutoff itself. Any further filter on another column, such as localization probability, number of PSMs or protein, does not keep the 1% guarantee for the filtered set.
+
+The spectrum q-value cutoff needs no correction. A site passes it exactly when its best PSM clears the score threshold that the cutoff sets. That is a threshold on the site score itself, applied to targets and decoys alike. A looser `ptm_localization.psm_q_value`, up to 1.0, leaves more decoy sites to estimate from and is allowed.
+
+`best_spectrum_q` is the lowest PSM q-value among supporting PSMs. It is not a site-level FDR. Sites supported by one PSM are the most likely to be false, and taking the minimum PSM q-value across a site's PSMs hides that. Reports written before schema version 3 have only this column.
+
+`run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and `protein_sites_at_one_percent_fdr` under `ptm_localization`.
 
 For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
 
@@ -1394,7 +1413,7 @@ psm_id  peptide            modification  position  residue  localization_probabi
 Notes:
 - Residue and terminal-group modifications are localized within their configured rules. Site reports include `attachment`, and terminal coordinates identify the adjacent residue.
 - The current backbone-ion model cannot distinguish equal masses on a terminal group and its adjacent residue in some configurations. Such alternatives retain ambiguity and are excluded from reusable libraries. Terminal localization is experimental and has synthetic regression coverage, not an empirical FLR calibration study.
-- Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
+- Localization runs after spectrum FDR assignment, for target and decoy PSMs that pass `ptm_localization.psm_q_value`. Only target PSMs are written to the site reports and counted in `localized_psms`. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
 - FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable. A peptide present in both the FASTA and a peptide TSV keeps the FASTA copy's protein position, enzymatic state and missed cleavages, so protein-terminal modification rules follow the FASTA; the TSV row only adds its protein.

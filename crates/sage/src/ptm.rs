@@ -629,6 +629,37 @@ pub fn target_decoy_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
     q_values
 }
 
+/// Read q-values for new competition scores off an existing q-value curve.
+///
+/// `evidence` and `q_values` are the population and output of
+/// [`target_decoy_q_values`]. Each probe score receives the smallest q-value
+/// of any population entry scoring at or below it, or 1.0 when none does, so
+/// `q <= cutoff` admits a probe exactly when its score clears the score
+/// threshold that the cutoff sets on the population.
+pub fn q_values_at_scores(evidence: &[(f32, bool)], q_values: &[f32], probes: &[f32]) -> Vec<f32> {
+    let mut curve = evidence
+        .iter()
+        .zip(q_values)
+        .map(|(&(score, _), &q)| (score, q))
+        .collect::<Vec<_>>();
+    curve.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut minimum = 1.0f32;
+    for point in curve.iter_mut() {
+        minimum = minimum.min(point.1);
+        point.1 = minimum;
+    }
+    probes
+        .iter()
+        .map(|&score| {
+            let at_or_below = curve.partition_point(|point| point.0.total_cmp(&score).is_le());
+            at_or_below
+                .checked_sub(1)
+                .map(|ix| curve[ix].1)
+                .unwrap_or(1.0)
+        })
+        .collect()
+}
+
 /// Clone `peptide` and relocate the target `mass`: clear it from every
 /// candidate position, then place it on the chosen positions. The total mass is
 /// invariant, so `monoisotopic` does not change.

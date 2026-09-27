@@ -496,6 +496,37 @@ pub struct PtmLocalizationRunStats {
     pub localized_psms: usize,
     pub psm_q_value: f32,
     pub localization_q_value: f32,
+    /// Target protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub target_protein_sites: usize,
+    /// Decoy protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub decoy_protein_sites: usize,
+    /// Target protein sites at site-level q-value <= 0.01.
+    #[serde(default)]
+    pub protein_sites_at_one_percent_fdr: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SiteFdrRunStats {
+    target_protein_sites: usize,
+    decoy_protein_sites: usize,
+    protein_sites_at_one_percent_fdr: usize,
+}
+
+impl SiteFdrRunStats {
+    fn from_sites(sites: &[artifacts::ProteinSite]) -> Self {
+        let mut stats = Self::default();
+        for site in sites {
+            if site.decoy {
+                stats.decoy_protein_sites += 1;
+            } else {
+                stats.target_protein_sites += 1;
+                stats.protein_sites_at_one_percent_fdr += usize::from(site.q_value <= 0.01);
+            }
+        }
+        stats
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -589,6 +620,10 @@ pub struct SpectralLibraryRunStats {
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
+    /// Site from a decoy PSM: counted in site-level FDR, never written.
+    decoy: bool,
+    /// Discriminant score of the supporting PSM.
+    discriminant_score: f32,
     ambiguous: bool,
     protein_sites: Arc<[sage_core::enzyme::ProteinOccurrence]>,
     attachment: sage_core::ptm_library::Attachment,
@@ -616,8 +651,10 @@ struct SiteRow {
     site_probabilities: String,
 }
 
-fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
-    feature.label == 1 && feature.spectrum_q <= psm_q_value
+/// PSMs entering PTM localization and site-level FDR. Targets and decoys pass
+/// the same identification cutoff so decoy sites can be counted.
+fn passes_site_psm_filter(feature: &Feature, psm_q_value: f32) -> bool {
+    feature.spectrum_q <= psm_q_value
 }
 
 fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
