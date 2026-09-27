@@ -327,6 +327,10 @@ pub struct RunSummary {
     /// Precursor and fragment tolerances suggested by the confident PSMs.
     #[serde(default)]
     pub recommended_tolerances: ToleranceRecommendation,
+    /// Peak resident set size of the Sage process, in bytes, at the end of
+    /// the run; `None` where the platform does not report it.
+    #[serde(default)]
+    pub peak_rss_bytes: Option<u64>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target

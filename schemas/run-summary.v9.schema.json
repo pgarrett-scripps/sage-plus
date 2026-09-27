@@ -1,0 +1,786 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/pgarrett-scripps/sage-plus/main/schemas/run-summary.v9.schema.json",
+  "title": "Sage run-summary.json (schema_version 9)",
+  "description": "Portable statistics of one completed search. Objects allow additional properties: new optional fields may be added without a schema_version bump, so readers must ignore unknown keys.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "description": "Run-summary schema version. Fields added without a version bump are optional.",
+      "minimum": 1,
+      "const": 9
+    },
+    "runtime_secs": {
+      "type": "integer",
+      "description": "Wall-clock runtime of the search, in seconds.",
+      "minimum": 0
+    },
+    "files": {
+      "type": "integer",
+      "description": "Spectrum files searched.",
+      "minimum": 0
+    },
+    "peptides_in_database": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fragments_in_database": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "psms_at_one_percent_fdr": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "peptides_at_one_percent_fdr": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "proteins_at_one_percent_fdr": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "protein_groups_at_one_percent_fdr": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ptm_localization": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "localized_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "psm_q_value": {
+          "type": "number"
+        },
+        "localization_q_value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "enabled",
+        "localized_psms",
+        "psm_q_value",
+        "localization_q_value"
+      ]
+    },
+    "models": {
+      "type": "object",
+      "properties": {
+        "mass_alignment_applied": {
+          "type": "boolean"
+        },
+        "mass_alignment_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file_id": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "calibration_psms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "precursor": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "fragment": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "precursor_skip_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fragment_skip_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "file_id",
+              "calibration_psms",
+              "precursor",
+              "fragment",
+              "precursor_skip_reason",
+              "fragment_skip_reason"
+            ]
+          }
+        },
+        "mass_recalibration": {
+          "type": "object",
+          "description": "Search-time mass recalibration; absent when mass_recalibration is off.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "description": "static, linear, or auto."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            }
+          },
+          "required": [
+            "mode",
+            "files"
+          ]
+        },
+        "retention_time_prediction_enabled": {
+          "type": "boolean"
+        },
+        "retention_time_model_fitted": {
+          "type": "boolean"
+        },
+        "retention_time_features": {
+          "type": "string"
+        },
+        "retention_time_alignment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ion_mobility_observed": {
+          "type": "boolean"
+        },
+        "ion_mobility_model_enabled": {
+          "type": "boolean"
+        },
+        "ion_mobility_model_fitted": {
+          "type": "boolean"
+        },
+        "ion_mobility_features": {
+          "type": "string"
+        },
+        "ion_mobility_scale": {
+          "type": "string",
+          "description": "calibrated, linear, or mixed; absent when no Bruker input was searched."
+        }
+      },
+      "required": [
+        "mass_alignment_applied",
+        "retention_time_prediction_enabled",
+        "retention_time_model_fitted",
+        "retention_time_features",
+        "retention_time_alignment",
+        "ion_mobility_observed",
+        "ion_mobility_model_enabled",
+        "ion_mobility_model_fitted",
+        "ion_mobility_features"
+      ]
+    },
+    "quantification": {
+      "type": "object",
+      "properties": {
+        "lfq_enabled": {
+          "type": "boolean"
+        },
+        "lfq_features": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tmt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tmt_features": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ms1_label_channels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ms1_label_reference": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "lfq_enabled",
+        "lfq_features",
+        "tmt",
+        "tmt_features"
+      ]
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "batch_size": {
+          "type": "integer",
+          "description": "Files loaded and searched at once.",
+          "minimum": 0
+        },
+        "parallelism": {
+          "type": "integer",
+          "description": "Fallback file batch size; describes file batching, not threads.",
+          "minimum": 0
+        },
+        "rayon_threads": {
+          "type": "integer",
+          "description": "Effective worker thread count (--threads, then threads, then RAYON_NUM_THREADS, then all cores).",
+          "minimum": 0
+        },
+        "max_memory_gb": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Enforced memory limit in GiB; null when disabled."
+        }
+      },
+      "required": [
+        "batch_size",
+        "parallelism",
+        "max_memory_gb"
+      ]
+    },
+    "inputs": {
+      "type": "object",
+      "properties": {
+        "mzml_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "thermo_raw_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "other_files": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "mzml_files",
+        "thermo_raw_files",
+        "other_files"
+      ]
+    },
+    "modifications": {
+      "type": "object",
+      "properties": {
+        "static_definitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variable_definitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_variable_mods": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_total_variable_mods": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_combinations": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "ptm_library_sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "label_channels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "labeled_peptides": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mass_offset_definitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mass_offset_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mass_offset_peptidoforms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "static_definitions",
+        "variable_definitions",
+        "max_variable_mods",
+        "max_total_variable_mods",
+        "max_combinations",
+        "ptm_library_sites"
+      ]
+    },
+    "spectral_library": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "entries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "psm_q_value": {
+          "type": "number"
+        },
+        "peptide_q_value": {
+          "type": "number"
+        },
+        "formats": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "enabled",
+        "entries",
+        "transitions",
+        "strategy",
+        "psm_q_value",
+        "peptide_q_value",
+        "formats"
+      ]
+    },
+    "qc": {
+      "type": "object",
+      "properties": {
+        "digestion": {
+          "type": "object",
+          "description": "Same rows as digestion.tsv.",
+          "properties": {
+            "q_value": {
+              "type": "number"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DigestionFileStats"
+              }
+            },
+            "total": {
+              "$ref": "#/$defs/DigestionSummary"
+            }
+          },
+          "required": [
+            "q_value",
+            "files",
+            "total"
+          ]
+        },
+        "polymers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "ms1_spectra": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "skipped_profile_spectra": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total_ion_current": {
+                "type": "number"
+              },
+              "polymers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "intensity": {
+                      "type": "number"
+                    },
+                    "tic_pct": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "intensity",
+                    "tic_pct"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "file",
+              "ms1_spectra",
+              "skipped_profile_spectra",
+              "total_ion_current",
+              "polymers"
+            ]
+          }
+        },
+        "diagnostic_ions": {
+          "type": "object",
+          "description": "Present when diagnostic_ions is enabled.",
+          "properties": {
+            "ms2_spectra": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DiagnosticIonShare"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  },
+                  "ms2_spectra": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "ions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/DiagnosticIonShare"
+                    }
+                  }
+                },
+                "required": [
+                  "file",
+                  "ms2_spectra",
+                  "ions"
+                ]
+              }
+            }
+          },
+          "required": [
+            "ms2_spectra",
+            "ions",
+            "files"
+          ]
+        }
+      },
+      "required": []
+    },
+    "output_paths": {
+      "type": "array",
+      "description": "Every artifact written, including run-summary.json.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "software_version": {
+          "type": "string"
+        },
+        "mzmlb_enabled": {
+          "type": "boolean"
+        },
+        "input_identity_mode": {
+          "type": "string"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "size_bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "modified_unix_secs": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "size_bytes",
+              "modified_unix_secs"
+            ]
+          }
+        }
+      },
+      "required": [
+        "software_version"
+      ]
+    },
+    "recommended_tolerances": {
+      "type": "object",
+      "properties": {
+        "psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "precursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToleranceEstimate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fragment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToleranceEstimate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skipped": {
+          "type": "string",
+          "description": "Why no recommendation was made."
+        }
+      },
+      "required": [
+        "psms",
+        "precursor",
+        "fragment"
+      ]
+    },
+    "peak_rss_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Peak resident set size of the Sage process in bytes (Linux VmHWM, else getrusage ru_maxrss); null where unavailable.",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "runtime_secs",
+    "files",
+    "peptides_in_database",
+    "fragments_in_database",
+    "psms_at_one_percent_fdr",
+    "peptides_at_one_percent_fdr",
+    "proteins_at_one_percent_fdr",
+    "protein_groups_at_one_percent_fdr",
+    "output_paths"
+  ],
+  "$defs": {
+    "ToleranceEstimate": {
+      "type": "object",
+      "properties": {
+        "bias_ppm": {
+          "type": "number",
+          "description": "Median signed error (observed - theoretical), ppm."
+        },
+        "sigma_ppm": {
+          "type": "number",
+          "description": "Robust standard deviation (1.4826 x MAD), ppm."
+        },
+        "required_ppm": {
+          "type": "number",
+          "description": "|bias_ppm| + 4 x sigma_ppm."
+        },
+        "recommended_ppm": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Smallest of 5, 10, 20, 50 and 100 ppm covering required_ppm; null when even 100 ppm does not."
+        }
+      },
+      "required": [
+        "bias_ppm",
+        "sigma_ppm",
+        "required_ppm",
+        "recommended_ppm"
+      ]
+    },
+    "DigestionSummary": {
+      "type": "object",
+      "properties": {
+        "target_peptides": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoy_peptides": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "peptides": {
+          "type": "integer",
+          "description": "Denominator: target minus decoy peptides.",
+          "minimum": 0
+        },
+        "missed_cleavages_0": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missed_cleavages_1": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missed_cleavages_2_plus": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semi_n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "semi_c": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "non_enzymatic": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missed_cleavage_pct": {
+          "type": "number",
+          "description": "Percent of peptides with at least one missed cleavage."
+        },
+        "semi_n_pct": {
+          "type": "number"
+        },
+        "semi_c_pct": {
+          "type": "number"
+        },
+        "non_enzymatic_pct": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "target_peptides",
+        "decoy_peptides",
+        "peptides",
+        "missed_cleavages_0",
+        "missed_cleavages_1",
+        "missed_cleavages_2_plus",
+        "semi_n",
+        "semi_c",
+        "non_enzymatic",
+        "missed_cleavage_pct",
+        "semi_n_pct",
+        "semi_c_pct",
+        "non_enzymatic_pct"
+      ]
+    },
+    "DiagnosticIonShare": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mz": {
+          "type": "number"
+        },
+        "spectra": {
+          "type": "integer",
+          "description": "MS2 spectra containing the ion.",
+          "minimum": 0
+        },
+        "spectra_pct": {
+          "type": "number",
+          "description": "Percent of MS2 spectra containing the ion."
+        }
+      },
+      "required": [
+        "name",
+        "mz",
+        "spectra",
+        "spectra_pct"
+      ]
+    },
+    "DigestionFileStats": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/DigestionSummary"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "file": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "file"
+          ]
+        }
+      ]
+    }
+  }
+}

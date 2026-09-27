@@ -514,6 +514,14 @@ impl Runner {
 
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
+        let peak_rss_bytes = crate::memory::peak_rss_bytes();
+        match peak_rss_bytes {
+            Some(bytes) => info!(
+                "peak memory (RSS): {:.2} GiB",
+                bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+            ),
+            None => info!("peak memory (RSS): unavailable on this platform"),
+        }
         info!("cite: \"Sage: An Open-Source Tool for Fast Proteomics Searching and Quantification at Scale\" https://doi.org/10.1021/acs.jproteome.3c00486");
 
         let summary_path = self.make_path("run-summary.json");
@@ -681,6 +689,7 @@ impl Runner {
                 diagnostic_ions,
             },
             output_paths,
+            peak_rss_bytes,
         };
         self.cancellation.check()?;
         self.events.check()?;

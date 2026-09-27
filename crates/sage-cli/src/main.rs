@@ -125,6 +125,17 @@ fn main() -> anyhow::Result<()> {
                 .help("Disable sending telemetry data"),
         )
         .arg(
+            Arg::new("threads")
+                .long("threads")
+                .value_name("N")
+                .value_parser(value_parser!(usize))
+                .help(
+                    "Number of worker threads; overrides `threads` from the configuration file \
+                     (default: all cores, or RAYON_NUM_THREADS when set)",
+                )
+                .value_hint(ValueHint::Other),
+        )
+        .arg(
             Arg::new("stack-size")
                 .long("stack-size")
                 .value_parser(value_parser!(u32).range(1..))
@@ -226,17 +237,6 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let stack_size_mib = matches.get_one::<u32>("stack-size").copied().unwrap_or(2);
-    let stack_size_bytes = stack_size_mib as usize * 1024 * 1024;
-    log::trace!(
-        "setting Rayon worker thread stack size to {} MiB",
-        stack_size_mib
-    );
-    ThreadPoolBuilder::new()
-        .stack_size(stack_size_bytes)
-        .build_global()
-        .expect("configure Rayon pool");
-
     let send_telemetry = matches
         .get_one::<bool>("disable-telemetry")
         .copied()
@@ -252,6 +252,7 @@ fn main() -> anyhow::Result<()> {
         None => EventEmitter::disabled(),
     };
 
+    let stack_size_mib = matches.get_one::<u32>("stack-size").copied().unwrap_or(2);
     let input = match Input::from_arguments(matches) {
         Ok(input) => input,
         Err(error) => {
@@ -261,6 +262,21 @@ fn main() -> anyhow::Result<()> {
             return Err(error);
         }
     };
+
+    // Build the global pool before any parallel work. `input.threads` already
+    // holds `--threads` over the configured `threads`; when neither is set
+    // Rayon falls back to RAYON_NUM_THREADS, then to every core.
+    log::trace!(
+        "setting Rayon worker thread stack size to {} MiB",
+        stack_size_mib
+    );
+    let mut pool = ThreadPoolBuilder::new().stack_size(stack_size_mib as usize * 1024 * 1024);
+    if let Some(threads) = input.threads {
+        pool = pool.num_threads(threads);
+    }
+    pool.build_global().expect("configure Rayon pool");
+    log::info!("using {} worker threads", rayon::current_num_threads());
+
     let parallel = input
         .batch_size
         .unwrap_or_else(|| (num_cpus::get() / 2).max(1));

@@ -99,6 +99,9 @@ Options:
           Number of files to search in parallel (default = number of CPUs/2)
       --write-pin
           Write percolator-compatible `.pin` output files
+      --threads <N>
+          Number of worker threads; overrides `threads` from the configuration file
+          (default: all cores, or RAYON_NUM_THREADS when set)
       --max-memory <GiB>
           Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
           (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
@@ -153,6 +156,13 @@ The provenance mode `path_size_mtime` records local input metadata, not content 
 cryptographically exact build identity. Benchmark manifests separately record SHA-256 hashes of
 inputs and binaries. Older summaries remain readable through defaults for the new fields.
 
+Two optional fields were added without a schema bump: `peak_rss_bytes`, the peak resident memory
+of the Sage process in bytes at the end of the run (Linux `VmHWM` from `/proc/self/status`, falling
+back to `getrusage` `ru_maxrss` on other Unix systems; `null` where neither is available), and
+`execution.rayon_threads`, which now reflects `--threads` / `threads`. The peak is also logged as
+`peak memory (RSS): N GiB` when the run finishes. It covers the whole process, so a library caller
+running several jobs in one process sees the highest peak so far.
+
 For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
 does not specify `batch_size`. It does not set the Rayon worker count. CLI batch overrides
 take precedence over the configuration.
@@ -160,6 +170,13 @@ take precedence over the configuration.
 Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
 
 The versioned physical schemas and score definitions are published in [`schemas/`](schemas/). Canonical Parquet files embed `sage.schema.name` and `sage.schema.version` metadata so downstream tools can select the matching contract.
+
+The non-Parquet reports have published schemas in the same directory:
+
+- [`run-summary.v9.schema.json`](schemas/run-summary.v9.schema.json): JSON Schema (draft 2020-12) for `run-summary.json` with `schema_version` 9. Objects allow additional properties, since optional fields are added without a version bump; readers should ignore unknown keys.
+- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json) and [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv` and `diagnostic_ions.tsv`.
+
+The integration tests validate a real run's outputs against these files. `results.json` echoes the effective configuration (see [`config.schema.json`](schemas/config.schema.json)) and is not a versioned contract.
 
 #### Output provenance
 
@@ -526,6 +543,7 @@ For additional information about configuration options and output file formats, 
   },
   "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its measured memory reaches this many GiB; 0 disables
   "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
+  "threads": 8,             // Optional[int] {default=all cores}: worker threads; `--threads` overrides, RAYON_NUM_THREADS applies when neither is set
   "output_directory": "s3://bucket/prefix", // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
     "local/path.mzML",
@@ -1186,6 +1204,7 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **max_memory_gb**: Number. Abort the search if Sage's measured (resident) memory reaches this many GiB. Zero disables this limit (default: disabled). It also sizes the prefilter's streamed digest and spectrum batches.
 - **min_free_memory_gb**: Ignored since Beta 11 and accepted only so older configurations still parse. Keeping memory free for other programs is left to the system.
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
+- **threads**: Integer, at least 1. Number of worker threads used for parallel work (database build, search, rescoring, quantification). The `--threads` command-line option overrides this value. When neither is set, Sage uses the `RAYON_NUM_THREADS` environment variable if present, and otherwise every core. The effective count is logged at startup (`using N worker threads`) and recorded in `run-summary.json` as `execution.rayon_threads`. `threads` does not change `batch_size`, whose default still follows the CPU count.
 
 Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts and whether the prefilter is on, and exits without reading spectra.
 

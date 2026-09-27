@@ -112,3 +112,20 @@ fn allocator_trim_dispatch_matches_target_support() {
     #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
     assert_eq!(result, AllocatorTrimResult::Unsupported);
 }
+
+#[test]
+fn parses_peak_rss_from_proc_status() {
+    let status = "Name:\tsage\nVmPeak:\t  900 kB\nVmHWM:\t    2048 kB\nVmRSS:\t 1024 kB\n";
+    assert_eq!(parse_vm_hwm(status), Some(2048 * 1024));
+    assert_eq!(parse_vm_hwm("Name:\tsage\n"), None);
+    assert_eq!(parse_vm_hwm("VmHWM:\t12 MB\n"), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn reports_a_peak_rss() {
+    let peak = peak_rss_bytes().expect("peak RSS on Unix");
+    assert!(peak > 0);
+    let from_rusage = max_rss_from_rusage().expect("getrusage on Unix");
+    assert!(from_rusage > 0);
+}

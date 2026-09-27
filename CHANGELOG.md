@@ -34,6 +34,15 @@ entries are retained below for provenance.
   It reads each file once more.
 - `matched_fragments.sage.parquet` now carries `sage.schema.name` and `sage.schema.version`, and
   its schema is published as `schemas/matched_fragments.sage.v1.parquet.schema`.
+- `--threads <N>` and the configuration key `threads` set the worker thread count (the flag wins;
+  `RAYON_NUM_THREADS` still applies when neither is set, then all cores). The effective count is
+  logged and recorded in `run-summary.json` as `execution.rayon_threads`.
+- `run-summary.json` records `peak_rss_bytes`, the process's peak resident memory (Linux `VmHWM`,
+  else `getrusage`; `null` where unavailable), and the end of the run logs it. The field is
+  optional and the run-summary schema stays at version 9.
+- Published schemas for `run-summary.json` (`schemas/run-summary.v9.schema.json`, JSON Schema),
+  `digestion.tsv` and `diagnostic_ions.tsv` (`schemas/*.v1.tsv.schema.json`, Table Schema). An
+  integration test validates real outputs against them.
 
 ### Documentation
 - The PSM column list in DOCS.md now matches `results.sage.parquet`. `label` and `ms1_intensity`

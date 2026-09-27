@@ -872,6 +872,7 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .arg("--output_directory")
         .arg(root.join("output"))
         .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .args(["--threads", "2"])
         .output()?;
     assert!(
         result.status.success(),
@@ -880,6 +881,8 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("digestion: "), "{stderr}");
+    assert!(stderr.contains("peak memory (RSS): "), "{stderr}");
+    assert_matches_published_schemas(&workspace, &root.join("output"))?;
 
     let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
     let lines = digestion.lines().collect::<Vec<_>>();
@@ -891,6 +894,10 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    assert_eq!(summary["execution"]["rayon_threads"], 2);
+    if cfg!(unix) {
+        assert!(summary["peak_rss_bytes"].as_u64().unwrap() > 0);
+    }
     let total = &summary["qc"]["digestion"]["total"];
     assert!(total["target_peptides"].as_u64().is_some());
     assert_eq!(
@@ -1023,5 +1030,63 @@ fn parquet_footers_and_run_summary_record_provenance() -> anyhow::Result<()> {
         assert_eq!(fasta["sha256"], fasta_sha256, "{name}");
     }
     std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// Check a run's `run-summary.json` and QC TSV headers against the schemas
+/// published in `schemas/`, so the files cannot drift from them.
+fn assert_matches_published_schemas(
+    workspace: &std::path::Path,
+    output: &std::path::Path,
+) -> anyhow::Result<()> {
+    let schemas = workspace.join("schemas");
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output.join("run-summary.json"))?)?;
+    let schema: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(schemas.join("run-summary.v9.schema.json"))?)?;
+    let mut compiler = boon::Compiler::new();
+    let mut compiled = boon::Schemas::new();
+    compiler
+        .add_resource("run-summary.v9.schema.json", schema)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let index = compiler
+        .compile("run-summary.v9.schema.json", &mut compiled)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    if let Err(error) = compiled.validate(&summary, index) {
+        panic!("run-summary.json does not match its published schema: {error:#}");
+    }
+    // The schema is not vacuous: a wrongly typed field is rejected.
+    let mut broken = summary.clone();
+    broken["execution"]["rayon_threads"] = serde_json::json!("two");
+    assert!(compiled.validate(&broken, index).is_err());
+
+    for (file, schema) in [
+        ("digestion.tsv", "digestion.v1.tsv.schema.json"),
+        ("diagnostic_ions.tsv", "diagnostic_ions.v1.tsv.schema.json"),
+    ] {
+        let table: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(schemas.join(schema))?)?;
+        let columns = table["fields"]
+            .as_array()
+            .expect("table schema fields")
+            .iter()
+            .map(|field| field["name"].as_str().expect("field name"))
+            .collect::<Vec<_>>();
+        let contents = std::fs::read_to_string(output.join(file))?;
+        let header = contents.lines().next().expect("TSV header");
+        assert_eq!(header.split('\t').collect::<Vec<_>>(), columns, "{file}");
+        for row in contents.lines().skip(1) {
+            let values = row.split('\t').collect::<Vec<_>>();
+            assert_eq!(values.len(), columns.len(), "{file}: {row}");
+            for (value, field) in values.iter().zip(table["fields"].as_array().unwrap()) {
+                let parses = match field["type"].as_str().unwrap() {
+                    "integer" => value.parse::<u64>().is_ok(),
+                    "number" => value.parse::<f64>().is_ok(),
+                    _ => true,
+                };
+                assert!(parses, "{file}: `{value}` is not a {}", field["type"]);
+            }
+        }
+    }
     Ok(())
 }

@@ -1,6 +1,6 @@
 # Sage analytical schemas
 
-These files are the versioned, machine-readable Parquet message schemas for Sage's canonical analytical outputs.
+These files are the versioned, machine-readable Parquet message schemas for Sage's canonical analytical outputs, plus schemas for the run summary and the quality-control TSV reports.
 
 `config.schema.json` is the JSON Schema for Sage search configuration files. Run
 `sage --write-config-schema PATH` to copy the schema from the installed Sage binary.
@@ -16,6 +16,11 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.
 - `matched_fragments.sage.v1.parquet.schema` describes `matched_fragments.sage.parquet`, one row per
   matched fragment ion of a retained PSM.
+- `run-summary.v9.schema.json` is the JSON Schema for `run-summary.json` (`schema_version` 9).
+  Objects allow additional properties; optional fields may be added without a version bump.
+- `digestion.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are Frictionless
+  Table Schemas giving the column order, types and meaning of `digestion.tsv` and
+  `diagnostic_ions.tsv`.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.
