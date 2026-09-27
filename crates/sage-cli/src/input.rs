@@ -6,6 +6,7 @@ use sage_cloudpath::Url;
 use sage_core::scoring::ScoreType;
 use sage_core::{
     database::{Builder, Parameters},
+    diagnostic::{DiagnosticIon, DiagnosticIonsConfig},
     lfq::LfqSettings,
     mass::Tolerance,
     mass_recalibration::MassRecalibrationMode,
@@ -87,6 +88,10 @@ pub struct Search {
 
     /// Search-time precursor and fragment mass recalibration.
     pub mass_recalibration: MassRecalibrationMode,
+
+    /// Diagnostic ions searched in raw MS2 spectra; omitted when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_ions: Option<Vec<DiagnosticIon>>,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -174,6 +179,11 @@ pub struct Input {
     /// models are fitted, and the file is searched again with corrected
     /// masses. Ignored for wide-window searches.
     pub mass_recalibration: Option<MassRecalibrationMode>,
+    /// Diagnostic-ion scan of MS2 spectra, written to `diagnostic_ions.tsv`.
+    /// `true` searches the built-in glycan oxonium, acetyl-lysine and
+    /// phosphotyrosine immonium ions; a list of `{name, mz, tolerance}`
+    /// replaces them (tolerance defaults to 20 ppm). Default off.
+    pub diagnostic_ions: Option<DiagnosticIonsConfig>,
 
     pub annotate_matches: Option<bool>,
     pub write_pin: Option<bool>,
@@ -616,6 +626,29 @@ impl Input {
         if let Some(settings) = &self.spectral_library {
             settings.validate().map_err(anyhow::Error::msg)?;
         }
+        if let Some(DiagnosticIonsConfig::Ions(ions)) = &self.diagnostic_ions {
+            ensure!(
+                !ions.is_empty(),
+                "`diagnostic_ions` must be `true`, `false`, or a non-empty list of ions"
+            );
+            for ion in ions {
+                ensure!(
+                    !ion.name.is_empty() && !ion.name.contains(['\t', '\n', '\r']),
+                    "diagnostic ion names must be non-empty and free of tabs and newlines"
+                );
+                ensure!(
+                    ion.mz.is_finite() && ion.mz > 0.0,
+                    "diagnostic ion `{}` must have a positive m/z",
+                    ion.name
+                );
+                let (low, high) = ion.tolerance().bounds(ion.mz);
+                ensure!(
+                    low.is_finite() && high.is_finite() && low <= ion.mz && ion.mz <= high,
+                    "diagnostic ion `{}` needs a tolerance window that contains its m/z",
+                    ion.name
+                );
+            }
+        }
         Ok(())
     }
 
@@ -703,6 +736,8 @@ impl Input {
             log::warn!("`dia.mode = \"pseudo\"` ignores `chimera`");
         }
 
+        let diagnostic_ions = self.diagnostic_ions.and_then(DiagnosticIonsConfig::resolve);
+
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
         // Record the alignment method that will run, so results.json states it.
@@ -752,6 +787,7 @@ impl Input {
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
+            diagnostic_ions,
             score_type,
             dia,
             prefilter_budgets: None,

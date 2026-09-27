@@ -391,6 +391,10 @@ impl Runner {
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
         let polymers = self.polymer_stats(&filenames);
+        let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
+        if let Some(path) = self.write_diagnostic_ions(&filenames)? {
+            self.parameters.output_paths.push(path);
+        }
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
 
@@ -648,6 +652,7 @@ impl Runner {
             qc: super::qc::QcRunStats {
                 digestion,
                 polymers,
+                diagnostic_ions,
             },
             output_paths,
         };

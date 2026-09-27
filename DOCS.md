@@ -139,7 +139,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
-- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`; see [Quality-control outputs](#quality-control-outputs).
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -347,6 +347,7 @@ For additional information about configuration options and output file formats, 
   "chimera": false,         // Optional[bool] {default=false}: search for chimeric/co-fragmenting PSMS
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
+  "diagnostic_ions": false, // Optional[bool|list] {default=false}: scan MS2 for diagnostic ions into diagnostic_ions.tsv
   "ion_mobility_model": {
     "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
   },
@@ -960,6 +961,15 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **dia**: Object. Opt-in DIA pseudo-spectrum search (default: off). See [DIA pseudo-spectrum search](#dia-pseudo-spectrum-search).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: true).
+- **diagnostic_ions**: Boolean or list. Search raw MS2 spectra for diagnostic ions and write `diagnostic_ions.tsv` (default: false). `true` uses the built-in ions below; a list of `{name, mz, tolerance}` objects replaces them. `tolerance` takes the same form as `fragment_tol` and defaults to `{"ppm": [-20, 20]}`. See [Diagnostic ions](#diagnostic-ions-diagnostic_ionstsv).
+  - Built-in ions (singly charged m/z): `HexNAc` 204.0867, `HexNAc_fragment` 138.0550, `Hex` 163.0601, `NeuAc` 292.1027, `acetyl_K_immonium` 126.0913, `phospho_Y_immonium` 216.0426. TMT reporter ions are not included; use `quant.tmt` for those.
+  - Example:
+    ```json
+    "diagnostic_ions": [
+      {"name": "HexNAc", "mz": 204.0867},
+      {"name": "HexHexNAc", "mz": 366.1395, "tolerance": {"da": [-0.01, 0.01]}}
+    ]
+    ```
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
     ```json
@@ -1205,7 +1215,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, and `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
@@ -1301,3 +1311,15 @@ Detergents and plastics ionize as ladders of peaks one repeat unit apart. Sage s
 For each file, `qc.polymers` reports the number of centroided MS1 spectra scanned (`ms1_spectra`), profile MS1 spectra skipped (`skipped_profile_spectra`), the summed MS1 intensity (`total_ion_current`), and per polymer the ladder intensity and its percent of the MS1 TIC (`polymers[].tic_pct`). A log line gives the shares per file. When one polymer carries more than 5% of a file's MS1 TIC, Sage logs a warning and records it in `run-summary.json` `warnings` with code `polymer_contamination`.
 
 The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, whose MS1 frames are only read for `quant.lfq` or DIA, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
+
+### Diagnostic ions (`diagnostic_ions.tsv`)
+
+With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configured ion on its raw peak list, before deisotoping and peak trimming, with one binary search per ion per spectrum. When several peaks fall inside an ion's tolerance window, the most intense one is reported. `diagnostic_ions.tsv` has one row per ion found in a spectrum; spectra without any hit have no rows. PSM output columns are unchanged: join on `file` and `scannr` to relate hits to PSMs.
+
+- `file`: Input file name.
+- `scannr`: Spectrum identifier, as in the PSM output.
+- `ion`: Configured ion name.
+- `mz`: Observed m/z of the matched peak.
+- `relative_intensity`: Matched peak intensity divided by the summed intensity of the spectrum's raw peaks.
+
+A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).

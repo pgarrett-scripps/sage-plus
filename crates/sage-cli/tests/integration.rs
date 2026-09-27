@@ -668,8 +668,13 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
     ));
     std::fs::create_dir_all(&root)?;
-    let config: serde_json::Value =
+    let mut config: serde_json::Value =
         serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    // A window covering the whole spectrum matches its most intense peak.
+    config["diagnostic_ions"] = serde_json::json!([
+        {"name": "anything", "mz": 1000.0, "tolerance": {"da": [-1000.0, 1000.0]}},
+        {"name": "HexNAc", "mz": 204.0867}
+    ]);
     std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
     let result = Command::new(env!("CARGO_BIN_EXE_sage"))
         .current_dir(&workspace)
@@ -709,6 +714,29 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
     // The test file has no MS1 spectra, so no polymer rows are reported.
     assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
+
+    assert!(
+        stderr.contains("diagnostic ions in 1 MS2 spectra: anything 100.00%, HexNAc 0.00%"),
+        "{stderr}"
+    );
+    let diagnostic = std::fs::read_to_string(root.join("output/diagnostic_ions.tsv"))?;
+    let lines = diagnostic.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{diagnostic}");
+    assert_eq!(lines[0], "file\tscannr\tion\tmz\trelative_intensity");
+    let row = lines[1].split('\t').collect::<Vec<_>>();
+    assert_eq!(row[0], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert_eq!(row[2], "anything");
+    let relative_intensity = row[4].parse::<f64>()?;
+    assert!(relative_intensity > 0.0 && relative_intensity <= 1.0);
+    let ions = &summary["qc"]["diagnostic_ions"];
+    assert_eq!(ions["ms2_spectra"], 1);
+    assert_eq!(ions["ions"][0]["spectra"], 1);
+    assert_eq!(ions["ions"][1]["spectra"], 0);
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("diagnostic_ions.tsv")));
     std::fs::remove_dir_all(root)?;
     Ok(())
 }

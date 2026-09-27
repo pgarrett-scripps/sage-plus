@@ -22,8 +22,15 @@ entries are retained below for provenance.
   A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
   searches already read and adds about 1% to spectrum reading; Bruker TDF files are checked
   only when MS1 is read (LFQ or DIA).
+- Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
+  fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
+  user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
+  `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
+  spectra containing each ion is logged and written to `run-summary.json` under
+  `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
-  `sage_core::digestion` classifies and summarizes peptide termini.
+  `sage_core::digestion` classifies and summarizes peptide termini;
+  `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
 
 ## [v0.1.0-beta.11] - 2026-09-26
 

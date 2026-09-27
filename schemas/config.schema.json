@@ -525,6 +525,51 @@
       },
       "type": "object"
     },
+    "DiagnosticIon": {
+      "additionalProperties": false,
+      "properties": {
+        "mz": {
+          "description": "Singly charged m/z.",
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "description": "Name reported in the output.",
+          "type": "string"
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Matching tolerance; 20 ppm when omitted."
+        }
+      },
+      "required": [
+        "name",
+        "mz"
+      ],
+      "type": "object"
+    },
+    "DiagnosticIonsConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/DiagnosticIon"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "`diagnostic_ions` configuration: `true` for the built-in ions, or a list\nof ions that replaces them."
+    },
     "EnzymeBuilder": {
       "additionalProperties": false,
       "properties": {
@@ -1737,6 +1782,17 @@
         }
       ],
       "description": "DIA search. `{\"mode\": \"pseudo\"}` builds MS1-anchored pseudo-MS2\nspectra from co-eluting fragment hills and searches them closed (like\nDDA); `wide_window` and `chimera` are ignored in that mode. Default off."
+    },
+    "diagnostic_ions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiagnosticIonsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Diagnostic-ion scan of MS2 spectra, written to `diagnostic_ions.tsv`.\n`true` searches the built-in glycan oxonium, acetyl-lysine and\nphosphotyrosine immonium ions; a list of `{name, mz, tolerance}`\nreplaces them (tolerance defaults to 20 ppm). Default off."
     },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"
