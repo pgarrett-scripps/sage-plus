@@ -156,6 +156,13 @@ The provenance mode `path_size_mtime` records local input metadata, not content 
 cryptographically exact build identity. Benchmark manifests separately record SHA-256 hashes of
 inputs and binaries. Older summaries remain readable through defaults for the new fields.
 
+Two optional fields were added without a schema bump: `peak_rss_bytes`, the peak resident memory
+of the Sage process in bytes at the end of the run (Linux `VmHWM` from `/proc/self/status`, falling
+back to `getrusage` `ru_maxrss` on other Unix systems; `null` where neither is available), and
+`execution.rayon_threads`, which now reflects `--threads` / `threads`. The peak is also logged as
+`peak memory (RSS): N GiB` when the run finishes. It covers the whole process, so a library caller
+running several jobs in one process sees the highest peak so far.
+
 For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
 does not specify `batch_size`. It does not set the Rayon worker count. CLI batch overrides
 take precedence over the configuration.

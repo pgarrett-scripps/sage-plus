@@ -881,6 +881,7 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("digestion: "), "{stderr}");
+    assert!(stderr.contains("peak memory (RSS): "), "{stderr}");
 
     let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
     let lines = digestion.lines().collect::<Vec<_>>();
@@ -893,6 +894,9 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
     assert_eq!(summary["execution"]["rayon_threads"], 2);
+    if cfg!(unix) {
+        assert!(summary["peak_rss_bytes"].as_u64().unwrap() > 0);
+    }
     let total = &summary["qc"]["digestion"]["total"];
     assert!(total["target_peptides"].as_u64().is_some());
     assert_eq!(

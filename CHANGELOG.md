@@ -13,6 +13,9 @@ entries are retained below for provenance.
 - `--threads <N>` and the configuration key `threads` set the worker thread count (the flag wins;
   `RAYON_NUM_THREADS` still applies when neither is set, then all cores). The effective count is
   logged and recorded in `run-summary.json` as `execution.rayon_threads`.
+- `run-summary.json` records `peak_rss_bytes`, the process's peak resident memory (Linux `VmHWM`,
+  else `getrusage`; `null` where unavailable), and the end of the run logs it. The field is
+  optional and the run-summary schema stays at version 9.
 
 ## [v0.1.0-beta.12] - 2026-09-27
 
