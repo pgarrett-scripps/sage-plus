@@ -702,6 +702,41 @@ fn diapasef_files_get_quality_control_scans() {
 }
 
 #[test]
+fn diapasef_files_without_lfq_get_quality_control_scans() {
+    let (directory, _) = temporary_output("tdf-dia-qc-no-ms1");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [path.clone()],
+        "dia": { "mode": "pseudo" },
+        "diagnostic_ions": true,
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    assert!(!runner.requires_ms1());
+    let url = Url::from_file_path(std::fs::canonicalize(&path).unwrap()).unwrap();
+    // The fixture is too small to yield pseudo-spectra, so without MS1 the
+    // read finds no spectra; the QC scan still runs on what was read.
+    let error = runner
+        .read_processed_spectra_with_ms1(&[url], 0, 1, false, false)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("no spectra"), "{error:#}");
+
+    // Only the pseudo-spectra are read: they are scanned for diagnostic ions
+    // and the file has no MS1 for polymer QC.
+    let file_qc = runner.file_qc.lock().unwrap();
+    let qc = file_qc.get(&0).expect("diaPASEF file scanned without MS1");
+    assert!(qc.polymers.is_none());
+    assert!(qc.diagnostic_ions.is_some());
+    drop(file_qc);
+    std::fs::remove_dir_all(directory).ok();
+}
+
+#[test]
 fn ptm_library_records_match_expanded_ambiguous_residues() {
     let (directory, root) = temporary_output("ptm-ambiguous");
     std::fs::create_dir_all(&root).unwrap();
