@@ -727,111 +727,44 @@ impl Runner {
                 vec![0.0; filenames.len()]
             };
 
-            // Median signed precursor error (observed - theoretical, ppm) per file.
-            let median_ms1_mass_bias_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_mass)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
+            // Summarize one value over each file's target PSMs at 1% spectrum
+            // q-value (median or mean of the finite values; NaN when none).
+            let per_file =
+                |summarize: fn(Vec<f32>) -> Option<f32>, value: fn(&Feature) -> f32| -> Vec<f32> {
+                    (0..filenames.len())
+                        .map(|file_id| {
+                            let values = features
+                                .iter()
+                                .filter(|feature| {
+                                    feature.file_id == file_id
+                                        && feature.label == 1
+                                        && feature.spectrum_q <= global_q_value_filter
+                                })
+                                .map(value)
+                                .collect::<Vec<_>>();
+                            summarize(values).unwrap_or(f32::NAN)
+                        })
+                        .collect()
+                };
+            let median_per_file = |value| per_file(median_finite, value);
+            let average_per_file = |value| per_file(average_finite, value);
 
+            // Median signed precursor error (observed - theoretical, ppm) per file.
+            let median_ms1_mass_bias_per_file = median_per_file(|feature| feature.delta_mass);
             // Median signed fragment error per file. `average_ppm` is an
             // absolute error and cannot show a bias, so the bias comes from
             // the signed, intensity-weighted `signed_fragment_ppm`.
-            let median_ms2_mass_bias_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.signed_fragment_ppm)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
+            let median_ms2_mass_bias_per_file =
+                median_per_file(|feature| feature.signed_fragment_ppm);
             // Median absolute fragment error per file (spread, never negative).
-            let median_ms2_abs_error_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.average_ppm)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Median RT deviation for each file, using feature.delta_rt_model
-            let median_rt_deviation_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_rt_model)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Median IM deviation for each file, using feature.delta_ims_model
-            let median_im_deviation_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_ims_model)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average peptide length for each file
-            let avg_peptide_length_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.peptide_len as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average peptide charge for each file
-            let avg_peptide_charge_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.charge as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average number of matched peaks for each file
-            let avg_matched_peaks_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.matched_peaks as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
+            let median_ms2_abs_error_per_file = median_per_file(|feature| feature.average_ppm);
+            let median_rt_deviation_per_file = median_per_file(|feature| feature.delta_rt_model);
+            let median_im_deviation_per_file = median_per_file(|feature| feature.delta_ims_model);
+            let avg_peptide_length_per_file =
+                average_per_file(|feature| feature.peptide_len as f32);
+            let avg_peptide_charge_per_file = average_per_file(|feature| feature.charge as f32);
+            let avg_matched_peaks_per_file =
+                average_per_file(|feature| feature.matched_peaks as f32);
 
             // Prepare html table to add to the report
             let table = html! {
