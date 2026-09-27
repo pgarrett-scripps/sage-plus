@@ -448,8 +448,10 @@ fn ptm_library_sites_match_with_and_without_prefilter() -> anyhow::Result<()> {
     std::fs::create_dir_all(&root)?;
 
     let fasta = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
-    let (header, sequence) = fasta.split_once('\n').expect("FASTA header");
-    let sequence = sequence.replace('\n', "");
+    // `lines` also strips the carriage returns of a Windows checkout.
+    let mut lines = fasta.lines();
+    let header = lines.next().expect("FASTA header");
+    let sequence: String = lines.collect();
     // One-based position 66 is the S of LQSR.
     let start = sequence.find("LQSRPAAPPAPGPGQLTLR").expect("test peptide") + 2;
     assert_eq!(start + 1, 66);
