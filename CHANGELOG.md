@@ -9,6 +9,19 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Fixed
+- TMT/isobaric reporter channels that are not observed are now missing values instead of 0.0
+  (grounding HC-QUANT-02). `TmtQuant::peaks` is `Vec<Option<f32>>`, and
+  `reporter_ion_intensity` in `results.sage.parquet` writes a null element for each missing
+  channel; the schema already allowed it. Only finite, positive peaks count as observed: a
+  zero-intensity centroid or a non-finite signal-to-noise value (zero noise estimate) is skipped,
+  and a real peak in the same window is still used. Readers that summed or averaged the list
+  must now skip nulls. `run-summary.json` gains an optional `quantification.tmt_channels`
+  (observed and missing counts and the median observed intensity per channel, skipping missing
+  channels); the run-summary schema stays at version 9. Sage has no other consumer of reporter
+  intensities: the PIN, TSV and HTML report outputs do not include them, and no reporter
+  normalisation or ratio is computed.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added
