@@ -87,11 +87,7 @@ pub fn oriented_span<'a>(written: &'a [u8], peptide: &[u8]) -> Option<Cow<'a, [u
     if fits(written) {
         return Some(Cow::Borrowed(written));
     }
-    let mut reversed = written.to_vec();
-    let len = reversed.len();
-    if len > 2 {
-        reversed[1..len - 1].reverse();
-    }
+    let reversed = crate::sequence::reverse_interior(written);
     fits(&reversed).then_some(Cow::Owned(reversed))
 }
 
@@ -133,6 +129,53 @@ pub fn isoleucine_leucine_eq(left: &[u8], right: &[u8]) -> bool {
             .iter()
             .zip(right)
             .all(|(&a, &b)| isoleucine_leucine_canonical(a) == isoleucine_leucine_canonical(b))
+}
+
+/// Could the FASTA residue `written` have produced `observed` in a digested
+/// peptide? Equal residues always do; with `merge_isoleucine_leucine`, I, L
+/// and J are one residue; with `expand_ambiguous`, B, Z and X stand for their
+/// [`alternatives`].
+pub fn residue_fits(
+    written: u8,
+    observed: u8,
+    merge_isoleucine_leucine: bool,
+    expand_ambiguous: bool,
+) -> bool {
+    written == observed
+        || (merge_isoleucine_leucine
+            && isoleucine_leucine_canonical(written) == isoleucine_leucine_canonical(observed))
+        || (expand_ambiguous
+            && alternatives(written).is_some_and(|choices| choices.contains(&observed)))
+}
+
+/// Zero-based starts of every span of `protein` that `peptide` fits residue
+/// by residue (see [`residue_fits`]), overlapping spans included. A merged
+/// I/L peptide shows one twin's sequence while listing proteins that carry
+/// either, so a literal substring search would miss the other twins.
+pub fn peptide_starts(
+    protein: &[u8],
+    peptide: &[u8],
+    merge_isoleucine_leucine: bool,
+    expand_ambiguous: bool,
+) -> Vec<usize> {
+    if peptide.is_empty() || peptide.len() > protein.len() {
+        return Vec::new();
+    }
+    protein
+        .windows(peptide.len())
+        .enumerate()
+        .filter(|(_, span)| {
+            span.iter().zip(peptide).all(|(&written, &observed)| {
+                residue_fits(
+                    written,
+                    observed,
+                    merge_isoleucine_leucine,
+                    expand_ambiguous,
+                )
+            })
+        })
+        .map(|(start, _)| start)
+        .collect()
 }
 
 #[cfg(test)]

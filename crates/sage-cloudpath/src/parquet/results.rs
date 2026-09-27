@@ -65,9 +65,13 @@ fn write_reporter_ions(
 
     // https://docs.rs/parquet/44.0.0/parquet/column/index.html
     // Using the low level API here is not very pleasant...
-    let def_levels = vec![3; channels];
+    // Definition levels: 0 = no reporter spectrum (null list), 2 = channel
+    // not observed (null element), 3 = observed intensity. Only observed
+    // intensities are passed as values.
     let mut rep_levels = vec![1; channels];
     rep_levels[0] = 0;
+    let mut def_levels = Vec::with_capacity(channels);
+    let mut values = Vec::with_capacity(channels);
 
     let col = column.typed::<FloatType>();
     for feature in features {
@@ -80,7 +84,19 @@ fn write_reporter_ions(
             // MS3 reporter spectra are keyed to their MS2 scan's first occurrence.
             .or_else(|| scan_map.get(&(feature.file_id, feature.spec_id.as_str(), 0)));
         if let Some(rs) = rs {
-            col.write_batch(&rs.peaks, Some(&def_levels), Some(&rep_levels))?;
+            debug_assert_eq!(rs.peaks.len(), channels);
+            def_levels.clear();
+            values.clear();
+            for peak in &rs.peaks {
+                match peak {
+                    Some(intensity) => {
+                        def_levels.push(3);
+                        values.push(*intensity);
+                    }
+                    None => def_levels.push(2),
+                }
+            }
+            col.write_batch(&values, Some(&def_levels), Some(&rep_levels))?;
         } else {
             col.write_batch(&[], Some(&[0]), Some(&[0]))?;
         }
@@ -110,13 +126,13 @@ pub fn serialize_features(
     filenames: &[String],
     database: &IndexedDatabase,
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let schema = build_results_schema(has_labels)?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
@@ -126,8 +142,9 @@ pub fn serialize_features(
                 "sage.output_filter.spectrum_q_max".into(),
                 Some(output_psm_q_value.to_string()),
             ),
-        ]))
-        .build();
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
     let mut writer = SerializedFileWriter::new(buf, schema.into(), options.into())?;
@@ -365,35 +382,32 @@ pub fn serialize_features(
 }
 
 pub fn build_matched_fragment_schema() -> parquet::errors::Result<Type> {
-    let msg = r#"
-        message schema {
-            required int64 psm_id;
-            required byte_array fragment_type (utf8);
-            required int32 fragment_ordinals;
-            required int32 fragment_charge;
-            required float fragment_mz_experimental;
-            required float fragment_mz_calculated;
-            required float neutral_loss;
-            required float fragment_intensity;
-        }
-    "#;
-
-    parquet::schema::parser::parse_message_type(msg)
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../../schemas/matched_fragments.sage.v1.parquet.schema"
+    ))
 }
 
 pub fn serialize_matched_fragments(
     features: &[&Feature],
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let schema = build_matched_fragment_schema()?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![KeyValue::new(
-            "sage.output_filter.spectrum_q_max".into(),
-            Some(output_psm_q_value.to_string()),
-        )]))
-        .build();
+    let options = writer_properties(
+        vec![
+            KeyValue::new(
+                "sage.schema.name".into(),
+                Some("matched_fragments.sage".into()),
+            ),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.output_filter.spectrum_q_max".into(),
+                Some(output_psm_q_value.to_string()),
+            ),
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
 

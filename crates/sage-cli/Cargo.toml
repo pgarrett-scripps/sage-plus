@@ -49,7 +49,9 @@ maud = "0.27.0"
 report-builder = "0.1.1"
 
 [dev-dependencies]
+boon = "0.6"
 parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
 
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+# malloc_trim (glibc) and getrusage (peak RSS fallback).
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -331,6 +331,11 @@ impl Runner {
                 });
 
                 log::info!("discovered {} target MS1 peaks at 5% FDR", q_precursor);
+                let q_extraction = sage_core::fdr::extraction_q_values(&mut areas);
+                log::info!(
+                    "{} target LFQ precursor/file rows pass 1% extraction FDR",
+                    q_extraction
+                );
                 Some(areas)
             } else {
                 None
@@ -345,6 +350,12 @@ impl Runner {
         }
         let lfq_features = areas.as_ref().map(|areas| areas.len()).unwrap_or_default();
         let tmt_features = outputs.quant.len();
+        let tmt_channels = match &self.parameters.quant.tmt {
+            Some(isobaric) if !outputs.quant.is_empty() => {
+                sage_core::tmt::summarize_channels(&outputs.quant, &isobaric.headers())
+            }
+            _ => Vec::new(),
+        };
         self.cancellation.check()?;
         self.events.check()?;
 
@@ -378,6 +389,13 @@ impl Runner {
             output_psm_q_value
         );
 
+        let provenance = crate::provenance::Provenance::collect(
+            &self.parameters,
+            &self.database_parameters,
+            &self.database,
+        );
+        self.parquet_provenance = provenance.parquet_metadata();
+
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
             &outputs.quant,
@@ -385,6 +403,7 @@ impl Runner {
             &filenames,
             &self.database,
             output_psm_q_value,
+            &self.parquet_provenance,
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -404,6 +423,7 @@ impl Runner {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
                 &output_features,
                 output_psm_q_value,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("matched_fragments.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -418,6 +438,7 @@ impl Runner {
             let bytes = sage_cloudpath::parquet::serialize_spectral_library(
                 &library_entries,
                 &self.parameters.spectral_library,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("spectral_library.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -446,24 +467,41 @@ impl Runner {
         }
 
         if let Some(areas) = &areas {
-            let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
+            let bytes = sage_cloudpath::parquet::serialize_lfq(
+                areas,
+                &filenames,
+                &self.database,
+                &self.parquet_provenance,
+            )?;
 
             let path = self.make_path("lfq.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
             self.parameters.output_paths.push(path);
         }
 
-        // PTM site reports follow the selected main output format.
+        // PTM site reports follow the selected main output format. Site-level
+        // FDR is estimated once, on the final site set, after every PSM and
+        // localization filter has been applied to targets and decoys alike.
+        let mut site_stats = SiteFdrRunStats::default();
         if self.parameters.ptm_localization.enabled {
+            let site_rows = self.collect_site_rows(&outputs.features, &filenames);
+            let protein_sites = artifacts::aggregate_protein_sites(&site_rows);
+            site_stats = SiteFdrRunStats::from_sites(&protein_sites);
+            log::info!(
+                "discovered {} target protein sites at 1% site FDR ({} target and {} decoy sites competed)",
+                site_stats.protein_sites_at_one_percent_fdr,
+                site_stats.target_protein_sites,
+                site_stats.decoy_protein_sites,
+            );
             self.parameters
                 .output_paths
-                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+                .push(self.write_ptm_sites(&site_rows, &protein_sites)?);
             self.parameters
                 .output_paths
-                .push(self.write_protein_sites(&outputs.features, &filenames)?);
+                .push(self.write_protein_sites(&protein_sites)?);
             self.parameters
                 .output_paths
-                .extend(self.write_ptm_library(&outputs.features, &filenames)?);
+                .extend(self.write_ptm_library(&site_rows)?);
         }
 
         // Write percolator input file if requested
@@ -493,6 +531,14 @@ impl Runner {
 
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
+        let peak_rss_bytes = crate::memory::peak_rss_bytes();
+        match peak_rss_bytes {
+            Some(bytes) => info!(
+                "peak memory (RSS): {:.2} GiB",
+                bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+            ),
+            None => info!("peak memory (RSS): unavailable on this platform"),
+        }
         info!("cite: \"Sage: An Open-Source Tool for Fast Proteomics Searching and Quantification at Scale\" https://doi.org/10.1021/acs.jproteome.3c00486");
 
         let summary_path = self.make_path("run-summary.json");
@@ -542,6 +588,7 @@ impl Runner {
                 mzmlb_enabled: cfg!(feature = "mzmlb"),
                 input_identity_mode: "path_size_mtime".into(),
                 inputs: input_identities,
+                metadata: Some(provenance),
             },
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
@@ -556,6 +603,9 @@ impl Runner {
                 localized_psms,
                 psm_q_value: self.parameters.ptm_localization.psm_q_value,
                 localization_q_value: self.parameters.ptm_localization.localization_q_value,
+                target_protein_sites: site_stats.target_protein_sites,
+                decoy_protein_sites: site_stats.decoy_protein_sites,
+                protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,
             },
             models: ModelRunStats {
                 mass_alignment_applied: mass_alignment_files
@@ -594,6 +644,7 @@ impl Runner {
                     .as_ref()
                     .map(|tmt| format!("{tmt:?}").to_lowercase()),
                 tmt_features,
+                tmt_channels,
                 ms1_label_channels: self.database.label_channels.len(),
                 ms1_label_reference: self.database.label_reference.as_deref().map(str::to_owned),
             },
@@ -658,6 +709,7 @@ impl Runner {
                 diagnostic_ions,
             },
             output_paths,
+            peak_rss_bytes,
         };
         self.cancellation.check()?;
         self.events.check()?;

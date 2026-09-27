@@ -92,18 +92,28 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
     assert_eq!(features[0].peptide_q, 1.0);
 }
 
+fn target(ix: u32, score: f32) -> Competition<u32> {
+    Competition {
+        forward: score,
+        foward_ix: Some(ix),
+        ..Default::default()
+    }
+}
+
+fn pair(target: u32, forward: f32, decoy: u32, reverse: f32) -> Competition<u32> {
+    Competition {
+        forward,
+        foward_ix: Some(target),
+        reverse,
+        reverse_ix: Some(decoy),
+    }
+}
+
 #[test]
-fn sparse_decoys_use_finite_count_based_confidence() {
+fn picked_q_values_count_winners_with_plus_one() {
     let mut scores = FnvHashMap::default();
     for ix in 0..200_u32 {
-        scores.insert(
-            ix,
-            Competition {
-                forward: 10.0 + ix as f32 / 200.0,
-                foward_ix: Some(ix),
-                ..Default::default()
-            },
-        );
+        scores.insert(ix, target(ix, 10.0 + ix as f32 / 200.0));
     }
     scores.insert(
         200,
@@ -113,12 +123,86 @@ fn sparse_decoys_use_finite_count_based_confidence() {
             ..Default::default()
         },
     );
-    assert!(Competition::fit_kde(&scores).is_none());
     let (q, passing) = Competition::assign_q_value(scores, 0.01);
+    // (0 + 1) / 200 for every target; the decoy adds one: (1 + 1) / 200.
     assert_eq!(passing, 200);
     assert_eq!(q[&0], 0.005);
     assert_eq!(q[&199], 0.005);
     assert_eq!(q[&200], 0.01);
+}
+
+#[test]
+fn picked_q_values_discard_the_losing_member() {
+    // Pairs (target ix, target score, decoy ix, decoy score):
+    //   A: 10 vs 1   -> target wins
+    //   B:  9 vs 9.5 -> decoy wins; target 9 is discarded
+    //   C:  8 vs 8   -> tie goes to the decoy
+    //   D:  7 vs 6.9 -> target wins; its decoy 6.9 is discarded
+    //   E:  6 alone  -> target wins
+    // Ranked winners: A 10 (t), B' 9.5 (d), C' 8 (d), D 7 (t), E 6 (t)
+    // raw (d + 1) / t: 1/1, 2/1 -> 1, 3/1 -> 1, 3/2 -> 1, 3/3 = 1
+    // Everything is capped at 1 in this tiny example, so use a larger one below.
+    let mut scores = FnvHashMap::default();
+    scores.insert("A", pair(0, 10.0, 100, 1.0));
+    scores.insert("B", pair(1, 9.0, 101, 9.5));
+    scores.insert("C", pair(2, 8.0, 102, 8.0));
+    scores.insert("D", pair(3, 7.0, 103, 6.9));
+    scores.insert("E", target(4, 6.0));
+    let (q, passing) = Competition::assign_q_value(scores, 0.5);
+    assert_eq!(passing, 0);
+    for ix in [0, 1, 2, 3, 4, 100, 101, 102, 103] {
+        assert_eq!(q[&ix], 1.0, "{ix}");
+    }
+
+    // Ten targets at 20..11 beat their decoys at 0; target 10 loses to a
+    // decoy at 15.5; one unpaired decoy at 10.5; target 11 at 10 is alone.
+    // Ranked winners: t20..t16 (5), d15.5, t15..t11 (5), d10.5, t10.
+    //   through t16: (0 + 1) / 5 = 0.2
+    //   through d15.5 and t11: (1 + 1) / 10 = 0.2
+    //   through d10.5 and t10: (2 + 1) / 11
+    let mut scores = FnvHashMap::default();
+    for i in 0..10_u32 {
+        scores.insert(i, pair(i, 20.0 - i as f32, 100 + i, 0.0));
+    }
+    scores.insert(10, pair(10, 12.5, 110, 15.5));
+    scores.insert(11, target(11, 10.0));
+    scores.insert(
+        12,
+        Competition {
+            reverse: 10.5,
+            reverse_ix: Some(112),
+            ..Default::default()
+        },
+    );
+    let (q, passing) = Competition::assign_q_value(scores, 0.2);
+    assert_eq!(passing, 10);
+    for i in 0..10_u32 {
+        assert!((q[&i] - 0.2).abs() < 1e-6, "target {i}: {}", q[&i]);
+        // Losing decoys are not ranked at all.
+        assert_eq!(q[&(100 + i)], 1.0);
+    }
+    // The winning decoy is ranked; the target it beat is discarded, even
+    // though its own score (12.5) is above the 1-in-5 threshold.
+    assert!((q[&110] - 0.2).abs() < 1e-6);
+    assert_eq!(q[&10], 1.0);
+    assert!((q[&112] - 3.0 / 11.0).abs() < 1e-6);
+    assert!((q[&11] - 3.0 / 11.0).abs() < 1e-6);
+}
+
+#[test]
+fn picked_q_values_keep_tied_winners_together() {
+    // Two targets and a decoy winner share score 5: the tie group is counted
+    // as a whole, so both targets see the decoy: (1 + 1) / 3.
+    let mut scores = FnvHashMap::default();
+    scores.insert(0, target(0, 9.0));
+    scores.insert(1, target(1, 5.0));
+    scores.insert(2, target(2, 5.0));
+    scores.insert(3, pair(3, 1.0, 13, 5.0));
+    let (q, _) = Competition::assign_q_value(scores, 0.01);
+    for ix in [0, 1, 2, 13] {
+        assert!((q[&ix] - 2.0 / 3.0).abs() < 1e-6, "{ix}: {}", q[&ix]);
+    }
+    assert_eq!(q[&3], 1.0);
 }
 
 #[test]
@@ -321,18 +405,18 @@ fn picked_protein_counts_unique_proteins_and_skips_shared_peptides() {
         scored(6, 50.0),
         scored(7, 0.1),
     ];
-    // Only one protein wins on the decoy side, so the KDE is underdetermined
-    // and target-decoy counts (+1) are used. Ranked protein scores:
-    //   P1 10, P2 9, P3 8, P4 7 (targets), rev_P5 1, rev_P1 0.5 (decoys)
-    // raw q = (1 + decoys) / targets: 1, 1/2, 1/3, 1/4, 2/4, 3/4
-    // after the reverse cumulative minimum: 1/4 x4, 1/2, 3/4.
+    // Picked protein scores: P1 10 beats rev_P1 0.5, which is discarded.
+    // Ranked winners: P1 10, P2 9, P3 8, P4 7 (targets), rev_P5 1 (decoy)
+    // raw q = (1 + decoys) / targets: 1, 1/2, 1/3, 1/4, 2/4
+    // after the reverse cumulative minimum: 1/4 x4, 1/2.
     let passing = picked_protein(&db, &mut features);
     assert_eq!(passing, 0);
     for feat in &features[0..4] {
         assert!((feat.protein_q - 0.25).abs() < 1e-6, "{}", feat.protein_q);
     }
     assert!((features[4].protein_q - 0.5).abs() < 1e-6);
-    assert!((features[5].protein_q - 0.75).abs() < 1e-6);
+    // The losing decoy of P1 is not ranked.
+    assert_eq!(features[5].protein_q, 1.0);
     // Shared peptides are excluded and keep their prior value.
     assert_eq!(features[6].protein_q, 42.0);
     // Every peptide of a protein inherits the protein's q-value.
@@ -351,6 +435,7 @@ fn picked_precursor_assigns_count_q_values_per_charge_state() {
         ms2_confirmed: Vec::new(),
         ms2_confirmed_strict: Vec::new(),
         file_evidence: Vec::new(),
+        paired_decoy_evidence: Vec::new(),
     };
     let mut peaks = FnvHashMap::default();
     // 20 targets at 100..81, one decoy at 50, one target at 40.
@@ -387,4 +472,223 @@ fn picked_precursor_assigns_count_q_values_per_charge_state() {
         .q_value;
     assert!((decoy - 2.0 / 21.0).abs() < 1e-6, "{decoy}");
     assert!((last - 2.0 / 21.0).abs() < 1e-6, "{last}");
+}
+
+#[test]
+fn site_q_values_match_hand_counted_target_decoy_answer() {
+    // Ten target sites scored 10..1 and two decoy sites tied at 5.5. The
+    // +1-corrected counts give the exact answer:
+    //   targets 10..6: best FDR (1 + 0) / 5 = 0.2
+    //   decoys at 5.5 and targets 5..1: best FDR (1 + 2) / 10 = 0.3
+    let mut evidence = (1..=10)
+        .rev()
+        .map(|score| (score as f32, false))
+        .collect::<Vec<_>>();
+    evidence.push((5.5, true));
+    evidence.push((5.5, true));
+    let q = site_q_values(&evidence);
+    for (ix, &(score, decoy)) in evidence.iter().enumerate() {
+        let expected = if !decoy && score >= 6.0 { 0.2 } else { 0.3 };
+        assert!(
+            (q[ix] - expected).abs() < 1e-6,
+            "score {score} decoy {decoy}: q {} != {expected}",
+            q[ix]
+        );
+    }
+}
+
+#[test]
+fn site_q_values_count_every_decoy_site_and_share_ties() {
+    // Many sites: targets on 5..15, decoys on
+    // 0..8, plus one decoy tied with three target rows of one shared site.
+    let mut evidence = (0..400)
+        .map(|i| (5.0 + i as f32 / 40.0, false))
+        .chain((0..100).map(|i| (i as f32 / 12.5, true)))
+        .collect::<Vec<_>>();
+    let tied = 7.0123;
+    let tie_rows = evidence.len()..evidence.len() + 4;
+    evidence.extend([(tied, false), (tied, true), (tied, false), (tied, false)]);
+    let q = site_q_values(&evidence);
+
+    let tie_q = q[tie_rows.start];
+    assert!(q[tie_rows].iter().all(|&value| value == tie_q));
+
+    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
+    assert!(order.windows(2).all(|pair| q[pair[0]] <= q[pair[1]]));
+    assert!(q.iter().all(|value| (0.0..=1.0).contains(value)));
+
+    // Without the decoys every target would be accepted at the best q; the
+    // decoy sites must raise q in the region where they score.
+    let targets_only = evidence
+        .iter()
+        .filter(|(_, decoy)| !decoy)
+        .copied()
+        .collect::<Vec<_>>();
+    let q_targets_only = site_q_values(&targets_only);
+    let low_target = evidence
+        .iter()
+        .position(|&(score, decoy)| !decoy && score == 5.0)
+        .unwrap();
+    assert!(q[low_target] > 0.05);
+    assert!(q_targets_only.iter().all(|&value| value < 0.01));
+}
+
+#[test]
+fn picked_peptide_reports_a_target_beaten_by_its_decoy_with_q_one() {
+    let mut peptides = Vec::new();
+    let mut features = Vec::new();
+    // Twenty confident target peptides whose decoys score lower, then one
+    // target (index 40) whose own reversed decoy outscores it.
+    for i in 0..21_u32 {
+        let target = peptide(&format!("PEPT{}IDEK", "A".repeat(i as usize)), false);
+        let decoy = target.reverse();
+        assert!(decoy.decoy);
+        peptides.push(target);
+        peptides.push(decoy);
+        let (target_score, decoy_score) = match i {
+            20 => (5.0, 6.0),
+            _ => (100.0 - i as f32, 1.0),
+        };
+        features.push(Feature {
+            peptide_idx: PeptideIx(2 * i),
+            discriminant_score: target_score,
+            ..Default::default()
+        });
+        features.push(Feature {
+            peptide_idx: PeptideIx(2 * i + 1),
+            discriminant_score: decoy_score,
+            ..Default::default()
+        });
+    }
+    let db = IndexedDatabase {
+        peptides,
+        generate_decoys: true,
+        ..Default::default()
+    };
+    // Winners: 20 targets (100..81), then the decoy at 6.
+    // q = (0 + 1) / 20 = 0.05 for the targets; the winning decoy (1 + 1) / 20.
+    let passing = picked_peptide(&db, &mut features);
+    assert_eq!(passing, 0);
+    for i in 0..20 {
+        assert!((features[2 * i].peptide_q - 0.05).abs() < 1e-6);
+        assert_eq!(features[2 * i + 1].peptide_q, 1.0);
+    }
+    assert_eq!(features[40].peptide_q, 1.0);
+    assert!((features[41].peptide_q - 0.1).abs() < 1e-6);
+}
+
+fn extraction_peak(scores: &[Option<f64>], paired: &[Option<f64>]) -> QuantifiedPeak {
+    let evidence = |scores: &[Option<f64>]| {
+        scores
+            .iter()
+            .map(|score| {
+                score.map(|score| crate::lfq::FileEvidence {
+                    score,
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    QuantifiedPeak {
+        peak: crate::lfq::Peak::default(),
+        intensities: scores.iter().map(|score| score.map(|_| 1.0)).collect(),
+        ms2_confirmed: vec![false; scores.len()],
+        ms2_confirmed_strict: vec![false; scores.len()],
+        file_evidence: evidence(scores),
+        paired_decoy_evidence: evidence(paired),
+    }
+}
+
+/// 100 targets in two files, three paired decoy rows and one weak target row.
+fn extraction_fixture(reverse: bool) -> FnvHashMap<(PrecursorId, bool), QuantifiedPeak> {
+    let mut entries = (0..100u32)
+        .map(|i| {
+            let paired = match i {
+                0 => [Some(0.9), None],
+                1 => [Some(0.4), Some(0.39)],
+                _ => [None, None],
+            };
+            (
+                (PrecursorId::Combined(PeptideIx(i)), false),
+                // File 1 plays the transfer: every row gets its own q-value.
+                extraction_peak(
+                    &[Some(1.0 - i as f64 * 0.001), Some(0.5 - i as f64 * 0.001)],
+                    &paired,
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.push((
+        (PrecursorId::Combined(PeptideIx(100)), false),
+        extraction_peak(&[Some(0.1), None], &[None, None]),
+    ));
+    // A decoy precursor's own peak is not a competitor: its high score must
+    // not change any target q-value, and it gets no q-value itself.
+    entries.push((
+        (PrecursorId::Combined(PeptideIx(0)), true),
+        extraction_peak(&[Some(2.0), Some(2.0)], &[]),
+    ));
+    if reverse {
+        entries.reverse();
+    }
+    entries.into_iter().collect()
+}
+
+fn extraction_q(
+    peaks: &FnvHashMap<(PrecursorId, bool), QuantifiedPeak>,
+    ix: u32,
+    decoy: bool,
+    file: usize,
+) -> Option<f32> {
+    peaks[&(PrecursorId::Combined(PeptideIx(ix)), decoy)].file_evidence[file]
+        .as_ref()
+        .and_then(|evidence| evidence.extraction_q_value)
+}
+
+#[test]
+fn extraction_q_values_count_paired_decoy_extractions_per_file_row() {
+    let mut peaks = extraction_fixture(false);
+    let passing = extraction_q_values(&mut peaks);
+
+    // Ranked: 100 file-0 targets, decoy 0.9, 100 file-1 targets, decoys 0.4
+    // and 0.39, then the weak target. The file-0 targets reach (0 + 1) / 100
+    // = 1% and the file-1 targets (1 + 1) / 200 = 1%, so all 200 pass. The
+    // weak row sees (3 + 1) / 201.
+    assert_eq!(passing, 200);
+    for i in 0..100 {
+        for file in 0..2 {
+            let q = extraction_q(&peaks, i, false, file).unwrap();
+            assert!((q - 0.01).abs() < 1e-6, "target {i} file {file}: {q}");
+        }
+    }
+    let weak = extraction_q(&peaks, 100, false, 0).unwrap();
+    assert!((weak - 4.0 / 201.0).abs() < 1e-6, "{weak}");
+    // A row without a signal has no evidence and no q-value.
+    assert!(peaks[&(PrecursorId::Combined(PeptideIx(100)), false)].file_evidence[1].is_none());
+    assert_eq!(extraction_q(&peaks, 0, true, 0), None);
+    assert_eq!(extraction_q(&peaks, 0, true, 1), None);
+}
+
+#[test]
+fn extraction_q_values_do_not_depend_on_insertion_order() {
+    let mut forward = extraction_fixture(false);
+    let mut reverse = extraction_fixture(true);
+    assert_eq!(
+        extraction_q_values(&mut forward),
+        extraction_q_values(&mut reverse)
+    );
+    for (key, peak) in &forward {
+        for (left, right) in peak.file_evidence.iter().zip(&reverse[key].file_evidence) {
+            assert_eq!(
+                left.as_ref()
+                    .and_then(|e| e.extraction_q_value)
+                    .map(f32::to_bits),
+                right
+                    .as_ref()
+                    .and_then(|e| e.extraction_q_value)
+                    .map(f32::to_bits)
+            );
+        }
+    }
 }

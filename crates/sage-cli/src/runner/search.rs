@@ -693,7 +693,14 @@ impl Runner {
                         true,
                     )
                     .map(|s| self.tdf_dia_with_ms1(file_id, s, &mut pseudo)),
-                    res => res,
+                    // Without MS1 the pseudo-spectra are all that is read:
+                    // scan them so the file still gets diagnostic-ion QC
+                    // (polymer QC needs MS1 and is reported as absent).
+                    Ok(pseudo) => {
+                        self.collect_file_qc(file_id, &pseudo);
+                        Ok(pseudo)
+                    }
+                    Err(e) => Err(e),
                 }
             } else {
                 let res = sage_cloudpath::util::read_spectra(

@@ -738,7 +738,8 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     let root = std::env::temp_dir().join(format!("sage-motif-{}-{nonce}", std::process::id()));
     std::fs::create_dir_all(&root)?;
     let fasta = ">GLYCO\nMRLSPEPTIDENKSGGAWLNGTEDVAPRQVNPTEFLKDEGNLTAYHR\n\
-                 >OTHER\nMKAGDTLEWVNKPQYFLSAKGHNESTIMDR\n";
+                 >OTHER\nMKAGDTLEWVNKPQYFLSAKGHNESTIMDR\n\
+                 >TWIN\nMRLSPEPTLDENKSGGA\n";
     std::fs::write(root.join("proteins.fasta"), fasta)?;
     let database = serde_json::json!({
         "fasta": root.join("proteins.fasta"),
@@ -821,6 +822,13 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
             .any(|line| line.starts_with("GLYCO\t12\tN\tHexNAc\tresidue")),
         "{library}"
     );
+    // TWIN carries the L twin of the merged peptide, displayed with I.
+    assert!(
+        library
+            .lines()
+            .any(|line| line.starts_with("TWIN\t12\tN\tHexNAc\tresidue")),
+        "{library}"
+    );
 
     // Preview sees the same edge site only when given the flanking residue.
     let preview = |extra: &[&str]| -> anyhow::Result<serde_json::Value> {
@@ -872,6 +880,7 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .arg("--output_directory")
         .arg(root.join("output"))
         .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .args(["--threads", "2"])
         .output()?;
     assert!(
         result.status.success(),
@@ -880,6 +889,8 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("digestion: "), "{stderr}");
+    assert!(stderr.contains("peak memory (RSS): "), "{stderr}");
+    assert_matches_published_schemas(&workspace, &root.join("output"))?;
 
     let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
     let lines = digestion.lines().collect::<Vec<_>>();
@@ -891,6 +902,10 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    assert_eq!(summary["execution"]["rayon_threads"], 2);
+    if cfg!(unix) {
+        assert!(summary["peak_rss_bytes"].as_u64().unwrap() > 0);
+    }
     let total = &summary["qc"]["digestion"]["total"];
     assert!(total["target_peptides"].as_u64().is_some());
     assert_eq!(
@@ -928,5 +943,158 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .iter()
         .any(|path| path.as_str().unwrap().ends_with("diagnostic_ions.tsv")));
     std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn parquet_footers_and_run_summary_record_provenance() -> anyhow::Result<()> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-provenance-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["quant"] = serde_json::json!({ "lfq": true });
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 9);
+    let provenance = &summary["provenance"]["metadata"];
+    assert_eq!(provenance["version"], env!("CARGO_PKG_VERSION"));
+    let fasta = &provenance["fasta"];
+    let fasta_sha256 = fasta["sha256"].as_str().expect("FASTA is always hashed");
+    assert_eq!(fasta_sha256.len(), 64);
+    assert_eq!(fasta["decoys"]["strategy"], "generated");
+    assert_eq!(fasta["decoys"]["decoy_tag"], "rev_");
+    assert_eq!(fasta["uniprot"]["organisms"][0]["taxonomy_id"], 9606);
+    let input = &provenance["inputs"][0];
+    assert_eq!(input["name"], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert!(input["sha256"].is_null());
+    assert_eq!(input["sha256_skipped"], "record_input_hashes is off");
+    assert!(provenance["config"]["output_paths"].is_null());
+    assert_eq!(provenance["config"]["record_input_hashes"], false);
+
+    let mut files = std::fs::read_dir(root.join("output"))?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()?;
+    files.retain(|path| path.extension().is_some_and(|ext| ext == "parquet"));
+    files.sort();
+    let names = files
+        .iter()
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "lfq.parquet",
+            "matched_fragments.sage.parquet",
+            "results.sage.parquet"
+        ]
+    );
+    for path in files {
+        let reader = SerializedFileReader::new(std::fs::File::open(&path)?)?;
+        let footer = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|entry| (entry.key, entry.value.unwrap_or_default()))
+            .collect::<std::collections::HashMap<_, _>>();
+        let name = path.display();
+        assert!(footer.contains_key("sage.schema.name"), "{name}");
+        assert_eq!(footer["sage.provenance.version"], "1", "{name}");
+        assert_eq!(footer["sage.version"], env!("CARGO_PKG_VERSION"), "{name}");
+        for key in [
+            "sage.config",
+            "sage.inputs",
+            "sage.fasta",
+            "sage.database_inputs",
+            "sage.protein_inference",
+        ] {
+            let value: serde_json::Value = serde_json::from_str(&footer[key])?;
+            assert_eq!(&value, &provenance[&key["sage.".len()..]], "{name}: {key}");
+        }
+        let fasta: serde_json::Value = serde_json::from_str(&footer["sage.fasta"])?;
+        assert_eq!(fasta["sha256"], fasta_sha256, "{name}");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// Check a run's `run-summary.json` and QC TSV headers against the schemas
+/// published in `schemas/`, so the files cannot drift from them.
+fn assert_matches_published_schemas(
+    workspace: &std::path::Path,
+    output: &std::path::Path,
+) -> anyhow::Result<()> {
+    let schemas = workspace.join("schemas");
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output.join("run-summary.json"))?)?;
+    let schema: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(schemas.join("run-summary.v9.schema.json"))?)?;
+    let mut compiler = boon::Compiler::new();
+    let mut compiled = boon::Schemas::new();
+    compiler
+        .add_resource("run-summary.v9.schema.json", schema)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let index = compiler
+        .compile("run-summary.v9.schema.json", &mut compiled)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    if let Err(error) = compiled.validate(&summary, index) {
+        panic!("run-summary.json does not match its published schema: {error:#}");
+    }
+    // The schema is not vacuous: a wrongly typed field is rejected.
+    let mut broken = summary.clone();
+    broken["execution"]["rayon_threads"] = serde_json::json!("two");
+    assert!(compiled.validate(&broken, index).is_err());
+
+    for (file, schema) in [
+        ("digestion.tsv", "digestion.v1.tsv.schema.json"),
+        ("diagnostic_ions.tsv", "diagnostic_ions.v1.tsv.schema.json"),
+    ] {
+        let table: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(schemas.join(schema))?)?;
+        let columns = table["fields"]
+            .as_array()
+            .expect("table schema fields")
+            .iter()
+            .map(|field| field["name"].as_str().expect("field name"))
+            .collect::<Vec<_>>();
+        let contents = std::fs::read_to_string(output.join(file))?;
+        let header = contents.lines().next().expect("TSV header");
+        assert_eq!(header.split('\t').collect::<Vec<_>>(), columns, "{file}");
+        for row in contents.lines().skip(1) {
+            let values = row.split('\t').collect::<Vec<_>>();
+            assert_eq!(values.len(), columns.len(), "{file}: {row}");
+            for (value, field) in values.iter().zip(table["fields"].as_array().unwrap()) {
+                let parses = match field["type"].as_str().unwrap() {
+                    "integer" => value.parse::<u64>().is_ok(),
+                    "number" => value.parse::<f64>().is_ok(),
+                    _ => true,
+                };
+                assert!(parses, "{file}: `{value}` is not a {}", field["type"]);
+            }
+        }
+    }
     Ok(())
 }

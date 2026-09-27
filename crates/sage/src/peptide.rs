@@ -872,10 +872,7 @@ impl Peptide {
                 if is_expansion_of(span, &self.sequence) {
                     return Some(span.to_vec());
                 }
-                let mut reversed = span.to_vec();
-                if len > 2 {
-                    reversed[1..len - 1].reverse();
-                }
+                let reversed = crate::sequence::reverse_interior(span);
                 is_expansion_of(&reversed, &self.sequence).then_some(reversed)
             })
             .collect::<Vec<_>>();

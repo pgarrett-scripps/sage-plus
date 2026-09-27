@@ -1,6 +1,6 @@
 use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
-    missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
+    missing_decoy_warning, normalize_finite, passes_output_filter, passes_site_psm_filter,
     sort_features_by_discriminant, spectrum_id_occurrences, LabelGroupIndex, OutputTarget,
     RunSummary, SpectrumAccumulator, ToleranceRecommendation,
 };
@@ -119,25 +119,123 @@ fn tied_features_receive_repeatable_psm_ids() {
 }
 
 #[test]
-fn localization_filter_requires_passing_target_psm() {
+fn site_psm_filter_admits_targets_and_decoys_at_the_same_cutoff() {
     let passing = Feature {
         label: 1,
         spectrum_q: 0.01,
         ..Default::default()
     };
-    assert!(passes_localization_filter(&passing, 0.01));
+    assert!(passes_site_psm_filter(&passing, 0.01));
 
     let failing = Feature {
         spectrum_q: 0.011,
         ..passing.clone()
     };
-    assert!(!passes_localization_filter(&failing, 0.01));
+    assert!(!passes_site_psm_filter(&failing, 0.01));
 
     let decoy = Feature {
         label: -1,
         ..passing
     };
-    assert!(!passes_localization_filter(&decoy, 0.01));
+    assert!(passes_site_psm_filter(&decoy, 0.01));
+    let failing_decoy = Feature {
+        spectrum_q: 0.011,
+        ..decoy
+    };
+    assert!(!passes_site_psm_filter(&failing_decoy, 0.01));
+}
+
+fn site_row(peptide: &str, proteins: &str, score: f32, decoy: bool) -> super::SiteRow {
+    super::SiteRow {
+        decoy,
+        discriminant_score: score,
+        ambiguous: false,
+        protein_sites: std::sync::Arc::from([]),
+        attachment: sage_core::ptm_library::Attachment::Residue,
+        psm_id: 0,
+        filename: "run.mzML".into(),
+        scannr: "scan".into(),
+        peptide: peptide.into(),
+        peptide_sequence: peptide.into(),
+        proteins: proteins.into(),
+        charge: 2,
+        spectrum_q: 0.001,
+        peptide_q: 0.001,
+        modification: "Phospho".into(),
+        modification_mass: 79.96633,
+        position: 2,
+        residue: b'S',
+        localization_probability: 0.99,
+        delta_score: 10.0,
+        target_decoy_score: 10.0,
+        localization_q_value: 0.0,
+        candidate_sites: 1,
+        site_determining_matched: 0,
+        site_determining_total: 0,
+        site_probabilities: String::new(),
+    }
+}
+
+#[test]
+fn decoy_psms_become_decoy_sites_in_the_site_fdr() {
+    // Ten target sites scored 10..1, each on its own protein, and two decoy
+    // PSMs on one decoy site of a decoy protein scoring 5.5. The decoy site is
+    // counted once, at its best PSM score, with the same key as target sites.
+    let mut rows = (1..=10)
+        .map(|score| {
+            site_row(
+                &format!("AS{score}K"),
+                &format!("P{score}"),
+                score as f32,
+                false,
+            )
+        })
+        .collect::<Vec<_>>();
+    rows.push(site_row("KSA", "rev_P99", 5.5, true));
+    rows.push(site_row("KSA", "rev_P99", 2.0, true));
+    rows.push(site_row("KSB", "rev_P98", 5.5, true));
+    // A second PSM on target site P10 does not add a site.
+    rows.push(site_row("AS10K", "P10", 0.5, false));
+
+    let sites = super::artifacts::aggregate_protein_sites(&rows);
+    assert_eq!(sites.len(), 12);
+    let decoys = sites.iter().filter(|site| site.decoy).collect::<Vec<_>>();
+    assert_eq!(decoys.len(), 2);
+    assert!(decoys.iter().all(|site| site.score == 5.5));
+    assert_eq!(
+        decoys.iter().map(|site| site.n_psms).sum::<u32>(),
+        3,
+        "both decoy PSMs of rev_P99 support one decoy site"
+    );
+    let p10 = sites.iter().find(|site| site.protein == "P10").unwrap();
+    assert_eq!((p10.n_psms, p10.score), (2, 10.0));
+
+    // Same known answer as the unit test of the q-value machinery: two tied
+    // decoys give q = 0.2 above them and 0.3 at and below them.
+    for site in &sites {
+        let expected = if !site.decoy && site.score >= 6.0 {
+            0.2
+        } else {
+            0.3
+        };
+        assert!(
+            (site.q_value - expected).abs() < 1e-6,
+            "{} q {} != {expected}",
+            site.protein,
+            site.q_value
+        );
+    }
+
+    // Dropping the decoy PSMs lowers every target q to the +1-corrected 1/10.
+    let target_rows = rows
+        .into_iter()
+        .filter(|row| !row.decoy)
+        .collect::<Vec<_>>();
+    let target_only = super::artifacts::aggregate_protein_sites(&target_rows);
+    assert_eq!(target_only.len(), 10);
+    assert!(target_only
+        .iter()
+        .all(|site| (site.q_value - 0.1).abs() < 1e-6));
 }
 
 #[test]
@@ -697,6 +795,41 @@ fn diapasef_files_get_quality_control_scans() {
         .diagnostic_ions
         .as_ref()
         .is_some_and(|scan| scan.ms2_spectra > 0));
+    drop(file_qc);
+    std::fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn diapasef_files_without_lfq_get_quality_control_scans() {
+    let (directory, _) = temporary_output("tdf-dia-qc-no-ms1");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [path.clone()],
+        "dia": { "mode": "pseudo" },
+        "diagnostic_ions": true,
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    assert!(!runner.requires_ms1());
+    let url = Url::from_file_path(std::fs::canonicalize(&path).unwrap()).unwrap();
+    // The fixture is too small to yield pseudo-spectra, so without MS1 the
+    // read finds no spectra; the QC scan still runs on what was read.
+    let error = runner
+        .read_processed_spectra_with_ms1(&[url], 0, 1, false, false)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("no spectra"), "{error:#}");
+
+    // Only the pseudo-spectra are read: they are scanned for diagnostic ions
+    // and the file has no MS1 for polymer QC.
+    let file_qc = runner.file_qc.lock().unwrap();
+    let qc = file_qc.get(&0).expect("diaPASEF file scanned without MS1");
+    assert!(qc.polymers.is_none());
+    assert!(qc.diagnostic_ions.is_some());
     drop(file_qc);
     std::fs::remove_dir_all(directory).ok();
 }

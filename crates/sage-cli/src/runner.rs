@@ -273,6 +273,9 @@ pub struct Runner {
     file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
     /// Custom cleavage sites of the searched FASTA, for the digestion summary.
     custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
+    /// Provenance key-value pairs for Parquet footers, set before outputs are
+    /// written.
+    parquet_provenance: Vec<(String, String)>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -324,6 +327,10 @@ pub struct RunSummary {
     /// Precursor and fragment tolerances suggested by the confident PSMs.
     #[serde(default)]
     pub recommended_tolerances: ToleranceRecommendation,
+    /// Peak resident set size of the Sage process, in bytes, at the end of
+    /// the run; `None` where the platform does not report it.
+    #[serde(default)]
+    pub peak_rss_bytes: Option<u64>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target
@@ -411,6 +418,10 @@ pub struct RunProvenance {
     pub mzmlb_enabled: bool,
     pub input_identity_mode: String,
     pub inputs: Vec<InputIdentity>,
+    /// The provenance record written to every Parquet footer, keyed as there
+    /// without the `sage.` prefix. Absent in summaries from before Beta 13.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<crate::provenance::Provenance>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -485,6 +496,37 @@ pub struct PtmLocalizationRunStats {
     pub localized_psms: usize,
     pub psm_q_value: f32,
     pub localization_q_value: f32,
+    /// Target protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub target_protein_sites: usize,
+    /// Decoy protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub decoy_protein_sites: usize,
+    /// Target protein sites at site-level q-value <= 0.01.
+    #[serde(default)]
+    pub protein_sites_at_one_percent_fdr: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SiteFdrRunStats {
+    target_protein_sites: usize,
+    decoy_protein_sites: usize,
+    protein_sites_at_one_percent_fdr: usize,
+}
+
+impl SiteFdrRunStats {
+    fn from_sites(sites: &[artifacts::ProteinSite]) -> Self {
+        let mut stats = Self::default();
+        for site in sites {
+            if site.decoy {
+                stats.decoy_protein_sites += 1;
+            } else {
+                stats.target_protein_sites += 1;
+                stats.protein_sites_at_one_percent_fdr += usize::from(site.q_value <= 0.01);
+            }
+        }
+        stats
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -515,6 +557,10 @@ pub struct QuantificationRunStats {
     pub lfq_features: usize,
     pub tmt: Option<String>,
     pub tmt_features: usize,
+    /// Per-channel reporter-ion coverage over all quantified spectra. Missing
+    /// channels are counted, not averaged in as 0. Absent without TMT.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tmt_channels: Vec<sage_core::tmt::ReporterChannelSummary>,
     #[serde(default)]
     pub ms1_label_channels: usize,
     #[serde(default)]
@@ -574,6 +620,10 @@ pub struct SpectralLibraryRunStats {
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
+    /// Site from a decoy PSM: counted in site-level FDR, never written.
+    decoy: bool,
+    /// Discriminant score of the supporting PSM.
+    discriminant_score: f32,
     ambiguous: bool,
     protein_sites: Arc<[sage_core::enzyme::ProteinOccurrence]>,
     attachment: sage_core::ptm_library::Attachment,
@@ -601,8 +651,10 @@ struct SiteRow {
     site_probabilities: String,
 }
 
-fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
-    feature.label == 1 && feature.spectrum_q <= psm_q_value
+/// PSMs entering PTM localization and site-level FDR. Targets and decoys pass
+/// the same identification cutoff so decoy sites can be counted.
+fn passes_site_psm_filter(feature: &Feature, psm_q_value: f32) -> bool {
+    feature.spectrum_q <= psm_q_value
 }
 
 fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
@@ -912,6 +964,7 @@ impl Runner {
                         mass_recalibration: Default::default(),
                         file_qc: file_qc.clone(),
                         custom_cleavages: None,
+                        parquet_provenance: Vec::new(),
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -1014,6 +1067,7 @@ impl Runner {
             mass_recalibration: Default::default(),
             file_qc,
             custom_cleavages: custom_cleavage_sites,
+            parquet_provenance: Vec::new(),
         })
     }
 }

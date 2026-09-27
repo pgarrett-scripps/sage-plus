@@ -1,12 +1,13 @@
-//! False discovery rate control using double-competition (picked-peptide &
-//! picked-protein) approaches
+//! False discovery rate control using double-competition (picked-peptide,
+//! picked-protein and picked-protein-group) approaches. Only the winner of
+//! each target-decoy pair is ranked; q-values are `(decoys + 1) / targets`.
 //!
 //! Lin et al., <https://pubmed.ncbi.nlm.nih.gov/36166314/>
 //! Savitski et al., <https://pubmed.ncbi.nlm.nih.gov/25987413/>
+//! The et al. 2022, "picked protein group FDR" (Mol Cell Proteomics 21:100437)
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::lfq::{PrecursorId, QuantifiedPeak};
-use crate::ml::kde::Estimator;
 use crate::peptide::Peptide;
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
@@ -49,31 +50,14 @@ impl<Ix: Default + Send> Competition<Ix> {
         self.reverse >= self.forward
     }
 
-    fn fit_kde<K, B>(scores: &HashMap<K, Self, B>) -> Option<Estimator> {
-        let (scores, decoys): (Vec<f64>, Vec<bool>) = scores
-            .values()
-            .map(|score| (score.score() as f64, score.is_decoy()))
-            .unzip();
-        for class in [false, true] {
-            let sample = scores
-                .iter()
-                .zip(&decoys)
-                .filter_map(|(score, decoy)| (*decoy == class).then_some(*score))
-                .collect::<Vec<_>>();
-            if sample.len() < 2
-                || sample.iter().any(|score| !score.is_finite())
-                || !sample.iter().any(|score| *score != sample[0])
-            {
-                return None;
-            }
-        }
-        let estimator = crate::ml::kde::Builder::default().build(&scores, &decoys);
-        scores
-            .iter()
-            .all(|score| estimator.posterior_error(*score).is_finite())
-            .then_some(estimator)
-    }
-
+    /// Picked target-decoy q-values (Savitski et al. 2015; The et al. 2022).
+    ///
+    /// Each competition keeps only its winner: the target when it outscores
+    /// its decoy, otherwise the decoy (a tie goes to the decoy). Winners are
+    /// ranked by score and q is `(decoys + 1) / targets` over complete
+    /// tied-score groups, followed by the reverse cumulative minimum and a cap
+    /// at 1. The losing member is discarded from the ranking and reported with
+    /// q = 1, so a target beaten by its own decoy never passes.
     fn assign_q_value<K, B>(
         scores: HashMap<K, Self, B>,
         threshold: f32,
@@ -83,71 +67,33 @@ impl<Ix: Default + Send> Competition<Ix> {
         Ix: Eq + std::hash::Hash,
         B: BuildHasher + Default + Send,
     {
-        let estimator = Self::fit_kde(&scores);
-        let mut scores = scores
-            .into_par_iter()
-            .flat_map(|(_, comp)| {
-                [
-                    (comp.foward_ix, false, comp.forward),
-                    (comp.reverse_ix, true, comp.reverse),
-                ]
-            })
-            .filter_map(|(ix, decoy, score)| {
-                ix.map(|ix| Row {
+        let mut winners = Vec::with_capacity(scores.len());
+        let mut losers = Vec::new();
+        for (_, comp) in scores {
+            let decoy = comp.is_decoy();
+            let score = comp.score();
+            let (winner, loser) = match decoy {
+                true => (comp.reverse_ix, comp.foward_ix),
+                false => (comp.foward_ix, comp.reverse_ix),
+            };
+            if let Some(ix) = winner {
+                winners.push(Row {
                     ix,
                     decoy,
                     score,
                     q: 1.0,
-                })
-            })
-            .collect::<Vec<Row<Ix>>>();
-
-        scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
-
-        if estimator.is_none() {
-            log::warn!("peptide/protein confidence model is underdetermined, using target-decoy counts with a +1 correction");
-            let passing = assign_count_q_values(&mut scores, threshold);
-            return (
-                scores
-                    .into_iter()
-                    .map(|score| (score.ix, score.q))
-                    .collect(),
-                passing,
-            );
-        }
-        let estimator = estimator.unwrap();
-
-        let mut decoy = 1.0;
-        let mut target = 0.0;
-        for score in scores.iter_mut() {
-            let pep = estimator.posterior_error(score.score as f64) as f32;
-
-            // Cumulative sum of PEP ~ # of decoys
-            decoy += pep;
-            if !score.decoy {
-                target += 1.0;
+                });
             }
-            score.q = decoy / target;
-        }
-        // Q-value is the minimum q-value at any given score threshold
-        // `q = q[::-1].cummin()[::-1] in python`
-        let mut q_min = 1.0f32;
-        let mut passing = 0;
-        for score in scores.iter_mut().rev() {
-            q_min = q_min.min(score.q);
-            score.q = q_min;
-            if q_min <= threshold && !score.decoy {
-                passing += 1;
-            }
+            losers.extend(loser);
         }
 
-        (
-            scores
-                .into_par_iter()
-                .map(|score| (score.ix, score.q))
-                .collect(),
-            passing,
-        )
+        let passing = assign_count_q_values(&mut winners, threshold);
+        let mut q = winners
+            .into_iter()
+            .map(|row| (row.ix, row.q))
+            .collect::<HashMap<_, _, B>>();
+        q.extend(losers.into_iter().map(|ix| (ix, 1.0)));
+        (q, passing)
     }
 }
 
@@ -409,6 +355,57 @@ fn decoy_competition_group(
         .or_else(|| feat.protein_groups.clone())
 }
 
+/// Site-level target-decoy q-values, one per `(score, decoy)` entry in caller
+/// order.
+///
+/// Each entry is one reported site, scored so that higher is better. Target
+/// and decoy sites are not paired: every site competes on its own side, so
+/// each is its own winner and q is `(decoys + 1) / targets` at complete score
+/// thresholds, as for the peptide and protein levels. Sites with the same
+/// score share one q-value, the most conservative in the tie, so the result
+/// never depends on input order.
+pub fn site_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
+    let map = evidence
+        .iter()
+        .enumerate()
+        .map(|(ix, &(score, decoy))| {
+            let mut competition = Competition::<usize>::default();
+            if decoy {
+                competition.reverse = score;
+                competition.reverse_ix = Some(ix);
+            } else {
+                competition.forward = score;
+                competition.foward_ix = Some(ix);
+            }
+            (ix, competition)
+        })
+        .collect::<FnvHashMap<_, _>>();
+    let (scores, _) = Competition::assign_q_value(map, 0.01);
+    let mut q_values = (0..evidence.len())
+        .map(|ix| scores.get(&ix).copied().unwrap_or(1.0))
+        .collect::<Vec<_>>();
+
+    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
+    let mut start = 0;
+    while start < order.len() {
+        let score = evidence[order[start]].0;
+        let mut end = start + 1;
+        while end < order.len() && evidence[order[end]].0.total_cmp(&score).is_eq() {
+            end += 1;
+        }
+        let tied = order[start..end]
+            .iter()
+            .map(|&ix| q_values[ix])
+            .fold(0.0f32, f32::max);
+        for &ix in &order[start..end] {
+            q_values[ix] = tied;
+        }
+        start = end;
+    }
+    q_values
+}
+
 pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {
     let mut scores = peaks
         .par_iter()
@@ -430,6 +427,54 @@ pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPe
     peaks.par_iter_mut().for_each(|(ix, quantified)| {
         quantified.peak.q_value = scores[ix];
     });
+    passing
+}
+
+/// Assign a target-decoy q-value to every target (precursor, file) LFQ extraction.
+///
+/// Every target file row with an integrated signal competes, whether the
+/// precursor was identified by MS2 in that file or transferred into it. Each
+/// target row has one potential competitor: its shifted decoy evaluated at the
+/// target's own peak in the same file (`QuantifiedPeak::paired_decoy_evidence`).
+/// Rows are ranked by the per-file `FileEvidence::score` and q-values follow
+/// from cumulative target and decoy counts with a +1 correction, as for the
+/// precursor-level q-value. Returns the number of target rows at 1% FDR.
+pub fn extraction_q_values<H: BuildHasher>(
+    peaks: &mut HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
+) -> usize {
+    let mut rows = peaks
+        .iter()
+        .filter(|((_, decoy), _)| !decoy)
+        .flat_map(|(&(id, _), quantified)| {
+            let targets = quantified.file_evidence.iter().enumerate();
+            let decoys = quantified.paired_decoy_evidence.iter().enumerate();
+            targets
+                .map(|(file, evidence)| (file, false, evidence))
+                .chain(decoys.map(|(file, evidence)| (file, true, evidence)))
+                .filter_map(move |(file, decoy, evidence)| {
+                    evidence.as_ref().map(|evidence| Row {
+                        ix: (id, decoy, file),
+                        decoy,
+                        score: evidence.score as f32,
+                        q: 1.0,
+                    })
+                })
+        })
+        .collect::<Vec<_>>();
+    // Ties share a q-value, so the input order cannot change the result.
+    let passing = assign_count_q_values(&mut rows, 0.01);
+    let q_values = rows
+        .into_iter()
+        .filter(|row| !row.decoy)
+        .map(|row| (row.ix, row.q))
+        .collect::<FnvHashMap<_, _>>();
+    for (&(id, decoy), quantified) in peaks.iter_mut() {
+        for (file, evidence) in quantified.file_evidence.iter_mut().enumerate() {
+            if let Some(evidence) = evidence {
+                evidence.extraction_q_value = q_values.get(&(id, decoy, file)).copied();
+            }
+        }
+    }
     passing
 }
 

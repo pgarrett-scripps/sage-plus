@@ -134,6 +134,10 @@ pub struct QuantifiedPeak {
     pub ms2_confirmed_strict: Vec<bool>,
     /// Diagnostics for individual file signals. These are not calibrated probabilities.
     pub file_evidence: Vec<Option<FileEvidence>>,
+    /// For a target, its shifted decoy evaluated at this target's peak (same
+    /// warps, apex, window and reference trace) in each file. These are the
+    /// competitors for per-file extraction q-values. Empty for decoys.
+    pub paired_decoy_evidence: Vec<Option<FileEvidence>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -143,8 +147,12 @@ pub struct FileEvidence {
     pub spectral_angle: f64,
     pub trace_cosine: f64,
     pub rt_shift_bins: i32,
-    /// Experimental ranking score, without an FDR guarantee.
+    /// Per-file ranking score: isotope agreement, trace similarity and warp
+    /// proximity. It also ranks extractions for [`crate::fdr::extraction_q_values`].
     pub score: f64,
+    /// Target-decoy q-value of this target (precursor, file) extraction; see
+    /// [`crate::fdr::extraction_q_values`]. `None` for decoys and until assigned.
+    pub extraction_q_value: Option<f32>,
 }
 
 pub fn build_feature_map(
@@ -437,49 +445,50 @@ impl FeatureMap {
 
         log::info!("integrating MS1 features");
 
-        let mut quantified = scores
+        // Pair each target grid with its shifted decoy grid, so the decoy can
+        // also be evaluated at the target's peak.
+        let mut pairs: HashMap<(PrecursorId, usize), [Option<Grid>; 2], fnv::FnvBuildHasher> =
+            HashMap::default();
+        for ((id, decoy, anchor), grid) in scores {
+            pairs.entry((id, anchor)).or_default()[usize::from(decoy)] = Some(grid);
+        }
+
+        let mut quantified = pairs
             .into_par_iter()
-            .filter_map(|((id, decoy, anchor), mut grid)| {
-                // MS1 ions have been added to any relevant grids, so we now
-                // attempt to trace the peaks, find the best peak, and integrate
-                // it across all of the files
-                let mut traces = grid.summarize_traces();
-                let (peak, areas, evidence) = traces.integrate_with_evidence(&self.settings)?;
-                // Expand a single-file (MBR disabled) grid back to all files
-                let (intensities, mut file_evidence) = match anchor {
-                    usize::MAX => (areas, evidence),
-                    anchor => {
-                        let mut intensities = vec![None; n_files];
-                        let mut file_evidence = vec![None; n_files];
-                        intensities[anchor] = areas[0];
-                        file_evidence[anchor] = evidence.into_iter().next().flatten();
-                        (intensities, file_evidence)
-                    }
-                };
-                for (file_id, evidence) in file_evidence.iter_mut().enumerate() {
-                    if let Some(evidence) = evidence {
-                        evidence.transfer_candidate = self.settings.mbr
-                            && !self.ms2_confirmed_strict.contains(&(id, file_id));
+            .flat_map_iter(|((id, anchor), [target, decoy])| {
+                let mut decoy_traces = decoy.map(|mut grid| grid.summarize_traces());
+                let mut out = Vec::with_capacity(2);
+                if let Some(mut grid) = target {
+                    let mut traces = grid.summarize_traces();
+                    if let Some((peak, areas, evidence, window)) =
+                        traces.integrate_window(&self.settings)
+                    {
+                        let paired = match &decoy_traces {
+                            Some(decoy) => decoy.clone().paired_evidence(&window, &self.settings),
+                            None => vec![None; evidence.len()],
+                        };
+                        out.push(
+                            self.expand(n_files, id, false, anchor, peak, areas, evidence, paired),
+                        );
                     }
                 }
-                let ms2_confirmed = (0..n_files)
-                    .map(|file_id| !decoy && self.ms2_confirmed.contains(&(id, file_id)))
-                    .collect();
-                let ms2_confirmed_strict = (0..n_files)
-                    .map(|file_id| !decoy && self.ms2_confirmed_strict.contains(&(id, file_id)))
-                    .collect();
-
-                Some((
-                    (id, decoy),
-                    anchor,
-                    QuantifiedPeak {
-                        peak,
-                        intensities,
-                        ms2_confirmed,
-                        ms2_confirmed_strict,
-                        file_evidence,
-                    },
-                ))
+                if let Some(traces) = decoy_traces.as_mut() {
+                    if let Some((peak, areas, evidence)) =
+                        traces.integrate_with_evidence(&self.settings)
+                    {
+                        out.push(self.expand(
+                            n_files,
+                            id,
+                            true,
+                            anchor,
+                            peak,
+                            areas,
+                            evidence,
+                            Vec::new(),
+                        ));
+                    }
+                }
+                out
             })
             .collect::<Vec<_>>();
 
@@ -501,20 +510,86 @@ impl FeatureMap {
     }
 }
 
+impl FeatureMap {
+    /// Expand a single-file (MBR disabled) grid back to all files and attach
+    /// the per-file labels.
+    #[allow(clippy::too_many_arguments)]
+    fn expand(
+        &self,
+        n_files: usize,
+        id: PrecursorId,
+        decoy: bool,
+        anchor: usize,
+        peak: Peak,
+        areas: Vec<Option<f64>>,
+        evidence: Vec<Option<FileEvidence>>,
+        paired: Vec<Option<FileEvidence>>,
+    ) -> ((PrecursorId, bool), usize, QuantifiedPeak) {
+        let (intensities, mut file_evidence, mut paired_decoy_evidence) = match anchor {
+            usize::MAX => (areas, evidence, paired),
+            anchor => {
+                let mut intensities = vec![None; n_files];
+                let mut file_evidence = vec![None; n_files];
+                intensities[anchor] = areas[0];
+                file_evidence[anchor] = evidence.into_iter().next().flatten();
+                let mut paired_decoy_evidence = Vec::new();
+                if !decoy {
+                    paired_decoy_evidence = vec![None; n_files];
+                    paired_decoy_evidence[anchor] = paired.into_iter().next().flatten();
+                }
+                (intensities, file_evidence, paired_decoy_evidence)
+            }
+        };
+        for (file_id, evidence) in file_evidence
+            .iter_mut()
+            .chain(paired_decoy_evidence.iter_mut())
+            .enumerate()
+        {
+            if let Some(evidence) = evidence {
+                evidence.transfer_candidate = self.settings.mbr
+                    && !self.ms2_confirmed_strict.contains(&(id, file_id % n_files));
+            }
+        }
+        let ms2_confirmed = (0..n_files)
+            .map(|file_id| !decoy && self.ms2_confirmed.contains(&(id, file_id)))
+            .collect();
+        let ms2_confirmed_strict = (0..n_files)
+            .map(|file_id| !decoy && self.ms2_confirmed_strict.contains(&(id, file_id)))
+            .collect();
+        (
+            (id, decoy),
+            anchor,
+            QuantifiedPeak {
+                peak,
+                intensities,
+                ms2_confirmed,
+                ms2_confirmed_strict,
+                file_evidence,
+                paired_decoy_evidence,
+            },
+        )
+    }
+}
+
 impl QuantifiedPeak {
     /// Combine the peak of another anchor file into this one: per-file signals
     /// are taken from whichever anchor observed them, and the highest-scoring
     /// peak (earliest anchor on ties) represents the precursor.
     fn merge(&mut self, other: QuantifiedPeak) {
+        let mut paired = other.paired_decoy_evidence.into_iter();
         for (file, (area, evidence)) in other
             .intensities
             .into_iter()
             .zip(other.file_evidence)
             .enumerate()
         {
+            let decoy = paired.next().flatten();
             if area.is_some() {
                 self.intensities[file] = area;
                 self.file_evidence[file] = evidence;
+                if let Some(slot) = self.paired_decoy_evidence.get_mut(file) {
+                    *slot = decoy;
+                }
             }
         }
         if other.peak.score > self.peak.score {
@@ -541,6 +616,7 @@ pub struct Grid {
     pub matrix: Matrix,
 }
 
+#[derive(Clone)]
 pub struct Traces {
     /// Matrix of dot(MS1 ions, Grid.distribution). This collapses our N_FILES * N_ISOTOPES rows
     /// down to just N_FILES
@@ -579,7 +655,12 @@ impl Traces {
     /// * For each LC-MS run, find the time warping shif that maximizes dot product
     ///   with the `reference` run
     pub fn find_time_warps(&self, matrix: &Matrix, slack: isize) -> Vec<isize> {
-        let reference = matrix.row_slice(self.reference_file_id);
+        Self::time_warps_to(matrix.row_slice(self.reference_file_id), matrix, slack)
+    }
+
+    /// Time warping offsets for each row of `matrix` that maximize the dot
+    /// product with `reference`
+    fn time_warps_to(reference: &[f64], matrix: &Matrix, slack: isize) -> Vec<isize> {
         let mut offsets = vec![0; matrix.rows];
 
         for (row, offset) in offsets.iter_mut().enumerate() {
@@ -674,6 +755,22 @@ impl Traces {
         &mut self,
         settings: &LfqSettings,
     ) -> Option<(Peak, Vec<Option<f64>>, Vec<Option<FileEvidence>>)> {
+        self.integrate_window(settings)
+            .map(|(peak, areas, evidence, _)| (peak, areas, evidence))
+    }
+
+    /// Integrate the best peak and also return its window, so that a paired
+    /// decoy can be evaluated at exactly the same place (see [`Traces::paired_evidence`]).
+    #[allow(clippy::type_complexity)]
+    pub fn integrate_window(
+        &mut self,
+        settings: &LfqSettings,
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
         let shifts = self.warp();
 
         let (scores, spectral) = self.scores(settings.peak_scoring);
@@ -710,19 +807,6 @@ impl Traces {
             right += 1;
         }
 
-        // Actually perform integration
-        let mut areas = Vec::with_capacity(self.dot_product.rows);
-        for file in 0..self.dot_product.rows {
-            let area = match settings.integration {
-                IntegrationStrategy::Sum => self.dot_product.row_slice(file)[left..right]
-                    .iter()
-                    .sum::<f64>(),
-                IntegrationStrategy::Apex => self.dot_product.row_slice(file)[best.rt],
-            };
-
-            areas.push((area.is_finite() && area > 0.0).then_some(area));
-        }
-
         let mut summed_int = 1.0;
         let mut weighted = 0.0;
         for (sa, dotp) in self
@@ -734,7 +818,57 @@ impl Traces {
             summed_int += dotp;
         }
         best.spectral_angle = weighted / summed_int;
-        let reference = self.dot_product.row_slice(self.reference_file_id);
+        let window = PeakWindow {
+            rt: best.rt,
+            left,
+            right,
+            shifts,
+            reference: self.dot_product.row_slice(self.reference_file_id).to_vec(),
+        };
+        let (areas, evidence) = self.window_evidence(&window, settings);
+        Some((best, areas, evidence, window))
+    }
+
+    /// Evaluate these (decoy) traces at a peak chosen from other traces: the
+    /// same apex, integration window and reference trace. Each file gets the
+    /// same local warp search the target files got (towards that reference),
+    /// so a file row answers the same question as the target row it is paired
+    /// with: can an isotope envelope be aligned to the expected elution?
+    pub fn paired_evidence(
+        &mut self,
+        window: &PeakWindow,
+        settings: &LfqSettings,
+    ) -> Vec<Option<FileEvidence>> {
+        let shifts = Self::time_warps_to(&window.reference, &self.dot_product, 75);
+        Self::apply_time_warps(&mut self.spectral_angle, &shifts);
+        Self::apply_time_warps(&mut self.dot_product, &shifts);
+        let window = PeakWindow {
+            shifts,
+            reference: window.reference.clone(),
+            ..*window
+        };
+        self.window_evidence(&window, settings).1
+    }
+
+    fn window_evidence(
+        &self,
+        window: &PeakWindow,
+        settings: &LfqSettings,
+    ) -> (Vec<Option<f64>>, Vec<Option<FileEvidence>>) {
+        let mut areas = Vec::with_capacity(self.dot_product.rows);
+        for file in 0..self.dot_product.rows {
+            let area = match settings.integration {
+                IntegrationStrategy::Sum => self.dot_product.row_slice(file)
+                    [window.left..window.right]
+                    .iter()
+                    .sum::<f64>(),
+                IntegrationStrategy::Apex => self.dot_product.row_slice(file)[window.rt],
+            };
+
+            areas.push((area.is_finite() && area > 0.0).then_some(area));
+        }
+
+        let reference = &window.reference;
         let reference_norm = reference.iter().map(|x| x * x).sum::<f64>().sqrt();
         let evidence = areas
             .iter()
@@ -749,22 +883,34 @@ impl Traces {
                     } else {
                         0.0
                     };
-                    let spectral_angle = self.spectral_angle[(file, best.rt)].clamp(0.0, 1.0);
+                    let spectral_angle = self.spectral_angle[(file, window.rt)].clamp(0.0, 1.0);
                     let proximity = (1.0
-                        - shifts[file].unsigned_abs() as f64 / self.dot_product.cols as f64)
+                        - window.shifts[file].unsigned_abs() as f64 / self.dot_product.cols as f64)
                         .max(0.0);
                     FileEvidence {
                         transfer_candidate: false,
                         spectral_angle,
                         trace_cosine,
-                        rt_shift_bins: shifts[file] as i32,
+                        rt_shift_bins: window.shifts[file] as i32,
                         score: spectral_angle.powi(3) * trace_cosine * proximity,
+                        extraction_q_value: None,
                     }
                 })
             })
             .collect();
-        Some((best, areas, evidence))
+        (areas, evidence)
     }
+}
+
+/// Where a precursor's cross-run peak was found: local warps, apex and
+/// integration bounds, and the warped reference trace.
+#[derive(Clone, Debug)]
+pub struct PeakWindow {
+    pub rt: usize,
+    pub left: usize,
+    pub right: usize,
+    pub shifts: Vec<isize>,
+    pub reference: Vec<f64>,
 }
 
 impl Grid {

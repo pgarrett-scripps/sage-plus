@@ -99,6 +99,9 @@ Options:
           Number of files to search in parallel (default = number of CPUs/2)
       --write-pin
           Write percolator-compatible `.pin` output files
+      --threads <N>
+          Number of worker threads; overrides `threads` from the configuration file
+          (default: all cores, or RAYON_NUM_THREADS when set)
       --max-memory <GiB>
           Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
           (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
@@ -137,7 +140,7 @@ sage config.json s3://my-bucket/YYYY-MM-DD_expt_A_fraction_1.mzML.gz
 
 Running Sage will produce several output files (located in either the current directory, or `output_directory` if that option is specified):
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
-- MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
+- MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row; a channel that was not observed is null. With TMT on, `run-summary.json` adds `quantification.tmt_channels`: per channel, the number of quantified spectra where it was observed or missing and the median observed intensity (missing channels are skipped, not counted as 0).
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
 - A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
@@ -153,6 +156,13 @@ The provenance mode `path_size_mtime` records local input metadata, not content 
 cryptographically exact build identity. Benchmark manifests separately record SHA-256 hashes of
 inputs and binaries. Older summaries remain readable through defaults for the new fields.
 
+Two optional fields were added without a schema bump: `peak_rss_bytes`, the peak resident memory
+of the Sage process in bytes at the end of the run (Linux `VmHWM` from `/proc/self/status`, falling
+back to `getrusage` `ru_maxrss` on other Unix systems; `null` where neither is available), and
+`execution.rayon_threads`, which now reflects `--threads` / `threads`. The peak is also logged as
+`peak memory (RSS): N GiB` when the run finishes. It covers the whole process, so a library caller
+running several jobs in one process sees the highest peak so far.
+
 For library callers, `JobOptions.parallel` remains the fallback file batch size when configuration
 does not specify `batch_size`. It does not set the Rayon worker count. CLI batch overrides
 take precedence over the configuration.
@@ -160,6 +170,72 @@ take precedence over the configuration.
 Parquet is the canonical analytical output format. Sage does not emit parallel TSV copies of the PSM, LFQ, matched-fragment, or PTM-site result tables. Purpose-specific interchange artifacts such as Percolator `.pin` files and the reusable PTM-library TSV remain available.
 
 The versioned physical schemas and score definitions are published in [`schemas/`](schemas/). Canonical Parquet files embed `sage.schema.name` and `sage.schema.version` metadata so downstream tools can select the matching contract.
+
+The non-Parquet reports have published schemas in the same directory:
+
+- [`run-summary.v9.schema.json`](schemas/run-summary.v9.schema.json): JSON Schema (draft 2020-12) for `run-summary.json` with `schema_version` 9. Objects allow additional properties, since optional fields are added without a version bump; readers should ignore unknown keys.
+- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json) and [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv` and `diagnostic_ions.tsv`.
+
+The integration tests validate a real run's outputs against these files. `results.json` echoes the effective configuration (see [`config.schema.json`](schemas/config.schema.json)) and is not a versioned contract.
+
+#### Output provenance
+
+Every Parquet file Sage writes carries the run's provenance in its key-value footer. The same
+keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage.parquet`,
+`lfq.parquet`, `spectral_library.sage.parquet`, and the PTM-localization tables
+`results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet` and
+`results.sage.ptm-library.parquet`. They follow each file's own keys (`sage.schema.name`,
+`sage.schema.version`, filters).
+
+| Key | Value |
+| --- | --- |
+| `sage.provenance.version` | Version of this key set, currently `1`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.13`. |
+| `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
+| `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
+| `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
+| `sage.fasta` | JSON, described below, or `null` for a peptide-list-only search. |
+| `sage.database_inputs` | JSON list of the peptide TSV, custom cleavage sites and PTM library, each with a `role` and always hashed. |
+| `sage.protein_inference` | JSON. The protein inference strategy; see [Protein inference](#protein-inference). |
+
+`sage.fasta` holds `path`, `size_bytes`, `sha256`, `proteins`, `target_proteins` and
+`decoy_proteins`. It also holds `decoys`, with `strategy` (`generated` or `supplied`), `method`
+(`reversed_peptide_keep_termini` for generated decoys), `decoy_tag`, `target_peptides` and
+`decoy_peptides`. When headers carry UniProt fields it adds `uniprot`: counts of reviewed (`sp|`)
+and unreviewed (`tr|`) entries, and up to 20 organisms from `OS=` and `OX=` with protein counts.
+UniProt FASTA headers do not state a release, so none is recorded. The FASTA sha256 identifies
+the exact file. Protein counts include decoy entries in the FASTA whether or not they are
+searched.
+
+All hashes are SHA-256 of the bytes as stored, so a gzip file hashes like `sha256sum` on the
+`.gz`. Files are streamed in 1 MiB chunks and never loaded whole. Remote database files are
+streamed from object storage.
+
+The FASTA, peptide TSV and PTM library are always hashed. Spectrum files are hashed only when
+`record_input_hashes` is true (default false). Hashing reads every spectrum file once more at the
+end of the search. `sha256sum` on a 0.97 GB mzML already in page cache takes 2.7 s, about
+0.36 GB/s per core. Files are hashed in parallel. A file not in cache also costs a disk read. Remote
+spectrum files and directory inputs such as Bruker `.d` are never hashed and record the reason
+in `sha256_skipped`.
+
+`run-summary.json` holds the same object under `provenance.metadata`, with `sage.` removed from
+each key. The run-summary schema stays at version 9.
+
+Read the footer with pyarrow:
+
+```python
+import json, pyarrow.parquet as pq
+meta = pq.read_schema("results.sage.parquet").metadata
+fasta = json.loads(meta[b"sage.fasta"])
+print(meta[b"sage.version"].decode(), fasta["sha256"])
+```
+
+or with DuckDB:
+
+```sql
+SELECT decode(key) AS key, decode(value) AS value
+FROM parquet_kv_metadata('results.sage.parquet');
+```
 
 #### Memory guard
 
@@ -467,6 +543,7 @@ For additional information about configuration options and output file formats, 
   },
   "max_memory_gb": 16,      // Optional[float] {default=null}: stop Sage if its measured memory reaches this many GiB; 0 disables
   "batch_size": 1,          // Optional[int] {default=# of CPUs/2}: number of input files to load and search at once
+  "threads": 8,             // Optional[int] {default=all cores}: worker threads; `--threads` overrides, RAYON_NUM_THREADS applies when neither is set
   "output_directory": "s3://bucket/prefix", // Optional[str] {default=`.`}: Place output files in a given directory or S3 bucket/prefix
   "mzml_paths": [           // List[str]: representing paths to mzML (or gzipped-mzML) files for search
     "local/path.mzML",
@@ -480,8 +557,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.12
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.12 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.13
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.13 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -934,7 +1011,7 @@ alongside the library, because the location table does not embed chemical masses
 ### Decoys
 
 - **decoy_tag**: String. The tag used to identify decoy entries in the FASTA database (default: "rev_").
-- **generate_decoys**: Boolean. If true, ignore decoys in the FASTA database matching `decoy_tag`, and generate internally reversed peptides (default: false).
+- **generate_decoys**: Boolean. If true, ignore decoys in the FASTA database matching `decoy_tag`, and generate internally reversed peptides (default: true).
 
 ### FASTA
 
@@ -1024,6 +1101,16 @@ Example:
   }
 ```
 
+### What quantification does not do
+
+- **No protein rollup.** TMT reporter intensities are per PSM row in `results.sage.parquet`, and
+  LFQ intensities are per precursor and file in `lfq.parquet`. Sage does not combine them into
+  peptide or protein abundances. Use `proteins` or `protein_groups` to aggregate downstream.
+- **No normalization.** LFQ intensities are integrated MS1 signal, and TMT values are raw reporter
+  intensities (or signal-to-noise with `sn`). Sage applies no between-file, between-channel or
+  total-intensity scaling, and no reporter isotope-impurity correction.
+- **No imputation.** A missing LFQ signal is null, never zero.
+
 
 ## Precursor Tolerance
 
@@ -1108,12 +1195,16 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
+- **protein_grouping**: Boolean. Group proteins by IDPicker parsimony before protein-group FDR (default: true). See [Protein inference](#protein-inference).
+- **protein_grouping_peptide_fdr**: Float from 0 to 1. Peptide q-value below which peptides seed the first grouping pass (default: 0.01).
+- **record_input_hashes**: Boolean. Record the SHA-256 of every local spectrum file in the output provenance (default: false). It reads each file once more, at about 0.36 GB/s per core. The FASTA and other database files are always hashed. See [Output provenance](#output-provenance).
 - **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
 - **spectral_library**: Object. Build an empirical library from confident target PSMs. See [Empirical Spectral Libraries](#empirical-spectral-libraries).
 - **output_filter.psm_q_value**: Float from 0 to 1. Maximum spectrum-level PSM q-value written to `results.sage.parquet` and `matched_fragments.sage.parquet` (default: 0.1). The boundary is inclusive. Set it to `1.0` to retain every scored PSM. This is an output-only filter: scoring, FDR estimation, LFQ, PTM localization, `.pin` output, and the HTML report continue to use their existing inputs and thresholds. Target and decoy PSMs that pass the threshold are retained so downstream target-decoy analyses remain possible.
 - **max_memory_gb**: Number. Abort the search if Sage's measured (resident) memory reaches this many GiB. Zero disables this limit (default: disabled). It also sizes the prefilter's streamed digest and spectrum batches.
 - **min_free_memory_gb**: Ignored since Beta 11 and accepted only so older configurations still parse. Keeping memory free for other programs is left to the system.
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
+- **threads**: Integer, at least 1. Number of worker threads used for parallel work (database build, search, rescoring, quantification). The `--threads` command-line option overrides this value. When neither is set, Sage uses the `RAYON_NUM_THREADS` environment variable if present, and otherwise every core. The effective count is logged at startup (`using N worker threads`) and recorded in `run-summary.json` as `execution.rayon_threads`. `threads` does not change `batch_size`, whose default still follows the CPU count.
 
 Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts and whether the prefilter is on, and exits without reading spectra.
 
@@ -1278,7 +1369,7 @@ Example configuration:
 }
 ```
 
-For each FDR-passing target PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification identity it carries, sage:
+For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), and for each distinct variable-modification identity it carries, sage:
 1. recovers candidate residue and terminal attachments from the configured sites and library restrictions,
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
@@ -1290,8 +1381,27 @@ The current implementation combines one AScore-inspired, site-determining-ion st
 
 Two Parquet site reports are written:
 
-- **results.sage.ptm-sites.parquet**: one row per localized modification site of each PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, and `site_probabilities`.
-- **results.sage.protein-sites.parquet**: the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs, including `best_localization_q_value`.
+- **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
+- **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
+
+### Site-level FDR
+
+`site_q_value` is a target-decoy q-value estimated at the site level, separately from the PSM, peptide and protein levels. Use `site_q_value <= 0.01` to report sites at 1% site FDR.
+
+1. Decoy PSMs pass through the same gates as target PSMs: spectrum q-value ≤ `ptm_localization.psm_q_value`, localization, no impossible-site decoy win, and localization q-value ≤ `ptm_localization.localization_q_value`. Decoy PSMs never enter the false-localization-rate competition. Each takes the localization q-value of the target competition at its own score, so the localization cutoff is the same score threshold for both.
+2. Target and decoy site rows are collapsed with the same key: protein, modified peptide, position in the peptide, modification and attachment. Decoy sites sit on decoy proteins.
+3. Each site is scored by the best discriminant score of its supporting PSMs, the same score used for PSM, peptide and protein FDR.
+4. Target and decoy sites compete without pairing. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
+
+Site FDR is about identity: is this modified site on this protein real? Localization confidence is a separate question and stays in `best_localization_probability` and `best_localization_q_value`.
+
+Every filter comes before estimation. Site FDR is estimated once, on exactly the set of sites written to the report, so no filter is applied afterwards. Filtering by `site_q_value` is the estimated cutoff itself. Any further filter on another column, such as localization probability, number of PSMs or protein, does not keep the 1% guarantee for the filtered set.
+
+The spectrum q-value cutoff needs no correction. A site passes it exactly when its best PSM clears the score threshold that the cutoff sets. That is a threshold on the site score itself, applied to targets and decoys alike. A looser `ptm_localization.psm_q_value`, up to 1.0, leaves more decoy sites to estimate from and is allowed.
+
+`best_spectrum_q` is the lowest PSM q-value among supporting PSMs. It is not a site-level FDR. Sites supported by one PSM are the most likely to be false, and taking the minimum PSM q-value across a site's PSMs hides that. Reports written before schema version 3 have only this column.
+
+`run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and `protein_sites_at_one_percent_fdr` under `ptm_localization`.
 
 For example, the PSM-site report contains rows shaped like this (positions are 1-based within the peptide):
 
@@ -1303,7 +1413,7 @@ psm_id  peptide            modification  position  residue  localization_probabi
 Notes:
 - Residue and terminal-group modifications are localized within their configured rules. Site reports include `attachment`, and terminal coordinates identify the adjacent residue.
 - The current backbone-ion model cannot distinguish equal masses on a terminal group and its adjacent residue in some configurations. Such alternatives retain ambiguity and are excluded from reusable libraries. Terminal localization is experimental and has synthetic regression coverage, not an empirical FLR calibration study.
-- Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
+- Localization runs after spectrum FDR assignment, for target and decoy PSMs that pass `ptm_localization.psm_q_value`. Only target PSMs are written to the site reports and counted in `localized_psms`. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
 - FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable. A peptide present in both the FASTA and a peptide TSV keeps the FASTA copy's protein position, enzymatic state and missed cleavages, so protein-terminal modification rules follow the FASTA; the TSV row only adds its protein.
@@ -1342,54 +1452,133 @@ Notes:
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
   ```
 
+## Performance and complexity
+
+Let S be the number of MS2 spectra, k the peaks kept per spectrum (`max_peaks`), N the peptides
+after modifications and decoys, F the fragments per peptide (about 2 × (length − 1) × fragment
+charges, less `min_ion_index` at each end), M the MS1 spectra, and T the worker threads.
+
+- **Index build**: digestion and modification expansion take time proportional to N, and N grows
+  combinatorially with `max_variable_mods`. The fragment index holds N × F entries of 6 bytes,
+  sorted by mass: O(N·F log(N·F)) time spread over T threads, and O(N·F) memory. This is usually
+  the peak memory of a search.
+- **Search**: each spectrum looks up its k peaks in the index, restricted to peptides inside
+  the precursor window. Time is O(S · k · (log(N·F) + c)), where c is the fragment hits per peak.
+  c grows with the precursor window, so wide-window and open searches cost more. Candidates that
+  pass `min_matched_peaks` are fully scored. Spectra are split over T threads, and memory for
+  spectra scales with the files loaded at once (`batch_size`).
+- **Prefilter**: the spectra are indexed once (O(S·k) memory, capped at a quarter of
+  `max_memory_gb`). Each streamed peptide checks its F fragments against that index, in
+  O(N · F · log(S·k)) time. Only the N′ surviving peptides enter the fragment index, so index
+  memory becomes O(N′·F).
+- **LFQ**: every MS1 spectrum is matched against the precursors inside its retention-time window.
+  Time is O(M × peaks per MS1 spectrum × precursors in window). Memory is one retention-time grid
+  per quantified precursor, across files.
+- **Files**: total time is roughly linear in the number of files. Files are loaded in batches of
+  `batch_size`.
+
+### Limiting CPU cores
+
+Sage uses one Rayon thread pool with one worker per logical core. Set the `RAYON_NUM_THREADS`
+environment variable to use fewer, for example `RAYON_NUM_THREADS=8 sage config.json`.
+`run-summary.json` records the count used in `execution.rayon_threads`. `batch_size` controls how
+many files are loaded at once, not the thread count.
+
 # Interpreting Sage Output
 
 The `results.sage.parquet` file contains the following columns:
 
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
+Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
+scores; columns without one are descriptive. `results.sage.v1.parquet.schema` and
+`results.sage.v2.parquet.schema` in [`schemas/`](schemas/) are the exact contract.
+
+- `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
+- `filename`: File containing this PSM.
+- `scannr`: Spectrum identifier from the mzML file.
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
-- `proteins`: Proteins containing the peptide sequence.
-- `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `ambiguity_sequence`, `mass_shift`: Fragment-evidence annotation; see [Sequence-ambiguity annotation](#sequence-ambiguity-annotation).
+- `stripped_peptide`: Peptide sequence without modifications.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
+- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 2).
+- `proteins`: Proteins containing the peptide sequence, joined by `;`.
+- `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `protein_groups`: Protein groups for the peptide, joined by `;`. With `protein_grouping` on, these are the IDPicker groups; with it off, the peptide's proteins. See [Protein inference](#protein-inference).
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
-- `filename`: File containing this PSM
-- `scannr`: Spectrum identifier from mzML file.
-- `rank`: Rank of the PSM. If `report_psms > 1`, then the best match will have rank = 1, the second best match will have rank = 2, etc. 
-- `label`: Target/Decoy label (-1: decoy, 1: target).
+- `num_protein_groups`: Number of protein groups assigned to the peptide. Only peptides with exactly one group take part in `protein_group_q`.
+- `rank`: Rank of the PSM. If `report_psms > 1`, then the best match will have rank = 1, the second best match will have rank = 2, etc.
+- `is_decoy`: True for decoy PSMs.
 - `expmass`: Experimental mass of the peptide.
 - `calcmass`: Calculated mass of the peptide.
 - `charge`: Reported precursor charge.
-- `pepide_len`: Length of the peptide sequence.
+- `peptide_len`: Length of the peptide sequence.
 - `missed_cleavages`: Number of missed cleavages.
+- `semi_enzymatic`: True for peptides from semi-enzymatic digestion.
+- `ms2_intensity`: Summed intensity of the matched fragment ions (not the total MS2 intensity; `matched_intensity_pct` relates the two). Higher is better.
 - `isotope_error`: C13 isotope error.
-- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million. Always the raw, uncorrected error, and `expmass` is always the raw experimental mass, even with `mass_recalibration`.
-- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions. Always computed from raw fragment m/z.
+- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million. Always the raw, uncorrected error, and `expmass` is always the raw experimental mass, even with `mass_recalibration`. Closer to zero is better.
+- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions. Always computed from raw fragment m/z. Closer to zero is better.
 - `calibrated_precursor_ppm` / `calibrated_fragment_ppm`: Residual errors after mass correction: the search-time `mass_recalibration` model when one was applied, otherwise the post-search per-file alignment.
-- `hyperscore`: X!Tandem hyperscore for the PSM.
-- `delta_next`: Difference between the hyperscore of this candidate and the next best candidate.
-- `delta_bext`: Difference between the hyperscore of the best candidate (rank=1) and this candidate.
+- `hyperscore`: X!Tandem hyperscore for the PSM. Higher is better.
+- `delta_next`: Hyperscore of this candidate minus that of the next-ranked candidate (its full hyperscore when there is none). Higher is better.
+- `delta_best`: Hyperscore of the best candidate (rank 1) minus that of this candidate; 0 for rank 1. Lower is better.
 - `rt`: Retention time.
 - `aligned_rt`: Globally aligned retention time.
 - `predicted_rt`: Predicted retention time, if enabled.
-- `delta_rt_model`: Difference between predicted and observed retention time.
-- `matched_peaks`: Number of matched theoretical fragment ions.
-- `longest_b`: Longest b-ion series.
-- `longest_y`: Longest y-ion series.
-- `longest_y_pct`: Longest y-ion series, divided by peptide length (as a percentage).
-- `matched_intensity_pct`: Fraction of MS2 intensity explained by matched b- and y-ions (as a percentage of total MS2 intensity for this spectrum).
+- `delta_rt_model`: Absolute difference between predicted and aligned retention time. Lower is better.
+- `ion_mobility`: Observed ion mobility, when the spectra have it.
+- `predicted_mobility`: Predicted ion mobility, when `ion_mobility_model` is enabled.
+- `delta_mobility`: Absolute difference between predicted and observed ion mobility. Lower is better.
+- `matched_peaks`: Number of matched theoretical fragment ions. Higher is better.
+- `longest_b`: Longest b-ion series. Higher is better.
+- `longest_y`: Longest y-ion series. Higher is better.
+- `longest_y_pct`: Longest y-ion series divided by peptide length, as a fraction from 0 to 1. Higher is better.
+- `matched_intensity_pct`: Percentage of the MS2 spectrum's total intensity explained by matched fragment ions. Higher is better.
+- `spectral_angle`, `explained_library_intensity`, `explained_query_intensity`: Former library-search columns, kept for schema compatibility. Always 0.
 - `scored_candidates`: Number of scored candidates for this spectrum.
-- `poisson`: Probability of matching exactly N peaks across all candidates (Pr(x=k)).
-- `sage_discriminant_score`: Combined score from linear discriminant analysis, used for FDR (False Discovery Rate) calculation.
-- `posterior_error`: Posterior error probability for this PSM / local FDR.
-- `spectrum_q`: Assigned spectrum-level q-value.
-- `peptide_q`: Assigned peptide-level q-value.
-- `protein_q`: Assigned protein-level q-value.
-- `ms1_intensity`: Intensity of the selected MS1 precursor ion (not label-free quant)
-- `ms2_intensity`: Total intensity of MS2 spectrum
+- `poisson`: log10 of the Poisson probability of matching exactly this many fragment peaks, with the expected count set to the average over all candidates for the spectrum. It is 0 or negative. For a top-ranked PSM, which matches more peaks than the average, more negative is better. It is not a p-value or a tail probability.
+- `sage_discriminant_score`: Combined score from linear discriminant analysis, used to rank PSMs for FDR. Higher is better.
+- `posterior_error`: log10 of the posterior error probability (local FDR) for this PSM, 0 or negative; -324 stands for a probability that underflows to zero. `10^posterior_error` gives the probability. Lower (more negative) is better.
+- `spectrum_q`: Spectrum-level q-value. Lower is better.
+- `peptide_q`: Peptide-level q-value. Lower is better.
+- `protein_q`: Protein-level q-value from picked-protein FDR over peptides unique to one protein; 1 for shared peptides. Lower is better.
+- `protein_group_q`: Protein-group q-value from picked group FDR over peptides in exactly one group; 1 for peptides shared between groups. Lower is better.
+- `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
+
+## Protein inference
+
+Sage reports peptide-level evidence with protein assignments. It does not report a protein
+table, and it does not roll PSM or LFQ intensities up to proteins.
+
+- **Grouping** (`protein_grouping`, default true): IDPicker parsimony (Zhang et al. 2007).
+  Proteins with identical peptide evidence are merged into one group, and a greedy set cover
+  keeps the fewest groups that explain every peptide. Proteins with a unique peptide are always
+  kept. The first pass uses target peptides with `peptide_q` below
+  `protein_grouping_peptide_fdr` (default 0.01); a second pass assigns the remaining peptides.
+  Groups are written to `protein_groups` and counted in `num_protein_groups`. With grouping off,
+  each peptide's proteins are written instead.
+- **`protein_q`**: picked-protein FDR (Savitski et al. 2015) over peptides unique to one protein.
+  Each protein and its decoy take their best `sage_discriminant_score`. Peptides shared between
+  proteins get `protein_q = 1`.
+- **`protein_group_q`**: picked protein-group FDR over peptides that map to exactly one group.
+  A decoy competes with the target group of the protein it was generated from. Peptides shared
+  between groups get `protein_group_q = 1`.
+- **Estimator**: peptide, protein and protein-group q-values use picked target-decoy
+  competition. Each target is paired with its own decoy: a peptide with its reversed sequence,
+  a protein with its decoy protein, a group with the decoys of its member proteins. The pair's
+  score is its best PSM `sage_discriminant_score`. Only the winner of each pair is ranked (a tie
+  goes to the decoy); the loser gets q = 1. q is `(decoys + 1) / targets` after each complete
+  tied-score group, then the reverse cumulative minimum, capped at 1. With decoys supplied in
+  the FASTA (`generate_decoys: false`) decoy proteins do not pair with their targets, so
+  `protein_q` reduces to classic, conservative protein-level target-decoy counting.
+
+`sage.protein_inference` in the Parquet footer and `provenance.metadata.protein_inference` in
+`run-summary.json` record the strategy used (`idpicker_parsimony`, or `protein_lists` with
+grouping off) and the grouping peptide q-value.
 
 ## Label-free quantification output
 
@@ -1400,12 +1589,14 @@ These columns provide comprehensive information about each candidate peptide spe
 - `charge`: Precursor charge, or null when charge states were combined.
 - `proteins`: Protein assignments.
 - `is_decoy`: Whether the LFQ precursor is a decoy.
-- `q_value`: Precursor-level q-value assigned by picked target-decoy competition.
-- `score`: Cross-run LFQ peak score used for precursor-level competition.
+- `q_value`: Precursor-level q-value: every target and shifted-decoy precursor is ranked by `score`, and q is (decoys + 1) / targets at each score, made monotonic. Targets and decoys are counted together, without pairing (not picked competition). The same value repeats on every file row of a precursor. Lower is better.
+- `score`: Cross-run LFQ peak score used to rank precursors for `q_value`. Higher is better.
 - `spectral_angle`: Intensity-weighted normalized isotope-pattern spectral angle for the selected cross-run peak.
 - `filename`: Acquisition file represented by this row.
 - `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
+- `ms2_confirmed_strict`, `file_score`, `file_spectral_angle`, `file_trace_cosine`, `file_rt_shift_bins`, `transfer_candidate`: per-file evidence diagnostics, defined in [`schemas/scores.v1.md`](schemas/scores.v1.md).
+- `extraction_q_value`: Per-row (precursor and file) extraction q-value, given for every target row with a signal, MS2-backed and transferred alike. Each target's shifted decoy is evaluated at the target's own peak, and these paired decoy rows compete with all target rows by `file_score`. Null for decoy precursors and for rows without a signal. It is a diagnostic: it does not filter output, does not replace the precursor `q_value`, and on a pure-human control roughly a fifth of transfers passing 1% were still foreign-species, so it is not a calibrated transfer FDR. `lfq_settings.mbr` defaults are unchanged.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
 

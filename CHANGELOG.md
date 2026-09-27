@@ -9,6 +9,98 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.13] - 2026-09-27
+
+### Fixed
+- TMT/isobaric reporter channels that are not observed are now missing values instead of 0.0
+  (grounding HC-QUANT-02). `TmtQuant::peaks` is `Vec<Option<f32>>`, and
+  `reporter_ion_intensity` in `results.sage.parquet` writes a null element for each missing
+  channel; the schema already allowed it. Only finite, positive peaks count as observed: a
+  zero-intensity centroid or a non-finite signal-to-noise value (zero noise estimate) is skipped,
+  and a real peak in the same window is still used. Readers that summed or averaged the list
+  must now skip nulls. `run-summary.json` gains an optional `quantification.tmt_channels`
+  (observed and missing counts and the median observed intensity per channel, skipping missing
+  channels); the run-summary schema stays at version 9. Sage has no other consumer of reporter
+  intensities: the PIN, TSV and HTML report outputs do not include them, and no reporter
+  normalisation or ratio is computed.
+- timsTOF diaPASEF files searched without LFQ are now scanned for diagnostic ions; they were
+  left out of `diagnostic_ions.tsv` and the run summary. Their polymer QC stays absent because
+  no MS1 is read. A file without any QC scan now logs a warning.
+- The PTM library locates merged I/L peptides in every listed protein, including those with the
+  other isoform (and, with `expand_ambiguous_residues`, B, Z or X spans); such proteins were
+  dropped. An I/L site records the residue as written in the FASTA.
+- `Tmt18` reports the TMTpro reagent mass 304.2071, as `Tmt16` does, instead of 304.2135
+  (inherited from upstream Sage).
+
+### Added
+- Every Parquet output records run provenance in its key-value footer: `sage.version`,
+  `sage.git_commit`, the effective configuration (`sage.config`), spectrum files with sizes
+  (`sage.inputs`), the FASTA with its SHA-256, protein and decoy counts, decoy strategy and
+  UniProt organisms (`sage.fasta`), hashed peptide, cleavage-site and PTM-library inputs
+  (`sage.database_inputs`), and the protein inference strategy (`sage.protein_inference`).
+  `run-summary.json` holds the same object under `provenance.metadata`; its schema stays at
+  version 9. See "Output provenance" in DOCS.md.
+- `record_input_hashes` (default false) also records the SHA-256 of each local spectrum file.
+  It reads each file once more.
+- `matched_fragments.sage.parquet` now carries `sage.schema.name` and `sage.schema.version`, and
+  its schema is published as `schemas/matched_fragments.sage.v1.parquet.schema`.
+- `--threads <N>` and the configuration key `threads` set the worker thread count (the flag wins;
+  `RAYON_NUM_THREADS` still applies when neither is set, then all cores). The effective count is
+  logged and recorded in `run-summary.json` as `execution.rayon_threads`.
+- `run-summary.json` records `peak_rss_bytes`, the process's peak resident memory (Linux `VmHWM`,
+  else `getrusage`; `null` where unavailable), and the end of the run logs it. The field is
+  optional and the run-summary schema stays at version 9.
+- Published schemas for `run-summary.json` (`schemas/run-summary.v9.schema.json`, JSON Schema),
+  `digestion.tsv` and `diagnostic_ions.tsv` (`schemas/*.v1.tsv.schema.json`, Table Schema). An
+  integration test validates real outputs against them.
+- Site-level FDR for PTM site reports. `results.sage.protein-sites.parquet` gains `site_score`
+  (best supporting PSM discriminant score) and `site_q_value`, a target-decoy q-value estimated
+  over protein sites with the same target-decoy estimator as the peptide and protein levels.
+  `results.sage.ptm-sites.parquet` gains `site_q_value`, the best q-value of the protein sites
+  each row supports. Filter on `site_q_value <= 0.01` for 1% site FDR. Schemas `protein_sites`
+  and `ptm_sites` move to version 3 (`schemas/*.v3.parquet.schema`); all version 2 columns are
+  kept, and `best_spectrum_q` is documented as a PSM-level minimum, not a site FDR.
+- `run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and
+  `protein_sites_at_one_percent_fdr` under `ptm_localization`. The fields are optional and the
+  run-summary schema version is unchanged.
+- `lfq.parquet` gains `extraction_q_value`, a target-decoy q-value for every precursor/file row
+  (MS2-backed and transferred). Each target's shifted decoy is scored at the target's own peak,
+  with its own per-file warp search, and competes by `file_score`. LFQ schemas move to version 5
+  (unlabeled) and 6 (labeled). The log prints how many target rows pass 1%. The value is a
+  diagnostic, not a calibrated transfer FDR, and the MBR default is unchanged.
+
+### Changed
+- Peptide, protein and protein-group q-values are now textbook picked FDR (Savitski et al.
+  2015; The et al. 2022). Only the winner of each target-decoy pair is ranked, q is
+  `(decoys + 1) / targets` over complete tied-score groups, and the losing member is reported
+  with q = 1. Previously both members were ranked and the numerator was a running sum of a
+  KDE posterior error fitted on the winners, so a target beaten by its own decoy could still
+  pass. On two human-only entrapment searches the entrapment FDP at 1% is unchanged within
+  noise and identifications at 1% change by at most 0.3% (`benchmarks/PICKED_FDR.md`).
+  Spectrum q-values and the per-PSM `posterior_error` are unchanged. Output columns and
+  schemas are unchanged.
+- PTM localization also runs on decoy PSMs that pass `ptm_localization.psm_q_value`, so decoy
+  sites exist to count. Decoy PSMs stay out of the false-localization-rate competition and take
+  the target curve's localization q-value at their own score, so every PSM and localization gate
+  is applied identically to targets and decoys before site FDR is estimated (HC-FDR-04). Site
+  reports, the PTM library and `localized_psms` still contain target PSMs only.
+
+### Documentation
+- The PSM column list in DOCS.md now matches `results.sage.parquet`. `label` and `ms1_intensity`
+  are removed, the `delta_bext` and `pepide_len` typos are fixed, and `protein_groups`,
+  `num_protein_groups`, `protein_group_q` and the other missing columns are added. Every score
+  states whether higher or lower is better.
+- `poisson` and `posterior_error` are documented as log10 values, as Sage has always written
+  them. `ms2_intensity` is the matched fragment intensity, and `longest_y_pct` is a fraction.
+- New "Protein inference" section: IDPicker parsimony grouping (`protein_grouping`,
+  `protein_grouping_peptide_fdr`), picked-protein and picked protein-group FDR over unique
+  peptides, and the q-value estimator.
+- The LFQ `q_value` is described as a cumulative target-decoy count, not picked competition.
+- The `generate_decoys` default is documented as true, which the code has always used.
+- Sage does no protein rollup, intensity normalization or imputation; DOCS.md now says so.
+- New "Performance and complexity" section, with `RAYON_NUM_THREADS` for limiting cores.
+- `benchmarks/GROUNDING.md` maps each grounding rule to its tests and lists the gaps.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added

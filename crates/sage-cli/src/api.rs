@@ -99,7 +99,11 @@ impl SageRunner {
             memory::MemoryLimitBehavior::CancelJob(cancellation.clone())
         };
         let memory_guard = memory::spawn_memory_guard(self.input.memory_limits()?, behavior)?;
-        let result = (|| -> anyhow::Result<JobResult> {
+        let threads = self
+            .input
+            .threads
+            .filter(|&threads| threads != rayon::current_num_threads());
+        let job = || -> anyhow::Result<JobResult> {
             cancellation.check()?;
             let mut input = self.input;
             input.batch_size.get_or_insert(parallel);
@@ -109,7 +113,17 @@ impl SageRunner {
                 Runner::new_with_control(search, batch_size, events.clone(), cancellation.clone())?;
             let (telemetry, summary) = runner.run_with_summary(batch_size)?;
             Ok(JobResult { telemetry, summary })
-        })();
+        };
+        // The CLI sizes the global pool; library callers get a dedicated pool
+        // when the configured `threads` differs from the current one.
+        let result = match threads {
+            Some(threads) => rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .map_err(anyhow::Error::from)
+                .and_then(|pool| pool.install(job)),
+            None => job(),
+        };
         if let Some(message) = memory_guard.failure() {
             events.emit(EventKind::JobFailed {
                 message: message.clone(),
