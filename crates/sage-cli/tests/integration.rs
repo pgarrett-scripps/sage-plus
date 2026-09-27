@@ -182,6 +182,11 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    // One test spectrum is far below the PSMs needed for a recommendation.
+    assert!(summary["recommended_tolerances"]["skipped"]
+        .as_str()
+        .unwrap()
+        .contains("fewer than the 100 needed"));
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 19);

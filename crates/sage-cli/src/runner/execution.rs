@@ -361,6 +361,8 @@ impl Runner {
             "discovered {} target protein groups (supported by proteotypic peptides only) at 1% FDR",
             q_protein_group
         );
+        let recommended_tolerances = ToleranceRecommendation::from_features(&outputs.features);
+        log::info!("{}", recommended_tolerances.log_line());
         log::trace!("writing outputs");
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
@@ -524,6 +526,7 @@ impl Runner {
         }
         let summary = RunSummary {
             schema_version: 9,
+            recommended_tolerances,
             warnings: self.events.warnings(),
             provenance: RunProvenance {
                 software_version: self.parameters.version.clone(),

@@ -10,6 +10,11 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
+  robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering
+  `|bias| + 4 × sigma`, from rank-1 target PSMs at 1% spectrum q-value (at least 100). The log
+  prints one `recommended tolerances: ...` line. The field is optional and the run-summary
+  schema stays at version 9.
 - Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
   `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
   Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.

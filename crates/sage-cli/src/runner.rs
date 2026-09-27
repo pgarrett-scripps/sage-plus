@@ -15,6 +15,7 @@ use sage_core::mass::Tolerance;
 use sage_core::mass::PROTON;
 use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+    ToleranceEstimate, MIN_TOLERANCE_PSMS,
 };
 use sage_core::mass_recalibration::{
     confident_per_group, select_group_models, select_model, stable_hash, stratified_sample,
@@ -312,6 +313,88 @@ pub struct RunSummary {
     pub warnings: Vec<crate::events::RunWarning>,
     #[serde(default)]
     pub provenance: RunProvenance,
+    /// Precursor and fragment tolerances suggested by the confident PSMs.
+    #[serde(default)]
+    pub recommended_tolerances: ToleranceRecommendation,
+}
+
+/// Search tolerances suggested by the signed mass errors of rank-1 target
+/// PSMs at 1% spectrum q-value, pooled over all files. Errors are the raw,
+/// uncorrected ones, so the suggestion applies to a search without
+/// `mass_recalibration`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToleranceRecommendation {
+    /// Confident PSMs the estimates were computed from.
+    pub psms: usize,
+    /// Precursor estimate, from `precursor_ppm`.
+    pub precursor: Option<ToleranceEstimate>,
+    /// Fragment estimate, from each PSM's signed fragment error and its
+    /// ions' spread around it.
+    pub fragment: Option<ToleranceEstimate>,
+    /// Why no recommendation was made, such as too few PSMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+
+impl ToleranceRecommendation {
+    /// Estimate tolerances from rank-1 target PSMs at 1% spectrum q-value.
+    /// Spectrum q-values must already be assigned.
+    pub fn from_features(features: &[Feature]) -> Self {
+        let confident = features
+            .iter()
+            .filter(|feature| feature.rank == 1 && feature.label == 1 && feature.spectrum_q <= 0.01)
+            .collect::<Vec<_>>();
+        let psms = confident.len();
+        if psms < MIN_TOLERANCE_PSMS {
+            return Self {
+                psms,
+                skipped: Some(format!(
+                    "{psms} confident PSMs, fewer than the {MIN_TOLERANCE_PSMS} needed"
+                )),
+                ..Self::default()
+            };
+        }
+        let precursor = confident
+            .iter()
+            .map(|feature| feature.delta_mass)
+            .collect::<Vec<_>>();
+        let fragment = confident
+            .iter()
+            .map(|feature| feature.signed_fragment_ppm)
+            .collect::<Vec<_>>();
+        let fragment_sd = confident
+            .iter()
+            .map(|feature| feature.fragment_ppm_sd)
+            .collect::<Vec<_>>();
+        Self {
+            psms,
+            precursor: ToleranceEstimate::from_errors(&precursor),
+            fragment: ToleranceEstimate::from_fragment_errors(&fragment, &fragment_sd),
+            skipped: None,
+        }
+    }
+
+    /// One log line, for example
+    /// `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`.
+    pub fn log_line(&self) -> String {
+        if let Some(reason) = &self.skipped {
+            return format!("recommended tolerances: skipped ({reason})");
+        }
+        let describe = |estimate: &Option<ToleranceEstimate>| match estimate {
+            Some(ToleranceEstimate {
+                recommended_ppm: Some(ppm),
+                ..
+            }) => format!("±{ppm} ppm"),
+            Some(estimate) => format!("wider than ±100 ppm (needs ±{:.1})", estimate.required_ppm),
+            None => "not estimated".into(),
+        };
+        format!(
+            "recommended tolerances: precursor {}, fragment {} (from {} PSMs)",
+            describe(&self.precursor),
+            describe(&self.fragment),
+            self.psms
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
