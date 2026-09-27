@@ -579,17 +579,13 @@ impl<'db> Scorer<'db> {
                     );
                     let candidates = self.db.query(mass, tolerance, self.fragment_tol);
                     let shift = self.fragment_shift(offset);
-                    for peak in &fragment_index.peaks {
-                        for fragment in candidates.page_search(peak.neutral_mass) {
+                    candidates.page_search_batch(
+                        fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                        shift.as_slice(),
+                        |fragment| {
                             keep.insert(fragment.peptide_index.0 as usize);
-                        }
-                        if let Some(shift) = shift {
-                            for fragment in candidates.page_search_shifted(peak.neutral_mass, shift)
-                            {
-                                keep.insert(fragment.peptide_index.0 as usize);
-                            }
-                        }
-                    }
+                        },
+                    );
                 }
             }
         };
@@ -785,18 +781,13 @@ impl<'db> Scorer<'db> {
                 sc.matched += 1;
                 matched_peaks += 1;
             };
-            for peak in &fragment_index.peaks {
-                for frag in candidates.page_search(peak.neutral_mass) {
-                    count(frag);
-                }
-                // Fragments retaining the offset appear at the indexed base
-                // fragment mass plus the shift.
-                for &shift in shifts {
-                    for frag in candidates.page_search_shifted(peak.neutral_mass, shift) {
-                        count(frag);
-                    }
-                }
-            }
+            // Fragments retaining the offset appear at the indexed base
+            // fragment mass plus each shift.
+            candidates.page_search_batch(
+                fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                shifts,
+                &mut count,
+            );
 
             if matched_peaks == 0 {
                 return InitialHits::default();

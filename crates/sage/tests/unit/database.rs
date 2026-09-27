@@ -2303,3 +2303,145 @@ fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
         .iter()
         .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
 }
+
+/// Small deterministic generator so the randomized comparisons are repeatable.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n.max(1)
+    }
+}
+
+#[test]
+fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
+    let mut rng = Lcg(0x5eed);
+    for _ in 0..200 {
+        // Buckets of random length (including empty and single-fragment
+        // ones), each sorted by peptide index with duplicates.
+        let bucket_count = 1 + rng.below(40) as usize;
+        let mut buckets = Vec::with_capacity(bucket_count);
+        let mut fragments = Vec::new();
+        let max_id = 1 + rng.below(3000) as u32;
+        for bucket in 0..bucket_count {
+            let len = match rng.below(4) {
+                0 => rng.below(3),
+                1 => rng.below(64),
+                _ => rng.below(5000),
+            } as usize;
+            let mut ids = (0..len)
+                .map(|_| rng.below(u64::from(max_id)) as u32)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            let start = fragments.len() as u32;
+            fragments.extend(ids.into_iter().map(|peptide_index| PackedFragment {
+                peptide_index,
+                mass_suffix: rng.below(1 << FRAGMENT_MASS_SUFFIX_BITS) as u16,
+            }));
+            buckets.push(FragmentBucket {
+                mass_prefix: (bucket as u32 + 0x4000) << FRAGMENT_MASS_SUFFIX_BITS,
+                start,
+                end: fragments.len() as u32,
+            });
+        }
+        let index = FragmentIndex { buckets, fragments };
+
+        let mut out = Vec::new();
+        for _ in 0..20 {
+            let a = rng.below(u64::from(max_id) + 2) as u32;
+            let b = rng.below(u64::from(max_id) + 2) as u32;
+            let (lo, hi) = match rng.below(8) {
+                0 => (0, u32::MAX),
+                1 => (a, a),
+                _ => (a.min(b), a.max(b)),
+            };
+            // Random subset with repeats, in random order.
+            let queried = (0..rng.below(50))
+                .map(|_| rng.below(bucket_count as u64) as u32)
+                .collect::<Vec<_>>();
+            index.resolve_bucket_ranges(&queried, lo, hi, &mut out);
+            assert_eq!(out.len(), queried.len());
+            for (&bucket, &(first, last)) in queried.iter().zip(&out) {
+                let expected = index
+                    .bucket_search(bucket as usize, lo, hi)
+                    .collect::<Vec<_>>();
+                let actual = index
+                    .range_iter(bucket as usize, first, last)
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected, "bucket={bucket} lo={lo} hi={hi}");
+                let span = index.buckets[bucket as usize];
+                assert!(span.start <= first && first <= last && last <= span.end);
+            }
+        }
+    }
+}
+
+#[test]
+fn batched_page_search_matches_per_peak_page_search() {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut rng = Lcg(0xfeed);
+    let mut text = String::new();
+    for protein in 0..40 {
+        text.push_str(&format!(">P{protein}\n"));
+        for _ in 0..(50 + rng.below(250)) {
+            text.push(RESIDUES[rng.below(RESIDUES.len() as u64) as usize] as char);
+        }
+        text.push('\n');
+    }
+    let fasta = Fasta::parse(text, "rev_", true).unwrap();
+    let mut matched = 0;
+    for bucket_size in [1usize, 8, 64, 8192] {
+        let parameters = Builder {
+            bucket_size: Some(bucket_size),
+            ..Builder::default()
+        }
+        .make_parameters();
+        let database = parameters.clone().build(fasta.clone());
+        assert!(!database.peptides.is_empty());
+
+        for _ in 0..300 {
+            let peptide = &database.peptides[rng.below(database.peptides.len() as u64) as usize];
+            let width = [0.01, 0.5, 5.0, 200.0][rng.below(4) as usize];
+            let precursor_tol = Tolerance::Da(-width, width);
+            let fragment_tol = match rng.below(2) {
+                0 => Tolerance::Ppm(-20.0, 20.0),
+                _ => Tolerance::Da(-0.05, 0.05),
+            };
+            let query = database.query(peptide.monoisotopic, precursor_tol, fragment_tol);
+
+            // Theoretical fragments of the chosen peptide plus noise peaks,
+            // sorted by mass as the scorer supplies them.
+            let mut masses = preliminary_fragment_masses(&parameters, peptide)
+                .map(|mass| mass + (rng.below(200) as f32 - 100.0) * 1e-4)
+                .collect::<Vec<_>>();
+            masses.extend((0..rng.below(80)).map(|_| 100.0 + rng.below(300_000) as f32 * 0.01));
+            masses.sort_unstable_by(f32::total_cmp);
+            let shifts: &[f32] = match rng.below(3) {
+                0 => &[],
+                1 => &[15.994915],
+                _ => &[79.96633, -18.010565],
+            };
+
+            let mut expected = Vec::new();
+            for &mass in &masses {
+                expected.extend(query.page_search(mass));
+                for &shift in shifts {
+                    expected.extend(query.page_search_shifted(mass, shift));
+                }
+            }
+            let mut actual = Vec::new();
+            query.page_search_batch(masses.iter().copied(), shifts, |frag| actual.push(frag));
+            assert_eq!(actual, expected, "bucket_size={bucket_size}");
+            matched += actual.len();
+        }
+    }
+    assert!(matched > 10_000, "only {matched} matches compared");
+}

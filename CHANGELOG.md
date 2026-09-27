@@ -73,6 +73,19 @@ entries are retained below for provenance.
   peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
   modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
   as L.
+- Preliminary fragment matching resolves each spectrum's fragment-index buckets together: each
+  distinct bucket's precursor range is found once per candidate window, and 16 buckets' binary
+  searches run interleaved so their memory loads overlap. Adapted, with credit, from Matteo
+  Lacki's MIT-licensed Sage fork (MatteoLacki/sage 950641f and 062f7b3). Results are identical
+  (every PSM row and column matched the previous build on all three benchmarks). Median of 3
+  runs, 8 threads, previous build vs this one:
+  - HEK SILAC, closed search: search 0.71 s to 0.52 s (-27%), wall 6.43 s to 6.18 s (-4%).
+  - PXD028735 LFQ file (1.2 GB mzML), closed search: search 9.96 s to 8.07 s (-19%), wall
+    27.2 s to 25.0 s (-8%).
+  - HEK SILAC, open search (`prefilter-open`, -150 to +500 Da): prefilter 16.9 s to 15.8 s,
+    search 40.5 s to 38.9 s (-4%), wall 61.9 s to 60.5 s (-2%).
+  Peak memory is unchanged. The upstream fork's 2.27x came from a larger, memory-bound index;
+  wide searches here are dominated by scanning fragments, not by the bucket searches.
 
 ### Fixed
 - The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
