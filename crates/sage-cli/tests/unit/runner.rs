@@ -363,8 +363,8 @@ fn report_keeps_same_basename_files_separate() {
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 2);
     // PSM targets and average precursor charge are per input file.
-    assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
-    assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
+    assert_eq!((rows[0][1], rows[0][12]), ("2", "2"));
+    assert_eq!((rows[1][1], rows[1][12]), ("1", "3"));
 }
 
 #[test]
@@ -561,4 +561,44 @@ fn streamed_prefilter_matches_the_whole_digest_search() -> anyhow::Result<()> {
     }
     std::fs::remove_dir_all(root)?;
     Ok(())
+}
+
+#[test]
+fn report_shows_signed_fragment_bias() {
+    let (directory, _) = temporary_output("report-bias");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    // A uniform -4 ppm fragment shift: the absolute error is 4 ppm, the bias -4.
+    let feature = |delta_mass| Feature {
+        label: 1,
+        peptide_idx: PeptideIx(0),
+        delta_mass,
+        average_ppm: 4.0,
+        signed_fragment_ppm: -4.0,
+        ..Feature::default()
+    };
+    let features = vec![feature(-2.0), feature(-3.0), feature(-2.5)];
+    let path = runner
+        .write_report(&features, None, &["run.mzML".to_string()])
+        .unwrap();
+    let html = std::fs::read_to_string(path.to_file_path().unwrap()).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+
+    assert!(html.contains("Median MS2 Mass Bias (ppm)"));
+    assert!(html.contains("Median MS2 Absolute Error (ppm)"));
+    let body = html.split("<tbody>").nth(1).unwrap();
+    let cells = body
+        .split("<td>")
+        .skip(1)
+        .map(|cell| cell.split("</td>").next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!((cells[6], cells[7], cells[8]), ("-2.5", "-4", "4"));
 }
