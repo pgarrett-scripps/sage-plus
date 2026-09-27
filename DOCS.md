@@ -993,7 +993,7 @@ alongside the library, because the location table does not embed chemical masses
 ### Decoys
 
 - **decoy_tag**: String. The tag used to identify decoy entries in the FASTA database (default: "rev_").
-- **generate_decoys**: Boolean. If true, ignore decoys in the FASTA database matching `decoy_tag`, and generate internally reversed peptides (default: false).
+- **generate_decoys**: Boolean. If true, ignore decoys in the FASTA database matching `decoy_tag`, and generate internally reversed peptides (default: true).
 
 ### FASTA
 
@@ -1167,6 +1167,8 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **min_matched_peaks**: Integer. The minimum number of matched b+y ions to use for reporting PSMs (default: 4).
 - **max_fragment_charge**: Integer. The maximum fragment ion charge states to consider (default: null - use precursor z-1).
 - **report_psms**: Integer. The number of PSMs to report for each spectrum. Higher values might disrupt LDA (default: 1).
+- **protein_grouping**: Boolean. Group proteins by IDPicker parsimony before protein-group FDR (default: true). See [Protein inference](#protein-inference).
+- **protein_grouping_peptide_fdr**: Float from 0 to 1. Peptide q-value below which peptides seed the first grouping pass (default: 0.01).
 - **record_input_hashes**: Boolean. Record the SHA-256 of every local spectrum file in the output provenance (default: false). It reads each file once more, at about 0.36 GB/s per core. The FASTA and other database files are always hashed. See [Output provenance](#output-provenance).
 - **annotate_matches**: Boolean. Write `matched_fragments.sage.parquet` for PSMs passing `output_filter.psm_q_value` (default: false). Detailed annotations are reconstructed in a batched post-FDR MS2 pass rather than allocated for every candidate during scoring. When PTM localization is also enabled, both operations share the same spectrum reread. Chimera ranks replay preceding-rank peak removal before annotation.
 - **spectral_library**: Object. Build an empirical library from confident target PSMs. See [Empirical Spectral Libraries](#empirical-spectral-libraries).
@@ -1466,6 +1468,34 @@ scores; columns without one are descriptive. `results.sage.v1.parquet.schema` an
 - `reporter_ion_intensity`: TMT or iTRAQ reporter-ion intensities in channel order, when isobaric quantification is configured; otherwise null.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
+
+## Protein inference
+
+Sage reports peptide-level evidence with protein assignments. It does not report a protein
+table, and it does not roll PSM or LFQ intensities up to proteins.
+
+- **Grouping** (`protein_grouping`, default true): IDPicker parsimony (Zhang et al. 2007).
+  Proteins with identical peptide evidence are merged into one group, and a greedy set cover
+  keeps the fewest groups that explain every peptide. Proteins with a unique peptide are always
+  kept. The first pass uses target peptides with `peptide_q` below
+  `protein_grouping_peptide_fdr` (default 0.01); a second pass assigns the remaining peptides.
+  Groups are written to `protein_groups` and counted in `num_protein_groups`. With grouping off,
+  each peptide's proteins are written instead.
+- **`protein_q`**: picked-protein FDR (Savitski et al. 2015) over peptides unique to one protein.
+  Each protein and its decoy take their best `sage_discriminant_score`. Peptides shared between
+  proteins get `protein_q = 1`.
+- **`protein_group_q`**: picked protein-group FDR over peptides that map to exactly one group.
+  A decoy competes with the target group of the protein it was generated from. Peptides shared
+  between groups get `protein_group_q = 1`.
+- **Estimator**: peptide, protein and protein-group q-values use the same estimator. A posterior
+  error model (kernel density) is fitted to the winner of each target-decoy pair. Then both
+  entries of every pair are ranked by score. q at each rank is (1 + the running sum of posterior
+  error) / targets, made monotonic. When the model cannot be fitted, Sage logs a warning and uses
+  (decoys + 1) / targets instead.
+
+`sage.protein_inference` in the Parquet footer and `provenance.metadata.protein_inference` in
+`run-summary.json` record the strategy used (`idpicker_parsimony`, or `protein_lists` with
+grouping off) and the grouping peptide q-value.
 
 ## Label-free quantification output
 
