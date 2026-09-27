@@ -179,3 +179,8 @@ Sage Plus retains Sage's Git history, authorship, citation metadata, and MIT lic
 endorsed by or released on behalf of the upstream Sage maintainers. When publishing work that
 uses Sage Plus, cite the original Sage paper listed in [CITATION.cff](CITATION.cff) and report the
 exact Sage Plus commit or release used.
+
+Initiator methionine clipping, ambiguous-residue expansion, the digestion summary, the polymer
+contamination check, diagnostic-ion reporting, and tolerance recommendations were inspired by
+[sageRecon](https://github.com/usnistgov/sageRecon) from NIST. Sage Plus implements them
+independently; no sageRecon code is included.

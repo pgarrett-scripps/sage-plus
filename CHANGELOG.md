@@ -9,10 +9,6 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
-### Changed
-- The documentation no longer promises that upstream Sage configurations load unchanged.
-  The basic symbol-keyed modification form still works; new options use named definitions.
-
 ### Added
 - `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
   robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering
@@ -22,17 +18,6 @@ entries are retained below for provenance.
 - Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
   `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
   Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.
-
-### Fixed
-- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
-  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
-  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
-  renamed `Median MS1 Mass Bias (ppm)`.
-- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
-  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
-  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
-
-### Added
 - Initiator methionine clipping, on by default (`database.clip_n_term_met`, default true).
   Proteins starting with M followed by G, A, S, T, C, P, or V are also digested without the Met,
   as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
@@ -41,16 +26,6 @@ entries are retained below for provenance.
   prefilter, and the memory estimate include them. Non-specific digests and peptide TSV input
   are unchanged. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
   this adds 0.9% digests.
-
-### Changed
-- Results change with the new default: searches of FASTA proteins with a clippable Met gain the
-  clipped N-terminal peptides and their decoys. Set `clip_n_term_met` to false for the previous
-  search space.
-- When the same peptide comes from digests with different enzymatic state, the kept copy is now
-  the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
-  sort order.
-
-### Added
 - `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
   (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
   for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
@@ -59,19 +34,12 @@ entries are retained below for provenance.
   prefilter are identical.
 - `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
   expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
-
-### Changed
-- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
-  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
-  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
-  as L.
-
-### Added
 - Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
   row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
   and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
   and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
-  decoy peptides class by class. A one-line summary is logged. The run-summary schema stays at
+  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. A one-line
+  summary is logged. The run-summary schema stays at
   version 9.
 - Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
   1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
@@ -88,6 +56,32 @@ entries are retained below for provenance.
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
   `sage_core::digestion` classifies and summarizes peptide termini;
   `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
+- The README credits NIST [sageRecon](https://github.com/usnistgov/sageRecon), which inspired
+  initiator Met clipping, ambiguous-residue expansion, the QC outputs, and tolerance
+  recommendations. Sage Plus implements them independently.
+
+### Changed
+- The documentation no longer promises that upstream Sage configurations load unchanged.
+  The basic symbol-keyed modification form still works; new options use named definitions.
+- Results change with the new default: searches of FASTA proteins with a clippable Met gain the
+  clipped N-terminal peptides and their decoys. Set `clip_n_term_met` to false for the previous
+  search space.
+- When the same peptide comes from digests with different enzymatic state, the kept copy is now
+  the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
+  sort order.
+- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
+  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
+  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
+  as L.
+
+### Fixed
+- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
+  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
+  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
+  renamed `Median MS1 Mass Bias (ppm)`.
+- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
+  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
+  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
 
 ## [v0.1.0-beta.11] - 2026-09-26
 
