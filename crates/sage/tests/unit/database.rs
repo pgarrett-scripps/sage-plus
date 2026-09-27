@@ -331,6 +331,44 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
 }
 
 #[test]
+fn chunked_modification_matches_a_single_pass() {
+    let fasta = ">a\nMPEPTIDERSEQMENCEKAMPLIFIERKPEPTIDEKLLMSTK\n\
+                 >b\nPEDITPERGGMKWHATEVERKMMKSAMPLEPEPTIDERK\n\
+                 >c\nMSTYKQNNQMKPEPTIDERKSTSTSYMR\n";
+    let fasta = Fasta::parse(fasta.to_string(), "rev_", true).unwrap();
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"missed_cleavages": 2, "min_len": 3},
+        "variable_mods": {
+            "M": [15.9949],
+            "S": [79.966331],
+            "T": [79.966331],
+            "Y": [79.966331],
+            "^E": [-18.010565]
+        },
+        "static_mods": {"C": 57.021464},
+        "max_variable_mods": 2
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    let digests = parameters.digest_unmodified(&fasta);
+    assert!(digests.len() > 8, "too few digest groups to chunk");
+    let targets = digests
+        .iter()
+        .filter(|digest| !digest.reference.decoy)
+        .map(|digest| digest.reference.sequence.clone())
+        .collect::<HashSet<_>>();
+    let single = parameters.modify_digest_chunks(digests.clone(), &targets, usize::MAX);
+    for chunk_groups in [0, 1, 2, 7] {
+        let chunked = parameters.modify_digest_chunks(digests.clone(), &targets, chunk_groups);
+        // Same peptides in the same order, not just the same set.
+        assert!(
+            chunked == single,
+            "chunk size {chunk_groups} changed the output"
+        );
+    }
+}
+
+#[test]
 fn modification_variants_share_target_and_decoy_sequence_storage() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "variable_mods": {"M": [15.9949]}

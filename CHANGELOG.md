@@ -86,6 +86,14 @@ entries are retained below for provenance.
     search 40.5 s to 38.9 s (-4%), wall 61.9 s to 60.5 s (-2%).
   Peak memory is unchanged. The upstream fork's 2.27x came from a larger, memory-bound index;
   wide searches here are dominated by scanning fragments, not by the bucket searches.
+- Lower peak memory without the prefilter. Modified peptides are now expanded in chunks of 65,536
+  digest groups instead of one parallel collect over the whole digest. The single collect left
+  per-thread pieces as large as the whole peptide list, and the allocator kept their pages
+  through the fragment index build, where peak memory occurs. Peptides come out in the same
+  order and PSMs are byte-identical. Human reviewed FASTA, 8 threads, 3 runs: peak RSS 1.44-1.53
+  GB to 1.25 GB with standard mods, and 7.76-8.30 GB to 7.00 GB with broad PTMs (seven variable
+  mods, 18.4 million peptides); wall time unchanged. Adapted from theGreatHerrLebert/sage
+  (commit ccce5da, chunked peptide materialisation).
 
 ### Fixed
 - The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
