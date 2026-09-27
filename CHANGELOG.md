@@ -9,6 +9,10 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- The documentation no longer promises that upstream Sage configurations load unchanged.
+  The basic symbol-keyed modification form still works; new options use named definitions.
+
 ### Added
 - `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
   robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering

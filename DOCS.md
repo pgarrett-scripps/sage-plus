@@ -725,8 +725,9 @@ limited. Static and variable occupancy is reflected in generated variants.
 
 #### Symbol-keyed configurations
 
-Upstream Sage's symbol-keyed syntax still loads, so one configuration can drive both
-Sage and Sage Plus. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
+The basic symbol-keyed form still loads for simple searches. Sage Plus does not aim to
+accept upstream Sage configurations: the two have diverged, and new options are added only
+as named definitions. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
 followed by a residue). Static values are masses; variable values are mass arrays,
 for example `"static_mods": {"C": 57.021464}` and `"variable_mods": {"M": [15.9949]}`.
 
