@@ -1414,6 +1414,31 @@ Notes:
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
   ```
 
+## Performance and complexity
+
+Let S be the number of MS2 spectra, k the peaks kept per spectrum (`max_peaks`), N the peptides
+after modifications and decoys, F the fragments per peptide (about 2 × (length − 1) × fragment
+charges, less `min_ion_index` at each end), M the MS1 spectra, and T the worker threads.
+
+- **Index build**: digestion and modification expansion take time proportional to N, and N grows
+  combinatorially with `max_variable_mods`. The fragment index holds N × F entries of 6 bytes,
+  sorted by mass: O(N·F log(N·F)) time spread over T threads, and O(N·F) memory. This is usually
+  the peak memory of a search.
+- **Search**: each spectrum looks up its k peaks in the index, restricted to peptides inside
+  the precursor window. Time is O(S · k · (log(N·F) + c)), where c is the fragment hits per peak.
+  c grows with the precursor window, so wide-window and open searches cost more. Candidates that
+  pass `min_matched_peaks` are fully scored. Spectra are split over T threads, and memory for
+  spectra scales with the files loaded at once (`batch_size`).
+- **Prefilter**: the spectra are indexed once (O(S·k) memory, capped at a quarter of
+  `max_memory_gb`). Each streamed peptide checks its F fragments against that index, in
+  O(N · F · log(S·k)) time. Only the N′ surviving peptides enter the fragment index, so index
+  memory becomes O(N′·F).
+- **LFQ**: every MS1 spectrum is matched against the precursors inside its retention-time window.
+  Time is O(M × peaks per MS1 spectrum × precursors in window). Memory is one retention-time grid
+  per quantified precursor, across files.
+- **Files**: total time is roughly linear in the number of files. Files are loaded in batches of
+  `batch_size`.
+
 # Interpreting Sage Output
 
 The `results.sage.parquet` file contains the following columns:
