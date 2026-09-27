@@ -165,6 +165,7 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
             prev_aa: reference.prev_aa,
             next_aa: reference.next_aa,
             source: None,
+            met_clipped: false,
         }],
         reference,
     }
@@ -266,7 +267,7 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
         // As the streamed prefilter does: digests whose sequence and decoy
         // sequence are unique are expanded one protein at a time without a
         // target check; the rest are expanded per canonical key.
-        let enzyme: EnzymeParameters = parameters.enzyme.clone().into();
+        let enzyme = parameters.enzyme_parameters();
         let digests = (0..fasta.targets.len())
             .map(|index| fasta.digest_protein(index, &enzyme, None))
             .collect::<Vec<_>>();
@@ -328,6 +329,44 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
         );
     }
     assert!(shared_exercised, "no shared digests exercised");
+}
+
+#[test]
+fn chunked_modification_matches_a_single_pass() {
+    let fasta = ">a\nMPEPTIDERSEQMENCEKAMPLIFIERKPEPTIDEKLLMSTK\n\
+                 >b\nPEDITPERGGMKWHATEVERKMMKSAMPLEPEPTIDERK\n\
+                 >c\nMSTYKQNNQMKPEPTIDERKSTSTSYMR\n";
+    let fasta = Fasta::parse(fasta.to_string(), "rev_", true).unwrap();
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"missed_cleavages": 2, "min_len": 3},
+        "variable_mods": {
+            "M": [15.9949],
+            "S": [79.966331],
+            "T": [79.966331],
+            "Y": [79.966331],
+            "^E": [-18.010565]
+        },
+        "static_mods": {"C": 57.021464},
+        "max_variable_mods": 2
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters();
+    let digests = parameters.digest_unmodified(&fasta);
+    assert!(digests.len() > 8, "too few digest groups to chunk");
+    let targets = digests
+        .iter()
+        .filter(|digest| !digest.reference.decoy)
+        .map(|digest| digest.reference.sequence.clone())
+        .collect::<HashSet<_>>();
+    let single = parameters.modify_digest_chunks(digests.clone(), &targets, usize::MAX);
+    for chunk_groups in [0, 1, 2, 7] {
+        let chunked = parameters.modify_digest_chunks(digests.clone(), &targets, chunk_groups);
+        // Same peptides in the same order, not just the same set.
+        assert!(
+            chunked == single,
+            "chunk size {chunk_groups} changed the output"
+        );
+    }
 }
 
 #[test]
@@ -540,6 +579,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
             prev_aa: None,
             next_aa: None,
             source: None,
+            met_clipped: false,
         }],
     }]);
     let heavy = peptides
@@ -697,7 +737,11 @@ fn digestion() {
         ptm_library: None,
         decoy_tag: "rev_".into(),
         generate_decoys: false,
+        clip_n_term_met: false,
         fasta: "none".into(),
+        expand_ambiguous_residues: false,
+        max_ambiguous_variants: 20,
+        merge_isoleucine_leucine: false,
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
@@ -809,13 +853,15 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
         assert!(sequences.contains(&("PEPTIDEK", false)));
         assert!(sequences.contains(&("LLLLLK", false)));
         assert!(sequences.contains(&("MSSWWHHK", false)));
+        // J (Ile or Leu) has the I/L mass and is kept as written.
+        assert!(sequences.contains(&("TTJTTR", false)));
         assert!(sequences.iter().any(|(_, decoy)| *decoy));
         for peptide in &peptides {
             assert!(
                 peptide
                     .sequence
                     .iter()
-                    .all(|residue| crate::mass::VALID_AA.contains(residue)),
+                    .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J'),
                 "{peptide:?}"
             );
             assert!(peptide.monoisotopic > 0.0);
@@ -827,7 +873,7 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
     assert!(database.peptides.iter().all(|peptide| peptide
         .sequence
         .iter()
-        .all(|residue| crate::mass::VALID_AA.contains(residue))));
+        .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J')));
 }
 
 #[test]
@@ -2166,4 +2212,704 @@ fn same_peptidoform_compares_chemistry_decoy_state_and_sequence() {
     assert!(!same_peptidoform(oxidized, &decoy));
     // Reversing twice restores the same chemical peptidoform.
     assert!(same_peptidoform(oxidized, &oxidized.reverse().reverse()));
+}
+
+#[test]
+fn clipped_initiator_methionine_peptides_take_protein_n_terminal_mods() {
+    let fasta = Fasta::parse(">P1\nMASPEPTIDEAAKGGLLR\n".into(), "rev_", true).unwrap();
+    let parameters = |clip: Option<bool>| {
+        let mut config = serde_json::json!({
+            "enzyme": {"missed_cleavages": 0, "min_len": 5},
+            "peptide_min_mass": 100.0,
+            "variable_mods": {"[": [42.010565]},
+            "generate_decoys": true,
+        });
+        if let Some(clip) = clip {
+            config["clip_n_term_met"] = clip.into();
+        }
+        serde_json::from_value::<Builder>(config)
+            .unwrap()
+            .make_parameters()
+    };
+
+    let defaults = parameters(None);
+    assert!(defaults.clip_n_term_met);
+    let peptides = defaults.digest(&fasta);
+    let describe = |peptide: &Peptide| (peptide.decoy, peptide.to_string());
+    let names = peptides.iter().map(describe).collect::<HashSet<_>>();
+    for expected in [
+        (false, "MASPEPTIDEAAK"),
+        (false, "[+42.010567]-MASPEPTIDEAAK"),
+        (false, "ASPEPTIDEAAK"),
+        (false, "[+42.010567]-ASPEPTIDEAAK"),
+        // The generated decoy of a clipped peptide is N-terminal too.
+        (true, "AAAEDITPEPSK"),
+        (true, "[+42.010567]-AAAEDITPEPSK"),
+    ] {
+        assert!(
+            names.contains(&(expected.0, expected.1.to_string())),
+            "missing {expected:?} in {names:?}"
+        );
+    }
+    let clipped = peptides
+        .iter()
+        .find(|peptide| peptide.to_string() == "ASPEPTIDEAAK")
+        .unwrap();
+    assert_eq!(clipped.position, Position::Nterm);
+    assert!(!clipped.semi_enzymatic);
+    assert_eq!(clipped.protein_sites[0].start, Some(1));
+
+    let unclipped = parameters(Some(false)).digest(&fasta);
+    assert_eq!(unclipped.len() + 4, peptides.len());
+    assert!(unclipped
+        .iter()
+        .all(|peptide| !peptide.sequence.starts_with("ASPEPT")));
+}
+
+#[test]
+fn clipped_initiator_methionine_peptides_match_protein_n_terminal_motifs() {
+    let fasta = Fasta::parse(">P1\nMASPEPTIDEAAKGGLLR\n".into(), "rev_", true).unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5},
+        "peptide_min_mass": 100.0,
+        "variable_mods": {"Nterm-A": {"mass": 10.0, "sites": ["motif:<A*"]}},
+        "generate_decoys": false,
+    }))
+    .unwrap()
+    .make_parameters();
+    let names = parameters
+        .digest(&fasta)
+        .iter()
+        .map(|peptide| peptide.to_string())
+        .collect::<HashSet<_>>();
+    assert!(names.contains("A[Nterm-A]SPEPTIDEAAK"), "{names:?}");
+    // The anchor still needs the protein N-terminus: an internal A does not
+    // qualify.
+    assert!(names.iter().all(|name| !name.contains("A[Nterm-A]A")));
+}
+
+#[test]
+fn fasta_copy_of_a_peptide_keeps_its_position_over_a_tsv_copy() {
+    let fasta = Fasta::parse(">P1\nGGGKPEPTIDERGGGK\n".into(), "rev_", false).unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5},
+        "generate_decoys": false,
+    }))
+    .unwrap()
+    .make_parameters();
+    let mut peptides = parameters.digest(&fasta);
+    // The TSV copy is a whole-protein, fully enzymatic placeholder.
+    peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nPEPTIDER\tT1\n"));
+    Parameters::reorder_peptides(&mut peptides);
+    let merged = peptides
+        .iter()
+        .filter(|peptide| peptide.to_string() == "PEPTIDER")
+        .collect::<Vec<_>>();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].position, Position::Internal);
+    assert_eq!(merged[0].protein_sites[0].start, Some(4));
+    let proteins = merged[0]
+        .proteins
+        .iter()
+        .map(|protein| protein.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(proteins, ["P1", "T1"]);
+}
+
+#[test]
+fn generated_decoys_of_n_terminal_peptides_stay_balanced_and_n_terminal() {
+    // ASEQK is semi-enzymatic at the N-terminus of "a" (K-P is not cut) and
+    // the fully enzymatic clipped N-terminal peptide of "b".
+    let fasta = Fasta::parse(
+        ">a\nASEQKPLLRGGDDK\n>b\nMASEQKGLLRWWEEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 1, "min_len": 5, "semi_enzymatic": true, "restrict": "P"},
+        "peptide_min_mass": 100.0,
+        "generate_decoys": true,
+    }))
+    .unwrap()
+    .make_parameters();
+    let peptides = parameters.digest(&fasta);
+    let n_terminal = |decoy: bool| {
+        peptides
+            .iter()
+            .filter(|peptide| peptide.decoy == decoy && peptide.position == Position::Nterm)
+            .map(|peptide| (peptide.semi_enzymatic, peptide.missed_cleavages))
+            .collect::<Vec<_>>()
+    };
+    let (mut targets, mut decoys) = (n_terminal(false), n_terminal(true));
+    targets.sort_unstable();
+    decoys.sort_unstable();
+    assert!(!targets.is_empty());
+    assert_eq!(targets, decoys);
+    let find = |name: &str| {
+        peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+    };
+    for name in ["ASEQK", "AQESK"] {
+        let peptide = find(name);
+        assert_eq!(peptide.position, Position::Nterm, "{name}");
+        assert!(!peptide.semi_enzymatic, "{name}");
+        assert_eq!(peptide.protein_sites.len(), 2, "{name}");
+    }
+    assert!(find("AQESK").decoy);
+    // The unclipped N-terminal peptide of "b" and its decoy.
+    assert_eq!(find("MASEQK").position, Position::Nterm);
+    assert_eq!(find("MQESAK").position, Position::Nterm);
+    assert!(find("MQESAK").decoy);
+}
+
+fn ambiguous_parameters(expand: bool) -> Parameters {
+    Builder {
+        enzyme: Some(EnzymeBuilder {
+            missed_cleavages: Some(0),
+            min_len: Some(5),
+            max_len: Some(50),
+            ..Default::default()
+        }),
+        expand_ambiguous_residues: Some(expand),
+        ..Default::default()
+    }
+    .make_parameters()
+}
+
+#[test]
+fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
+    let fasta = || Fasta::parse(">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n".into(), "rev_", true).unwrap();
+
+    let off = ambiguous_parameters(false);
+    let on = ambiguous_parameters(true);
+    assert!(
+        on.estimate_memory(&fasta()).unmodified_peptides
+            > off.estimate_memory(&fasta()).unmodified_peptides
+    );
+
+    let database = off.build(fasta());
+    let peptide = database
+        .peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"GEPTIDEK")
+        .unwrap();
+    assert_eq!(peptide.proteins("rev_", true), "P2");
+    assert_eq!(peptide.database_peptide(), None);
+
+    let database = on.build(fasta());
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let target = find(b"GEPTIDEK");
+    assert_eq!(target.proteins("rev_", true), "P1;P2");
+    assert_eq!(target.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let variant = find(b"GEPWIDEK");
+    assert_eq!(variant.proteins("rev_", true), "P1");
+    assert_eq!(variant.database_peptide().as_deref(), Some("GEPXIDEK"));
+    let decoy = find(b"GEDITPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.database_peptide().as_deref(), Some("GEDIXPEK"));
+    assert!(database
+        .peptides
+        .iter()
+        .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
+}
+
+#[test]
+fn ambiguous_proteins_are_reported_as_expanded_or_dropped() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPJIDEK\n>P3\nMRBZK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    assert_eq!(fasta.ambiguous_protein_count(), 2);
+    let (level, message) = ambiguous_parameters(true)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Info);
+    assert!(message.starts_with("2 FASTA protein(s)"), "{message}");
+    assert!(
+        message.contains("expanded into up to 20 variant(s)"),
+        "{message}"
+    );
+    let (level, message) = ambiguous_parameters(false)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Warn);
+    assert!(
+        message.contains("not searched unless database.expand_ambiguous_residues"),
+        "{message}"
+    );
+    // J alone carries the I/L mass and needs neither.
+    let fasta = Fasta::parse(">P2\nMRGEPJIDEK\n".into(), "rev_", true).unwrap();
+    assert_eq!(
+        ambiguous_parameters(false).ambiguous_proteins_message(&fasta),
+        None
+    );
+}
+
+#[test]
+fn expanded_peptides_report_substitutions() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n>P3\nMRABEZAK\n>P4\nMRSAMPLEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let database = ambiguous_parameters(true).build(fasta);
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    // Written plainly in P2, so nothing was substituted.
+    assert_eq!(find(b"GEPTIDEK").substitutions(), "");
+    assert_eq!(find(b"GEPWIDEK").substitutions(), "X4W");
+    // The generated decoy of GEPWIDEK, at decoy positions.
+    let decoy = find(b"GEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"ADEQAK").substitutions(), "B2D;Z4Q");
+    assert_eq!(find(b"ANEEAK").substitutions(), "B2N;Z4E");
+    // No ambiguous residues.
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+}
+
+/// Merged copies from several proteins: the substitutions come from the first
+/// expanded occurrence in protein order, and any occurrence with the residues
+/// as written leaves them empty.
+#[test]
+fn substitutions_follow_the_first_expanded_occurrence() {
+    let parameters = |merge: bool| {
+        serde_json::from_value::<Builder>(serde_json::json!({
+            "enzyme": {"missed_cleavages": 0, "min_len": 5},
+            "generate_decoys": false,
+            "expand_ambiguous_residues": true,
+            "merge_isoleucine_leucine": merge,
+        }))
+        .unwrap()
+        .make_parameters()
+    };
+    let peptide = |fasta: &str, merge: bool| {
+        let fasta = Fasta::parse(fasta.into(), "rev_", false).unwrap();
+        parameters(merge)
+            .digest(&fasta)
+            .into_iter()
+            .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+            .expect("AEPTIDEK")
+    };
+
+    // Both proteins are expanded, at different residues: the first in
+    // protein order, A, gives them, whatever the FASTA order.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTXDEK\n",
+        ">B\nGGKAEPTXDEK\n>A\nGGKAEPXIDEK\n",
+    ] {
+        for merge in [false, true] {
+            let merged = peptide(fasta, merge);
+            assert_eq!(merged.proteins("rev_", false), "A;B");
+            assert_eq!(merged.substitutions(), "X4T");
+        }
+    }
+
+    // A real residue in any protein wins, before or after the expanded one.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTIDEK\n",
+        ">A\nGGKAEPTIDEK\n>B\nGGKAEPXIDEK\n",
+    ] {
+        let merged = peptide(fasta, true);
+        assert_eq!(merged.proteins("rev_", false), "A;B");
+        assert_eq!(merged.substitutions(), "");
+    }
+    // Also a merged I/L/J twin; unmerged, the twin is another peptide.
+    let fasta = ">A\nGGKAEPXIDEK\n>B\nGGKAEPTJDEK\n";
+    let merged = peptide(fasta, true);
+    assert_eq!(merged.proteins("rev_", false), "A;B");
+    assert_eq!(merged.substitutions(), "");
+    let unmerged = peptide(fasta, false);
+    assert_eq!(unmerged.proteins("rev_", false), "A");
+    assert_eq!(unmerged.substitutions(), "X4T");
+
+    // A peptide TSV row lists the sequence as written.
+    let fasta = Fasta::parse(">A\nGGKAEPXIDEK\n".into(), "rev_", false).unwrap();
+    let parameters = parameters(true);
+    let mut peptides = parameters.digest(&fasta);
+    peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nAEPTIDEK\tT1\n"));
+    parameters.reorder_merged_peptides(&mut peptides);
+    let merged = peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+        .unwrap();
+    assert_eq!(merged.proteins("rev_", false), "A;T1");
+    assert_eq!(merged.substitutions(), "");
+}
+
+/// Small deterministic generator so the randomized comparisons are repeatable.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n.max(1)
+    }
+}
+
+#[test]
+fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
+    let mut rng = Lcg(0x5eed);
+    for _ in 0..200 {
+        // Buckets of random length (including empty and single-fragment
+        // ones), each sorted by peptide index with duplicates.
+        let bucket_count = 1 + rng.below(40) as usize;
+        let mut buckets = Vec::with_capacity(bucket_count);
+        let mut fragments = Vec::new();
+        let max_id = 1 + rng.below(3000) as u32;
+        for bucket in 0..bucket_count {
+            let len = match rng.below(4) {
+                0 => rng.below(3),
+                1 => rng.below(64),
+                _ => rng.below(5000),
+            } as usize;
+            let mut ids = (0..len)
+                .map(|_| rng.below(u64::from(max_id)) as u32)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            let start = fragments.len() as u32;
+            fragments.extend(ids.into_iter().map(|peptide_index| PackedFragment {
+                peptide_index,
+                mass_suffix: rng.below(1 << FRAGMENT_MASS_SUFFIX_BITS) as u16,
+            }));
+            buckets.push(FragmentBucket {
+                mass_prefix: (bucket as u32 + 0x4000) << FRAGMENT_MASS_SUFFIX_BITS,
+                start,
+                end: fragments.len() as u32,
+            });
+        }
+        let index = FragmentIndex { buckets, fragments };
+
+        let mut out = Vec::new();
+        for _ in 0..20 {
+            let a = rng.below(u64::from(max_id) + 2) as u32;
+            let b = rng.below(u64::from(max_id) + 2) as u32;
+            let (lo, hi) = match rng.below(8) {
+                0 => (0, u32::MAX),
+                1 => (a, a),
+                _ => (a.min(b), a.max(b)),
+            };
+            // Random subset with repeats, in random order.
+            let queried = (0..rng.below(50))
+                .map(|_| rng.below(bucket_count as u64) as u32)
+                .collect::<Vec<_>>();
+            index.resolve_bucket_ranges(&queried, lo, hi, &mut out);
+            assert_eq!(out.len(), queried.len());
+            for (&bucket, &(first, last)) in queried.iter().zip(&out) {
+                let expected = index
+                    .bucket_search(bucket as usize, lo, hi)
+                    .collect::<Vec<_>>();
+                let actual = index
+                    .range_iter(bucket as usize, first, last)
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected, "bucket={bucket} lo={lo} hi={hi}");
+                let span = index.buckets[bucket as usize];
+                assert!(span.start <= first && first <= last && last <= span.end);
+            }
+        }
+    }
+}
+
+#[test]
+fn batched_page_search_matches_per_peak_page_search() {
+    const RESIDUES: &[u8] = b"ACDEFGHIKLMNPQRSTVWY";
+    let mut rng = Lcg(0xfeed);
+    let mut text = String::new();
+    for protein in 0..40 {
+        text.push_str(&format!(">P{protein}\n"));
+        for _ in 0..(50 + rng.below(250)) {
+            text.push(RESIDUES[rng.below(RESIDUES.len() as u64) as usize] as char);
+        }
+        text.push('\n');
+    }
+    let fasta = Fasta::parse(text, "rev_", true).unwrap();
+    let mut matched = 0;
+    for bucket_size in [1usize, 8, 64, 8192] {
+        let parameters = Builder {
+            bucket_size: Some(bucket_size),
+            ..Builder::default()
+        }
+        .make_parameters();
+        let database = parameters.clone().build(fasta.clone());
+        assert!(!database.peptides.is_empty());
+
+        for _ in 0..300 {
+            let peptide = &database.peptides[rng.below(database.peptides.len() as u64) as usize];
+            let width = [0.01, 0.5, 5.0, 200.0][rng.below(4) as usize];
+            let precursor_tol = Tolerance::Da(-width, width);
+            let fragment_tol = match rng.below(2) {
+                0 => Tolerance::Ppm(-20.0, 20.0),
+                _ => Tolerance::Da(-0.05, 0.05),
+            };
+            let query = database.query(peptide.monoisotopic, precursor_tol, fragment_tol);
+
+            // Theoretical fragments of the chosen peptide plus noise peaks,
+            // sorted by mass as the scorer supplies them.
+            let mut masses = preliminary_fragment_masses(&parameters, peptide)
+                .map(|mass| mass + (rng.below(200) as f32 - 100.0) * 1e-4)
+                .collect::<Vec<_>>();
+            masses.extend((0..rng.below(80)).map(|_| 100.0 + rng.below(300_000) as f32 * 0.01));
+            masses.sort_unstable_by(f32::total_cmp);
+            let shifts: &[f32] = match rng.below(3) {
+                0 => &[],
+                1 => &[15.994915],
+                _ => &[79.96633, -18.010565],
+            };
+
+            let mut expected = Vec::new();
+            for &mass in &masses {
+                expected.extend(query.page_search(mass));
+                for &shift in shifts {
+                    expected.extend(query.page_search_shifted(mass, shift));
+                }
+            }
+            let mut actual = Vec::new();
+            query.page_search_batch(masses.iter().copied(), shifts, |frag| actual.push(frag));
+            assert_eq!(actual, expected, "bucket_size={bucket_size}");
+            matched += actual.len();
+        }
+    }
+    assert!(matched > 10_000, "only {matched} matches compared");
+}
+
+fn isoleucine_leucine_parameters(merge: bool, extra: serde_json::Value) -> Parameters {
+    let mut config = serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5, "semi_enzymatic": false},
+        "peptide_min_mass": 100.0,
+        "generate_decoys": true,
+        "merge_isoleucine_leucine": merge,
+    });
+    for (key, value) in extra.as_object().unwrap() {
+        config[key] = value.clone();
+    }
+    serde_json::from_value::<Builder>(config)
+        .unwrap()
+        .make_parameters()
+}
+
+/// Unmodified peptides equal to APEPLDEK once I, L and J are one residue.
+fn isoleucine_leucine_twins(peptides: &[Peptide], decoy: bool) -> Vec<&Peptide> {
+    let canonical: &[u8] = if decoy { b"AEDLPEPK" } else { b"APEPLDEK" };
+    peptides
+        .iter()
+        .filter(|peptide| {
+            peptide.decoy == decoy
+                && peptide.modifications.is_empty()
+                && crate::ambiguous_residues::isoleucine_leucine_eq(&peptide.sequence, canonical)
+        })
+        .collect()
+}
+
+#[test]
+fn isoleucine_leucine_twins_merge_into_one_peptide() {
+    // APEPIDEK in "a" follows a G: with semi-enzymatic digestion it is
+    // semi-enzymatic there, and fully enzymatic as APEPLDEK in "b".
+    let fasta = Fasta::parse(
+        ">c\nSSRAPEPJDEKWWK\n>b\nLLRAPEPLDEKGGWR\n>a\nGGGAPEPIDEKR\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let semi = serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5, "semi_enzymatic": true}
+    });
+    let peptides = isoleucine_leucine_parameters(true, semi.clone()).digest(&fasta);
+    let targets = isoleucine_leucine_twins(&peptides, false);
+    let decoys = isoleucine_leucine_twins(&peptides, true);
+    assert_eq!((targets.len(), decoys.len()), (1, 1), "{targets:?}");
+    // The displayed sequence comes from the first protein, "a"; the rest
+    // is the most enzymatic occurrence, in "b".
+    let target = targets[0];
+    assert_eq!(target.to_string(), "APEPIDEK");
+    assert!(!target.semi_enzymatic);
+    assert_eq!(
+        target.proteins.as_slice(),
+        &["a".into(), "b".into(), "c".into()]
+    );
+    assert_eq!(target.protein_sites.len(), 3);
+    assert_eq!(decoys[0].to_string(), "AEDIPEPK");
+    assert_eq!(decoys[0].proteins, target.proteins);
+    // The decoy is the target's pair in the built database.
+    let fasta_again = Fasta::parse(
+        ">c\nSSRAPEPJDEKWWK\n>b\nLLRAPEPLDEKGGWR\n>a\nGGGAPEPIDEKR\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let database = isoleucine_leucine_parameters(true, semi.clone()).build(fasta_again);
+    let index = database
+        .peptides
+        .iter()
+        .position(|peptide| peptide.to_string() == "APEPIDEK" && !peptide.decoy)
+        .unwrap();
+    let pair = database
+        .paired_peptide_index(PeptideIx(index as u32))
+        .expect("paired decoy");
+    assert_eq!(database.peptides[pair.0 as usize].to_string(), "AEDIPEPK");
+
+    // Without merging, each twin is its own target with its own decoy.
+    let peptides = isoleucine_leucine_parameters(false, semi).digest(&fasta);
+    assert_eq!(isoleucine_leucine_twins(&peptides, false).len(), 3);
+    assert_eq!(isoleucine_leucine_twins(&peptides, true).len(), 3);
+}
+
+#[test]
+fn twins_from_one_protein_list_it_once() {
+    let fasta = Fasta::parse(">a\nGGRAPEPIDEKAPEPLDEKR\n".into(), "rev_", true).unwrap();
+    let peptides = isoleucine_leucine_parameters(true, serde_json::json!({})).digest(&fasta);
+    let targets = isoleucine_leucine_twins(&peptides, false);
+    assert_eq!(targets.len(), 1, "{targets:?}");
+    assert_eq!(targets[0].proteins.as_slice(), &["a".into()]);
+    assert_eq!(targets[0].protein_sites.len(), 2);
+}
+
+#[test]
+fn modifications_on_isoleucine_or_leucine_keep_twins_apart() {
+    let fasta = Fasta::parse(
+        ">a\nGGRAPEPIDEKR\n>b\nLLRAPEPLDEKGGWR\n>c\nSSRAPEPJDEKWWK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let names = |peptides: &[Peptide]| {
+        let mut names = peptides
+            .iter()
+            .filter(|peptide| {
+                !peptide.decoy
+                    && peptide.sequence.len() == 8
+                    && crate::ambiguous_residues::isoleucine_leucine_eq(
+                        &peptide.sequence,
+                        b"APEPLDEK",
+                    )
+            })
+            .map(|peptide| (peptide.to_string(), peptide.proteins.len()))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+
+    // A static modification on I: the I twin is heavier, L and J merge.
+    let peptides =
+        isoleucine_leucine_parameters(true, serde_json::json!({"static_mods": {"I": 10.0}}))
+            .digest(&fasta);
+    assert_eq!(
+        names(&peptides),
+        [
+            ("APEPI[+10]DEK".to_string(), 1),
+            ("APEPLDEK".to_string(), 2)
+        ]
+    );
+
+    // A variable modification on L: the modified L twin stays apart, the
+    // unmodified forms merge; J never carries it.
+    let peptides =
+        isoleucine_leucine_parameters(true, serde_json::json!({"variable_mods": {"L": [15.9949]}}))
+            .digest(&fasta);
+    assert_eq!(
+        names(&peptides),
+        [
+            ("APEPIDEK".to_string(), 3),
+            ("APEPL[+15.9949]DEK".to_string(), 1)
+        ]
+    );
+}
+
+#[test]
+fn generated_decoys_that_are_twins_of_a_target_are_dropped() {
+    // The decoy of DLGEENFK is DFNEEGLK, a twin of the target DFNEEGIK.
+    let fasta = Fasta::parse(">c\nDLGEENFKR\n>d\nMSSRDFNEEGIKR\n".into(), "rev_", true).unwrap();
+    for merge in [false, true] {
+        let peptides = isoleucine_leucine_parameters(merge, serde_json::json!({})).digest(&fasta);
+        let decoy = peptides
+            .iter()
+            .any(|peptide| peptide.decoy && peptide.to_string() == "DFNEEGLK");
+        assert_eq!(decoy, !merge);
+    }
+}
+
+/// Peptide TSV rows with B, X or Z are expanded like FASTA digests when
+/// expansion is on, report their substitutions, and are otherwise skipped.
+#[test]
+fn ambiguous_peptide_tsv_rows_expand_with_substitutions() {
+    let tsv = "sequence\tprotein\nPEPXIDEK\tT1\nPEBTIDZK\tT2\nSAMPLEK\tT3\n";
+    let peptides = ambiguous_parameters(true).peptides_from_tsv(tsv);
+    let find = |sequence: &[u8]| {
+        peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let targets = |protein: &str| {
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == protein)
+            .count()
+    };
+    // 20 variants, with the I and L twins merged.
+    assert_eq!(targets("T1"), 19);
+    assert_eq!(targets("T2"), 4);
+    let expanded = find(b"PEPWIDEK");
+    assert_eq!(expanded.substitutions(), "X4W");
+    assert_eq!(expanded.proteins("rev_", false), "T1");
+    // No coordinates are invented: the row is still unplaced, like a plain one.
+    let enzyme = ambiguous_parameters(true)
+        .enzyme_parameters()
+        .enzyme
+        .unwrap();
+    assert_eq!(
+        crate::digestion::classify_peptide(&enzyme, expanded, false),
+        crate::digestion::classify_peptide(&enzyme, find(b"SAMPLEK"), false),
+    );
+    // The generated decoy of PEPWIDEK, at decoy positions.
+    let decoy = find(b"PEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"PENTIDQK").substitutions(), "B3N;Z7Q");
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+
+    // Expansion off: skipped with a warning, as before.
+    let peptides = ambiguous_parameters(false).peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) == "T3"));
+    assert!(!peptides.is_empty());
+
+    // Over the variant cap: the X row is dropped, the B/Z row (4) kept.
+    let mut capped = ambiguous_parameters(true);
+    capped.max_ambiguous_variants = 4;
+    let peptides = capped.peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) != "T1"));
+    assert_eq!(
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == "T2")
+            .count(),
+        4
+    );
 }

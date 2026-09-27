@@ -1,5 +1,5 @@
 use super::*;
-use sage_core::database::{sequence_hashes, DigestExpander};
+use sage_core::database::{canonical_sequence_hashes, DigestExpander};
 use sage_core::enzyme::{
     group_protein_digests, Digest, DigestGroup, EnzymeParameters, ProteinOccurrence,
 };
@@ -28,12 +28,13 @@ impl Runner {
     ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
         let started = Instant::now();
-        let enzyme: EnzymeParameters = db_params.enzyme.clone().into();
+        let enzyme = db_params.enzyme_parameters();
         let shared = SharedSequences::scan(
             &fasta,
             &enzyme,
             custom_cleavages.as_ref(),
             db_params.generate_decoys,
+            db_params.merge_isoleucine_leucine,
         );
         let scanned = started.elapsed();
 
@@ -262,6 +263,8 @@ impl PrefilterBudgets {
 /// A digest's key is the smaller hash of its sequence and, with generated
 /// decoys, of its decoy sequence (`reversed_internal` is an involution). A
 /// sequence, its decoy, and any target equal to that decoy share a key.
+/// With `merge_isoleucine_leucine`, I, L and J hash as one residue, so
+/// equality here is up to I/L/J.
 ///
 /// A digest whose key is unique yields peptides that no other digest shares:
 /// no other protein merges into them, no decoy collides with them, and their
@@ -273,6 +276,9 @@ impl PrefilterBudgets {
 struct SharedSequences {
     keys: Vec<u64>,
     generate_decoys: bool,
+    /// Hash I, L and J as one residue, so I/L/J twins, which merge into
+    /// one peptide, share a key.
+    merge_isoleucine_leucine: bool,
 }
 
 impl SharedSequences {
@@ -281,6 +287,7 @@ impl SharedSequences {
         enzyme: &EnzymeParameters,
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
         generate_decoys: bool,
+        merge_isoleucine_leucine: bool,
     ) -> Self {
         let mut keys = (0..fasta.targets.len())
             .into_par_iter()
@@ -289,7 +296,10 @@ impl SharedSequences {
                     .digest_protein(index, enzyme, custom_cleavages)
                     .into_iter()
                     .map(|digest| {
-                        let (forward, reversed) = sequence_hashes(digest.sequence.as_bytes());
+                        let (forward, reversed) = canonical_sequence_hashes(
+                            digest.sequence.as_bytes(),
+                            merge_isoleucine_leucine,
+                        );
                         match generate_decoys {
                             // A palindrome's decoy collides with itself.
                             true if forward == reversed => PALINDROME,
@@ -310,12 +320,14 @@ impl SharedSequences {
         Self {
             keys: shared,
             generate_decoys,
+            merge_isoleucine_leucine,
         }
     }
 
     /// Canonical key of `digest`, when it is shared.
     fn shared_key(&self, digest: &Digest) -> Option<u64> {
-        let (forward, reversed) = sequence_hashes(digest.sequence.as_bytes());
+        let (forward, reversed) =
+            canonical_sequence_hashes(digest.sequence.as_bytes(), self.merge_isoleucine_leucine);
         let key = match self.generate_decoys {
             true if forward == reversed => return Some(PALINDROME),
             true => forward.min(reversed),
@@ -426,7 +438,11 @@ impl ProteinStream<'_> {
                             .groups
                             .iter()
                             .filter(|group| !group.reference.decoy)
-                            .map(|group| group.reference.sequence.clone())
+                            .map(|group| {
+                                expander
+                                    .parameters()
+                                    .decoy_collision_key(&group.reference.sequence)
+                            })
                             .collect::<HashSet<_>>();
                         let groups = match last {
                             true => std::mem::take(&mut unit.groups),
@@ -571,5 +587,39 @@ mod test {
             PrefilterBudgets::from_max_memory(Some(0.0)).index_bytes,
             8 * GIB
         );
+    }
+    #[test]
+    fn isoleucine_leucine_twins_share_a_prefilter_key() {
+        // APEPIDEK and APEPJDEK are twins; DFNEEGIK is a twin of the decoy
+        // of DLGEENFK. Each digest is unique as written.
+        let fasta = Fasta::parse(
+            ">a\nGGRAPEPIDEKR\n>b\nWWKAPEPJDEKR\n>c\nDLGEENFKR\n>d\nMSSRDFNEEGIKR\n".into(),
+            "rev_",
+            true,
+        )
+        .unwrap();
+        let enzyme = sage_core::database::Builder::default()
+            .make_parameters()
+            .enzyme_parameters();
+        for merge in [false, true] {
+            let shared = SharedSequences::scan(&fasta, &enzyme, None, true, merge);
+            let key = |protein: usize, sequence: &str| {
+                let digest = fasta
+                    .digest_protein(protein, &enzyme, None)
+                    .into_iter()
+                    .find(|digest| digest.sequence.as_str() == sequence)
+                    .unwrap();
+                shared.shared_key(&digest)
+            };
+            let (i, j) = (key(0, "APEPIDEK"), key(1, "APEPJDEK"));
+            let (target, collision) = (key(2, "DLGEENFK"), key(3, "DFNEEGIK"));
+            match merge {
+                true => {
+                    assert!(i.is_some() && i == j);
+                    assert!(target.is_some() && target == collision);
+                }
+                false => assert_eq!([i, j, target, collision], [None; 4]),
+            }
+        }
     }
 }

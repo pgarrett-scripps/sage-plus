@@ -15,6 +15,7 @@ use sage_core::mass::Tolerance;
 use sage_core::mass::PROTON;
 use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+    ToleranceEstimate, MIN_TOLERANCE_PSMS,
 };
 use sage_core::mass_recalibration::{
     confident_per_group, select_group_models, select_model, stable_hash, stratified_sample,
@@ -268,6 +269,10 @@ pub struct Runner {
     retained_spectra: std::sync::Mutex<RetainedSpectra>,
     /// Search-time mass corrections selected for each searched file.
     mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
+    /// Quality-control scans of each file's raw spectra, by file id.
+    file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
+    /// Custom cleavage sites of the searched FASTA, for the digestion summary.
+    custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -307,11 +312,97 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
+    /// Quality-control summaries (digestion, and the optional MS1 and MS2
+    /// checks when enabled).
+    #[serde(default)]
+    pub qc: qc::QcRunStats,
     pub output_paths: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<crate::events::RunWarning>,
     #[serde(default)]
     pub provenance: RunProvenance,
+    /// Precursor and fragment tolerances suggested by the confident PSMs.
+    #[serde(default)]
+    pub recommended_tolerances: ToleranceRecommendation,
+}
+
+/// Search tolerances suggested by the signed mass errors of rank-1 target
+/// PSMs at 1% spectrum q-value, pooled over all files. Errors are the raw,
+/// uncorrected ones, so the suggestion applies to a search without
+/// `mass_recalibration`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToleranceRecommendation {
+    /// Confident PSMs the estimates were computed from.
+    pub psms: usize,
+    /// Precursor estimate, from `precursor_ppm`.
+    pub precursor: Option<ToleranceEstimate>,
+    /// Fragment estimate, from each PSM's signed fragment error and its
+    /// ions' spread around it.
+    pub fragment: Option<ToleranceEstimate>,
+    /// Why no recommendation was made, such as too few PSMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+
+impl ToleranceRecommendation {
+    /// Estimate tolerances from rank-1 target PSMs at 1% spectrum q-value.
+    /// Spectrum q-values must already be assigned.
+    pub fn from_features(features: &[Feature]) -> Self {
+        let confident = features
+            .iter()
+            .filter(|feature| feature.rank == 1 && feature.label == 1 && feature.spectrum_q <= 0.01)
+            .collect::<Vec<_>>();
+        let psms = confident.len();
+        if psms < MIN_TOLERANCE_PSMS {
+            return Self {
+                psms,
+                skipped: Some(format!(
+                    "{psms} confident PSMs, fewer than the {MIN_TOLERANCE_PSMS} needed"
+                )),
+                ..Self::default()
+            };
+        }
+        let precursor = confident
+            .iter()
+            .map(|feature| feature.delta_mass)
+            .collect::<Vec<_>>();
+        let fragment = confident
+            .iter()
+            .map(|feature| feature.signed_fragment_ppm)
+            .collect::<Vec<_>>();
+        let fragment_sd = confident
+            .iter()
+            .map(|feature| feature.fragment_ppm_sd)
+            .collect::<Vec<_>>();
+        Self {
+            psms,
+            precursor: ToleranceEstimate::from_errors(&precursor),
+            fragment: ToleranceEstimate::from_fragment_errors(&fragment, &fragment_sd),
+            skipped: None,
+        }
+    }
+
+    /// One log line, for example
+    /// `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`.
+    pub fn log_line(&self) -> String {
+        if let Some(reason) = &self.skipped {
+            return format!("recommended tolerances: skipped ({reason})");
+        }
+        let describe = |estimate: &Option<ToleranceEstimate>| match estimate {
+            Some(ToleranceEstimate {
+                recommended_ppm: Some(ppm),
+                ..
+            }) => format!("±{ppm} ppm"),
+            Some(estimate) => format!("wider than ±100 ppm (needs ±{:.1})", estimate.required_ppm),
+            None => "not estimated".into(),
+        };
+        format!(
+            "recommended tolerances: precursor {}, fragment {} (from {} PSMs)",
+            describe(&self.precursor),
+            describe(&self.fragment),
+            self.psms
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -614,6 +705,18 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
 }
 
 /// Load `database.ptm_library`, if configured, into the database parameters.
+/// Does a PTM library record's residue match the FASTA residue at its
+/// position? With ambiguous-residue expansion on, a B, Z or X in the FASTA
+/// also matches any residue it expands to, since the record is applied to
+/// that expanded peptide.
+fn library_residue_matches(fasta: Option<u8>, record: u8, expand_ambiguous: bool) -> bool {
+    fasta.is_some_and(|written| {
+        written == record
+            || (expand_ambiguous
+                && sage_core::ambiguous_residues::is_expansion_of(&[written], &[record]))
+    })
+}
+
 fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> {
     if let Some(settings) = database_parameters.ptm_library.clone() {
         let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
@@ -637,7 +740,7 @@ fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> 
 
 fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
     let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
-    sage_cloudpath::util::read_fasta(
+    let fasta = sage_cloudpath::util::read_fasta(
         &fasta_url,
         &database_parameters.decoy_tag,
         database_parameters.generate_decoys,
@@ -647,7 +750,9 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             "Failed to build database from `{}`",
             database_parameters.fasta
         )
-    })
+    })?;
+    database_parameters.log_ambiguous_proteins(&fasta);
+    Ok(fasta)
 }
 
 fn load_custom_cleavages(
@@ -731,12 +836,15 @@ impl Runner {
         events.emit(EventKind::DatabaseStarted);
         let limits = MemoryLimits::from_gib(parameters.max_memory_gb)?;
         let mut retained_spectra = RetainedSpectra::default();
+        let file_qc = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
+        let mut custom_cleavage_sites = None;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
             let fasta = load_fasta(&database_parameters)?;
             let custom_cleavages = load_custom_cleavages(&database_parameters, &fasta)?;
+            custom_cleavage_sites = custom_cleavages.clone();
 
             if let (Some(settings), Some(library)) = (
                 database_parameters.ptm_library.as_ref(),
@@ -756,7 +864,11 @@ impl Runner {
                             site.position + 1
                         )),
                         Some(sequence)
-                            if sequence.get(site.position as usize) != Some(&site.residue) =>
+                            if !library_residue_matches(
+                                sequence.get(site.position as usize).copied(),
+                                site.residue,
+                                database_parameters.expand_ambiguous_residues,
+                            ) =>
                         {
                             invalid.push(format!(
                                 "{}:{} expects residue {}",
@@ -781,6 +893,7 @@ impl Runner {
                 }
             }
 
+            database_parameters.log_ambiguous_expansion(&fasta, custom_cleavages.as_ref());
             match database_parameters.prefilter {
                 false => {
                     let digests = database_parameters
@@ -797,6 +910,8 @@ impl Runner {
                         cancellation: cancellation.clone(),
                         retained_spectra: Default::default(),
                         mass_recalibration: Default::default(),
+                        file_qc: file_qc.clone(),
+                        custom_cleavages: None,
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -822,7 +937,7 @@ impl Runner {
 
         // Merge, deduplicate, and build the index.
         if !reordered {
-            Parameters::reorder_peptides(&mut all_peptides);
+            database_parameters.reorder_merged_peptides(&mut all_peptides);
         }
         // Prefilter spectra are kept to skip rereading them, unless the
         // fragment index looks unlikely to fit beside them. The search
@@ -897,6 +1012,8 @@ impl Runner {
             cancellation,
             retained_spectra: std::sync::Mutex::new(retained_spectra),
             mass_recalibration: Default::default(),
+            file_qc,
+            custom_cleavages: custom_cleavage_sites,
         })
     }
 }
@@ -905,6 +1022,7 @@ pub mod estimate;
 mod execution;
 mod postprocess;
 pub(crate) mod prefilter;
+pub mod qc;
 mod search;
 
 #[cfg(test)]

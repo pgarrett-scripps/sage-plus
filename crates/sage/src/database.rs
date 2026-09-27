@@ -1,3 +1,4 @@
+use crate::ambiguous_residues;
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{
     group_protein_digests, Digest, DigestGroup, Enzyme, EnzymeParameters, Position,
@@ -16,7 +17,7 @@ use crate::peptide::{
 };
 use crate::ptm_library::PtmLibrary;
 use crate::scoring::Feature;
-use crate::sequence::PeptideSequence;
+use crate::sequence::{PeptideSequence, ProteinSequence};
 use dashmap::DashSet;
 use fnv::FnvBuildHasher;
 use rayon::prelude::*;
@@ -61,6 +62,7 @@ impl Default for EnzymeBuilder {
 impl From<EnzymeBuilder> for EnzymeParameters {
     fn from(en: EnzymeBuilder) -> EnzymeParameters {
         EnzymeParameters {
+            clip_n_term_met: false,
             missed_cleavages: en.missed_cleavages.unwrap_or(1),
             min_len: en.min_len.unwrap_or(5),
             max_len: en.max_len.unwrap_or(50),
@@ -70,6 +72,7 @@ impl From<EnzymeBuilder> for EnzymeParameters {
                 en.c_terminal.unwrap_or(true),
                 en.semi_enzymatic.unwrap_or(false),
             ),
+            ambiguous_variants: None,
         }
     }
 }
@@ -116,8 +119,26 @@ pub struct Builder {
     pub decoy_tag: Option<String>,
 
     pub generate_decoys: Option<bool>,
+    /// Also search each protein with its initiator methionine removed when
+    /// the second residue is G, A, S, T, C, P, or V (MetAP clipping). The
+    /// clipped peptides are protein N-terminal. Enzymatic digests only.
+    /// Default: true.
+    pub clip_n_term_met: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
+    /// Expand ambiguous FASTA residues into every residue they may stand
+    /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues
+    /// (default false: peptides containing B, X or Z are not searched).
+    /// J (Ile or Leu) is always searched with the I/L mass.
+    pub expand_ambiguous_residues: Option<bool>,
+    /// Peptides whose ambiguous residues expand into more sequences than
+    /// this are dropped (default 20, one X per peptide). Values below 1 are
+    /// normalized to 1.
+    pub max_ambiguous_variants: Option<usize>,
+    /// Merge peptides that differ only in I, L and J (Ile or Leu) into one
+    /// peptide listing every protein, when their modifications and decoy
+    /// flag also match (default true). They have the same mass and fragments.
+    pub merge_isoleucine_leucine: Option<bool>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
     /// Configured static, variable, and channel-aware modifications are applied.
@@ -141,6 +162,17 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Reject enzyme residues that would otherwise abort database building.
+    pub fn validate_enzyme(&self) -> Result<(), String> {
+        let Some(enzyme) = &self.enzyme else {
+            return Ok(());
+        };
+        Enzyme::validate_residues(
+            enzyme.cleave_at.as_deref().unwrap_or("KR"),
+            enzyme.restrict.as_deref().unwrap_or(""),
+        )
+    }
+
     pub fn validate_modification_keys(&self) -> Result<(), String> {
         for key in self
             .static_mods
@@ -183,7 +215,11 @@ impl Builder {
             max_total_variable_mods,
             ptm_library: self.ptm_library,
             generate_decoys: self.generate_decoys.unwrap_or(true),
+            clip_n_term_met: self.clip_n_term_met.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
+            expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
+            max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
+            merge_isoleucine_leucine: self.merge_isoleucine_leucine.unwrap_or(true),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter: self.prefilter.unwrap_or(false),
@@ -216,7 +252,11 @@ pub struct Parameters {
     pub ptm_library: Option<PtmLibrarySettings>,
     pub decoy_tag: String,
     pub generate_decoys: bool,
+    pub clip_n_term_met: bool,
     pub fasta: String,
+    pub expand_ambiguous_residues: bool,
+    pub max_ambiguous_variants: usize,
+    pub merge_isoleucine_leucine: bool,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
     pub prefilter: bool,
@@ -270,9 +310,22 @@ fn digest_bytes(sequence_len: u64) -> u64 {
 /// of the decoy generated from it. Equal sequences hash equally; unequal
 /// sequences rarely do.
 pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
+    canonical_sequence_hashes(sequence, false)
+}
+
+/// [`sequence_hashes`], with I, L and J hashed as one residue when
+/// `merge_isoleucine_leucine` is set, so peptides that
+/// [`Parameters::merge_isoleucine_leucine`] merges share their hashes.
+pub fn canonical_sequence_hashes(sequence: &[u8], merge_isoleucine_leucine: bool) -> (u64, u64) {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let step = |hash: u64, byte: &u8| (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+    let step = |hash: u64, byte: &u8| {
+        let byte = match merge_isoleucine_leucine {
+            true => crate::ambiguous_residues::isoleucine_leucine_canonical(*byte),
+            false => *byte,
+        };
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    };
     let forward = sequence.iter().fold(OFFSET, step);
     let reversed = match sequence {
         [first, middle @ .., last] if !middle.is_empty() => {
@@ -291,7 +344,77 @@ pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
     (mix(forward), mix(reversed))
 }
 
+/// Digest groups expanded per parallel pass in
+/// [`Parameters::modify_digests_with_target_sequences`].
+const MODIFY_DIGEST_CHUNK_GROUPS: usize = 1 << 16;
+
 impl Parameters {
+    /// Digest settings, including initiator methionine clipping and
+    /// ambiguous-residue expansion.
+    pub fn enzyme_parameters(&self) -> EnzymeParameters {
+        let mut enzyme: EnzymeParameters = self.enzyme.clone().into();
+        enzyme.clip_n_term_met = self.clip_n_term_met;
+        enzyme.ambiguous_variants = self
+            .expand_ambiguous_residues
+            .then_some(self.max_ambiguous_variants);
+        enzyme
+    }
+
+    /// How FASTA proteins with B, X or Z are searched: an info message when
+    /// `expand_ambiguous_residues` expands their peptides, a warning when
+    /// they are dropped, and `None` when there are no such proteins.
+    pub fn ambiguous_proteins_message(&self, fasta: &Fasta) -> Option<(log::Level, String)> {
+        let proteins = fasta.ambiguous_protein_count();
+        if proteins == 0 {
+            return None;
+        }
+        let prefix = format!(
+            "{proteins} FASTA protein(s) contain residues without a single mass (B, X or Z)"
+        );
+        Some(match self.expand_ambiguous_residues {
+            true => (
+                log::Level::Info,
+                format!(
+                    "{prefix}; peptides containing them are expanded into up to {} variant(s) each (database.max_ambiguous_variants)",
+                    self.max_ambiguous_variants
+                ),
+            ),
+            false => (
+                log::Level::Warn,
+                format!(
+                    "{prefix}; peptides containing them are not searched unless database.expand_ambiguous_residues is true"
+                ),
+            ),
+        })
+    }
+
+    /// Log [`Self::ambiguous_proteins_message`].
+    pub fn log_ambiguous_proteins(&self, fasta: &Fasta) {
+        if let Some((level, message)) = self.ambiguous_proteins_message(fasta) {
+            log::log!(level, "{message}");
+        }
+    }
+
+    /// Log how many digests with ambiguous residues were expanded or
+    /// dropped. Only proteins with such residues are digested again.
+    pub fn log_ambiguous_expansion(
+        &self,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) {
+        if let Some(summary) =
+            fasta.ambiguous_expansion_summary(&self.enzyme_parameters(), custom_cleavages)
+        {
+            log::info!(
+                "expanded {} digest(s) with ambiguous residues (B, X, Z) into {} variant(s); dropped {} with more than {} variant(s) (database.max_ambiguous_variants)",
+                summary.expanded,
+                summary.variants,
+                summary.dropped,
+                self.max_ambiguous_variants,
+            );
+        }
+    }
+
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
         let max_len = self.enzyme.max_len.unwrap_or(50);
         if max_len > u8::MAX as usize {
@@ -714,7 +837,7 @@ impl Parameters {
     ) -> DatabaseMemoryEstimate {
         const ALLOCATION_OVERHEAD: u64 = 16;
 
-        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
         let rules = self.variable_modifications();
 
@@ -1044,7 +1167,7 @@ impl Parameters {
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
     ) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
-        let enzyme = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let digests = fasta.digest_with_custom_cleavages(&enzyme, custom_cleavages);
 
         log::trace!("grouping digests");
@@ -1058,29 +1181,76 @@ impl Parameters {
         digests
     }
 
+    /// Key under which target sequences are recorded and generated decoys
+    /// looked up, so a decoy equal to a target is dropped. With
+    /// `merge_isoleucine_leucine`, I, L and J count as one residue, as a
+    /// decoy that is a target's I/L twin would merge with it.
+    pub fn decoy_collision_key(&self, sequence: &PeptideSequence) -> PeptideSequence {
+        match self.merge_isoleucine_leucine {
+            true => sequence
+                .as_bytes()
+                .iter()
+                .map(|&residue| crate::ambiguous_residues::isoleucine_leucine_canonical(residue))
+                .collect::<Vec<_>>()
+                .into(),
+            false => sequence.clone(),
+        }
+    }
+
     /// Expand variable modifications and generate decoys from an unmodified digest.
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
         let target_sequences = digests
             .iter()
             .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.clone())
+            .map(|digest| self.decoy_collision_key(&digest.reference.sequence))
             .collect::<HashSet<_>>();
         self.modify_digests_with_target_sequences(digests, &target_sequences)
     }
 
     /// Expand a digest chunk while checking generated decoys against every
-    /// target sequence in the complete database.
+    /// target sequence in the complete database. Record the targets by
+    /// [`Self::decoy_collision_key`] so decoys that are I/L twins of a
+    /// target are dropped too.
     pub fn modify_digests_with_target_sequences(
         &self,
         digests: Vec<DigestGroup>,
         target_sequences: &HashSet<PeptideSequence>,
     ) -> Vec<Peptide> {
+        self.modify_digest_chunks(digests, target_sequences, MODIFY_DIGEST_CHUNK_GROUPS)
+    }
+
+    fn modify_digest_chunks(
+        &self,
+        digests: Vec<DigestGroup>,
+        target_sequences: &HashSet<PeptideSequence>,
+        chunk_groups: usize,
+    ) -> Vec<Peptide> {
         log::trace!("modifying peptides");
-        let mut target_decoys = self.with_digest_expander(|expander| {
-            digests
-                .into_par_iter()
-                .flat_map_iter(|group| expander.expand(group, Some(target_sequences)))
-                .collect::<Vec<_>>()
+        // Expand in fixed-size chunks of digest groups. A single parallel
+        // `collect` over every group builds per-thread pieces the size of the
+        // whole peptide list; once they are concatenated and freed, the
+        // allocator keeps most of those pages, so they sit under the fragment
+        // index build and raise peak memory. Chunking bounds the pieces to one
+        // chunk, whose pages the next chunk reuses. Chunks are appended in
+        // order, so the output order is unchanged. Adapted from
+        // theGreatHerrLebert/sage ccce5da (chunked peptide materialisation).
+        let mut target_decoys = Vec::new();
+        self.with_digest_expander(|expander| {
+            let mut digests = digests.into_iter();
+            loop {
+                let chunk = digests
+                    .by_ref()
+                    .take(chunk_groups.max(1))
+                    .collect::<Vec<_>>();
+                if chunk.is_empty() {
+                    break;
+                }
+                target_decoys.par_extend(
+                    chunk
+                        .into_par_iter()
+                        .flat_map_iter(|group| expander.expand(group, Some(target_sequences))),
+                );
+            }
         });
         self.reorder_peptides_with_labels(&mut target_decoys);
         target_decoys
@@ -1089,7 +1259,11 @@ impl Parameters {
     /// Sort and deduplicate peptides as [`Self::modify_digests`] does,
     /// merging label channels with this database's reference channel.
     pub fn reorder_peptides_with_labels(&self, target_decoys: &mut Vec<Peptide>) {
-        Self::reorder_peptides_with_reference(target_decoys, self.label_reference().as_deref());
+        Self::reorder_peptides_with_reference(
+            target_decoys,
+            self.label_reference().as_deref(),
+            self.merge_isoleucine_leucine,
+        );
     }
 
     /// Run `f` with a [`DigestExpander`] for this database's modification
@@ -1141,7 +1315,13 @@ impl Parameters {
     }
 
     pub fn reorder_peptides(target_decoys: &mut Vec<Peptide>) {
-        Self::reorder_peptides_with_reference(target_decoys, None);
+        Self::reorder_peptides_with_reference(target_decoys, None, false);
+    }
+
+    /// [`Self::reorder_peptides`], merging I/L/J twins when this database's
+    /// `merge_isoleucine_leucine` is set.
+    pub fn reorder_merged_peptides(&self, target_decoys: &mut Vec<Peptide>) {
+        Self::reorder_peptides_with_reference(target_decoys, None, self.merge_isoleucine_leucine);
     }
 
     /// Add reversed decoys to an already filtered target set.
@@ -1154,7 +1334,7 @@ impl Parameters {
             .iter()
             .filter(|peptide| !peptide.decoy)
             .for_each(|peptide| {
-                target_sequences.insert(peptide.sequence.clone());
+                target_sequences.insert(self.decoy_collision_key(&peptide.sequence));
             });
 
         let mut target_decoys = targets
@@ -1164,7 +1344,7 @@ impl Parameters {
                     return vec![peptide];
                 }
                 let decoy = peptide.reverse();
-                if target_sequences.contains(&decoy.sequence[..]) {
+                if target_sequences.contains(&self.decoy_collision_key(&decoy.sequence)) {
                     vec![peptide]
                 } else {
                     vec![decoy, peptide]
@@ -1174,23 +1354,86 @@ impl Parameters {
         Self::reorder_peptides_with_reference(
             &mut target_decoys,
             self.label_reference().as_deref(),
+            self.merge_isoleucine_leucine,
         );
         target_decoys
     }
 
-    fn reorder_peptides_with_reference(target_decoys: &mut Vec<Peptide>, reference: Option<&str>) {
+    fn reorder_peptides_with_reference(
+        target_decoys: &mut Vec<Peptide>,
+        reference: Option<&str>,
+        merge_isoleucine_leucine: bool,
+    ) {
+        use crate::ambiguous_residues::{isoleucine_leucine_canonical, isoleucine_leucine_eq};
         log::trace!("sorting and deduplicating peptides");
 
         let init_size = target_decoys.len();
-        // This is equivalent to a stable sort
-        target_decoys.par_sort_unstable_by(|a, b| {
-            a.monoisotopic
-                .total_cmp(&b.monoisotopic)
-                .then_with(|| a.initial_sort(b))
-        });
+        // This is equivalent to a stable sort. The same peptide can come from
+        // digests with different enzymatic state, e.g. a protein N-terminal
+        // peptide that is semi-enzymatic in another protein. The
+        // kept copy is then the most enzymatic one, whatever the input order.
+        // A FASTA copy is kept over a peptide TSV copy, whose placeholder
+        // state (fully enzymatic, whole protein) says nothing about where the
+        // peptide sits in a protein.
+        let from_tsv = |peptide: &Peptide| {
+            !peptide
+                .protein_sites
+                .iter()
+                .any(|occurrence| occurrence.start.is_some())
+        };
+        let enzymatic_state = |a: &Peptide, b: &Peptide| {
+            from_tsv(a)
+                .cmp(&from_tsv(b))
+                .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
+                .then(a.missed_cleavages.cmp(&b.missed_cleavages))
+                .then(a.position.cmp(&b.position))
+        };
+        match merge_isoleucine_leucine {
+            // I/L/J twins sort next to each other: by sequence with I, L
+            // and J as one residue, modifications, decoy flag, then the
+            // most enzymatic copy first. An exact copy of a target in a
+            // FASTA decoy protein sorts right after the target's twins.
+            true => target_decoys.par_sort_unstable_by(|a, b| {
+                fn canonical(peptide: &Peptide) -> impl Iterator<Item = u8> + '_ {
+                    peptide
+                        .sequence
+                        .iter()
+                        .map(|&residue| isoleucine_leucine_canonical(residue))
+                }
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| canonical(a).cmp(canonical(b)))
+                    .then_with(|| a.modification_sort(b))
+                    .then(a.decoy.cmp(&b.decoy))
+                    .then_with(|| enzymatic_state(a, b))
+                    .then_with(|| a.sequence.cmp(&b.sequence))
+            }),
+            false => target_decoys.par_sort_unstable_by(|a, b| {
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| a.initial_sort(b))
+                    .then_with(|| enzymatic_state(a, b))
+            }),
+        }
+        // Protein occurrence that names a merged twin's displayed sequence.
+        let first_occurrence = |peptide: &Peptide| {
+            (
+                // Peptide TSV rows, even expanded ones, come last.
+                peptide
+                    .protein_sites
+                    .iter()
+                    .all(|occurrence| occurrence.start.is_none()),
+                peptide.protein_sites.iter().min().cloned(),
+                peptide.proteins.iter().min().cloned(),
+            )
+        };
         target_decoys.dedup_by(|remove, keep| {
+            let twins = remove.sequence != keep.sequence
+                && merge_isoleucine_leucine
+                && remove.decoy == keep.decoy
+                && isoleucine_leucine_eq(&remove.sequence, &keep.sequence);
             if remove.monoisotopic == keep.monoisotopic
-                && remove.sequence == keep.sequence
+                && (remove.sequence == keep.sequence || twins)
                 && chemical_modifications_eq(remove, keep)
                 && (remove.modifications == keep.modifications
                     || channel_zero_provenance_eq(remove, keep))
@@ -1210,6 +1453,11 @@ impl Parameters {
                         })
                         .flatten();
                 }
+                // Twins show the sequence of the one found first in
+                // protein order; the rest of `keep` is the most enzymatic.
+                if twins && first_occurrence(remove) < first_occurrence(keep) {
+                    keep.sequence = remove.sequence.clone();
+                }
                 keep.proteins.extend(remove.proteins.iter().cloned());
                 if !remove.protein_sites.is_empty() {
                     let mut sites = keep.protein_sites.to_vec();
@@ -1227,9 +1475,23 @@ impl Parameters {
             }
         });
 
-        target_decoys
-            .par_iter_mut()
-            .for_each(|peptide| peptide.proteins.sort_unstable());
+        if merge_isoleucine_leucine {
+            // Restore the database order, which lookups such as
+            // `paired_peptide_index` binary-search: by mass, then sequence as
+            // written. Only peptides of equal mass move. A FASTA decoy that
+            // copies a target but not its displayed twin sorts after it.
+            target_decoys.par_sort_unstable_by(|a, b| {
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| a.initial_sort(b))
+                    .then(a.decoy.cmp(&b.decoy))
+            });
+        }
+        target_decoys.par_iter_mut().for_each(|peptide| {
+            // Merged I/L/J twins from one protein list it once.
+            peptide.proteins.sort_unstable();
+            peptide.proteins.dedup();
+        });
 
         let num_dropped = init_size - target_decoys.len();
         log::trace!(
@@ -1246,6 +1508,8 @@ impl Parameters {
     /// channel-aware modifications are applied.
     /// Decoys are generated by reversal when `self.generate_decoys` is true,
     /// subject to the same deduplication as the normal FASTA digest path.
+    /// Rows with B, X or Z are expanded like FASTA digests when
+    /// `expand_ambiguous_residues` is on, and skipped with a warning otherwise.
     pub fn peptides_from_tsv(&self, content: &str) -> Vec<Peptide> {
         let mut lines = content.lines().filter(|l| !l.trim().is_empty());
 
@@ -1270,11 +1534,13 @@ impl Parameters {
 
         // Parse all rows into Peptide structs.
         let raw: Vec<Peptide> = lines
-            .filter_map(|line| {
+            .flat_map(|line| {
                 let fields: Vec<&str> = line.split('\t').collect();
-                let seq = fields.get(seq_col)?.trim().to_string();
+                let Some(seq) = fields.get(seq_col).map(|seq| seq.trim().to_string()) else {
+                    return Vec::new();
+                };
                 if seq.is_empty() {
-                    return None;
+                    return Vec::new();
                 }
                 let protein: Arc<str> = protein_col
                     .and_then(|i| fields.get(i).map(|s| s.trim()))
@@ -1286,24 +1552,64 @@ impl Parameters {
                     .map(|s| s.trim().eq_ignore_ascii_case("true"))
                     .unwrap_or(false);
 
-                let digest = Digest {
+                let digest = |sequence: String| Digest {
                     decoy: is_decoy,
                     semi_enzymatic: false,
-                    sequence: seq.into(),
-                    protein,
+                    sequence: sequence.into(),
+                    protein: protein.clone(),
                     protein_start: None,
                     prev_aa: None,
                     next_aa: None,
                     missed_cleavages: 0,
                     position: Position::Full,
+                    expanded_from: None,
                 };
-                match Peptide::try_from(digest) {
-                    Ok(p) => Some(p),
-                    Err(e) => {
-                        log::warn!("skipping peptide: {e}");
-                        None
-                    }
+                if !(self.expand_ambiguous_residues
+                    && ambiguous_residues::is_ambiguous(seq.as_bytes()))
+                {
+                    return match Peptide::try_from(digest(seq)) {
+                        Ok(p) => vec![p],
+                        Err(e) => {
+                            log::warn!("skipping peptide: {e}");
+                            Vec::new()
+                        }
+                    };
                 }
+                // Expand B, X and Z like a FASTA digest. Each variant keeps
+                // the row as written, without coordinates, for the
+                // substitutions column.
+                let variants = ambiguous_residues::variant_count(seq.as_bytes());
+                if variants > self.max_ambiguous_variants {
+                    log::warn!(
+                        "skipping peptide {seq}: {variants} variant(s) exceed database.max_ambiguous_variants ({})",
+                        self.max_ambiguous_variants
+                    );
+                    return Vec::new();
+                }
+                let written: ProteinSequence = seq.as_str().into();
+                ambiguous_residues::expand(seq.as_bytes())
+                    .into_iter()
+                    .filter_map(|variant| {
+                        let variant = String::from_utf8(variant).ok()?;
+                        match Peptide::try_from(digest(variant)) {
+                            Ok(mut peptide) => {
+                                peptide.protein_sites = Arc::from([ProteinOccurrence {
+                                    protein: protein.clone(),
+                                    start: None,
+                                    prev_aa: None,
+                                    next_aa: None,
+                                    source: Some(written.clone()),
+                                    met_clipped: false,
+                                }]);
+                                Some(peptide)
+                            }
+                            Err(e) => {
+                                log::warn!("skipping peptide: {e}");
+                                None
+                            }
+                        }
+                    })
+                    .collect()
             })
             .collect();
 
@@ -1359,7 +1665,7 @@ impl Parameters {
         // Build target sequence set for decoy deduplication.
         let targets: DashSet<PeptideSequence, FnvBuildHasher> = DashSet::default();
         raw.iter().filter(|p| !p.decoy).for_each(|p| {
-            targets.insert(p.sequence.clone());
+            targets.insert(self.decoy_collision_key(&p.sequence));
         });
 
         // Emit targets (+ generated decoys) into the final list.
@@ -1368,7 +1674,7 @@ impl Parameters {
             .flat_map(|peptide| {
                 if self.generate_decoys && !peptide.decoy {
                     let rev = peptide.reverse();
-                    if !targets.contains(&rev.sequence[..]) {
+                    if !targets.contains(&self.decoy_collision_key(&rev.sequence)) {
                         vec![rev, peptide]
                     } else {
                         vec![peptide]
@@ -1379,7 +1685,11 @@ impl Parameters {
             })
             .collect();
 
-        Self::reorder_peptides_with_reference(&mut result, label_reference.as_deref());
+        Self::reorder_peptides_with_reference(
+            &mut result,
+            label_reference.as_deref(),
+            self.merge_isoleucine_leucine,
+        );
         result
     }
 
@@ -1556,7 +1866,11 @@ impl DigestExpander<'_> {
     /// Sort and deduplicate expanded peptides, as
     /// [`Parameters::modify_digests`] does.
     pub fn reorder(&self, target_decoys: &mut Vec<Peptide>) {
-        Parameters::reorder_peptides_with_reference(target_decoys, self.label_reference.as_deref());
+        Parameters::reorder_peptides_with_reference(
+            target_decoys,
+            self.label_reference.as_deref(),
+            self.parameters.merge_isoleucine_leucine,
+        );
     }
 
     /// Modified peptides and generated decoys of one digest group, unsorted.
@@ -1602,8 +1916,13 @@ impl DigestExpander<'_> {
                 })
                 .filter(|peptide| {
                     !peptide.decoy
-                        || !target_sequences
-                            .is_some_and(|targets| targets.contains(&(peptide.sequence[..])))
+                        || !target_sequences.is_some_and(|targets| {
+                            targets.contains(&peptide.sequence)
+                                || (parameters.merge_isoleucine_leucine
+                                    && targets.contains(
+                                        &parameters.decoy_collision_key(&peptide.sequence),
+                                    ))
+                        })
                 })
                 .collect::<Vec<_>>()
         };
@@ -2013,6 +2332,125 @@ impl FragmentIndex {
     pub fn bucket(&self, bucket: usize) -> impl Iterator<Item = Theoretical> + '_ {
         self.bucket_search(bucket, 0, u32::MAX)
     }
+
+    /// Resolve the precursor-scoped fragment range of many buckets at once.
+    ///
+    /// Writes one absolute `[first, last)` range into `fragments` per entry of
+    /// `buckets`, identical to the range [`Self::bucket_search`] selects. A
+    /// binary search is a chain of dependent loads, so one search at a time
+    /// leaves the core waiting on a single cache miss. Here `LANES` buckets
+    /// are stepped in lockstep, each with independent lower and upper
+    /// searches, so up to `2 * LANES` misses are in flight together. The
+    /// design follows Matteo Lacki's interleaved page-bound resolver
+    /// (MatteoLacki/sage 950641f, MIT).
+    fn resolve_bucket_ranges(
+        &self,
+        buckets: &[u32],
+        peptide_lo: u32,
+        peptide_hi: u32,
+        out: &mut Vec<(u32, u32)>,
+    ) {
+        /// Buckets resolved together. Two searches each, sized against the
+        /// core's outstanding-miss capacity rather than a vector width.
+        const LANES: usize = 16;
+        const SLOTS: usize = 2 * LANES;
+
+        out.clear();
+        out.reserve(buckets.len());
+        if self.fragments.is_empty() {
+            out.extend(buckets.iter().map(|&bucket| {
+                let start = self.buckets[bucket as usize].start;
+                (start, start)
+            }));
+            return;
+        }
+        let fragments = self.fragments.as_slice();
+
+        for chunk in buckets.chunks(LANES) {
+            // Even slots search `id < peptide_lo`, odd slots `id <= peptide_hi`,
+            // exactly the two `partition_point` predicates of `bucket_search`.
+            let mut base = [0usize; SLOTS];
+            let mut size = [0usize; SLOTS];
+            let mut longest = 0usize;
+            for (lane, &bucket) in chunk.iter().enumerate() {
+                let bucket = self.buckets[bucket as usize];
+                let (start, len) = (bucket.start as usize, (bucket.end - bucket.start) as usize);
+                // An empty bucket probes index 0 (always valid here) without
+                // moving; its result is taken from `start` below.
+                let start = if len == 0 { 0 } else { start };
+                base[2 * lane] = start;
+                base[2 * lane + 1] = start;
+                size[2 * lane] = len;
+                size[2 * lane + 1] = len;
+                longest = longest.max(len);
+            }
+
+            // Branchless halving with a fixed trip count: a converged or
+            // unused slot has `half == 0`, re-reads its own `base` and stays.
+            let steps = usize::BITS - longest.saturating_sub(1).leading_zeros();
+            for _ in 0..steps {
+                for slot in 0..SLOTS {
+                    let half = size[slot] / 2;
+                    let mid = base[slot] + half;
+                    // SAFETY: `mid < base + size <= bucket.end <= fragments.len()`
+                    // when `size > 1`; otherwise `half == 0` and `mid == base`,
+                    // which is in bounds for a non-empty bucket and is index 0
+                    // for an empty or unused slot.
+                    let id = unsafe { fragments.get_unchecked(mid) }.peptide_index();
+                    let go_right = if slot % 2 == 0 {
+                        id < peptide_lo
+                    } else {
+                        id <= peptide_hi
+                    };
+                    base[slot] = if go_right { mid } else { base[slot] };
+                    size[slot] -= half;
+                }
+            }
+
+            for (lane, &bucket) in chunk.iter().enumerate() {
+                let bucket = self.buckets[bucket as usize];
+                if bucket.start == bucket.end {
+                    out.push((bucket.start, bucket.start));
+                    continue;
+                }
+                let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
+                let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
+                let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
+                out.push((first as u32, last as u32));
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn range_iter(&self, bucket: usize, first: u32, last: u32) -> FragmentIter<'_> {
+        FragmentIter {
+            fragments: &self.fragments[first as usize..last as usize],
+            mass_prefix: self.buckets[bucket].mass_prefix,
+            next: 0,
+        }
+    }
+}
+
+/// Per-thread scratch for [`IndexedQuery::page_search_batch`], reused across
+/// spectra so the batched path allocates nothing in steady state.
+#[derive(Default)]
+struct BatchSearchScratch {
+    /// Per window: fragment bounds and its span in `entries`.
+    windows: Vec<(f32, f32, u32, u32)>,
+    /// One bucket per (window, bucket) pair, in emission order.
+    entries: Vec<u32>,
+    /// `(bucket, entry)` pairs sorted by bucket for de-duplication.
+    order: Vec<(u32, u32)>,
+    /// Distinct buckets and their resolved ranges.
+    distinct: Vec<u32>,
+    resolved: Vec<(u32, u32)>,
+    /// Resolved range per entry.
+    ranges: Vec<(u32, u32)>,
+}
+
+thread_local! {
+    static BATCH_SEARCH_SCRATCH: std::cell::RefCell<BatchSearchScratch> =
+        std::cell::RefCell::new(BatchSearchScratch::default());
 }
 
 struct FragmentIter<'a> {
@@ -2358,27 +2796,130 @@ impl IndexedQuery<'_> {
                 .fragments
                 .bucket_search(page, peptide_lo, peptide_hi)
                 .filter(move |frag| {
-                    // This looks somewhat complicated, but it's a consequence of
-                    // how the `binary_search_slice` function works - it will return
-                    // the set of indices that maximally cover the desired range - the exact
-                    // `left` and `right` indices may be valid, or just outside of the range.
-                    // Anything interior of `left` and `right` is guaranteed to be within the
-                    // precursor tolerance, so we just need to check the edge cases
-                    //
-                    // Previously, a direct lookup to check the mass of the current fragment was
-                    // performed, but the pointer indirection + float comparison can slow down
-                    // open searches by as much as 2x!!
-                    // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
-                    (frag.peptide_index.0 > self.pre_idx_lo as u32
-                        || (frag.peptide_index.0 == self.pre_idx_lo as u32
-                            && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
-                        && (frag.peptide_index.0 < self.pre_idx_hi as u32
-                            || (frag.peptide_index.0 == self.pre_idx_hi as u32
-                                && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
-                        && frag.fragment_mz >= fragment_lo
-                        && frag.fragment_mz <= fragment_hi
+                    self.accepts(frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi)
                 })
         })
+    }
+
+    /// Final per-fragment check shared by the single and batched searches.
+    #[inline(always)]
+    fn accepts(
+        &self,
+        frag: &Theoretical,
+        fragment_lo: f32,
+        fragment_hi: f32,
+        precursor_lo: f32,
+        precursor_hi: f32,
+    ) -> bool {
+        // This looks somewhat complicated, but it's a consequence of
+        // how the `binary_search_slice` function works - it will return
+        // the set of indices that maximally cover the desired range - the exact
+        // `left` and `right` indices may be valid, or just outside of the range.
+        // Anything interior of `left` and `right` is guaranteed to be within the
+        // precursor tolerance, so we just need to check the edge cases
+        //
+        // Previously, a direct lookup to check the mass of the current fragment was
+        // performed, but the pointer indirection + float comparison can slow down
+        // open searches by as much as 2x!!
+        // e.g. used to be `self.db[frag.peptide_index].monoisotopic >= precursor_lo`
+        (frag.peptide_index.0 > self.pre_idx_lo as u32
+            || (frag.peptide_index.0 == self.pre_idx_lo as u32
+                && self.db[frag.peptide_index].monoisotopic >= precursor_lo))
+            && (frag.peptide_index.0 < self.pre_idx_hi as u32
+                || (frag.peptide_index.0 == self.pre_idx_hi as u32
+                    && self.db[frag.peptide_index].monoisotopic <= precursor_hi))
+            && frag.fragment_mz >= fragment_lo
+            && frag.fragment_mz <= fragment_hi
+    }
+
+    /// Batched equivalent of calling [`Self::page_search`] and then
+    /// [`Self::page_search_shifted`] for every shift, for each mass in turn.
+    ///
+    /// Matches are emitted in exactly that order. Every bucket's
+    /// precursor-scoped range depends only on the bucket, because the
+    /// peptide range is fixed for this query, so each distinct bucket is
+    /// resolved once for the whole spectrum and all of them are resolved
+    /// with interleaved binary searches. Adapted from Matteo Lacki's
+    /// `page_search_batch` (MatteoLacki/sage 062f7b3 and 950641f, MIT).
+    pub fn page_search_batch(
+        &self,
+        masses: impl IntoIterator<Item = f32>,
+        shifts: &[f32],
+        mut on_match: impl FnMut(Theoretical),
+    ) {
+        let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
+        let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
+        let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
+
+        BATCH_SEARCH_SCRATCH.with(|scratch| {
+            let mut scratch = scratch.borrow_mut();
+            let BatchSearchScratch {
+                windows,
+                entries,
+                order,
+                distinct,
+                resolved,
+                ranges,
+            } = &mut *scratch;
+            windows.clear();
+            entries.clear();
+
+            let mut push_window = |fragment_lo: f32, fragment_hi: f32| {
+                let (left, right) =
+                    fragment_bucket_slice(&self.db.min_value, fragment_lo, fragment_hi);
+                let first = entries.len() as u32;
+                entries.extend(left as u32..right as u32);
+                windows.push((fragment_lo, fragment_hi, first, entries.len() as u32));
+            };
+            for mass in masses {
+                let (fragment_lo, fragment_hi) = self.fragment_tol.bounds(mass);
+                push_window(fragment_lo, fragment_hi);
+                for &shift in shifts {
+                    push_window(fragment_lo - shift, fragment_hi - shift);
+                }
+            }
+
+            // Resolve each distinct bucket once.
+            order.clear();
+            order.extend(
+                entries
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, &bucket)| (bucket, entry as u32)),
+            );
+            order.sort_unstable();
+            distinct.clear();
+            distinct.extend(order.iter().map(|&(bucket, _)| bucket));
+            distinct.dedup();
+            self.db
+                .fragments
+                .resolve_bucket_ranges(distinct, peptide_lo, peptide_hi, resolved);
+            ranges.clear();
+            ranges.resize(entries.len(), (0, 0));
+            let mut group = 0;
+            for &(bucket, entry) in order.iter() {
+                if distinct[group] != bucket {
+                    group += 1;
+                }
+                ranges[entry as usize] = resolved[group];
+            }
+
+            for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
+                for entry in first as usize..last as usize {
+                    let (lo, hi) = ranges[entry];
+                    for frag in self
+                        .db
+                        .fragments
+                        .range_iter(entries[entry] as usize, lo, hi)
+                    {
+                        if self.accepts(&frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi)
+                        {
+                            on_match(frag);
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 

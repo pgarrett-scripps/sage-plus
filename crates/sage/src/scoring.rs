@@ -78,6 +78,8 @@ struct Score {
     /// Fragment errors of the observed, uncorrected peaks.
     raw_ppm_difference: f32,
     raw_signed_ppm_difference: f32,
+    /// Intensity-weighted sum (then mean) of squared raw signed errors.
+    raw_squared_ppm_difference: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -260,6 +262,10 @@ pub struct Feature {
     /// Signed, intensity-weighted fragment error (observed - theoretical).
     #[serde(skip_serializing)]
     pub signed_fragment_ppm: f32,
+    /// Intensity-weighted standard deviation of the raw signed fragment
+    /// errors within this PSM, around `signed_fragment_ppm`.
+    #[serde(skip_serializing)]
+    pub fragment_ppm_sd: f32,
     /// Precursor mass error after per-file retention-time alignment.
     #[serde(skip_serializing)]
     pub aligned_delta_mass: f32,
@@ -573,17 +579,13 @@ impl<'db> Scorer<'db> {
                     );
                     let candidates = self.db.query(mass, tolerance, self.fragment_tol);
                     let shift = self.fragment_shift(offset);
-                    for peak in &fragment_index.peaks {
-                        for fragment in candidates.page_search(peak.neutral_mass) {
+                    candidates.page_search_batch(
+                        fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                        shift.as_slice(),
+                        |fragment| {
                             keep.insert(fragment.peptide_index.0 as usize);
-                        }
-                        if let Some(shift) = shift {
-                            for fragment in candidates.page_search_shifted(peak.neutral_mass, shift)
-                            {
-                                keep.insert(fragment.peptide_index.0 as usize);
-                            }
-                        }
-                    }
+                        },
+                    );
                 }
             }
         };
@@ -779,18 +781,13 @@ impl<'db> Scorer<'db> {
                 sc.matched += 1;
                 matched_peaks += 1;
             };
-            for peak in &fragment_index.peaks {
-                for frag in candidates.page_search(peak.neutral_mass) {
-                    count(frag);
-                }
-                // Fragments retaining the offset appear at the indexed base
-                // fragment mass plus the shift.
-                for &shift in shifts {
-                    for frag in candidates.page_search_shifted(peak.neutral_mass, shift) {
-                        count(frag);
-                    }
-                }
-            }
+            // Fragments retaining the offset appear at the indexed base
+            // fragment mass plus each shift.
+            candidates.page_search_batch(
+                fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                shifts,
+                &mut count,
+            );
 
             if matched_peaks == 0 {
                 return InitialHits::default();
@@ -1206,6 +1203,10 @@ impl<'db> Scorer<'db> {
                 isotope_error,
                 average_ppm: score.raw_ppm_difference,
                 signed_fragment_ppm: score.raw_signed_ppm_difference,
+                fragment_ppm_sd: (score.raw_squared_ppm_difference
+                    - score.raw_signed_ppm_difference.powi(2))
+                .max(0.0)
+                .sqrt(),
                 aligned_average_ppm: score.ppm_difference,
                 aligned_signed_fragment_ppm: score.signed_ppm_difference,
                 hyperscore: score.hyperscore,
@@ -1504,6 +1505,10 @@ impl<'db> Scorer<'db> {
                     score.raw_signed_ppm_difference +=
                         peak_intensity * (raw_peak_mass - expected_mass) * 2E6
                             / (expected_mass + raw_peak_mass);
+                    let raw_signed_ppm =
+                        (raw_peak_mass - expected_mass) * 2E6 / (expected_mass + raw_peak_mass);
+                    score.raw_squared_ppm_difference +=
+                        peak_intensity * raw_signed_ppm * raw_signed_ppm;
                     let calc_mz = frag.monoisotopic_mass / charge as f32 + PROTON;
 
                     match frag.kind {
@@ -1551,6 +1556,7 @@ impl<'db> Scorer<'db> {
         score.signed_ppm_difference /= score.summed_b + score.summed_y;
         score.raw_ppm_difference /= score.summed_b + score.summed_y;
         score.raw_signed_ppm_difference /= score.summed_b + score.summed_y;
+        score.raw_squared_ppm_difference /= score.summed_b + score.summed_y;
 
         if collect_fragments {
             (score, Some(fragments_details), coverage)

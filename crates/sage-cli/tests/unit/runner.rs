@@ -2,7 +2,7 @@ use super::{
     assign_psm_ids, average_finite, finish_csv_writer, labeled_finite_values, median_finite,
     missing_decoy_warning, normalize_finite, passes_localization_filter, passes_output_filter,
     sort_features_by_discriminant, spectrum_id_occurrences, LabelGroupIndex, OutputTarget,
-    RunSummary, SpectrumAccumulator,
+    RunSummary, SpectrumAccumulator, ToleranceRecommendation,
 };
 
 #[test]
@@ -178,6 +178,10 @@ fn older_run_summaries_receive_compatible_defaults() {
     .unwrap();
 
     assert_eq!(summary.schema_version, 1);
+    assert_eq!(
+        summary.recommended_tolerances,
+        ToleranceRecommendation::default()
+    );
     assert!(!summary.ptm_localization.enabled);
     assert_eq!(summary.quantification.lfq_features, 0);
 }
@@ -363,8 +367,8 @@ fn report_keeps_same_basename_files_separate() {
         .collect::<Vec<_>>();
     assert_eq!(rows.len(), 2);
     // PSM targets and average precursor charge are per input file.
-    assert_eq!((rows[0][1], rows[0][11]), ("2", "2"));
-    assert_eq!((rows[1][1], rows[1][11]), ("1", "3"));
+    assert_eq!((rows[0][1], rows[0][12]), ("2", "2"));
+    assert_eq!((rows[1][1], rows[1][12]), ("1", "3"));
 }
 
 #[test]
@@ -560,5 +564,271 @@ fn streamed_prefilter_matches_the_whole_digest_search() -> anyhow::Result<()> {
         assert_eq!(count, 3, "{kind} emitted {count} times");
     }
     std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn report_shows_signed_fragment_bias() {
+    let (directory, _) = temporary_output("report-bias");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    // A uniform -4 ppm fragment shift: the absolute error is 4 ppm, the bias -4.
+    let feature = |delta_mass| Feature {
+        label: 1,
+        peptide_idx: PeptideIx(0),
+        delta_mass,
+        average_ppm: 4.0,
+        signed_fragment_ppm: -4.0,
+        ..Feature::default()
+    };
+    let features = vec![feature(-2.0), feature(-3.0), feature(-2.5)];
+    let path = runner
+        .write_report(&features, None, &["run.mzML".to_string()])
+        .unwrap();
+    let html = std::fs::read_to_string(path.to_file_path().unwrap()).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+
+    assert!(html.contains("Median MS2 Mass Bias (ppm)"));
+    assert!(html.contains("Median MS2 Absolute Error (ppm)"));
+    let body = html.split("<tbody>").nth(1).unwrap();
+    let cells = body
+        .split("<td>")
+        .skip(1)
+        .map(|cell| cell.split("</td>").next().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!((cells[6], cells[7], cells[8]), ("-2.5", "-4", "4"));
+}
+
+#[test]
+fn tolerance_recommendation_uses_confident_signed_errors() {
+    let confident = |i: usize| Feature {
+        rank: 1,
+        label: 1,
+        spectrum_q: 0.001,
+        // Precursor: -2 ppm bias, errors -3/-2/-1.
+        delta_mass: -2.0 + (i % 3) as f32 - 1.0,
+        // Fragment: +3 ppm bias; each PSM's ions spread by 2 ppm.
+        signed_fragment_ppm: 3.0,
+        average_ppm: 3.0,
+        fragment_ppm_sd: 2.0,
+        ..Feature::default()
+    };
+    let mut features = (0..150).map(confident).collect::<Vec<_>>();
+    // Decoys, lower ranks and non-confident PSMs are ignored.
+    for excluded in [
+        Feature {
+            label: -1,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+        Feature {
+            rank: 2,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+        Feature {
+            spectrum_q: 0.5,
+            delta_mass: 90.0,
+            ..confident(0)
+        },
+    ] {
+        features.extend(std::iter::repeat_n(excluded, 60));
+    }
+
+    let recommendation = ToleranceRecommendation::from_features(&features);
+    assert_eq!(recommendation.psms, 150);
+    assert!(recommendation.skipped.is_none());
+    let precursor = recommendation.precursor.unwrap();
+    assert_eq!(precursor.bias_ppm, -2.0);
+    // |-2| + 4 * 1.4826 = 7.93 -> 10 ppm.
+    assert_eq!(precursor.recommended_ppm, Some(10.0));
+    let fragment = recommendation.fragment.unwrap();
+    assert_eq!(fragment.bias_ppm, 3.0);
+    // |3| + 4 * 2 = 11 -> 20 ppm.
+    assert_eq!(fragment.recommended_ppm, Some(20.0));
+    assert_eq!(
+        recommendation.log_line(),
+        "recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 150 PSMs)"
+    );
+
+    let few = ToleranceRecommendation::from_features(&features[..99]);
+    assert_eq!(few.psms, 99);
+    assert!(few.precursor.is_none() && few.fragment.is_none());
+    assert!(few.log_line().contains("skipped (99 confident PSMs"));
+}
+
+#[test]
+fn diapasef_files_get_quality_control_scans() {
+    let (directory, _) = temporary_output("tdf-dia-qc");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [path.clone()],
+        "dia": { "mode": "pseudo" },
+        "quant": { "lfq": true },
+        "diagnostic_ions": true,
+        "output_directory": directory.to_string_lossy(),
+    }))
+    .unwrap();
+    let runner = super::Runner::new(input.build().unwrap(), 1).unwrap();
+    let url = Url::from_file_path(std::fs::canonicalize(&path).unwrap()).unwrap();
+    let (ms1, _) = runner
+        .read_processed_spectra_with_ms1(&[url], 0, 1, true, false)
+        .unwrap();
+    assert!(!ms1.is_empty());
+
+    // The raw MS1 frames and window MS2 spectra are scanned before only the
+    // MS1 is kept next to the pseudo-spectra.
+    let file_qc = runner.file_qc.lock().unwrap();
+    let qc = file_qc.get(&0).expect("diaPASEF file scanned");
+    assert!(qc.polymers.as_ref().is_some_and(|p| p.ms1_spectra > 0));
+    assert!(qc
+        .diagnostic_ions
+        .as_ref()
+        .is_some_and(|scan| scan.ms2_spectra > 0));
+    drop(file_qc);
+    std::fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn ptm_library_records_match_expanded_ambiguous_residues() {
+    let (directory, root) = temporary_output("ptm-ambiguous");
+    std::fs::create_dir_all(&root).unwrap();
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let fasta = root.join("proteins.fasta");
+    // One-based position 6 is the B of MKPEPBIDEK.
+    std::fs::write(&fasta, ">P1\nMKPEPBIDEKRAAAGGGK\n").unwrap();
+    let library = root.join("sites.tsv");
+    std::fs::write(
+        &library,
+        "protein\tposition\tresidue\tmodification\nP1\t6\tN\tDeamidated\n",
+    )
+    .unwrap();
+    let runner = |expand: bool| {
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": {
+                "fasta": fasta.to_string_lossy(),
+                "expand_ambiguous_residues": expand,
+                "prefilter": false,
+                "variable_mods": {
+                    "Deamidated": {
+                        "mass": 0.984016, "sites": ["N"], "site_mode": "library", "max_count": 1
+                    }
+                },
+                "ptm_library": { "path": library.to_string_lossy(), "strict": true },
+            },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        super::Runner::new(input.build().unwrap(), 1)
+    };
+
+    // Without expansion the B cannot stand for the recorded N.
+    let error = runner(false).err().expect("strict library aborts");
+    assert!(
+        format!("{error:#}").contains("expects residue N"),
+        "{error:#}"
+    );
+
+    // With expansion the record validates and modifies the N variant only.
+    let runner = runner(true).unwrap();
+    let modified = runner
+        .database
+        .peptides
+        .iter()
+        .filter(|peptide| !peptide.decoy && !peptide.modifications.is_empty())
+        .map(|peptide| String::from_utf8_lossy(&peptide.sequence).to_string())
+        .collect::<Vec<_>>();
+    assert!(!modified.is_empty());
+    assert!(
+        modified
+            .iter()
+            .all(|sequence| sequence.contains("PEPNIDEK")),
+        "{modified:?}"
+    );
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// I/L/J twins of the test spectrum's peptide in other proteins merge the
+/// same way whether the prefilter streams the digest or not.
+#[test]
+fn isoleucine_leucine_twins_merge_with_and_without_prefilter() -> anyhow::Result<()> {
+    use super::prefilter::PrefilterBudgets;
+    use crate::events::{CancellationToken, EventEmitter};
+
+    let (directory, root) = temporary_output("il-merge");
+    std::fs::create_dir_all(&root)?;
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fasta = root.join("proteins.fasta");
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    std::fs::write(
+        &fasta,
+        q99536
+            + "\n>sp|TWIN_I|ISOLEUCINE\nMSSKLQSRPAAPPAPGPGQITLRGGWK\n"
+            + ">sp|TWIN_J|AMBIGUOUS\nMWWKLQSRPAAPPAPGPGQJTLRAAYK\n",
+    )?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta.display().to_string().into();
+    config["database"]["prefilter"] = true.into();
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["mzml_paths"] = serde_json::json!([workspace
+        .join("tests/LQSRPAAPPAPGPGQLTLR.mzML")
+        .display()
+        .to_string()]);
+    config["output_directory"] = directory.display().to_string().into();
+    let input: crate::input::Input = serde_json::from_value(config)?;
+    let mut search = input.build()?;
+    // A one-byte index budget streams the digest protein by protein.
+    search.prefilter_budgets = Some(PrefilterBudgets { index_bytes: 1 });
+    let runner = super::Runner::new_with_control(
+        search,
+        1,
+        EventEmitter::from_writer(EventLog::default()),
+        CancellationToken::default(),
+    )?;
+    let database = runner.database_parameters.clone();
+    let proteins = super::load_fasta(&database)?;
+    let whole = runner.prefilter_whole_digest(1, &proteins, None)?;
+    let (streamed, _) = runner.prefilter_peptides(1, proteins, None)?;
+    assert_eq!(streamed, whole);
+
+    let twins = |decoy: bool| {
+        whole
+            .iter()
+            .filter(|peptide| {
+                peptide.decoy == decoy
+                    && peptide.modifications.is_empty()
+                    && sage_core::ambiguous_residues::isoleucine_leucine_eq(
+                        &peptide.sequence,
+                        match decoy {
+                            false => b"LQSRPAAPPAPGPGQLTLR",
+                            true => b"LLTLQGPGPAPPAAPRSQR",
+                        },
+                    )
+            })
+            .collect::<Vec<_>>()
+    };
+    let (targets, decoys) = (twins(false), twins(true));
+    assert_eq!((targets.len(), decoys.len()), (1, 1));
+    // Q99536 sorts first, so its L form is displayed.
+    assert_eq!(targets[0].to_string(), "LQSRPAAPPAPGPGQLTLR");
+    assert_eq!(targets[0].proteins.len(), 3);
+    assert_eq!(decoys[0].proteins, targets[0].proteins);
+    std::fs::remove_dir_all(directory).ok();
     Ok(())
 }

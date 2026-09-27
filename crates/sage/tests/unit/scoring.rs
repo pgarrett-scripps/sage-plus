@@ -1090,6 +1090,8 @@ mod mass_offsets {
         assert!((hit.expmass - query.precursors[0].mz * 2.0 + 2.0 * PROTON).abs() < 1e-3);
         assert!((hit.average_ppm - 15.0).abs() < 0.2, "{}", hit.average_ppm);
         assert!((hit.signed_fragment_ppm - 15.0).abs() < 0.2);
+        // Every ion is shifted by the same 15 ppm, so the within-PSM spread is ~0.
+        assert!(hit.fragment_ppm_sd < 0.2, "{}", hit.fragment_ppm_sd);
         assert!(hit.aligned_average_ppm < 0.2);
 
         // Annotation reports observed peak m/z, not corrected m/z.

@@ -148,6 +148,26 @@ impl<'a> MotifContext<'a> {
             right_boundary: end == protein.len(),
         }
     }
+
+    /// [`Self::in_protein`] for an occurrence digested from `protein`. When
+    /// `met_clipped`, the occurrence comes from the protein with its
+    /// initiator methionine clipped (see
+    /// [`crate::enzyme::ProteinOccurrence::met_clipped`]), so the methionine
+    /// is not a flank and a peptide at offset 1 starts the protein
+    /// N-terminus. Without clipping, offset 1 is an ordinary internal span.
+    pub fn in_digested_protein(
+        protein: &'a [u8],
+        start: usize,
+        len: usize,
+        met_clipped: bool,
+    ) -> Self {
+        let mut context = Self::in_protein(protein, start, len);
+        if met_clipped && start == 1 && crate::enzyme::metap_clips(protein) {
+            context.left = &protein[..0];
+            context.left_boundary = true;
+        }
+        context
+    }
 }
 
 impl SiteMotif {

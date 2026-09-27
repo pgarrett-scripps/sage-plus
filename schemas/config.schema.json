@@ -525,6 +525,51 @@
       },
       "type": "object"
     },
+    "DiagnosticIon": {
+      "additionalProperties": false,
+      "properties": {
+        "mz": {
+          "description": "Singly charged m/z.",
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "description": "Name reported in the output.",
+          "type": "string"
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Matching tolerance; 20 ppm when omitted."
+        }
+      },
+      "required": [
+        "name",
+        "mz"
+      ],
+      "type": "object"
+    },
+    "DiagnosticIonsConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/DiagnosticIon"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "`diagnostic_ions` configuration: `true` for the built-in ions, or a list\nof ions that replaces them."
+    },
     "EnzymeBuilder": {
       "additionalProperties": false,
       "properties": {
@@ -1529,6 +1574,13 @@
             "null"
           ]
         },
+        "clip_n_term_met": {
+          "description": "Also search each protein with its initiator methionine removed when\nthe second residue is G, A, S, T, C, P, or V (MetAP clipping). The\nclipped peptides are protein N-terminal. Enzymatic digests only.\nDefault: true.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "custom_cleavage_sites": {
           "description": "Path to a protein-specific custom cleavage-site TSV or Parquet file.\nRequired columns: `protein`, `position`; optional column: `context`.",
           "type": [
@@ -1553,6 +1605,13 @@
             }
           ]
         },
+        "expand_ambiguous_residues": {
+          "description": "Expand ambiguous FASTA residues into every residue they may stand\nfor: B to D or N, Z to E or Q, X to each of the 20 standard residues\n(default false: peptides containing B, X or Z are not searched).\nJ (Ile or Leu) is always searched with the I/L mass.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "fasta": {
           "description": "Path to fasta database",
           "type": [
@@ -1573,6 +1632,15 @@
           },
           "type": [
             "array",
+            "null"
+          ]
+        },
+        "max_ambiguous_variants": {
+          "description": "Peptides whose ambiguous residues expand into more sequences than\nthis are dropped (default 20, one X per peptide). Values below 1 are\nnormalized to 1.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -1600,6 +1668,13 @@
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "merge_isoleucine_leucine": {
+          "description": "Merge peptides that differ only in I, L and J (Ile or Leu) into one\npeptide listing every protein, when their modifications and decoy\nflag also match (default true). They have the same mass and fragments.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -1737,6 +1812,17 @@
         }
       ],
       "description": "DIA search. `{\"mode\": \"pseudo\"}` builds MS1-anchored pseudo-MS2\nspectra from co-eluting fragment hills and searches them closed (like\nDDA); `wide_window` and `chimera` are ignored in that mode. Default off."
+    },
+    "diagnostic_ions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiagnosticIonsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Diagnostic-ion scan of MS2 spectra, written to `diagnostic_ions.tsv`.\n`true` searches the built-in glycan oxonium, acetyl-lysine and\nphosphotyrosine immonium ions; a list of `{name, mz, tolerance}`\nreplaces them (tolerance defaults to 20 ppm). Default off."
     },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"

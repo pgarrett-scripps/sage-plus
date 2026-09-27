@@ -179,6 +179,31 @@ pub fn serialize_features(
             |f: &&Feature| database[f.peptide_idx].sequence.as_ref().into(),
             ByteArrayType
         );
+        // Null unless the peptide was expanded from ambiguous FASTA residues.
+        if let Some(mut column) = rg.next_column()? {
+            let spans = features
+                .iter()
+                .map(|f| database[f.peptide_idx].database_peptide())
+                .collect::<Vec<_>>();
+            let definition_levels = spans
+                .iter()
+                .map(|span| i16::from(span.is_some()))
+                .collect::<Vec<_>>();
+            let values = spans
+                .into_iter()
+                .flatten()
+                .map(|span| ByteArray::from(span.into_bytes()))
+                .collect::<Vec<_>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, Some(&definition_levels), None)?;
+            column.close()?;
+        }
+        // Empty unless the peptide was expanded from ambiguous FASTA residues.
+        write_col!(
+            |f: &&Feature| database[f.peptide_idx].substitutions().into_bytes().into(),
+            ByteArrayType
+        );
         if has_labels {
             write_col!(
                 |f: &&Feature| database[f.peptide_idx]

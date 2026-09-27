@@ -361,6 +361,8 @@ impl Runner {
             "discovered {} target protein groups (supported by proteotypic peptides only) at 1% FDR",
             q_protein_group
         );
+        let recommended_tolerances = ToleranceRecommendation::from_features(&outputs.features);
+        log::info!("{}", recommended_tolerances.log_line());
         log::trace!("writing outputs");
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
@@ -387,6 +389,15 @@ impl Runner {
 
         let path = self.make_path("results.sage.parquet");
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
+        self.parameters.output_paths.push(path);
+
+        let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let polymers = self.polymer_stats(&filenames);
+        let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
+        if let Some(path) = self.write_diagnostic_ions(&filenames)? {
+            self.parameters.output_paths.push(path);
+        }
+        let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
 
         if self.parameters.annotate_matches {
@@ -524,6 +535,7 @@ impl Runner {
         }
         let summary = RunSummary {
             schema_version: 9,
+            recommended_tolerances,
             warnings: self.events.warnings(),
             provenance: RunProvenance {
                 software_version: self.parameters.version.clone(),
@@ -639,6 +651,11 @@ impl Runner {
                         SpectralLibraryFormat::MzSpecLib => "mzspeclib".into(),
                     })
                     .collect(),
+            },
+            qc: super::qc::QcRunStats {
+                digestion,
+                polymers,
+                diagnostic_ions,
             },
             output_paths,
         };

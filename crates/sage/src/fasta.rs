@@ -1,6 +1,6 @@
+use crate::ambiguous_residues;
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
-use crate::mass::VALID_AA;
 use crate::sequence::ProteinSequence;
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -49,10 +49,10 @@ impl Fasta {
                 if last_id.is_none() {
                     return Err(FastaError::MissingHeader { line: line_number });
                 }
-                // Ambiguous or unknown uppercase residues (X, B, Z, J) are kept
-                // so the rest of the protein remains searchable; peptides that
-                // contain a residue without a defined mass are dropped when
-                // digests are converted to peptides.
+                // Ambiguous uppercase residues (B, J, X, Z) are kept so the
+                // rest of the protein remains searchable. J carries the I/L
+                // mass; peptides with B, X or Z are expanded or dropped at
+                // digestion, see `database.expand_ambiguous_residues`.
                 if let Some(residue) = line.bytes().find(|residue| !residue.is_ascii_uppercase()) {
                     return Err(FastaError::InvalidResidue {
                         line: line_number,
@@ -75,21 +75,6 @@ impl Fasta {
 
         if targets.is_empty() {
             return Err(FastaError::NoSequences);
-        }
-
-        let nonstandard = targets
-            .iter()
-            .filter(|(_, sequence)| {
-                sequence
-                    .as_str()
-                    .bytes()
-                    .any(|residue| !VALID_AA.contains(&residue))
-            })
-            .count();
-        if nonstandard > 0 {
-            log::warn!(
-                "{nonstandard} FASTA protein(s) contain residues without a defined mass (e.g. X, B, Z, J); peptides containing them will not be searched"
-            );
         }
 
         Ok(Fasta {
@@ -156,6 +141,55 @@ impl Fasta {
         digests
     }
 
+    /// Number of proteins containing B, X or Z, residues without a single
+    /// mass, whose peptides are expanded or dropped at digestion.
+    pub fn ambiguous_protein_count(&self) -> usize {
+        self.targets
+            .par_iter()
+            .filter(|(_, sequence)| ambiguous_residues::is_ambiguous(sequence.as_bytes()))
+            .count()
+    }
+
+    /// Counts of digests with ambiguous residues that `enzyme` expands or
+    /// drops, or `None` when it does not expand them. Only proteins that
+    /// contain B, X or Z are digested.
+    pub fn ambiguous_expansion_summary(
+        &self,
+        enzyme: &EnzymeParameters,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> Option<AmbiguousExpansionSummary> {
+        let max_variants = enzyme.ambiguous_variants?;
+        let as_written = EnzymeParameters {
+            ambiguous_variants: None,
+            ..enzyme.clone()
+        };
+        let summary = (0..self.targets.len())
+            .into_par_iter()
+            .filter(|&index| ambiguous_residues::is_ambiguous(self.targets[index].1.as_bytes()))
+            .map(|index| {
+                let mut summary = AmbiguousExpansionSummary::default();
+                for digest in self.digest_protein(index, &as_written, custom_cleavages) {
+                    match ambiguous_residues::variant_count(digest.sequence.as_bytes()) {
+                        1 => {}
+                        count if count > max_variants => summary.dropped += 1,
+                        count => {
+                            summary.expanded += 1;
+                            summary.variants += count;
+                        }
+                    }
+                }
+                summary
+            })
+            .reduce(AmbiguousExpansionSummary::default, |left, right| {
+                AmbiguousExpansionSummary {
+                    expanded: left.expanded + right.expanded,
+                    variants: left.variants + right.variants,
+                    dropped: left.dropped + right.dropped,
+                }
+            });
+        Some(summary)
+    }
+
     pub fn iter_chunks(&self, chunk_size: usize) -> impl Iterator<Item = Self> + '_ {
         self.targets
             .chunks(chunk_size)
@@ -165,6 +199,18 @@ impl Fasta {
                 generate_decoys: self.generate_decoys,
             })
     }
+}
+
+/// See [`Fasta::ambiguous_expansion_summary`]. Counts are per digest, before
+/// identical sequences are merged and before generated decoys.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AmbiguousExpansionSummary {
+    /// Digests replaced by their expansions.
+    pub expanded: usize,
+    /// Expanded digests created in their place.
+    pub variants: usize,
+    /// Digests with more expansions than allowed, not searched.
+    pub dropped: usize,
 }
 
 fn accession(id: &str, line: usize) -> Result<Arc<str>, FastaError> {

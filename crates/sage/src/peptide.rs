@@ -774,6 +774,13 @@ impl Peptide {
     pub fn initial_sort(&self, other: &Self) -> std::cmp::Ordering {
         self.sequence
             .cmp(&other.sequence)
+            .then_with(|| self.modification_sort(other))
+    }
+
+    /// The part of [`Self::initial_sort`] after the sequence: modifications
+    /// by position, termini, then label channel.
+    pub fn modification_sort(&self, other: &Self) -> std::cmp::Ordering {
+        std::cmp::Ordering::Equal
             .then_with(|| {
                 (0..self.sequence.len())
                     .find_map(|index| {
@@ -844,6 +851,93 @@ impl Peptide {
         } else {
             self.proteins.iter().join(";")
         }
+    }
+
+    /// FASTA spans, as written, that this peptide was expanded from when they
+    /// contain ambiguous residues (B, X or Z), joined by `;`. A generated
+    /// decoy reports its target's span reversed the same way. `None` when no
+    /// occurrence was expanded.
+    pub fn database_peptide(&self) -> Option<String> {
+        use crate::ambiguous_residues::{is_ambiguous, is_expansion_of};
+        let len = self.sequence.len();
+        let mut spans = self
+            .protein_sites
+            .iter()
+            .filter_map(|site| {
+                let start = site.start? as usize;
+                let span = site.source.as_ref()?.as_bytes().get(start..start + len)?;
+                if !is_ambiguous(span) {
+                    return None;
+                }
+                if is_expansion_of(span, &self.sequence) {
+                    return Some(span.to_vec());
+                }
+                let mut reversed = span.to_vec();
+                if len > 2 {
+                    reversed[1..len - 1].reverse();
+                }
+                is_expansion_of(&reversed, &self.sequence).then_some(reversed)
+            })
+            .collect::<Vec<_>>();
+        if spans.is_empty() {
+            return None;
+        }
+        spans.sort_unstable();
+        spans.dedup();
+        Some(
+            spans
+                .iter()
+                .map(|span| String::from_utf8_lossy(span))
+                .join(";"),
+        )
+    }
+
+    /// Ambiguous FASTA residues (B, Z or X) replaced to make this peptide,
+    /// formatted as `X4K;B7D` (see
+    /// [`crate::ambiguous_residues::format_substitutions`]); empty when there
+    /// are none.
+    ///
+    /// Occurrences are read in protein order, the order of `proteins` and
+    /// `protein_sites`, which also picks the displayed sequence of merged
+    /// I/L twins. If any occurrence has the peptide's residues as written,
+    /// the result is empty: a FASTA span without B, Z or X, a site without a
+    /// FASTA span, or a protein listed without a site (a peptide TSV row
+    /// without B, Z or X). Otherwise the first expanded
+    /// occurrence gives the substitutions. A generated decoy reports its
+    /// target span reversed like the decoy, at decoy positions.
+    pub fn substitutions(&self) -> String {
+        use crate::ambiguous_residues::{format_substitutions, is_ambiguous, oriented_span};
+        let len = self.sequence.len();
+        let mut expanded = None;
+        for site in self.protein_sites.iter() {
+            // A site without a start is an expanded peptide TSV row, whose
+            // source is the row as written.
+            let span = site.source.as_ref().and_then(|source| match site.start {
+                Some(start) => source.as_bytes().get(start as usize..start as usize + len),
+                None => Some(source.as_bytes()).filter(|row| row.len() == len),
+            });
+            match span {
+                Some(span) if is_ambiguous(span) => {
+                    if expanded.is_none() {
+                        expanded = oriented_span(span, &self.sequence);
+                    }
+                }
+                _ => return String::new(),
+            }
+        }
+        let Some(written) = expanded else {
+            return String::new();
+        };
+        let listed_without_site = self.proteins.iter().any(|protein| {
+            !self
+                .protein_sites
+                .iter()
+                .any(|site| site.protein == *protein)
+        });
+        if listed_without_site {
+            return String::new();
+        }
+        format_substitutions(&written, &self.sequence)
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {

@@ -16,6 +16,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
         Digest {
             decoy: false,
@@ -27,6 +28,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
     ];
 
@@ -45,6 +47,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
         Digest {
             decoy: false,
@@ -56,6 +59,7 @@ fn hash_digest() {
             protein_start: Some(0),
             prev_aa: None,
             next_aa: None,
+            expanded_from: None,
         },
     ];
 
@@ -76,10 +80,12 @@ fn trypsin() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 2,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -109,10 +115,12 @@ fn trypsin_missed_cleavage() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 0,
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -146,10 +154,12 @@ fn trypsin_missed_cleavage_2() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 0,
         max_len: 50,
         missed_cleavages: 2,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -174,10 +184,12 @@ fn test_trypsin_pro() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 2,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -195,10 +207,12 @@ fn test_asp_n() {
     let expected = vec!["MA", "DEEKLPPGWEKRMSRSSGRVYYFNHITNASQWERPSGNW"];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 1,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("D", "", false, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -224,10 +238,12 @@ fn test_chymotrypsin_pro() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 1,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("FYWL", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -250,10 +266,12 @@ fn nonspecific_digest_5() {
         .collect::<Vec<_>>();
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 5,
         max_len: 5,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -279,10 +297,12 @@ fn nonspecific_digest_5_7() {
         .collect::<Vec<_>>();
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 5,
         max_len: 7,
         missed_cleavages: 0,
         enzyme: Enzyme::new("", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -300,10 +320,12 @@ fn no_digest() {
     let expected = vec![sequence];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 0,
         max_len: usize::MAX,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -324,10 +346,12 @@ fn preserve_repeated_sequence_coordinates() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 2,
         max_len: usize::MAX,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "", true, false),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -347,10 +371,12 @@ fn mini_semi_trypsin() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 2,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, true),
+        ambiguous_variants: None,
     };
 
     assert_eq!(
@@ -397,10 +423,12 @@ fn semi_trypsin_trypsin_missed_cleavage() {
     ];
 
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, true),
+        ambiguous_variants: None,
     };
 
     for (digest, expected) in tryp
@@ -434,10 +462,12 @@ fn semi_trypsin_trypsin_missed_cleavage() {
 fn custom_cleavages_add_both_sides_with_missed_cleavages() {
     let sequence = "AAKAPEPTIDERQQQK";
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let digests = tryp.digest_with_custom_cleavages(sequence, Arc::default(), &[8]);
@@ -458,10 +488,12 @@ fn custom_cleavages_add_both_sides_with_missed_cleavages() {
 fn existing_enzyme_boundary_does_not_add_duplicates() {
     let sequence = "AAKAPEPTIDER";
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 1,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let ordinary = tryp.digest(sequence, Arc::default());
@@ -473,10 +505,12 @@ fn existing_enzyme_boundary_does_not_add_duplicates() {
 fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
     let sequence = "ACDEFGHIK";
     let no_digest = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
     let sequences = no_digest
         .digest_with_custom_cleavages(sequence, Arc::default(), &[4])
@@ -488,10 +522,12 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
     assert!(sequences.contains(sequence.as_bytes()));
 
     let nonspecific = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 5,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
     assert_eq!(
         nonspecific.digest(sequence, Arc::default()),
@@ -503,10 +539,12 @@ fn custom_cleavages_are_additive_to_no_digest_and_redundant_for_nonspecific() {
 fn nonspecific_digest_spans_share_one_protein_allocation() {
     let sequence: ProteinSequence = "ACDEFGHIK".into();
     let nonspecific = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 3,
         missed_cleavages: 0,
         enzyme: None,
+        ambiguous_variants: None,
     };
     let digests =
         nonspecific.digest_protein_with_custom_cleavages(&sequence, Arc::from("protein"), &[]);
@@ -523,10 +561,12 @@ fn nonspecific_digest_spans_share_one_protein_allocation() {
 #[test]
 fn grouping_uses_sequence_content_instead_of_storage_identity() {
     let no_digest = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("$", "", true, false),
+        ambiguous_variants: None,
     };
     let first: ProteinSequence = "PEPTIDE".into();
     let second: ProteinSequence = "PEPTIDE".into();
@@ -566,10 +606,12 @@ impl quickcheck::Arbitrary for RandomSequence {
 /// broken for arbitrary peptide sequences
 fn quickcheck_semi_missed_cleavages(RandomSequence { sequence }: RandomSequence) {
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 3,
         max_len: 50,
         missed_cleavages: 2,
         enzyme: Enzyme::new("KR", "", true, true),
+        ambiguous_variants: None,
     };
 
     for digest in tryp.digest(&sequence, Arc::default()) {
@@ -590,4 +632,183 @@ fn quickcheck_semi_missed_cleavages(RandomSequence { sequence }: RandomSequence)
 
         assert!(digest.missed_cleavages <= 2);
     }
+}
+
+#[test]
+fn unsupported_enzyme_residues_are_errors() {
+    for (cleave, restrict, field) in [
+        ("KB", "", "cleave_at"),
+        ("KZ", "P", "cleave_at"),
+        ("kr", "", "cleave_at"),
+        ("KR", "X", "restrict"),
+        ("KR", "J", "restrict"),
+    ] {
+        let error = Enzyme::try_new(cleave, restrict, true, false)
+            .err()
+            .unwrap_or_else(|| panic!("accepted {cleave}/{restrict}"));
+        assert!(error.contains(field), "{error}");
+    }
+    assert!(Enzyme::try_new("KR", "P", true, false).unwrap().is_some());
+    assert!(Enzyme::try_new("$", "", true, false).unwrap().is_some());
+    assert!(Enzyme::try_new("", "", true, false).unwrap().is_none());
+}
+
+fn clipping_trypsin(clip_n_term_met: bool, semi_enzymatic: bool) -> EnzymeParameters {
+    EnzymeParameters {
+        clip_n_term_met,
+        ambiguous_variants: None,
+        min_len: 3,
+        max_len: 50,
+        missed_cleavages: 1,
+        enzyme: Enzyme::new("KR", "P", true, semi_enzymatic),
+    }
+}
+
+#[test]
+fn metap_clips_only_before_small_residues() {
+    for second in b"GASTCPV" {
+        assert!(metap_clips(&[b'M', *second, b'K']));
+    }
+    for sequence in [&b"MKDER"[..], b"MLDER", b"MEDER", b"ASDER", b"M", b""] {
+        assert!(!metap_clips(sequence), "{sequence:?}");
+    }
+}
+
+#[test]
+fn metap_clipping_adds_only_protein_n_terminal_peptides_from_residue_two() {
+    let sequence = "MSDEREVAEAKLPPGWEKR";
+    let unclipped = clipping_trypsin(false, false).digest(sequence, Arc::from("P1"));
+    let clipped = clipping_trypsin(true, false).digest(sequence, Arc::from("P1"));
+
+    // The unclipped digests stay, and only peptides from residue 2 are added.
+    assert_eq!(clipped[..unclipped.len()], unclipped[..]);
+    let added = &clipped[unclipped.len()..];
+    let summary = added
+        .iter()
+        .map(|digest| {
+            (
+                String::from_utf8(digest.sequence.to_vec()).unwrap(),
+                digest.missed_cleavages,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        summary,
+        vec![("SDER".to_string(), 0), ("SDEREVAEAK".to_string(), 1)]
+    );
+    for digest in added {
+        assert_eq!(digest.position, Position::Nterm);
+        assert!(!digest.semi_enzymatic);
+        assert!(!digest.decoy);
+        // Coordinates stay relative to the real protein sequence.
+        assert_eq!(digest.protein_start, Some(1));
+        assert_eq!(digest.prev_aa, Some(b'M'));
+    }
+
+    for sequence in ["MKDEREVAEAK", "MLDEREVAEAK", "ASDEREVAEAK"] {
+        assert_eq!(
+            clipping_trypsin(true, false).digest(sequence, Arc::default()),
+            clipping_trypsin(false, false).digest(sequence, Arc::default()),
+            "{sequence}"
+        );
+    }
+}
+
+#[test]
+fn metap_clipping_relabels_semi_enzymatic_spans_after_the_methionine() {
+    let digests = clipping_trypsin(true, true).digest("MSDEREVAEAK", Arc::default());
+    let from_residue_two = |peptide: &[u8]| {
+        digests
+            .iter()
+            .filter(|digest| digest.protein_start == Some(1) && &digest.sequence[..] == peptide)
+            .collect::<Vec<_>>()
+    };
+    // Once, as the clipped protein N-terminal peptide, not as a semi-enzymatic
+    // internal one.
+    let full = from_residue_two(b"SDER");
+    assert_eq!(full.len(), 1);
+    assert_eq!(full[0].position, Position::Nterm);
+    assert!(!full[0].semi_enzymatic);
+    // A C-terminally non-enzymatic end stays semi-enzymatic.
+    let semi = from_residue_two(b"SDE");
+    assert_eq!(semi.len(), 1);
+    assert_eq!(semi[0].position, Position::Nterm);
+    assert!(semi[0].semi_enzymatic);
+}
+
+#[test]
+fn metap_clipping_ignores_nonspecific_and_clips_whole_proteins() {
+    let nonspecific = |clip_n_term_met| EnzymeParameters {
+        clip_n_term_met,
+        ambiguous_variants: None,
+        min_len: 3,
+        max_len: 5,
+        missed_cleavages: 0,
+        enzyme: None,
+    };
+    assert_eq!(
+        nonspecific(true).digest("MSPEPTIDE", Arc::default()),
+        nonspecific(false).digest("MSPEPTIDE", Arc::default())
+    );
+
+    let no_digest = EnzymeParameters {
+        clip_n_term_met: true,
+        ambiguous_variants: None,
+        min_len: 3,
+        max_len: 50,
+        missed_cleavages: 0,
+        enzyme: Enzyme::new("$", "", true, false),
+    };
+    let digests = no_digest
+        .digest("MSPEPTIDE", Arc::default())
+        .into_iter()
+        .map(|digest| (digest.sequence, digest.position))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        digests,
+        vec![
+            ("MSPEPTIDE".into(), Position::Full),
+            ("SPEPTIDE".into(), Position::Full)
+        ]
+    );
+}
+
+#[test]
+fn metap_clipping_does_not_count_a_cut_after_the_methionine_as_missed() {
+    let after_met = EnzymeParameters {
+        clip_n_term_met: true,
+        ambiguous_variants: None,
+        min_len: 3,
+        max_len: 50,
+        missed_cleavages: 1,
+        enzyme: Enzyme::new("M", "", true, false),
+    };
+    let digests = after_met.digest("MSDEMKLL", Arc::default());
+    let clipped = digests
+        .iter()
+        .filter(|digest| &digest.sequence[..] == b"SDEM")
+        .collect::<Vec<_>>();
+    assert_eq!(clipped.len(), 1);
+    assert_eq!(clipped[0].position, Position::Nterm);
+    assert_eq!(clipped[0].missed_cleavages, 0);
+}
+
+#[test]
+fn group_reference_is_the_most_enzymatic_occurrence() {
+    // "a" sorts before "b". In "a", ASEQK starts the protein but K-P is not a
+    // trypsin site, so it is semi-enzymatic; in "b" it is the fully enzymatic
+    // Met-clipped N-terminal peptide. Both are protein N-terminal.
+    let enzyme = clipping_trypsin(true, true);
+    let mut digests = enzyme.digest("ASEQKPLLR", Arc::from("a"));
+    digests.extend(enzyme.digest("MASEQKGLLR", Arc::from("b")));
+    let groups = group_digests(digests);
+    let group = groups
+        .iter()
+        .find(|group| {
+            &group.reference.sequence[..] == b"ASEQK" && group.reference.position == Position::Nterm
+        })
+        .unwrap();
+    assert_eq!(group.origins.len(), 2);
+    assert!(!group.reference.semi_enzymatic);
+    assert_eq!(&*group.reference.protein, "b");
 }

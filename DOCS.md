@@ -139,6 +139,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -261,6 +262,107 @@ Normal digest peptides remain unchanged. Context mismatches and terminal or
 out-of-range positions are errors; sites without context are accepted with a
 warning.
 
+#### Initiator methionine clipping
+
+Methionine aminopeptidase (MetAP) removes a protein's initiator methionine when
+the second residue is small: G, A, S, T, C, P, or V. With
+`database.clip_n_term_met` set to true (the default), each FASTA protein that
+starts with M followed by one of those residues is also digested as if the Met
+were gone. Clipping is often incomplete, so the unclipped peptides stay; only
+peptides starting at residue 2 are added. For `MSDEREVAEAK` with trypsin and one
+missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
+`MSDEREVAEAK`.
+
+- Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
+  sites and PTM-library `protein_n_term` records apply to them (for example,
+  N-terminal acetylation of the new first residue), and a motif's `<` anchor
+  matches at residue 2. The anchor matches there only for peptides digested with
+  clipping on, both during the search and in the exported site library, so with
+  `clip_n_term_met` false or a non-specific digest residue 2 is an ordinary
+  internal position even when the peptide is protein N-terminal in another
+  protein.
+- Their enzymatic state and missed cleavages are those of the unclipped
+  N-terminal peptide, so they are never semi-enzymatic because of the clip. A
+  semi-enzymatic or custom-cleavage peptide that already starts at residue 2 is
+  reported once, as the clipped N-terminal peptide.
+- Protein coordinates stay relative to the FASTA sequence: a clipped peptide
+  starts at protein position 2 and its previous residue is the M.
+- Generated decoys are reversed clipped peptides and are N-terminal too, so
+  targets and decoys stay balanced (`generate_decoys: true`, the recommended
+  setup). FASTA decoy proteins are clipped by the same rule on the sequence as
+  written; a fully reversed decoy protein ends in `...[GASTCPV]M` and is rarely
+  clipped, so FASTA-supplied decoys get fewer added peptides than their targets.
+  The prefilter produces the same clipped peptides as the full database.
+- Clipping applies to enzymatic digests, including no digestion (`"$"`, which
+  adds the whole protein without its Met). A non-specific digest already
+  contains every peptide from residue 2 and is unchanged. Peptide TSV input is
+  searched as written.
+
+Set `clip_n_term_met` to false to search only the FASTA sequences as written. The
+rule is fixed to the MetAP residues; to search another processed form, put it in
+the FASTA.
+
+#### Ambiguous residues
+
+J (Ile or Leu) is always searched with the shared I/L mass and reported as J.
+Static or variable modifications declared on I or L do not apply to J.
+
+I, L and J have the same mass, so peptides that differ only in them (twins,
+such as `PEPIDEK`, `PEPLDEK` and `PEPJDEK`) give identical spectra. With
+`database.merge_isoleucine_leucine: true` (the default) twins become one
+peptide when their modifications (positions and masses) and decoy flag also
+match:
+
+- The merged peptide lists every twin's proteins and positions. Its
+  enzymatic state (`semi_enzymatic`, missed cleavages, terminal position) is
+  the most enzymatic twin's, as for a peptide found in several proteins.
+- It shows the sequence of the twin found first in protein order (by
+  accession, then position). Generated decoys merge the same way, so each
+  merged target keeps one decoy, and a generated decoy that is a twin of a
+  target is dropped like a decoy equal to a target.
+- A modification declared only on I or only on L keeps the modified twin
+  apart (J carries neither); the unmodified twins still merge.
+- Merging happens in the shared deduplication step, so results with and
+  without the prefilter are identical. `--estimate` counts digests before
+  deduplication and stays an overcount.
+
+With `merge_isoleucine_leucine: false`, twins stay separate peptides: the
+best PSM ties with a twin (`delta_next` 0) and protein inference sees the
+twins' proteins as separate groups.
+
+B (Asp or Asn), Z (Glu or Gln) and X (any residue) have no single mass. By
+default, peptides containing them are dropped with a warning. With
+`database.expand_ambiguous_residues: true`, each digest containing them is
+replaced by one peptide per combination: B becomes D or N, Z becomes E or Q,
+and X each of the 20 standard residues. Digests with more than
+`database.max_ambiguous_variants` (default 20, one X) combinations are dropped.
+The log reports how many digests were expanded, the variants created and the
+digests dropped.
+
+- Cleavage uses the residue as written: an X is never a K/R site, so
+  `PEPXIDEK` gives `PEPKIDEK` uncleaved, and `prev_aa`/`next_aa` report the
+  FASTA residues.
+- Each variant keeps its protein and position, and merges with the same
+  sequence from other proteins. The `database_peptide` results column shows
+  the FASTA sequence it came from, and `substitutions` lists the replaced
+  residues (`X4T` for a `PEPTIDE` match to `PEPXIDE`). A peptide that is
+  also written plainly in another protein reports no substitutions.
+- Decoy proteins in the FASTA are expanded like targets; generated decoys are
+  reversed from the expanded targets.
+- Expansion happens per digest, so it applies equally with and without the
+  prefilter and in `--estimate`.
+- A `database.peptides` TSV row containing B, Z or X is expanded the same
+  way, with the same `max_ambiguous_variants` cap (a row over it is skipped
+  with a warning), and its variants fill `substitutions`; `database_peptide`
+  stays empty, since a row has no FASTA position. With expansion off, such a
+  row is skipped with a warning.
+- A `database.ptm_library` record at a B, Z or X position matches when its
+  residue is one the FASTA residue expands to (N at a B, for example), also
+  with `strict: true`, and modifies only that variant. Without expansion such
+  a record is a mismatch: strict libraries abort, others warn. A record whose
+  residue is itself B, Z or X never applies, because no searched peptide
+  contains it.
+
 
 ### Example configuration file
 
@@ -300,7 +402,11 @@ For additional information about configuration options and output file formats, 
     "max_combinations": 8,  // Optional[int] {default=null} Limit total variants per peptide
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
     "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
+    "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
+    "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
+    "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
+    "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
     "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
   "quant": {                // Optional - specify only if TMT or LFQ
@@ -346,6 +452,7 @@ For additional information about configuration options and output file formats, 
   "chimera": false,         // Optional[bool] {default=false}: search for chimeric/co-fragmenting PSMS
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
+  "diagnostic_ions": false, // Optional[bool|list] {default=false}: scan MS2 for diagnostic ions into diagnostic_ions.tsv
   "ion_mobility_model": {
     "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
   },
@@ -373,8 +480,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.11
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.11 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.12
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.12 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -408,6 +515,7 @@ The enzyme section contains parameters related to the enzyme used for digestion.
 - **max_len**: Integer. The maximum AA length of peptides to search (default: 50).
 - **cleave_at**: String. Amino acids to cleave at (default: 'KR').
 - **restrict**: String. Do not cleave if one of these amino acids follows the cleavage site (default: 'P').
+- Both accept only the uppercase one-letter codes `ACDEFGHIKLMNPQRSTVWYUO`; `cleave_at` also accepts `""` and `"$"`. Ambiguity codes such as `B`, `Z`, `J` and `X`, lowercase letters and other symbols are configuration errors.
 - **c_terminal**: Boolean. Cleave at the C-terminus of matching amino acids (default:true).
 
 Example: 
@@ -724,8 +832,9 @@ limited. Static and variable occupancy is reflected in generated variants.
 
 #### Symbol-keyed configurations
 
-Upstream Sage's symbol-keyed syntax still loads, so one configuration can drive both
-Sage and Sage Plus. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
+The basic symbol-keyed form still loads for simple searches. Sage Plus does not aim to
+accept upstream Sage configurations: the two have diverged, and new options are added only
+as named definitions. Keys are a residue or a terminal symbol (`^ $ [ ]`, optionally
 followed by a residue). Static values are masses; variable values are mass arrays,
 for example `"static_mods": {"C": 57.021464}` and `"variable_mods": {"M": [15.9949]}`.
 
@@ -830,6 +939,18 @@ alongside the library, because the location table does not embed chemical masses
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
+- **clip_n_term_met**: Boolean. Also digest each protein without its initiator methionine
+  when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
+  and are protein N-terminal. Enzymatic digests only (default: true). See
+  [Initiator methionine clipping](#initiator-methionine-clipping).
+- **expand_ambiguous_residues**: Boolean. Search peptides containing B, Z or X as every
+  sequence they may stand for (default: false, such peptides are dropped). See
+  [Ambiguous residues](#ambiguous-residues).
+- **max_ambiguous_variants**: Integer. Peptides that expand into more sequences than this are
+  dropped (default: 20; values below 1 become 1).
+- **merge_isoleucine_leucine**: Boolean. Merge peptides that differ only in I, L and J into
+  one peptide listing all their proteins (default: true). See
+  [Ambiguous residues](#ambiguous-residues).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
   searching before building the search index. The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and
@@ -959,6 +1080,15 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **dia**: Object. Opt-in DIA pseudo-spectrum search (default: off). See [DIA pseudo-spectrum search](#dia-pseudo-spectrum-search).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: true).
+- **diagnostic_ions**: Boolean or list. Search raw MS2 spectra for diagnostic ions and write `diagnostic_ions.tsv` (default: false). `true` uses the built-in ions below; a list of `{name, mz, tolerance}` objects replaces them. `tolerance` takes the same form as `fragment_tol` and defaults to `{"ppm": [-20, 20]}`. See [Diagnostic ions](#diagnostic-ions-diagnostic_ionstsv).
+  - Built-in ions (singly charged m/z): `HexNAc` 204.0867, `HexNAc_fragment` 138.0550, `Hex` 163.0601, `NeuAc` 292.1027, `acetyl_K_immonium` 126.0913, `phospho_Y_immonium` 216.0426. TMT reporter ions are not included; use `quant.tmt` for those.
+  - Example:
+    ```json
+    "diagnostic_ions": [
+      {"name": "HexNAc", "mz": 204.0867},
+      {"name": "HexHexNAc", "mz": 366.1395, "tolerance": {"da": [-0.01, 0.01]}}
+    ]
+    ```
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
     ```json
@@ -1176,7 +1306,7 @@ Notes:
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
-- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable.
+- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable. A peptide present in both the FASTA and a peptide TSV keeps the FASTA copy's protein position, enzymatic state and missed cleavages, so protein-terminal modification rules follow the FASTA; the TSV row only adds its protein.
 
 ## Spectrum Paths
 
@@ -1204,7 +1334,9 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, and `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
+  - `recommended_tolerances` suggests precursor and fragment tolerances from the rank-1 target PSMs at 1% spectrum q-value, pooled over all files. For each, `bias_ppm` is the median signed error (observed − theoretical), `sigma_ppm` is 1.4826 × the median absolute deviation around it, `required_ppm` is `|bias_ppm| + 4 × sigma_ppm`, and `recommended_ppm` is the smallest of ±5, 10, 20, 50 and 100 ppm that covers `required_ppm` (`null` when even 100 ppm does not). Precursor errors are `precursor_ppm`. Fragment errors start from each PSM's signed, intensity-weighted mean fragment error; the spread of those means understates how far single ions stray, so the median within-PSM standard deviation of the ion errors is added in quadrature to `sigma_ppm`. All errors are raw, before any `mass_recalibration`. Fewer than 100 such PSMs leave both estimates `null` and set `skipped`. The log prints the same result, for example `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`. Only PSMs inside the configured windows are measured, so a recommendation at or above a configured half-width means the window may be clipping real errors: widen it and search again.
+  - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
@@ -1219,6 +1351,8 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
 - `proteins`: Proteins containing the peptide sequence.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
+- `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
 - `filename`: File containing this PSM
 - `scannr`: Spectrum identifier from mzML file.
@@ -1274,3 +1408,43 @@ These columns provide comprehensive information about each candidate peptide spe
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
+
+## Quality-control outputs
+
+Every search summarizes how the sample was digested and checks MS1 spectra for polymer contamination. The digestion summary is written to `digestion.tsv` and to `run-summary.json` under `qc.digestion`; polymer shares are logged and written to `run-summary.json` under `qc.polymers`.
+
+### Digestion summary (`digestion.tsv`)
+
+The summary counts distinct peptide sequences (modifications ignored), not PSMs, from rank-1 PSMs with spectrum and peptide q-values of at most 0.01. Decoy peptides passing the same filter estimate the false targets: each count is the number of distinct target peptides minus the number of distinct decoy peptides in the same class, floored at zero. `digestion.tsv` has one row per input file and a final `total` row; the total counts each sequence once across all files, so it is not the sum of the file rows.
+
+- `file`: Input file name, or `total`.
+- `target_peptides` / `decoy_peptides`: Distinct target and decoy sequences passing the filter.
+- `peptides`: Denominator of every rate: `target_peptides - decoy_peptides`.
+- `missed_cleavages_0`, `missed_cleavages_1`, `missed_cleavages_2_plus`: Peptides with 0, 1, and 2 or more internal enzymatic sites. Sites are counted from the residues with the configured enzyme rule (`cleave_at`, `restrict`, `c_terminal`), so semi-enzymatic and custom-cleavage peptides are counted the same way.
+- `semi_n` / `semi_c`: Peptides whose N-terminus (ragged N-terminus) or C-terminus (ragged C-terminus) was not produced by the enzyme, while the other terminus was.
+- `non_enzymatic`: Peptides with neither terminus produced by the enzyme.
+- `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: Each count as a percentage of `peptides`; `missed_cleavage_pct` covers peptides with at least one missed cleavage.
+
+A terminus is enzymatic when it is a protein terminus, a custom cleavage site of that protein (`custom_cleavage_sites`), or the enzyme cuts the bond between the flanking residue and the peptide. A peptide found in several proteins is classified at its most enzymatic occurrence. A peptide expanded from ambiguous FASTA residues (`expand_ambiguous_residues`) is classified on its residues as written, as the digest cleaved them: an X searched as K or R is not a missed cleavage, and an X searched as P after a K does not make the N-terminus ragged. Ragged and non-enzymatic peptides can only be identified when the database contains them, so these rates are zero for a fully enzymatic search unless semi-enzymatic digestion (`semi_enzymatic`) or a peptide list add such peptides. Peptides without recorded protein occurrences (for example from a peptide list without flanking residues) count towards `peptides` and missed cleavages but not towards the termini classes. Non-specific digestion (`cleave_at: ""`) reports every peptide as enzymatic with no missed cleavages.
+
+### Polymer contamination (`qc.polymers`)
+
+Detergents and plastics ionize as ladders of peaks one repeat unit apart. Sage searches each centroided MS1 spectrum for three ladders: polyethylene glycol (PEG, 44.0262 Da repeat, water end group), polypropylene glycol (PPG, 58.0419 Da, water end group) and cyclic polysiloxane (74.0188 Da, e.g. the 445.12 lock mass), at charges 1 to 3 with H+, Na+ and NH4+ adducts. A peak counts only when at least 4 consecutive ladder members are found within 10 ppm; each peak counts once per polymer.
+
+For each file, `qc.polymers` reports the number of centroided MS1 spectra scanned (`ms1_spectra`), profile MS1 spectra skipped (`skipped_profile_spectra`), the summed MS1 intensity (`total_ion_current`), and per polymer the ladder intensity and its percent of the MS1 TIC (`polymers[].tic_pct`). A log line gives the shares per file. When one polymer carries more than 5% of a file's MS1 TIC, Sage logs a warning and records it in `run-summary.json` `warnings` with code `polymer_contamination`.
+
+The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, DDA or diaPASEF, whose MS1 frames are only read with `quant.lfq`, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.
+
+### Diagnostic ions (`diagnostic_ions.tsv`)
+
+With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configured ion on its raw peak list, before deisotoping and peak trimming, with one binary search per ion per spectrum. When several peaks fall inside an ion's tolerance window, the most intense one is reported. `diagnostic_ions.tsv` has one row per ion found in a spectrum; spectra without any hit have no rows. PSM output columns are unchanged: join on `file` and `scannr` to relate hits to PSMs.
+
+- `file`: Input file name.
+- `scannr`: Spectrum identifier, as in the PSM output.
+- `ion`: Configured ion name.
+- `mz`: Observed m/z of the matched peak.
+- `relative_intensity`: Matched peak intensity divided by the summed intensity of the spectrum's raw peaks.
+
+In DIA pseudo mode the scan runs on the raw wide-window MS2 spectra before they are converted to pseudo-spectra, by design: diagnostic ions are fragments of whatever co-isolated in the window, so `scannr` names the raw window scan, not a pseudo-spectrum. timsTOF diaPASEF pseudo-spectra are built straight from the frames, so their raw window spectra are read, and scanned, only with `quant.lfq`; without it a diaPASEF file has no QC entry.
+
+A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).

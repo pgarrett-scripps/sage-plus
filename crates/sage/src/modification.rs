@@ -662,6 +662,7 @@ impl ModificationSpecificity {
         decoy: bool,
         occurrences: &[crate::enzyme::ProteinOccurrence],
     ) -> Vec<crate::peptide::Site> {
+        use crate::ambiguous_residues::is_expansion_of;
         use crate::motif::MotifContext;
         use crate::peptide::Site;
         if !self.is_motif() {
@@ -685,6 +686,12 @@ impl ModificationSpecificity {
                 });
             }
         };
+        // An expanded peptide TSV row keeps its row as written in an
+        // occurrence without coordinates; it says nothing about neighbors.
+        let occurrences = occurrences
+            .iter()
+            .filter(|occurrence| occurrence.start.is_some() || occurrence.source.is_none())
+            .collect::<Vec<_>>();
         if occurrences.is_empty() {
             match &reversed {
                 Some(target) => collect(target, MotifContext::peptide_only(position), true),
@@ -703,13 +710,24 @@ impl ModificationSpecificity {
                         Some((protein.as_bytes(), start, span))
                     });
             match (protein, &reversed) {
-                (Some((protein, start, span)), _) if span == sequence => collect(
+                // Expanded ambiguous residues (B, X, Z) match their span as
+                // written; see `ambiguous_residues`.
+                (Some((protein, start, span)), _) if is_expansion_of(span, sequence) => collect(
                     sequence,
-                    MotifContext::in_protein(protein, start, len),
+                    MotifContext::in_digested_protein(protein, start, len, occurrence.met_clipped),
                     false,
                 ),
-                (Some((protein, start, span)), Some(target)) if span == target.as_slice() => {
-                    collect(target, MotifContext::in_protein(protein, start, len), true)
+                (Some((protein, start, span)), Some(target)) if is_expansion_of(span, target) => {
+                    collect(
+                        target,
+                        MotifContext::in_digested_protein(
+                            protein,
+                            start,
+                            len,
+                            occurrence.met_clipped,
+                        ),
+                        true,
+                    )
                 }
                 // Inconsistent coordinates cannot vouch for a motif.
                 (Some(_), _) => {}

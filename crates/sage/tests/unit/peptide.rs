@@ -191,10 +191,12 @@ fn var_mod_sequence(
 fn full() {
     let sequence = "MPEPTIDEKMSAGEKEND";
     let tryp = EnzymeParameters {
+        clip_n_term_met: false,
         min_len: 0,
         max_len: 50,
         missed_cleavages: 0,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let peptides = tryp
@@ -383,10 +385,12 @@ fn test_variable_mods_multi() {
 #[test]
 fn test_psuedo_forward() {
     let trypsin = crate::enzyme::EnzymeParameters {
+        clip_n_term_met: false,
         missed_cleavages: 0,
         min_len: 3,
         max_len: 30,
         enzyme: Enzyme::new("KR", "P", true, false),
+        ambiguous_variants: None,
     };
 
     let fwd = "MADEEKLPPGWEKRMSRSSGRVYYFNHITNASQWERPSGN";

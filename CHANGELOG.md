@@ -9,6 +9,133 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.12] - 2026-09-27
+
+### Added
+- `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
+  robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering
+  `|bias| + 4 × sigma`, from rank-1 target PSMs at 1% spectrum q-value (at least 100). The log
+  prints one `recommended tolerances: ...` line. The field is optional and the run-summary
+  schema stays at version 9.
+- Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
+  `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
+  Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.
+- Initiator methionine clipping, on by default (`database.clip_n_term_met`, default true).
+  Proteins starting with M followed by G, A, S, T, C, P, or V are also digested without the Met,
+  as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
+  N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
+  semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
+  prefilter, and the memory estimate include them. FASTA-supplied decoy proteins are clipped by
+  the same rule as written, so fully reversed decoys (ending in `M`) rarely gain peptides; use
+  generated decoys for a balanced search space. Non-specific digests and peptide TSV input
+  are unchanged. A motif's `<` anchor matches at residue 2 only for occurrences digested with
+  clipping, so a peptide that is protein N-terminal in another protein no longer satisfies it
+  at residue 2 when clipping is off or the digest is non-specific; the exported site library
+  follows the same rule. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
+  this adds 0.9% digests.
+- `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
+  (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
+  for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
+  drops peptides with more combinations; the log reports expanded, created and dropped counts.
+  FASTA proteins containing B, Z or X are logged at info level when expansion is on, and with a
+  warning that their peptides are not searched when it is off. `database.peptides` TSV rows
+  with B, Z or X are expanded the same way, under the same cap, instead of being skipped;
+  with expansion off they are still skipped with a warning.
+  Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
+  prefilter are identical. A PTM library record at a B, Z or X position validates, also in
+  strict mode, when its residue is one the FASTA residue expands to, and modifies only that
+  variant.
+- `database.merge_isoleucine_leucine` (default true) merges peptides that differ only in I,
+  L and J, with the same modifications and decoy flag, into one peptide listing every
+  protein. It keeps the most enzymatic occurrence and shows the sequence of the twin found
+  first in protein order; generated decoys merge the same way. Previously twins tied
+  (`delta_next` 0) and split protein inference. Set false for the previous behavior.
+- `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
+  expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
+- `results.sage.parquet` has a `substitutions` column listing the ambiguous residues replaced in
+  an expanded peptide, as `X4K;B7D` (residue as written, one-based position, residue searched).
+  It is empty for other peptides and when any protein has the residues as written. J is not
+  listed, since it is scored as I/L. It is computed at output time from the protein
+  occurrences, so peptides take no extra memory.
+- Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
+  row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
+  and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
+  and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
+  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. Peptides
+  expanded from ambiguous residues are classified on the FASTA residues as written, and a
+  terminus at a custom cleavage site counts as enzymatic. A one-line
+  summary is logged. The run-summary schema stays at
+  version 9.
+- Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
+  1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
+  percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
+  A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files, DDA and
+  diaPASEF, are checked only with `quant.lfq`, which reads their MS1 frames.
+- Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
+  fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
+  user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
+  `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
+  spectra containing each ion is logged and written to `run-summary.json` under
+  `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
+  DIA files are scanned on their raw wide-window MS2 before pseudo-spectrum conversion;
+  timsTOF diaPASEF files only when `quant.lfq` makes Sage read their raw frames.
+- Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
+  `sage_core::digestion` classifies and summarizes peptide termini (optionally with custom
+  cleavage sites);
+  `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
+- The README credits NIST [sageRecon](https://github.com/usnistgov/sageRecon), which inspired
+  initiator Met clipping, ambiguous-residue expansion, the QC outputs, and tolerance
+  recommendations. Sage Plus implements them independently.
+
+### Changed
+- The documentation no longer promises that upstream Sage configurations load unchanged.
+  The basic symbol-keyed modification form still works; new options use named definitions.
+- Results change with the new default: searches of FASTA proteins with a clippable Met gain the
+  clipped N-terminal peptides and their decoys. Set `clip_n_term_met` to false for the previous
+  search space.
+- When the same peptide comes from digests with different enzymatic state, the kept copy is now
+  the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
+  sort order or protein accession order. This also holds between proteins that share a
+  peptide at the same terminal position (for example a Met-clipped fully enzymatic N-terminal
+  peptide and a semi-enzymatic N-terminal copy in another protein). A FASTA copy is kept over a peptide TSV copy, whose placeholder state (whole protein, fully
+  enzymatic) would otherwise let protein-terminal modification rules apply to an internal
+  FASTA peptide.
+- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
+  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
+  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
+  as L.
+- Preliminary fragment matching resolves each spectrum's fragment-index buckets together: each
+  distinct bucket's precursor range is found once per candidate window, and 16 buckets' binary
+  searches run interleaved so their memory loads overlap. Adapted, with credit, from Matteo
+  Lacki's MIT-licensed Sage fork (MatteoLacki/sage 950641f and 062f7b3). Results are identical
+  (every PSM row and column matched the previous build on all three benchmarks). Median of 3
+  runs, 8 threads, previous build vs this one:
+  - HEK SILAC, closed search: search 0.71 s to 0.52 s (-27%), wall 6.43 s to 6.18 s (-4%).
+  - PXD028735 LFQ file (1.2 GB mzML), closed search: search 9.96 s to 8.07 s (-19%), wall
+    27.2 s to 25.0 s (-8%).
+  - HEK SILAC, open search (`prefilter-open`, -150 to +500 Da): prefilter 16.9 s to 15.8 s,
+    search 40.5 s to 38.9 s (-4%), wall 61.9 s to 60.5 s (-2%).
+  Peak memory is unchanged. The upstream fork's 2.27x came from a larger, memory-bound index;
+  wide searches here are dominated by scanning fragments, not by the bucket searches.
+- Lower peak memory without the prefilter. Modified peptides are now expanded in chunks of 65,536
+  digest groups instead of one parallel collect over the whole digest. The single collect left
+  per-thread pieces as large as the whole peptide list, and the allocator kept their pages
+  through the fragment index build, where peak memory occurs. Peptides come out in the same
+  order and PSMs are byte-identical. Human reviewed FASTA, 8 threads, 3 runs: peak RSS 1.44-1.53
+  GB to 1.25 GB with standard mods, and 7.76-8.30 GB to 7.00 GB with broad PTMs (seven variable
+  mods, 18.4 million peptides); wall time unchanged. Adapted from theGreatHerrLebert/sage
+  (commit ccce5da, chunked peptide materialisation).
+
+### Fixed
+- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
+  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
+  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
+  renamed `Median MS1 Mass Bias (ppm)`.
+- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
+  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
+  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

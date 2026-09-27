@@ -2,6 +2,7 @@ use fnv::FnvHashSet;
 use regex::Regex;
 use std::sync::Arc;
 
+use crate::ambiguous_residues;
 use crate::mass::VALID_AA;
 use crate::sequence::{PeptideSequence, ProteinSequence};
 
@@ -30,6 +31,11 @@ pub struct Digest {
     pub missed_cleavages: u8,
     /// Is this an N-terminal peptide of the protein?
     pub position: Position,
+    /// Source protein of a digest expanded from ambiguous FASTA residues
+    /// (B, X or Z). Its `sequence` is then a standalone allocation holding
+    /// one expansion, and `protein_start` locates the ambiguous span as
+    /// written in this protein. `None` for every other digest.
+    pub expanded_from: Option<ProteinSequence>,
 }
 
 #[derive(Clone)]
@@ -48,6 +54,11 @@ pub struct ProteinOccurrence {
     /// reference to the FASTA allocation, not a copy, and it does not take part
     /// in equality, ordering, or reporting.
     pub source: Option<ProteinSequence>,
+    /// The occurrence was digested from the protein with its initiator
+    /// methionine clipped (see [`metap_clips`]), so it starts the mature
+    /// protein at offset 1. Set only when clipping was enabled for an
+    /// enzymatic digest; it does not take part in equality or ordering.
+    pub met_clipped: bool,
 }
 
 impl ProteinOccurrence {
@@ -72,16 +83,25 @@ impl ProteinOccurrence {
     }
 
     fn with_source(digest: &Digest, protein_backed: bool) -> Self {
-        let (storage, offset) = digest.sequence.source();
-        let source = (digest.protein_start == Some(offset)
-            && (protein_backed || storage.as_bytes().len() > digest.sequence.len()))
-        .then_some(storage);
+        let source = match &digest.expanded_from {
+            // An expansion views its own allocation; its source is the
+            // protein the ambiguous span was cut from.
+            Some(protein) => digest.protein_start.map(|_| protein.clone()),
+            None => {
+                let (storage, offset) = digest.sequence.source();
+                (digest.protein_start == Some(offset)
+                    && (protein_backed || storage.as_bytes().len() > digest.sequence.len()))
+                .then_some(storage)
+            }
+        };
         Self {
             protein: digest.protein.clone(),
             start: digest.protein_start,
             prev_aa: digest.prev_aa,
             next_aa: digest.next_aa,
             source,
+            met_clipped: digest.protein_start == Some(1)
+                && matches!(digest.position, Position::Nterm | Position::Full),
         }
     }
 
@@ -98,6 +118,7 @@ impl std::fmt::Debug for ProteinOccurrence {
             .field("prev_aa", &self.prev_aa)
             .field("next_aa", &self.next_aa)
             .field("source", &self.source.is_some())
+            .field("met_clipped", &self.met_clipped)
             .finish()
     }
 }
@@ -148,16 +169,17 @@ fn group_digests_by(
     let mut groups = Vec::new();
     // A total order, so the group reference (which supplies semi-enzymatic
     // and missed-cleavage state) does not depend on which other digests are
-    // grouped alongside, e.g. in prefilter sequence buckets.
+    // grouped alongside, e.g. in prefilter sequence buckets. Within a group
+    // the most enzymatic occurrence comes first and becomes the reference.
     digests.sort_unstable_by(|a, b| {
         a.position
             .cmp(&b.position)
             .then(a.decoy.cmp(&b.decoy))
             .then(a.sequence.cmp(&b.sequence))
-            .then_with(|| a.protein.cmp(&b.protein))
-            .then(a.protein_start.cmp(&b.protein_start))
             .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
             .then(a.missed_cleavages.cmp(&b.missed_cleavages))
+            .then_with(|| a.protein.cmp(&b.protein))
+            .then(a.protein_start.cmp(&b.protein_start))
     });
     let mut digests = digests.into_iter();
     let first = digests.next().expect("checked non-empty above");
@@ -214,6 +236,7 @@ impl Digest {
             sequence: self.sequence.reversed_internal(),
             missed_cleavages: self.missed_cleavages,
             position: self.position,
+            expanded_from: self.expanded_from.clone(),
         }
     }
 }
@@ -233,6 +256,7 @@ impl std::hash::Hash for Digest {
     }
 }
 
+#[derive(Clone)]
 pub struct EnzymeParameters {
     /// Number of missed cleavages to produce
     pub missed_cleavages: u8,
@@ -241,6 +265,26 @@ pub struct EnzymeParameters {
     /// Inclusive
     pub max_len: usize,
     pub enzyme: Option<Enzyme>,
+    /// Also digest each protein as if methionine aminopeptidase removed its
+    /// initiator methionine. See [`metap_clips`]. Ignored by non-specific
+    /// digests.
+    pub clip_n_term_met: bool,
+    /// When set, each digest with ambiguous residues (B, X or Z) is replaced
+    /// by one digest per residue combination, and digests with more
+    /// combinations than this are dropped. When `None`, such digests are
+    /// returned as written and dropped when converted to peptides.
+    pub ambiguous_variants: Option<usize>,
+}
+
+/// Residues that let methionine aminopeptidase (MetAP) remove an initiator
+/// methionine when they sit at the second position of a protein.
+pub const METAP_SECOND_RESIDUES: &[u8] = b"GASTCPV";
+
+/// Does MetAP remove the initiator methionine of `protein`? True when the
+/// protein starts with M followed by a small residue in
+/// [`METAP_SECOND_RESIDUES`]. The clipped protein starts at offset 1.
+pub fn metap_clips(protein: &[u8]) -> bool {
+    matches!(protein, [b'M', second, ..] if METAP_SECOND_RESIDUES.contains(second))
 }
 
 #[derive(Clone)]
@@ -266,23 +310,70 @@ pub struct DigestSite {
 }
 
 impl Enzyme {
+    /// Check that `cleave` (`cleave_at`) and `skip_suffix` (`restrict`) name
+    /// only residues Sage can digest. Ambiguity codes such as B, Z, J and X,
+    /// lowercase letters and other symbols are rejected; `cleave` may also be
+    /// empty (no digestion) or `$` (cleave at the C-terminus only).
+    pub fn validate_residues(cleave: &str, skip_suffix: &str) -> Result<(), String> {
+        let invalid = |residues: &str| {
+            residues
+                .chars()
+                .filter(|x| !x.is_ascii() || !VALID_AA.contains(&(*x as u8)))
+                .collect::<String>()
+        };
+        let bad = invalid(cleave);
+        if !bad.is_empty() && cleave != "$" {
+            return Err(format!(
+                "`database.enzyme.cleave_at` contains unsupported residues `{bad}` in `{cleave}`; \
+                 use one-letter codes from {}, `$`, or an empty string",
+                std::str::from_utf8(&VALID_AA).unwrap_or_default()
+            ));
+        }
+        let bad = invalid(skip_suffix);
+        if !bad.is_empty() {
+            return Err(format!(
+                "`database.enzyme.restrict` contains unsupported residues `{bad}` in `{skip_suffix}`; \
+                 use one-letter codes from {}",
+                std::str::from_utf8(&VALID_AA).unwrap_or_default()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Build an enzyme, returning an error for unsupported residues instead of
+    /// panicking. `Ok(None)` means no digestion (empty `cleave`).
+    pub fn try_new(
+        cleave: &str,
+        skip_suffix: &str,
+        c_terminal: bool,
+        semi_enzymatic: bool,
+    ) -> Result<Option<Self>, String> {
+        Self::validate_residues(cleave, skip_suffix)?;
+        Ok(Self::build(cleave, skip_suffix, c_terminal, semi_enzymatic))
+    }
+
+    /// Build an enzyme from validated residues.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `cleave` or `skip_suffix` contains unsupported residues;
+    /// use [`Enzyme::try_new`] for untrusted input.
     pub fn new(
         cleave: &str,
         skip_suffix: &str,
         c_terminal: bool,
         semi_enzymatic: bool,
     ) -> Option<Self> {
-        assert!(
-            cleave.chars().all(|x| VALID_AA.contains(&(x as u8))) || cleave == "$",
-            "Enzyme cleavage sequence contains non-amino acid characters: {}",
-            cleave
-        );
-        assert!(
-            skip_suffix.chars().all(|x| VALID_AA.contains(&(x as u8))),
-            "Enzyme cleavage restriction contains non-amino acid characters: {}",
-            skip_suffix,
-        );
+        Self::try_new(cleave, skip_suffix, c_terminal, semi_enzymatic)
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
 
+    fn build(
+        cleave: &str,
+        skip_suffix: &str,
+        c_terminal: bool,
+        semi_enzymatic: bool,
+    ) -> Option<Self> {
         // At this point, cleave can be three things: empty, "$", or a string of valid AA's
         match cleave {
             "" => None,
@@ -307,6 +398,22 @@ impl Enzyme {
                 semi_enzymatic,
             }),
         }
+    }
+
+    /// Whether this enzyme cuts the bond between residues `left` and `right`,
+    /// by the rule [`Enzyme::cleavage_sites`] applies inside a protein: the
+    /// residue on the cleaved side matches the cleavage set and `right` is not
+    /// a restricted residue. The `$` (no-cleavage) enzyme never cuts a bond.
+    pub fn cleaves_between(&self, left: u8, right: u8) -> bool {
+        let site = if self.c_terminal { left } else { right };
+        if !site.is_ascii() {
+            return false;
+        }
+        let mut buffer = [0u8; 4];
+        let site = (site as char).encode_utf8(&mut buffer);
+        let matched = self.regex.find(site).is_some_and(|found| !found.is_empty());
+        let restricted = right.is_ascii_uppercase() && self.skip_suffix[(right - b'A') as usize];
+        matched && !restricted
     }
 
     pub fn cleavage_sites(&self, sequence: &str) -> Vec<DigestSite> {
@@ -497,11 +604,43 @@ impl EnzymeParameters {
             }
         }
 
+        // Initiator methionine clipping: every site anchored at the protein
+        // N-terminus is repeated from offset 1, where the clipped protein
+        // starts. These peptides are protein N-terminal, keep the enzymatic
+        // state of their unclipped counterpart, and stay in real protein
+        // coordinates. A span that the digest already produced from offset 1
+        // (a semi-enzymatic or custom cleavage after the Met) is emitted once,
+        // as the clipped N-terminal peptide.
+        let mut clipped_sites = Vec::new();
+        if self.clip_n_term_met && self.enzyme.is_some() && metap_clips(sequence.as_bytes()) {
+            // An enzyme boundary after the Met is not a missed cleavage of the
+            // clipped protein.
+            let cut_after_met = enzyme_boundaries.binary_search(&1).is_ok();
+            clipped_sites.extend(
+                sites
+                    .iter()
+                    .filter(|site| site.site.start == 0 && site.site.end > 1)
+                    .map(|site| DigestSite {
+                        site: 1..site.site.end,
+                        missed_cleavages: site.missed_cleavages.saturating_sub(cut_after_met as u8),
+                        semi_enzymatic: site.semi_enzymatic,
+                    }),
+            );
+        }
+
         // Keep ranges unique while preserving repeated peptide sequences at
         // different protein positions for protein-coordinate PTM libraries.
         let mut seen = FnvHashSet::default();
+        seen.extend(
+            clipped_sites
+                .iter()
+                .map(|site| (site.site.start, site.site.end)),
+        );
+        let mut seen_clipped = FnvHashSet::default();
 
-        for site in sites.iter_mut() {
+        let regular = sites.iter().map(|site| (site, false));
+        let clipped = clipped_sites.iter().map(|site| (site, true));
+        for (site, is_clipped) in regular.chain(clipped) {
             let start = site.site.start;
             let end = site.site.end;
 
@@ -512,14 +651,18 @@ impl EnzymeParameters {
 
             let len = peptide_sequence.len();
 
-            let position = match (start == 0, end == n) {
+            let position = match (start == 0 || is_clipped, end == n) {
                 (true, true) => Position::Full,
                 (true, false) => Position::Nterm,
                 (false, true) => Position::Cterm,
                 (false, false) => Position::Internal,
             };
 
-            if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert((start, end)) {
+            let unique = match is_clipped {
+                true => seen_clipped.insert((start, end)),
+                false => seen.insert((start, end)),
+            };
+            if len >= self.min_len && len <= self.max_len && len > 0 && unique {
                 digests.push(Digest {
                     sequence: peptide_sequence,
                     missed_cleavages: site.missed_cleavages,
@@ -530,11 +673,48 @@ impl EnzymeParameters {
                     protein_start: Some(start as u32),
                     prev_aa: start.checked_sub(1).map(|index| sequence.as_bytes()[index]),
                     next_aa: sequence.as_bytes().get(end).copied(),
+                    expanded_from: None,
                 });
             }
         }
-        digests
+        match self.ambiguous_variants {
+            Some(max_variants) => expand_ambiguous(digests, protein_sequence, max_variants),
+            None => digests,
+        }
     }
+}
+
+/// Replace every digest containing B, X or Z by its expansions (see
+/// [`ambiguous_residues::expand`]), dropping digests with more than
+/// `max_variants` of them. Cleavage sites were already chosen from the
+/// residues as written, so an X is never a trypsin site.
+fn expand_ambiguous(
+    digests: Vec<Digest>,
+    protein: &ProteinSequence,
+    max_variants: usize,
+) -> Vec<Digest> {
+    if !ambiguous_residues::is_ambiguous(protein.as_bytes()) {
+        return digests;
+    }
+    let mut expanded = Vec::with_capacity(digests.len());
+    for digest in digests {
+        let count = ambiguous_residues::variant_count(digest.sequence.as_bytes());
+        if count == 1 {
+            expanded.push(digest);
+            continue;
+        }
+        if count > max_variants {
+            continue;
+        }
+        for variant in ambiguous_residues::expand(digest.sequence.as_bytes()) {
+            expanded.push(Digest {
+                sequence: variant.into(),
+                expanded_from: Some(protein.clone()),
+                ..digest.clone()
+            });
+        }
+    }
+    expanded
 }
 
 #[cfg(test)]

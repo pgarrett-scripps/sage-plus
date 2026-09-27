@@ -182,6 +182,11 @@ fn spectral_library_cli_writes_both_formats_and_summary() -> anyhow::Result<()> 
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output_directory.join("run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
+    // One test spectrum is far below the PSMs needed for a recommendation.
+    assert!(summary["recommended_tolerances"]["skipped"]
+        .as_str()
+        .unwrap()
+        .contains("fewer than the 100 needed"));
     assert_eq!(summary["spectral_library"]["enabled"], true);
     assert_eq!(summary["spectral_library"]["entries"], 1);
     assert_eq!(summary["spectral_library"]["transitions"], 19);
@@ -267,6 +272,15 @@ fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
         .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid modification key `KK`"));
+    std::fs::write(&config, r#"{"database":{"enzyme":{"cleave_at":"KB"}}}"#)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg(&config)
+        .args(["--preview-modifications", "KAKAK"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains("unsupported residues `B`"), "{stderr}");
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
@@ -535,6 +549,182 @@ fn ptm_library_sites_match_with_and_without_prefilter() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The synthetic spectrum is ASPEPTIDEAAK, which this FASTA holds only after
+/// its initiator methionine: a clipped protein N-terminal peptide. It is found,
+/// fully enzymatic, with the default initiator Met clipping and the same with
+/// and without the prefilter, and not at all when clipping is off.
+#[test]
+fn clipped_initiator_methionine_peptides_match_with_and_without_prefilter() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-met-clip-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let fasta_path = root.join("proteins.fasta");
+    std::fs::write(
+        &fasta_path,
+        format!("{q99536}\n>sp|CLIP|CLIPPED\nMASPEPTIDEAAKGGLLR\n"),
+    )?;
+
+    let mut config: serde_json::Value = serde_json::from_slice(&std::fs::read(
+        workspace.join("tests/synthetic/config.json"),
+    )?)?;
+    config["database"]["fasta"] = fasta_path.display().to_string().into();
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["write_pin"] = true.into();
+
+    let run = |name: &str, prefilter: bool, clip: Option<bool>| -> anyhow::Result<_> {
+        let run_root = root.join(name);
+        std::fs::create_dir_all(&run_root)?;
+        let mut config = config.clone();
+        config["database"]["prefilter"] = prefilter.into();
+        if let Some(clip) = clip {
+            config["database"]["clip_n_term_met"] = clip.into();
+        }
+        let config_path = run_root.join("config.json");
+        std::fs::write(&config_path, serde_json::to_vec(&config)?)?;
+        run_sage_with_events(&workspace, &config_path, &run_root)?;
+
+        let pin = std::fs::read_to_string(run_root.join("output/results.sage.pin"))?;
+        let mut lines = pin.lines();
+        let headers = lines
+            .next()
+            .expect("pin header")
+            .split('\t')
+            .collect::<Vec<_>>();
+        let column = |name: &str| headers.iter().position(|h| *h == name).expect(name);
+        let columns = [
+            "SpecId",
+            "Label",
+            "Peptide",
+            "Proteins",
+            "semi_enzymatic",
+            "missed_cleavages",
+            "ln(hyperscore)",
+            "matched_peaks",
+        ]
+        .map(column);
+        let mut psms = lines
+            .map(|line| {
+                let fields = line.split('\t').collect::<Vec<_>>();
+                columns.map(|idx| fields[idx].to_string())
+            })
+            .collect::<Vec<_>>();
+        psms.sort();
+        Ok(psms)
+    };
+
+    let without = run("prefilter-false", false, None)?;
+    let with = run("prefilter-true", true, None)?;
+    let clipped = without
+        .iter()
+        .find(|psm| psm[2] == "ASPEPTIDEAAK")
+        .unwrap_or_else(|| panic!("the clipped peptide is not identified: {without:?}"));
+    assert_eq!(clipped[1], "1");
+    assert_eq!(clipped[3], "sp|CLIP|CLIPPED");
+    assert_eq!(clipped[4], "0", "a clipped peptide is not semi-enzymatic");
+    assert_eq!(without, with, "prefilter changed the clipped peptide PSMs");
+
+    let unclipped = run("no-clip", false, Some(false))?;
+    assert!(
+        unclipped.iter().all(|psm| psm[2] != "ASPEPTIDEAAK"),
+        "{unclipped:?}"
+    );
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+/// Expanded ambiguous residues give the same PSMs with and without the
+/// streamed prefilter. The X-containing digest is expanded in one protein, and
+/// one of its variants is also written plainly in another, so both the
+/// per-protein and the shared-sequence prefilter paths see expanded digests.
+#[test]
+fn expanded_ambiguous_residues_match_with_and_without_prefilter() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-ambiguous-prefilter-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+
+    let fasta = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let mut lines = fasta.lines();
+    let header = lines.next().expect("FASTA header");
+    let sequence: String = lines.collect();
+    let peptide = "LQSRPAAPPAPGPGQLTLR";
+    // Write the T of QLTLR as X.
+    let start = sequence.find(peptide).expect("test peptide") + peptide.len() - 3;
+    let mutated = format!("{}X{}", &sequence[..start], &sequence[start + 1..]);
+    let fasta_path = root.join("proteins.fasta");
+    std::fs::write(
+        &fasta_path,
+        format!("{header}\n{mutated}\n>sp|SHARED|TEST\nMKLQSRPAAPPAPGPGQLTLRGGK\n"),
+    )?;
+
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta_path.display().to_string().into();
+    config["database"]["expand_ambiguous_residues"] = true.into();
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["report_psms"] = 5.into();
+    config["write_pin"] = true.into();
+
+    let mut results = Vec::new();
+    for prefilter in [false, true] {
+        let run_root = root.join(format!("prefilter-{prefilter}"));
+        std::fs::create_dir_all(&run_root)?;
+        let mut config = config.clone();
+        config["database"]["prefilter"] = prefilter.into();
+        let config_path = run_root.join("config.json");
+        std::fs::write(&config_path, serde_json::to_vec(&config)?)?;
+        run_sage_with_events(&workspace, &config_path, &run_root)?;
+
+        let pin = std::fs::read_to_string(run_root.join("output/results.sage.pin"))?;
+        let mut lines = pin.lines();
+        let headers = lines
+            .next()
+            .expect("pin header")
+            .split('\t')
+            .collect::<Vec<_>>();
+        let column = |name: &str| headers.iter().position(|h| *h == name).expect(name);
+        let columns = [
+            "SpecId",
+            "Label",
+            "rank",
+            "Peptide",
+            "Proteins",
+            "ln(hyperscore)",
+            "matched_peaks",
+        ]
+        .map(column);
+        let mut psms = lines
+            .map(|line| {
+                let fields = line.split('\t').collect::<Vec<_>>();
+                columns.map(|idx| fields[idx].to_string())
+            })
+            .collect::<Vec<_>>();
+        psms.sort();
+        results.push(psms);
+    }
+
+    let (without, with) = (&results[0], &results[1]);
+    assert!(
+        without.iter().any(|psm| psm[3] == peptide
+            && psm[4].contains("sp|Q99536|VAT1_HUMAN")
+            && psm[4].contains("sp|SHARED|TEST")),
+        "no PSM maps the expanded peptide to both proteins: {without:?}"
+    );
+    assert_eq!(without, with, "prefilter changed the expanded PSMs");
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// End-to-end N-glycosylation motif search on a synthetic spectrum. The sequon
 /// of the identified peptide is completed by the residue after it, so the
 /// search, localization, and reusable library all need protein context.
@@ -655,6 +845,88 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
             ["eligible_sites"],
         serde_json::json!([{"position": 10}])
     );
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn quality_control_outputs_are_written() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-qc-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    // A window covering the whole spectrum matches its most intense peak.
+    config["diagnostic_ions"] = serde_json::json!([
+        {"name": "anything", "mz": 1000.0, "tolerance": {"da": [-1000.0, 1000.0]}},
+        {"name": "HexNAc", "mz": 204.0867}
+    ]);
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("digestion: "), "{stderr}");
+
+    let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
+    let lines = digestion.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 3, "{digestion}");
+    assert!(lines[0].starts_with("file\ttarget_peptides\tdecoy_peptides\tpeptides\t"));
+    assert!(lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\t"));
+    assert!(lines[2].starts_with("total\t"));
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 9);
+    let total = &summary["qc"]["digestion"]["total"];
+    assert!(total["target_peptides"].as_u64().is_some());
+    assert_eq!(
+        summary["qc"]["digestion"]["files"][0]["file"],
+        "LQSRPAAPPAPGPGQLTLR.mzML"
+    );
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
+    // The test file has no MS1 spectra, so no polymer rows are reported.
+    assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
+
+    assert!(
+        stderr.contains("diagnostic ions in 1 MS2 spectra: anything 100.00%, HexNAc 0.00%"),
+        "{stderr}"
+    );
+    let diagnostic = std::fs::read_to_string(root.join("output/diagnostic_ions.tsv"))?;
+    let lines = diagnostic.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{diagnostic}");
+    assert_eq!(lines[0], "file\tscannr\tion\tmz\trelative_intensity");
+    let row = lines[1].split('\t').collect::<Vec<_>>();
+    assert_eq!(row[0], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert_eq!(row[2], "anything");
+    let relative_intensity = row[4].parse::<f64>()?;
+    assert!(relative_intensity > 0.0 && relative_intensity <= 1.0);
+    let ions = &summary["qc"]["diagnostic_ions"];
+    assert_eq!(ions["ms2_spectra"], 1);
+    assert_eq!(ions["ions"][0]["spectra"], 1);
+    assert_eq!(ions["ions"][1]["spectra"], 0);
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("diagnostic_ions.tsv")));
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
