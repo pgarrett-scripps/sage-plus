@@ -9,6 +9,12 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
+  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
+  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
+  as L.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added

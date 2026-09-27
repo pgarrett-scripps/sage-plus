@@ -159,6 +159,8 @@ impl RetentionModel {
         for (idx, aa) in VALID_AA.iter().enumerate() {
             map[(aa - b'A') as usize] = idx;
         }
+        // J (Ile or Leu) shares the Leu embedding.
+        map[(b'J' - b'A') as usize] = map[(b'L' - b'A') as usize];
 
         let lr = match feature_set {
             RetentionTimeFeatureSet::Basic => LinearRegression::fit::<_, BASIC_FEATURES>(
@@ -226,7 +228,8 @@ fn hydrophobicity(residue: u8) -> f64 {
     match residue {
         b'I' => 4.5,
         b'V' => 4.2,
-        b'L' => 3.8,
+        // J (Ile or Leu) is embedded as Leu.
+        b'L' | b'J' => 3.8,
         b'F' => 2.8,
         b'C' => 2.5,
         b'M' => 1.9,
@@ -292,7 +295,7 @@ fn physicochemical_source_embed(
         negative += usize::from(matches!(residue, b'D' | b'E'));
         polar += usize::from(matches!(residue, b'S' | b'T' | b'N' | b'Q' | b'C' | b'Y'));
         aromatic += usize::from(matches!(residue, b'F' | b'W' | b'Y'));
-        aliphatic += usize::from(matches!(residue, b'I' | b'L' | b'V'));
+        aliphatic += usize::from(matches!(residue, b'I' | b'L' | b'J' | b'V'));
         proline += usize::from(residue == b'P');
         glycine += usize::from(residue == b'G');
     }

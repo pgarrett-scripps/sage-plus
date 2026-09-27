@@ -1,6 +1,6 @@
 use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Digest, EnzymeParameters};
-use crate::mass::VALID_AA;
+use crate::mass::monoisotopic;
 use crate::sequence::ProteinSequence;
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -49,10 +49,10 @@ impl Fasta {
                 if last_id.is_none() {
                     return Err(FastaError::MissingHeader { line: line_number });
                 }
-                // Ambiguous or unknown uppercase residues (X, B, Z, J) are kept
-                // so the rest of the protein remains searchable; peptides that
-                // contain a residue without a defined mass are dropped when
-                // digests are converted to peptides.
+                // Ambiguous uppercase residues (B, J, X, Z) are kept so the
+                // rest of the protein remains searchable. J carries the I/L
+                // mass; peptides with B, X or Z are expanded or dropped at
+                // digestion, see `database.expand_ambiguous_residues`.
                 if let Some(residue) = line.bytes().find(|residue| !residue.is_ascii_uppercase()) {
                     return Err(FastaError::InvalidResidue {
                         line: line_number,
@@ -83,12 +83,12 @@ impl Fasta {
                 sequence
                     .as_str()
                     .bytes()
-                    .any(|residue| !VALID_AA.contains(&residue))
+                    .any(|residue| monoisotopic(residue) == 0.0)
             })
             .count();
         if nonstandard > 0 {
             log::warn!(
-                "{nonstandard} FASTA protein(s) contain residues without a defined mass (e.g. X, B, Z, J); peptides containing them will not be searched"
+                "{nonstandard} FASTA protein(s) contain residues without a defined mass (e.g. B, X, Z); peptides containing them will not be searched"
             );
         }
 

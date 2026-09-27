@@ -809,13 +809,15 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
         assert!(sequences.contains(&("PEPTIDEK", false)));
         assert!(sequences.contains(&("LLLLLK", false)));
         assert!(sequences.contains(&("MSSWWHHK", false)));
+        // J (Ile or Leu) has the I/L mass and is kept as written.
+        assert!(sequences.contains(&("TTJTTR", false)));
         assert!(sequences.iter().any(|(_, decoy)| *decoy));
         for peptide in &peptides {
             assert!(
                 peptide
                     .sequence
                     .iter()
-                    .all(|residue| crate::mass::VALID_AA.contains(residue)),
+                    .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J'),
                 "{peptide:?}"
             );
             assert!(peptide.monoisotopic > 0.0);
@@ -827,7 +829,7 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
     assert!(database.peptides.iter().all(|peptide| peptide
         .sequence
         .iter()
-        .all(|residue| crate::mass::VALID_AA.contains(residue))));
+        .all(|residue| crate::mass::VALID_AA.contains(residue) || *residue == b'J')));
 }
 
 #[test]
