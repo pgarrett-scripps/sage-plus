@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `lfq.parquet` gains `extraction_q_value`, a target-decoy q-value for every precursor/file row
+  (MS2-backed and transferred). Each target's shifted decoy is scored at the target's own peak,
+  with its own per-file warp search, and competes by `file_score`. LFQ schemas move to version 5
+  (unlabeled) and 6 (labeled). The log prints how many target rows pass 1%. The value is a
+  diagnostic, not a calibrated transfer FDR, and the MBR default is unchanged.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added
