@@ -61,6 +61,11 @@ entries are retained below for provenance.
 - `run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and
   `protein_sites_at_one_percent_fdr` under `ptm_localization`. The fields are optional and the
   run-summary schema version is unchanged.
+- `lfq.parquet` gains `extraction_q_value`, a target-decoy q-value for every precursor/file row
+  (MS2-backed and transferred). Each target's shifted decoy is scored at the target's own peak,
+  with its own per-file warp search, and competes by `file_score`. LFQ schemas move to version 5
+  (unlabeled) and 6 (labeled). The log prints how many target rows pass 1%. The value is a
+  diagnostic, not a calibrated transfer FDR, and the MBR default is unchanged.
 
 ### Changed
 - Peptide, protein and protein-group q-values are now textbook picked FDR (Savitski et al.

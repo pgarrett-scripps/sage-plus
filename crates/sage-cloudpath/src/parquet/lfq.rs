@@ -2,15 +2,15 @@ use super::*;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/lfq.v3.parquet.schema"
+        "../../../../schemas/lfq.v5.parquet.schema"
     ))
 }
 
 fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/lfq.v4.parquet.schema")
+        include_str!("../../../../schemas/lfq.v6.parquet.schema")
     } else {
-        include_str!("../../../../schemas/lfq.v3.parquet.schema")
+        include_str!("../../../../schemas/lfq.v5.parquet.schema")
     })
 }
 
@@ -76,8 +76,12 @@ pub fn serialize_lfq<H: BuildHasher>(
                 Some("experimental_uncalibrated".into()),
             ),
             KeyValue::new(
+                "sage.lfq.extraction_q_value_scope".into(),
+                Some("precursor_file_all_rows".into()),
+            ),
+            KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "4" } else { "3" }.into()),
+                Some(if has_labels { "6" } else { "5" }.into()),
             ),
         ],
         provenance,
@@ -388,6 +392,25 @@ pub fn serialize_lfq<H: BuildHasher>(
             }
         }
         col.typed::<BoolType>()
+            .write_batch(&values, Some(&levels), None)?;
+        col.close()?;
+    }
+    if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::new();
+        let mut levels = Vec::new();
+        for evidence in rows.iter().flat_map(|(_, peak)| &peak.file_evidence) {
+            match evidence
+                .as_ref()
+                .and_then(|evidence| evidence.extraction_q_value)
+            {
+                Some(q) => {
+                    values.push(q);
+                    levels.push(1);
+                }
+                None => levels.push(0),
+            }
+        }
+        col.typed::<FloatType>()
             .write_batch(&values, Some(&levels), None)?;
         col.close()?;
     }

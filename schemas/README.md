@@ -11,6 +11,8 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.
 - `lfq.v4.parquet.schema` adds those diagnostics to labeled LFQ.
+- `lfq.v5.parquet.schema` adds the per-row `extraction_q_value` to unlabeled LFQ.
+- `lfq.v6.parquet.schema` adds it to labeled LFQ.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.
@@ -37,7 +39,7 @@ support, and minimum fragment frequency. `library_entry_id` groups transitions b
 same exact peptidoform and precursor charge.
 
 Unlabeled searches write version 1 result schemas. A configured precursor-label search writes
-version 2 results. LFQ uses version 3 without labels and version 4 with labels. Protein site coordinates are one-based and inclusive.
+version 2 results. LFQ uses version 5 without labels and version 6 with labels. Protein site coordinates are one-based and inclusive.
 Spectral libraries use version 2 only when labeled entries are present.
 
 Beta 6 adds `ptm_library.v2.parquet.schema`, `ptm_sites.v2.parquet.schema`, and

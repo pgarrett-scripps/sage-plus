@@ -331,6 +331,11 @@ impl Runner {
                 });
 
                 log::info!("discovered {} target MS1 peaks at 5% FDR", q_precursor);
+                let q_extraction = sage_core::fdr::extraction_q_values(&mut areas);
+                log::info!(
+                    "{} target LFQ precursor/file rows pass 1% extraction FDR",
+                    q_extraction
+                );
                 Some(areas)
             } else {
                 None

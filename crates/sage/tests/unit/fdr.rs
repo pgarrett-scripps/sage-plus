@@ -435,6 +435,7 @@ fn picked_precursor_assigns_count_q_values_per_charge_state() {
         ms2_confirmed: Vec::new(),
         ms2_confirmed_strict: Vec::new(),
         file_evidence: Vec::new(),
+        paired_decoy_evidence: Vec::new(),
     };
     let mut peaks = FnvHashMap::default();
     // 20 targets at 100..81, one decoy at 50, one target at 40.
@@ -575,4 +576,119 @@ fn picked_peptide_reports_a_target_beaten_by_its_decoy_with_q_one() {
     }
     assert_eq!(features[40].peptide_q, 1.0);
     assert!((features[41].peptide_q - 0.1).abs() < 1e-6);
+}
+
+fn extraction_peak(scores: &[Option<f64>], paired: &[Option<f64>]) -> QuantifiedPeak {
+    let evidence = |scores: &[Option<f64>]| {
+        scores
+            .iter()
+            .map(|score| {
+                score.map(|score| crate::lfq::FileEvidence {
+                    score,
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    QuantifiedPeak {
+        peak: crate::lfq::Peak::default(),
+        intensities: scores.iter().map(|score| score.map(|_| 1.0)).collect(),
+        ms2_confirmed: vec![false; scores.len()],
+        ms2_confirmed_strict: vec![false; scores.len()],
+        file_evidence: evidence(scores),
+        paired_decoy_evidence: evidence(paired),
+    }
+}
+
+/// 100 targets in two files, three paired decoy rows and one weak target row.
+fn extraction_fixture(reverse: bool) -> FnvHashMap<(PrecursorId, bool), QuantifiedPeak> {
+    let mut entries = (0..100u32)
+        .map(|i| {
+            let paired = match i {
+                0 => [Some(0.9), None],
+                1 => [Some(0.4), Some(0.39)],
+                _ => [None, None],
+            };
+            (
+                (PrecursorId::Combined(PeptideIx(i)), false),
+                // File 1 plays the transfer: every row gets its own q-value.
+                extraction_peak(
+                    &[Some(1.0 - i as f64 * 0.001), Some(0.5 - i as f64 * 0.001)],
+                    &paired,
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.push((
+        (PrecursorId::Combined(PeptideIx(100)), false),
+        extraction_peak(&[Some(0.1), None], &[None, None]),
+    ));
+    // A decoy precursor's own peak is not a competitor: its high score must
+    // not change any target q-value, and it gets no q-value itself.
+    entries.push((
+        (PrecursorId::Combined(PeptideIx(0)), true),
+        extraction_peak(&[Some(2.0), Some(2.0)], &[]),
+    ));
+    if reverse {
+        entries.reverse();
+    }
+    entries.into_iter().collect()
+}
+
+fn extraction_q(
+    peaks: &FnvHashMap<(PrecursorId, bool), QuantifiedPeak>,
+    ix: u32,
+    decoy: bool,
+    file: usize,
+) -> Option<f32> {
+    peaks[&(PrecursorId::Combined(PeptideIx(ix)), decoy)].file_evidence[file]
+        .as_ref()
+        .and_then(|evidence| evidence.extraction_q_value)
+}
+
+#[test]
+fn extraction_q_values_count_paired_decoy_extractions_per_file_row() {
+    let mut peaks = extraction_fixture(false);
+    let passing = extraction_q_values(&mut peaks);
+
+    // Ranked: 100 file-0 targets, decoy 0.9, 100 file-1 targets, decoys 0.4
+    // and 0.39, then the weak target. The file-0 targets reach (0 + 1) / 100
+    // = 1% and the file-1 targets (1 + 1) / 200 = 1%, so all 200 pass. The
+    // weak row sees (3 + 1) / 201.
+    assert_eq!(passing, 200);
+    for i in 0..100 {
+        for file in 0..2 {
+            let q = extraction_q(&peaks, i, false, file).unwrap();
+            assert!((q - 0.01).abs() < 1e-6, "target {i} file {file}: {q}");
+        }
+    }
+    let weak = extraction_q(&peaks, 100, false, 0).unwrap();
+    assert!((weak - 4.0 / 201.0).abs() < 1e-6, "{weak}");
+    // A row without a signal has no evidence and no q-value.
+    assert!(peaks[&(PrecursorId::Combined(PeptideIx(100)), false)].file_evidence[1].is_none());
+    assert_eq!(extraction_q(&peaks, 0, true, 0), None);
+    assert_eq!(extraction_q(&peaks, 0, true, 1), None);
+}
+
+#[test]
+fn extraction_q_values_do_not_depend_on_insertion_order() {
+    let mut forward = extraction_fixture(false);
+    let mut reverse = extraction_fixture(true);
+    assert_eq!(
+        extraction_q_values(&mut forward),
+        extraction_q_values(&mut reverse)
+    );
+    for (key, peak) in &forward {
+        for (left, right) in peak.file_evidence.iter().zip(&reverse[key].file_evidence) {
+            assert_eq!(
+                left.as_ref()
+                    .and_then(|e| e.extraction_q_value)
+                    .map(f32::to_bits),
+                right
+                    .as_ref()
+                    .and_then(|e| e.extraction_q_value)
+                    .map(f32::to_bits)
+            );
+        }
+    }
 }
