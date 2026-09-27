@@ -1506,8 +1506,8 @@ grouping off) and the grouping peptide q-value.
 - `charge`: Precursor charge, or null when charge states were combined.
 - `proteins`: Protein assignments.
 - `is_decoy`: Whether the LFQ precursor is a decoy.
-- `q_value`: Precursor-level q-value assigned by picked target-decoy competition.
-- `score`: Cross-run LFQ peak score used for precursor-level competition.
+- `q_value`: Precursor-level q-value: every target and shifted-decoy precursor is ranked by `score`, and q is (decoys + 1) / targets at each score, made monotonic. Targets and decoys are counted together, without pairing (not picked competition). The same value repeats on every file row of a precursor. Lower is better.
+- `score`: Cross-run LFQ peak score used to rank precursors for `q_value`. Higher is better.
 - `spectral_angle`: Intensity-weighted normalized isotope-pattern spectral angle for the selected cross-run peak.
 - `filename`: Acquisition file represented by this row.
 - `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
