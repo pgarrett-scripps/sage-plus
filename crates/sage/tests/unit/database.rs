@@ -2315,6 +2315,55 @@ fn fasta_copy_of_a_peptide_keeps_its_position_over_a_tsv_copy() {
     assert_eq!(proteins, ["P1", "T1"]);
 }
 
+#[test]
+fn generated_decoys_of_n_terminal_peptides_stay_balanced_and_n_terminal() {
+    // ASEQK is semi-enzymatic at the N-terminus of "a" (K-P is not cut) and
+    // the fully enzymatic clipped N-terminal peptide of "b".
+    let fasta = Fasta::parse(
+        ">a\nASEQKPLLRGGDDK\n>b\nMASEQKGLLRWWEEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 1, "min_len": 5, "semi_enzymatic": true, "restrict": "P"},
+        "peptide_min_mass": 100.0,
+        "generate_decoys": true,
+    }))
+    .unwrap()
+    .make_parameters();
+    let peptides = parameters.digest(&fasta);
+    let n_terminal = |decoy: bool| {
+        peptides
+            .iter()
+            .filter(|peptide| peptide.decoy == decoy && peptide.position == Position::Nterm)
+            .map(|peptide| (peptide.semi_enzymatic, peptide.missed_cleavages))
+            .collect::<Vec<_>>()
+    };
+    let (mut targets, mut decoys) = (n_terminal(false), n_terminal(true));
+    targets.sort_unstable();
+    decoys.sort_unstable();
+    assert!(!targets.is_empty());
+    assert_eq!(targets, decoys);
+    let find = |name: &str| {
+        peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+    };
+    for name in ["ASEQK", "AQESK"] {
+        let peptide = find(name);
+        assert_eq!(peptide.position, Position::Nterm, "{name}");
+        assert!(!peptide.semi_enzymatic, "{name}");
+        assert_eq!(peptide.protein_sites.len(), 2, "{name}");
+    }
+    assert!(find("AQESK").decoy);
+    // The unclipped N-terminal peptide of "b" and its decoy.
+    assert_eq!(find("MASEQK").position, Position::Nterm);
+    assert_eq!(find("MQESAK").position, Position::Nterm);
+    assert!(find("MQESAK").decoy);
+}
+
 fn ambiguous_parameters(expand: bool) -> Parameters {
     Builder {
         enzyme: Some(EnzymeBuilder {
