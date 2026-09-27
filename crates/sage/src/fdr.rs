@@ -1,12 +1,13 @@
-//! False discovery rate control using double-competition (picked-peptide &
-//! picked-protein) approaches
+//! False discovery rate control using double-competition (picked-peptide,
+//! picked-protein and picked-protein-group) approaches. Only the winner of
+//! each target-decoy pair is ranked; q-values are `(decoys + 1) / targets`.
 //!
 //! Lin et al., <https://pubmed.ncbi.nlm.nih.gov/36166314/>
 //! Savitski et al., <https://pubmed.ncbi.nlm.nih.gov/25987413/>
+//! The et al. 2022, "picked protein group FDR" (Mol Cell Proteomics 21:100437)
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::lfq::{PrecursorId, QuantifiedPeak};
-use crate::ml::kde::Estimator;
 use crate::peptide::Peptide;
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
@@ -49,31 +50,14 @@ impl<Ix: Default + Send> Competition<Ix> {
         self.reverse >= self.forward
     }
 
-    fn fit_kde<K, B>(scores: &HashMap<K, Self, B>) -> Option<Estimator> {
-        let (scores, decoys): (Vec<f64>, Vec<bool>) = scores
-            .values()
-            .map(|score| (score.score() as f64, score.is_decoy()))
-            .unzip();
-        for class in [false, true] {
-            let sample = scores
-                .iter()
-                .zip(&decoys)
-                .filter_map(|(score, decoy)| (*decoy == class).then_some(*score))
-                .collect::<Vec<_>>();
-            if sample.len() < 2
-                || sample.iter().any(|score| !score.is_finite())
-                || !sample.iter().any(|score| *score != sample[0])
-            {
-                return None;
-            }
-        }
-        let estimator = crate::ml::kde::Builder::default().build(&scores, &decoys);
-        scores
-            .iter()
-            .all(|score| estimator.posterior_error(*score).is_finite())
-            .then_some(estimator)
-    }
-
+    /// Picked target-decoy q-values (Savitski et al. 2015; The et al. 2022).
+    ///
+    /// Each competition keeps only its winner: the target when it outscores
+    /// its decoy, otherwise the decoy (a tie goes to the decoy). Winners are
+    /// ranked by score and q is `(decoys + 1) / targets` over complete
+    /// tied-score groups, followed by the reverse cumulative minimum and a cap
+    /// at 1. The losing member is discarded from the ranking and reported with
+    /// q = 1, so a target beaten by its own decoy never passes.
     fn assign_q_value<K, B>(
         scores: HashMap<K, Self, B>,
         threshold: f32,
@@ -83,71 +67,33 @@ impl<Ix: Default + Send> Competition<Ix> {
         Ix: Eq + std::hash::Hash,
         B: BuildHasher + Default + Send,
     {
-        let estimator = Self::fit_kde(&scores);
-        let mut scores = scores
-            .into_par_iter()
-            .flat_map(|(_, comp)| {
-                [
-                    (comp.foward_ix, false, comp.forward),
-                    (comp.reverse_ix, true, comp.reverse),
-                ]
-            })
-            .filter_map(|(ix, decoy, score)| {
-                ix.map(|ix| Row {
+        let mut winners = Vec::with_capacity(scores.len());
+        let mut losers = Vec::new();
+        for (_, comp) in scores {
+            let decoy = comp.is_decoy();
+            let score = comp.score();
+            let (winner, loser) = match decoy {
+                true => (comp.reverse_ix, comp.foward_ix),
+                false => (comp.foward_ix, comp.reverse_ix),
+            };
+            if let Some(ix) = winner {
+                winners.push(Row {
                     ix,
                     decoy,
                     score,
                     q: 1.0,
-                })
-            })
-            .collect::<Vec<Row<Ix>>>();
-
-        scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
-
-        if estimator.is_none() {
-            log::warn!("peptide/protein/site confidence model is underdetermined, using target-decoy counts with a +1 correction");
-            let passing = assign_count_q_values(&mut scores, threshold);
-            return (
-                scores
-                    .into_iter()
-                    .map(|score| (score.ix, score.q))
-                    .collect(),
-                passing,
-            );
-        }
-        let estimator = estimator.unwrap();
-
-        let mut decoy = 1.0;
-        let mut target = 0.0;
-        for score in scores.iter_mut() {
-            let pep = estimator.posterior_error(score.score as f64) as f32;
-
-            // Cumulative sum of PEP ~ # of decoys
-            decoy += pep;
-            if !score.decoy {
-                target += 1.0;
+                });
             }
-            score.q = decoy / target;
-        }
-        // Q-value is the minimum q-value at any given score threshold
-        // `q = q[::-1].cummin()[::-1] in python`
-        let mut q_min = 1.0f32;
-        let mut passing = 0;
-        for score in scores.iter_mut().rev() {
-            q_min = q_min.min(score.q);
-            score.q = q_min;
-            if q_min <= threshold && !score.decoy {
-                passing += 1;
-            }
+            losers.extend(loser);
         }
 
-        (
-            scores
-                .into_par_iter()
-                .map(|score| (score.ix, score.q))
-                .collect(),
-            passing,
-        )
+        let passing = assign_count_q_values(&mut winners, threshold);
+        let mut q = winners
+            .into_iter()
+            .map(|row| (row.ix, row.q))
+            .collect::<HashMap<_, _, B>>();
+        q.extend(losers.into_iter().map(|ix| (ix, 1.0)));
+        (q, passing)
     }
 }
 
@@ -413,11 +359,11 @@ fn decoy_competition_group(
 /// order.
 ///
 /// Each entry is one reported site, scored so that higher is better. Target
-/// and decoy sites are not paired: every site competes on its own side, and the
-/// q-values come from the same posterior-error model as the peptide and protein
-/// levels, falling back to +1-corrected target-decoy counts when that model is
-/// underdetermined. Sites with the same score share one q-value, the most
-/// conservative in the tie, so the result never depends on input order.
+/// and decoy sites are not paired: every site competes on its own side, so
+/// each is its own winner and q is `(decoys + 1) / targets` at complete score
+/// thresholds, as for the peptide and protein levels. Sites with the same
+/// score share one q-value, the most conservative in the tie, so the result
+/// never depends on input order.
 pub fn site_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
     let map = evidence
         .iter()

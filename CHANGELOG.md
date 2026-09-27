@@ -53,7 +53,7 @@ entries are retained below for provenance.
   integration test validates real outputs against them.
 - Site-level FDR for PTM site reports. `results.sage.protein-sites.parquet` gains `site_score`
   (best supporting PSM discriminant score) and `site_q_value`, a target-decoy q-value estimated
-  over protein sites with the same model as the peptide and protein levels.
+  over protein sites with the same target-decoy estimator as the peptide and protein levels.
   `results.sage.ptm-sites.parquet` gains `site_q_value`, the best q-value of the protein sites
   each row supports. Filter on `site_q_value <= 0.01` for 1% site FDR. Schemas `protein_sites`
   and `ptm_sites` move to version 3 (`schemas/*.v3.parquet.schema`); all version 2 columns are
@@ -63,6 +63,15 @@ entries are retained below for provenance.
   run-summary schema version is unchanged.
 
 ### Changed
+- Peptide, protein and protein-group q-values are now textbook picked FDR (Savitski et al.
+  2015; The et al. 2022). Only the winner of each target-decoy pair is ranked, q is
+  `(decoys + 1) / targets` over complete tied-score groups, and the losing member is reported
+  with q = 1. Previously both members were ranked and the numerator was a running sum of a
+  KDE posterior error fitted on the winners, so a target beaten by its own decoy could still
+  pass. On two human-only entrapment searches the entrapment FDP at 1% is unchanged within
+  noise and identifications at 1% change by at most 0.3% (`benchmarks/PICKED_FDR.md`).
+  Spectrum q-values and the per-PSM `posterior_error` are unchanged. Output columns and
+  schemas are unchanged.
 - PTM localization also runs on decoy PSMs that pass `ptm_localization.psm_q_value`, so decoy
   sites exist to count. Decoy PSMs stay out of the false-localization-rate competition and take
   the target curve's localization q-value at their own score, so every PSM and localization gate
