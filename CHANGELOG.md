@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.13] - 2026-09-27
+
 ### Fixed
 - TMT/isobaric reporter channels that are not observed are now missing values instead of 0.0
   (grounding HC-QUANT-02). `TmtQuant::peaks` is `Vec<Option<f32>>`, and

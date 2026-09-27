@@ -8,7 +8,7 @@ Sage Plus is a fork of the [Sage proteomics search engine](https://github.com/la
 people who need more than a standard closed search: very large or PTM-heavy databases, site
 localization, Thermo RAW input without conversion, and machine-readable outputs. It keeps Sage's
 workflow and configuration style, and most additions are opt-in. The current release is
-**v0.1.0-beta.12**, a prerelease.
+**v0.1.0-beta.13**, a prerelease.
 
 ```shell
 # Download a binary from the releases page, or build from source (Rust 1.88+):
@@ -30,8 +30,8 @@ in 19 GiB (14,459 PSMs in 451 s). See [settings](DOCS.md#fasta) and [benchmark](
 
 **Localize PTM sites with a false-localization rate.** `ptm_localization` rescores each arrangement
 of a PSM's modifications on site-determining ions against impossible-site decoys. It writes site
-probabilities and localization q-values to PSM-level and protein-level site tables, plus a
-reusable site library. See [PTM site localization](DOCS.md#ptm-site-localization).
+probabilities and localization q-values to PSM-level and protein-level site tables, a site-level
+target-decoy q-value (`site_q_value`), and a reusable site library. See [PTM site localization](DOCS.md#ptm-site-localization).
 
 **Search modifications without growing the index.** Mass-offset modifications are placed at
 scoring time instead of expanded into the fragment index: a phosphorylation search used 0.16 GB
@@ -56,6 +56,7 @@ Better defaults and scoring for the spectra you already have.
 - Search-time mass recalibration per file and per analyzer, kept only when it improves held-out error ([details](DOCS.md#other-settings)).
 - Ambiguous residues: J scored as I/L, opt-in B/Z/X expansion with a `substitutions` column, I/L twins merged ([details](DOCS.md#ambiguous-residues)).
 - Averagine-scored deisotoping, charge-aware fragment matching, and `ambiguity_sequence` marking unsupported regions ([details](DOCS.md#sequence-ambiguity-annotation)).
+- Picked target-decoy FDR for peptides, proteins and protein groups: a target beaten by its own decoy no longer passes ([details](DOCS.md#protein-inference)).
 - Opt-in DIA pseudo-spectrum mode for Orbitrap DIA and diaPASEF ([details](DOCS.md#dia-pseudo-spectrum-search)).
 
 ### Search PTMs with less setup
@@ -77,8 +78,9 @@ Most useful for large databases, many modifications, or many files.
 
 ### Quantify
 
-Label-free and labeled MS1 quantification; TMT works as in upstream Sage.
+Label-free and labeled MS1 quantification, and TMT reporter ions with unobserved channels written as null, not 0.
 - LFQ with nonlinear alignment, configurable match-between-runs tolerance, and per-file MS2 confirmation ([details](DOCS.md#label-free-quantification-output)).
+- A per-row LFQ `extraction_q_value` for MS2-backed and transferred rows, a diagnostic of wrong-peak quantification, not yet a calibrated transfer FDR ([details](DOCS.md#label-free-quantification-output)).
 - SILAC, dimethyl, and custom label channels defined on modifications, with channel-aware LFQ ([details](DOCS.md#modification-channels)).
 - Optional timsTOF MS1 denoising with dnoise for LFQ (`bruker_config.denoise`, [details](DOCS.md#spectrum-paths)).
 
@@ -86,7 +88,8 @@ Label-free and labeled MS1 quantification; TMT works as in upstream Sage.
 
 Typed, versioned files instead of logs you have to parse.
 - Parquet is the canonical output, with versioned schemas in [`schemas/`](schemas/) and one-based protein coordinates ([details](DOCS.md#interpreting-sage-output)).
-- `run-summary.json` records outputs, warnings, provenance, fitted models, and recommended tolerances.
+- Every Parquet file records its provenance (version, commit, configuration, FASTA hash) in the footer ([details](DOCS.md#output-provenance)).
+- `run-summary.json` records outputs, warnings, peak memory, fitted models, and recommended tolerances; it and the TSV outputs have published schemas.
 - QC on every search: `digestion.tsv` and a polymer contamination check, plus opt-in `diagnostic_ions.tsv` ([details](DOCS.md#quality-control-outputs)).
 - Empirical spectral-library export in Parquet and PSI mzSpecLib ([details](DOCS.md#empirical-spectral-libraries)).
 
@@ -94,6 +97,7 @@ Typed, versioned files instead of logs you have to parse.
 
 For pipelines and agents that launch searches without a person watching.
 - JSON Schema for configurations (`sage --write-config-schema`) and `--validate-only` checks ([details](DOCS.md#machine-readable-jobs)).
+- `--threads` (or the `threads` key) sets the worker count ([details](DOCS.md#performance-and-complexity)).
 - JSONL progress events (`--events-jsonl`), a Rust runner API with cancellation, and no output replaced without `--overwrite`.
 - Pre-digested peptide lists and custom cleavage sites extend the database ([details](DOCS.md#fasta)).
 
