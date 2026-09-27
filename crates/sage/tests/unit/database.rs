@@ -2285,6 +2285,34 @@ fn clipped_initiator_methionine_peptides_match_protein_n_terminal_motifs() {
     assert!(names.iter().all(|name| !name.contains("A[Nterm-A]A")));
 }
 
+#[test]
+fn fasta_copy_of_a_peptide_keeps_its_position_over_a_tsv_copy() {
+    let fasta = Fasta::parse(">P1\nGGGKPEPTIDERGGGK\n".into(), "rev_", false).unwrap();
+    let parameters = serde_json::from_value::<Builder>(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5},
+        "generate_decoys": false,
+    }))
+    .unwrap()
+    .make_parameters();
+    let mut peptides = parameters.digest(&fasta);
+    // The TSV copy is a whole-protein, fully enzymatic placeholder.
+    peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nPEPTIDER\tT1\n"));
+    Parameters::reorder_peptides(&mut peptides);
+    let merged = peptides
+        .iter()
+        .filter(|peptide| peptide.to_string() == "PEPTIDER")
+        .collect::<Vec<_>>();
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].position, Position::Internal);
+    assert_eq!(merged[0].protein_sites[0].start, Some(4));
+    let proteins = merged[0]
+        .proteins
+        .iter()
+        .map(|protein| protein.to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(proteins, ["P1", "T1"]);
+}
+
 fn ambiguous_parameters(expand: bool) -> Parameters {
     Builder {
         enzyme: Some(EnzymeBuilder {

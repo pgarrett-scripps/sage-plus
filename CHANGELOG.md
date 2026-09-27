@@ -70,7 +70,9 @@ entries are retained below for provenance.
   the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
   sort order or protein accession order. This also holds between proteins that share a
   peptide at the same terminal position (for example a Met-clipped fully enzymatic N-terminal
-  peptide and a semi-enzymatic N-terminal copy in another protein).
+  peptide and a semi-enzymatic N-terminal copy in another protein). A FASTA copy is kept over a peptide TSV copy, whose placeholder state (whole protein, fully
+  enzymatic) would otherwise let protein-terminal modification rules apply to an internal
+  FASTA peptide.
 - FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
   peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
   modifications declared on I or L do not apply to J. Retention-time and mobility models embed J

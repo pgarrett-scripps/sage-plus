@@ -1259,7 +1259,7 @@ Notes:
 - Localization runs after spectrum FDR assignment and only for passing target PSMs. Sage re-reads MS2 spectra for this optional pass rather than retaining the full experiment in memory.
 - `ptm_localization.psm_q_value` controls identification quality; `ptm_localization.localization_q_value` controls arrangement-level localization FLR. `localization_probability` remains a within-PSM marginal site probability.
 - A modification without enough eligible impossible residues to construct a balanced decoy search space is not included in the FDR-controlled reports.
-- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable.
+- FASTA searches preserve protein coordinates during indexing. The canonical PSM output attaches each protein accession to its one-based inclusive start and end positions plus the preceding and following amino acids. Pre-digested peptide TSV and spectral-library inputs omit coordinates when they are unavailable. A peptide present in both the FASTA and a peptide TSV keeps the FASTA copy's protein position, enzymatic state and missed cleavages, so protein-terminal modification rules follow the FASTA; the TSV row only adds its protein.
 
 ## Spectrum Paths
 

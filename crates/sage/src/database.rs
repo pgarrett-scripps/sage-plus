@@ -1283,10 +1283,20 @@ impl Parameters {
         // digests with different enzymatic state, e.g. a protein N-terminal
         // peptide that is semi-enzymatic in another protein. The
         // kept copy is then the most enzymatic one, whatever the input order.
+        // A FASTA copy is kept over a peptide TSV copy, whose placeholder
+        // state (fully enzymatic, whole protein) says nothing about where the
+        // peptide sits in a protein.
+        let from_tsv = |peptide: &Peptide| {
+            !peptide
+                .protein_sites
+                .iter()
+                .any(|occurrence| occurrence.start.is_some())
+        };
         target_decoys.par_sort_unstable_by(|a, b| {
             a.monoisotopic
                 .total_cmp(&b.monoisotopic)
                 .then_with(|| a.initial_sort(b))
+                .then_with(|| from_tsv(a).cmp(&from_tsv(b)))
                 .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
                 .then(a.missed_cleavages.cmp(&b.missed_cleavages))
                 .then(a.position.cmp(&b.position))
