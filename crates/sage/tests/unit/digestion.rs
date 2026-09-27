@@ -182,3 +182,34 @@ fn expanded_ambiguous_peptides_are_classified_as_written() {
     assert_eq!(summary.decoy_peptides, 1);
     assert_eq!(summary.semi_n + summary.semi_c + summary.non_enzymatic, 0);
 }
+
+#[test]
+fn custom_cleavage_termini_are_enzymatic() {
+    use crate::cleavage::CustomCleavageLibrary;
+    use crate::fasta::Fasta;
+    let enzyme = trypsin();
+    // A processing site between SIGNAL and PEPTIDEK.
+    let protein = "MAAKSIGNALPEPTIDEKGG";
+    let fasta = Fasta::parse(format!(">P1\n{protein}\n"), "rev_", true).unwrap();
+    let library = CustomCleavageLibrary::from_tsv("protein\tposition\tcontext\nP1\t9\t\n")
+        .unwrap()
+        .validate(&fasta)
+        .unwrap();
+    assert_eq!(library.boundaries_for("P1"), &[10]);
+    let at = |start: usize, len: usize| ProteinOccurrence {
+        protein: "P1".into(),
+        start: Some(start as u32),
+        prev_aa: Some(protein.as_bytes()[start - 1]),
+        next_aa: protein.as_bytes().get(start + len).copied(),
+        source: Some(protein.into()),
+        met_clipped: false,
+    };
+    let mature = peptide("PEPTIDEK", false, vec![at(10, 8)]);
+    let signal = peptide("SIGNAL", false, vec![at(4, 6)]);
+
+    let plain = summarize(Some(&enzyme), true, [&mature, &signal]);
+    assert_eq!((plain.semi_n, plain.semi_c), (1, 1));
+    let custom =
+        summarize_with_custom_cleavages(Some(&enzyme), true, Some(&library), [&mature, &signal]);
+    assert_eq!((custom.semi_n, custom.semi_c, custom.non_enzymatic), (0, 0, 0));
+}

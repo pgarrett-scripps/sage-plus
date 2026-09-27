@@ -301,9 +301,10 @@ impl Runner {
             .enumerate()
             .map(|(file_id, file)| DigestionFileStats {
                 file: file.clone(),
-                summary: sage_core::digestion::summarize(
+                summary: sage_core::digestion::summarize_with_custom_cleavages(
                     enzyme.as_ref(),
                     clip,
+                    self.custom_cleavages.as_ref(),
                     passing
                         .iter()
                         .filter(|feature| feature.file_id == file_id)
@@ -311,9 +312,10 @@ impl Runner {
                 ),
             })
             .collect();
-        let total = sage_core::digestion::summarize(
+        let total = sage_core::digestion::summarize_with_custom_cleavages(
             enzyme.as_ref(),
             clip,
+            self.custom_cleavages.as_ref(),
             passing
                 .iter()
                 .map(|feature| &self.database[feature.peptide_idx]),

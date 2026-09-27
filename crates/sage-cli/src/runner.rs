@@ -271,6 +271,8 @@ pub struct Runner {
     mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
     /// Quality-control scans of each file's raw spectra, by file id.
     file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
+    /// Custom cleavage sites of the searched FASTA, for the digestion summary.
+    custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -823,10 +825,12 @@ impl Runner {
         let file_qc = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
+        let mut custom_cleavage_sites = None;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
             let fasta = load_fasta(&database_parameters)?;
             let custom_cleavages = load_custom_cleavages(&database_parameters, &fasta)?;
+            custom_cleavage_sites = custom_cleavages.clone();
 
             if let (Some(settings), Some(library)) = (
                 database_parameters.ptm_library.as_ref(),
@@ -889,6 +893,7 @@ impl Runner {
                         retained_spectra: Default::default(),
                         mass_recalibration: Default::default(),
                         file_qc: file_qc.clone(),
+                        custom_cleavages: None,
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -990,6 +995,7 @@ impl Runner {
             retained_spectra: std::sync::Mutex::new(retained_spectra),
             mass_recalibration: Default::default(),
             file_qc,
+            custom_cleavages: custom_cleavage_sites,
         })
     }
 }

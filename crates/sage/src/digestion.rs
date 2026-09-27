@@ -7,6 +7,7 @@
 //! subtracted class by class before rates are formed.
 
 use crate::ambiguous_residues::{is_ambiguous, is_expansion_of};
+use crate::cleavage::ValidatedCustomCleavageLibrary;
 use crate::enzyme::{Enzyme, ProteinOccurrence, METAP_SECOND_RESIDUES};
 use crate::peptide::Peptide;
 use std::borrow::Cow;
@@ -69,14 +70,31 @@ pub fn classify_occurrence(
     occurrence: &ProteinOccurrence,
     clip_n_term_met: bool,
 ) -> TerminusClass {
+    classify_occurrence_with_custom_cleavages(enzyme, sequence, occurrence, clip_n_term_met, &[])
+}
+
+/// [`classify_occurrence`] where a terminus at one of `custom_boundaries`
+/// (zero-based offsets into the occurrence's protein, as in
+/// [`ValidatedCustomCleavageLibrary::boundaries_for`]) is also enzymatic.
+pub fn classify_occurrence_with_custom_cleavages(
+    enzyme: &Enzyme,
+    sequence: &[u8],
+    occurrence: &ProteinOccurrence,
+    clip_n_term_met: bool,
+    custom_boundaries: &[usize],
+) -> TerminusClass {
     let (Some(&first), Some(&last)) = (sequence.first(), sequence.last()) else {
         return TerminusClass::Enzymatic;
     };
+    let custom = |offset: usize| custom_boundaries.contains(&offset);
+    let start = occurrence.start.map(|start| start as usize);
     let n_enzymatic = at_protein_n_terminus(sequence, occurrence, clip_n_term_met)
+        || start.is_some_and(custom)
         || occurrence
             .prev_aa
             .is_some_and(|previous| enzyme.cleaves_between(previous, first));
     let c_enzymatic = at_protein_c_terminus(occurrence)
+        || start.is_some_and(|start| custom(start + sequence.len()))
         || occurrence
             .next_aa
             .is_some_and(|next| enzyme.cleaves_between(last, next));
@@ -95,7 +113,7 @@ pub fn classify_peptide(
     peptide: &Peptide,
     clip_n_term_met: bool,
 ) -> Option<TerminusClass> {
-    classify_cleavages(enzyme, peptide, clip_n_term_met).1
+    classify_cleavages(enzyme, peptide, clip_n_term_met, None).1
 }
 
 /// Missed cleavages and termini class of `peptide` at its most enzymatic
@@ -106,6 +124,7 @@ fn classify_cleavages(
     enzyme: &Enzyme,
     peptide: &Peptide,
     clip_n_term_met: bool,
+    custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
 ) -> (usize, Option<TerminusClass>) {
     let rank = |class: TerminusClass| match class {
         TerminusClass::Enzymatic => 0,
@@ -117,8 +136,17 @@ fn classify_cleavages(
         .iter()
         .map(|occurrence| {
             let written = as_written(peptide, occurrence);
+            let custom_boundaries = custom_cleavages
+                .map(|library| library.boundaries_for(&occurrence.protein))
+                .unwrap_or_default();
             (
-                classify_occurrence(enzyme, &written, occurrence, clip_n_term_met),
+                classify_occurrence_with_custom_cleavages(
+                    enzyme,
+                    &written,
+                    occurrence,
+                    clip_n_term_met,
+                    custom_boundaries,
+                ),
                 missed_cleavages(enzyme, &written),
             )
         })
@@ -263,6 +291,20 @@ pub fn summarize<'a, I>(
 where
     I: IntoIterator<Item = &'a Peptide>,
 {
+    summarize_with_custom_cleavages(enzyme, clip_n_term_met, None, peptides)
+}
+
+/// [`summarize`] where termini at the search's custom cleavage sites count
+/// as enzymatic, as the digest produced them.
+pub fn summarize_with_custom_cleavages<'a, I>(
+    enzyme: Option<&Enzyme>,
+    clip_n_term_met: bool,
+    custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    peptides: I,
+) -> DigestionSummary
+where
+    I: IntoIterator<Item = &'a Peptide>,
+{
     let mut seen = HashSet::new();
     let mut targets = DigestionCounts::default();
     let mut decoys = DigestionCounts::default();
@@ -271,7 +313,9 @@ where
             continue;
         }
         let (missed, class) = match enzyme {
-            Some(enzyme) => classify_cleavages(enzyme, peptide, clip_n_term_met),
+            Some(enzyme) => {
+                classify_cleavages(enzyme, peptide, clip_n_term_met, custom_cleavages)
+            }
             None => (0, Some(TerminusClass::Enzymatic)),
         };
         if peptide.decoy {

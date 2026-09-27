@@ -44,7 +44,8 @@ entries are retained below for provenance.
   and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
   and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
   decoy peptides class by class. Met-clipped peptides count as protein N-terminal. Peptides
-  expanded from ambiguous residues are classified on the FASTA residues as written. A one-line
+  expanded from ambiguous residues are classified on the FASTA residues as written, and a
+  terminus at a custom cleavage site counts as enzymatic. A one-line
   summary is logged. The run-summary schema stays at
   version 9.
 - Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
@@ -60,7 +61,8 @@ entries are retained below for provenance.
   spectra containing each ion is logged and written to `run-summary.json` under
   `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
-  `sage_core::digestion` classifies and summarizes peptide termini;
+  `sage_core::digestion` classifies and summarizes peptide termini (optionally with custom
+  cleavage sites);
   `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
 - The README credits NIST [sageRecon](https://github.com/usnistgov/sageRecon), which inspired
   initiator Met clipping, ambiguous-residue expansion, the QC outputs, and tolerance
