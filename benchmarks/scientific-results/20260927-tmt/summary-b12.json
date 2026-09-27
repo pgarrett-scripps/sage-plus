@@ -1,0 +1,1431 @@
+{
+  "label": "b12",
+  "runs": {
+    "upstream-hrms2-mzml": {
+      "accepted_psms_q01": 32981,
+      "quantified": {
+        "all": {
+          "psms": 32969,
+          "peptides": 25847,
+          "proteins_q01": 7199
+        },
+        "human": {
+          "psms": 23849,
+          "peptides": 18811,
+          "proteins_q01": 5092
+        },
+        "yeast": {
+          "psms": 8577,
+          "peptides": 6657,
+          "proteins_q01": 2080
+        }
+      },
+      "cross_or_unassigned_species_excluded": 543,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 19560,
+          "median_log2": -2.6204,
+          "median_bias": 1.7015,
+          "mae": 1.7783,
+          "median_abs_error": 1.7015,
+          "observed_fold_1x_over_level": 6.149,
+          "paper_fold": 7.69
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 19775,
+          "median_log2": -2.2392,
+          "median_bias": 1.0828,
+          "mae": 1.1876,
+          "median_abs_error": 1.0828,
+          "observed_fold_1x_over_level": 4.721,
+          "paper_fold": 5.67
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 19893,
+          "median_log2": -1.5169,
+          "median_bias": 0.4831,
+          "mae": 0.5665,
+          "median_abs_error": 0.4841,
+          "observed_fold_1x_over_level": 2.862,
+          "paper_fold": 3.16
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 19933,
+          "median_log2": -0.7698,
+          "median_bias": 0.2302,
+          "mae": 0.2701,
+          "median_abs_error": 0.2314,
+          "observed_fold_1x_over_level": 1.705,
+          "paper_fold": 1.81
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 19944,
+          "median_log2": -0.0002,
+          "median_bias": -0.0002,
+          "mae": 0.0417,
+          "median_abs_error": 0.0308,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.5901,
+      "intercept": -0.1157,
+      "compression_slope_spiked_levels": 0.5422,
+      "yeast_peptides_in_ratio_analysis": 6648,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 4095,
+        "peptides": 3566,
+        "compression_slope_spiked_levels": 0.6154,
+        "levels": {
+          "1/20": {
+            "median_bias": 1.3965,
+            "mae": 1.4877,
+            "observed_fold_1x_over_level": 7.597,
+            "paper_fold": 7.69
+          },
+          "1/10": {
+            "median_bias": 0.8798,
+            "mae": 0.9882,
+            "observed_fold_1x_over_level": 5.434,
+            "paper_fold": 5.67
+          },
+          "1/4": {
+            "median_bias": 0.3886,
+            "mae": 0.4597,
+            "observed_fold_1x_over_level": 3.055,
+            "paper_fold": 3.16
+          },
+          "1/2": {
+            "median_bias": 0.1915,
+            "mae": 0.2224,
+            "observed_fold_1x_over_level": 1.751,
+            "paper_fold": 1.81
+          },
+          "1": {
+            "median_bias": -0.0003,
+            "mae": 0.0349,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 8548,
+        "fraction_126_observed": 0.841,
+        "median_126_over_1x_missing_as_0": 0.1015,
+        "mean_126_over_1x_missing_as_0": 0.1531,
+        "median_126_over_1x_observed_only": 0.1292,
+        "median_126_over_1_20_level_observed_only": 0.6966
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0047,
+        "human_excl_126": 0.0025,
+        "yeast_excl_126": 0.0109,
+        "yeast_126_missing": 0.1618,
+        "per_channel_all": {
+          "126": 0.0459,
+          "127N": 0.0119,
+          "127C": 0.0096,
+          "128N": 0.0093,
+          "128C": 0.0056,
+          "129N": 0.0059,
+          "129C": 0.0054,
+          "130N": 0.0034,
+          "130C": 0.0031,
+          "131N": 0.0034,
+          "131C": 0.0025,
+          "132N": 0.0024,
+          "132C": 0.0025,
+          "133N": 0.0016,
+          "133C": 0.0024,
+          "134N": 0.0022
+        },
+        "psms_with_any_missing_excl_126": 0.0171
+      },
+      "human_cv": {
+        "psms_all16": 23654,
+        "median_psm_cv": 0.0887,
+        "median_peptide_cv": 0.0851,
+        "peptides": 18711
+      },
+      "per_file": {
+        "a18203": {
+          "quantified_psms": 10817,
+          "yeast_psms": 2792,
+          "human_psms": 7847
+        },
+        "a18209": {
+          "quantified_psms": 11145,
+          "yeast_psms": 2906,
+          "human_psms": 8044
+        },
+        "a18212": {
+          "quantified_psms": 11007,
+          "yeast_psms": 2879,
+          "human_psms": 7958
+        }
+      },
+      "job": {
+        "engine": "upstream",
+        "method": "hrms2",
+        "input": "mzml",
+        "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
+        "binary_sha256": "065f9c7b445d2d5f4d3f23be007f123231e135b0344a586a656666585f8c402e",
+        "binary_version": "sage 0.15.0-beta.2",
+        "wall_seconds": 64.0,
+        "max_rss_gib": 5.39,
+        "config_sha256": "e74580503b983e642f871acdf8ef5172d4511909d5195312ea85a7ac813127d8"
+      }
+    },
+    "plus-b12-hrms2-mzml": {
+      "accepted_psms_q01": 33228,
+      "quantified": {
+        "all": {
+          "psms": 33217,
+          "peptides": 25977,
+          "proteins_q01": 7194
+        },
+        "human": {
+          "psms": 24017,
+          "peptides": 18897,
+          "proteins_q01": 5089
+        },
+        "yeast": {
+          "psms": 8637,
+          "peptides": 6701,
+          "proteins_q01": 2087
+        }
+      },
+      "cross_or_unassigned_species_excluded": 563,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 19683,
+          "median_log2": -2.6203,
+          "median_bias": 1.7016,
+          "mae": 1.7767,
+          "median_abs_error": 1.7016,
+          "observed_fold_1x_over_level": 6.149,
+          "paper_fold": 7.69
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 19905,
+          "median_log2": -2.2377,
+          "median_bias": 1.0842,
+          "mae": 1.1874,
+          "median_abs_error": 1.0842,
+          "observed_fold_1x_over_level": 4.717,
+          "paper_fold": 5.67
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 20029,
+          "median_log2": -1.516,
+          "median_bias": 0.484,
+          "mae": 0.5666,
+          "median_abs_error": 0.4847,
+          "observed_fold_1x_over_level": 2.86,
+          "paper_fold": 3.16
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 20068,
+          "median_log2": -0.7695,
+          "median_bias": 0.2305,
+          "mae": 0.2704,
+          "median_abs_error": 0.2319,
+          "observed_fold_1x_over_level": 1.705,
+          "paper_fold": 1.81
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 20076,
+          "median_log2": -0.0002,
+          "median_bias": -0.0002,
+          "mae": 0.0419,
+          "median_abs_error": 0.0309,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.5904,
+      "intercept": -0.1153,
+      "compression_slope_spiked_levels": 0.5427,
+      "yeast_peptides_in_ratio_analysis": 6692,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 4121,
+        "peptides": 3583,
+        "compression_slope_spiked_levels": 0.616,
+        "levels": {
+          "1/20": {
+            "median_bias": 1.3941,
+            "mae": 1.4859,
+            "observed_fold_1x_over_level": 7.609,
+            "paper_fold": 7.69
+          },
+          "1/10": {
+            "median_bias": 0.8794,
+            "mae": 0.9879,
+            "observed_fold_1x_over_level": 5.436,
+            "paper_fold": 5.67
+          },
+          "1/4": {
+            "median_bias": 0.3893,
+            "mae": 0.46,
+            "observed_fold_1x_over_level": 3.054,
+            "paper_fold": 3.16
+          },
+          "1/2": {
+            "median_bias": 0.1923,
+            "mae": 0.2228,
+            "observed_fold_1x_over_level": 1.75,
+            "paper_fold": 1.81
+          },
+          "1": {
+            "median_bias": -0.0003,
+            "mae": 0.0351,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 8608,
+        "fraction_126_observed": 0.8367,
+        "median_126_over_1x_missing_as_0": 0.1014,
+        "mean_126_over_1x_missing_as_0": 0.1527,
+        "median_126_over_1x_observed_only": 0.1295,
+        "median_126_over_1_20_level_observed_only": 0.698
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0048,
+        "human_excl_126": 0.0026,
+        "yeast_excl_126": 0.0109,
+        "yeast_126_missing": 0.1661,
+        "per_channel_all": {
+          "126": 0.0468,
+          "127N": 0.012,
+          "127C": 0.0096,
+          "128N": 0.0093,
+          "128C": 0.0057,
+          "129N": 0.006,
+          "129C": 0.0055,
+          "130N": 0.0033,
+          "130C": 0.0031,
+          "131N": 0.0034,
+          "131C": 0.0025,
+          "132N": 0.0024,
+          "132C": 0.0024,
+          "133N": 0.0016,
+          "133C": 0.0023,
+          "134N": 0.0022
+        },
+        "psms_with_any_missing_excl_126": 0.0172
+      },
+      "human_cv": {
+        "psms_all16": 23827,
+        "median_psm_cv": 0.0888,
+        "median_peptide_cv": 0.0852,
+        "peptides": 18802
+      },
+      "per_file": {
+        "a18203": {
+          "quantified_psms": 10892,
+          "yeast_psms": 2805,
+          "human_psms": 7904
+        },
+        "a18209": {
+          "quantified_psms": 11239,
+          "yeast_psms": 2930,
+          "human_psms": 8108
+        },
+        "a18212": {
+          "quantified_psms": 11086,
+          "yeast_psms": 2902,
+          "human_psms": 8005
+        }
+      },
+      "job": {
+        "engine": "plus",
+        "method": "hrms2",
+        "input": "mzml",
+        "binary": "/mnt/data1/sage-plus-scientific/tmt-hypro16/bin/sage-plus-v0.1.0-beta.12-x86_64-unknown-linux-gnu/sage",
+        "binary_sha256": "e11976c9a614e298e91c96881a4ba5ac7827d78e078bf3641358b04febc57c78",
+        "binary_version": "sage 0.1.0-beta.12",
+        "wall_seconds": 32.2,
+        "max_rss_gib": 3.79,
+        "config_sha256": "22a19b6c49855b5b465aef2f5f9f11f36a8d2e89c7b56380e05cb6ae85f14332"
+      }
+    },
+    "plus-b12-hrms2-raw": {
+      "accepted_psms_q01": 33134,
+      "quantified": {
+        "all": {
+          "psms": 33123,
+          "peptides": 25962,
+          "proteins_q01": 7191
+        },
+        "human": {
+          "psms": 23944,
+          "peptides": 18886,
+          "proteins_q01": 5087
+        },
+        "yeast": {
+          "psms": 8616,
+          "peptides": 6697,
+          "proteins_q01": 2086
+        }
+      },
+      "cross_or_unassigned_species_excluded": 563,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 19674,
+          "median_log2": -2.6197,
+          "median_bias": 1.7023,
+          "mae": 1.7783,
+          "median_abs_error": 1.7023,
+          "observed_fold_1x_over_level": 6.146,
+          "paper_fold": 7.69
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 19895,
+          "median_log2": -2.2368,
+          "median_bias": 1.0852,
+          "mae": 1.1893,
+          "median_abs_error": 1.0852,
+          "observed_fold_1x_over_level": 4.713,
+          "paper_fold": 5.67
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 20017,
+          "median_log2": -1.515,
+          "median_bias": 0.485,
+          "mae": 0.568,
+          "median_abs_error": 0.4855,
+          "observed_fold_1x_over_level": 2.858,
+          "paper_fold": 3.16
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 20056,
+          "median_log2": -0.7693,
+          "median_bias": 0.2307,
+          "mae": 0.2708,
+          "median_abs_error": 0.2322,
+          "observed_fold_1x_over_level": 1.704,
+          "paper_fold": 1.81
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 20064,
+          "median_log2": -0.0002,
+          "median_bias": -0.0002,
+          "mae": 0.0419,
+          "median_abs_error": 0.031,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.59,
+      "intercept": -0.1151,
+      "compression_slope_spiked_levels": 0.5424,
+      "yeast_peptides_in_ratio_analysis": 6688,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 4112,
+        "peptides": 3586,
+        "compression_slope_spiked_levels": 0.6154,
+        "levels": {
+          "1/20": {
+            "median_bias": 1.3957,
+            "mae": 1.4885,
+            "observed_fold_1x_over_level": 7.601,
+            "paper_fold": 7.69
+          },
+          "1/10": {
+            "median_bias": 0.8815,
+            "mae": 0.9907,
+            "observed_fold_1x_over_level": 5.428,
+            "paper_fold": 5.67
+          },
+          "1/4": {
+            "median_bias": 0.3899,
+            "mae": 0.4618,
+            "observed_fold_1x_over_level": 3.053,
+            "paper_fold": 3.16
+          },
+          "1/2": {
+            "median_bias": 0.1928,
+            "mae": 0.2235,
+            "observed_fold_1x_over_level": 1.75,
+            "paper_fold": 1.81
+          },
+          "1": {
+            "median_bias": -0.0003,
+            "mae": 0.0351,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 8587,
+        "fraction_126_observed": 0.8366,
+        "median_126_over_1x_missing_as_0": 0.1015,
+        "mean_126_over_1x_missing_as_0": 0.1531,
+        "median_126_over_1x_observed_only": 0.1296,
+        "median_126_over_1_20_level_observed_only": 0.6979
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0048,
+        "human_excl_126": 0.0026,
+        "yeast_excl_126": 0.0109,
+        "yeast_126_missing": 0.1662,
+        "per_channel_all": {
+          "126": 0.0469,
+          "127N": 0.012,
+          "127C": 0.0095,
+          "128N": 0.0094,
+          "128C": 0.0057,
+          "129N": 0.006,
+          "129C": 0.0055,
+          "130N": 0.0033,
+          "130C": 0.0031,
+          "131N": 0.0034,
+          "131C": 0.0025,
+          "132N": 0.0024,
+          "132C": 0.0024,
+          "133N": 0.0016,
+          "133C": 0.0024,
+          "134N": 0.0022
+        },
+        "psms_with_any_missing_excl_126": 0.0172
+      },
+      "human_cv": {
+        "psms_all16": 23754,
+        "median_psm_cv": 0.0889,
+        "median_peptide_cv": 0.0853,
+        "peptides": 18791
+      },
+      "per_file": {
+        "a18203": {
+          "quantified_psms": 10866,
+          "yeast_psms": 2797,
+          "human_psms": 7886
+        },
+        "a18209": {
+          "quantified_psms": 11204,
+          "yeast_psms": 2924,
+          "human_psms": 8079
+        },
+        "a18212": {
+          "quantified_psms": 11053,
+          "yeast_psms": 2895,
+          "human_psms": 7979
+        }
+      },
+      "job": {
+        "engine": "plus",
+        "method": "hrms2",
+        "input": "raw",
+        "binary": "/mnt/data1/sage-plus-scientific/tmt-hypro16/bin/sage-plus-v0.1.0-beta.12-x86_64-unknown-linux-gnu/sage",
+        "binary_sha256": "e11976c9a614e298e91c96881a4ba5ac7827d78e078bf3641358b04febc57c78",
+        "binary_version": "sage 0.1.0-beta.12",
+        "wall_seconds": 30.7,
+        "max_rss_gib": 4.24,
+        "config_sha256": "fce04fa9421f4aeb2ef10171b98aee91f112e36a2c0e4915206aa6baed8a7788"
+      }
+    },
+    "upstream-sps-mzml": {
+      "accepted_psms_q01": 22385,
+      "quantified": {
+        "all": {
+          "psms": 21490,
+          "peptides": 17573,
+          "proteins_q01": 5717
+        },
+        "human": {
+          "psms": 15530,
+          "peptides": 12777,
+          "proteins_q01": 4122
+        },
+        "yeast": {
+          "psms": 5528,
+          "peptides": 4496,
+          "proteins_q01": 1567
+        }
+      },
+      "cross_or_unassigned_species_excluded": 432,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 12476,
+          "median_log2": -3.7358,
+          "median_bias": 0.5861,
+          "mae": 0.8875,
+          "median_abs_error": 0.5971,
+          "observed_fold_1x_over_level": 13.323,
+          "paper_fold": 13.55
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 12832,
+          "median_log2": -2.9825,
+          "median_bias": 0.3394,
+          "mae": 0.5703,
+          "median_abs_error": 0.3529,
+          "observed_fold_1x_over_level": 7.904,
+          "paper_fold": null
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 13114,
+          "median_log2": -1.8957,
+          "median_bias": 0.1043,
+          "mae": 0.268,
+          "median_abs_error": 0.1593,
+          "observed_fold_1x_over_level": 3.721,
+          "paper_fold": null
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 13261,
+          "median_log2": -0.9514,
+          "median_bias": 0.0486,
+          "mae": 0.1458,
+          "median_abs_error": 0.0985,
+          "observed_fold_1x_over_level": 1.934,
+          "paper_fold": 1.9
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 13380,
+          "median_log2": -0.0003,
+          "median_bias": -0.0003,
+          "mae": 0.0487,
+          "median_abs_error": 0.034,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.8052,
+      "intercept": -0.0897,
+      "compression_slope_spiked_levels": 0.7677,
+      "yeast_peptides_in_ratio_analysis": 4460,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 2464,
+        "peptides": 2143,
+        "compression_slope_spiked_levels": 0.8511,
+        "levels": {
+          "1/20": {
+            "median_bias": 0.3223,
+            "mae": 0.5889,
+            "observed_fold_1x_over_level": 15.996,
+            "paper_fold": 13.55
+          },
+          "1/10": {
+            "median_bias": 0.1999,
+            "mae": 0.3787,
+            "observed_fold_1x_over_level": 8.706,
+            "paper_fold": null
+          },
+          "1/4": {
+            "median_bias": 0.0422,
+            "mae": 0.1865,
+            "observed_fold_1x_over_level": 3.885,
+            "paper_fold": null
+          },
+          "1/2": {
+            "median_bias": 0.0241,
+            "mae": 0.1096,
+            "observed_fold_1x_over_level": 1.967,
+            "paper_fold": 1.9
+          },
+          "1": {
+            "median_bias": -0.0001,
+            "mae": 0.038,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 5469,
+        "fraction_126_observed": 0.6559,
+        "median_126_over_1x_missing_as_0": 0.0163,
+        "mean_126_over_1x_missing_as_0": 0.0605,
+        "median_126_over_1x_observed_only": 0.0411,
+        "median_126_over_1_20_level_observed_only": 0.4635
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0327,
+        "human_excl_126": 0.0301,
+        "yeast_excl_126": 0.0415,
+        "yeast_126_missing": 0.3508,
+        "per_channel_all": {
+          "126": 0.1404,
+          "127N": 0.0668,
+          "127C": 0.0642,
+          "128N": 0.0544,
+          "128C": 0.0505,
+          "129N": 0.0421,
+          "129C": 0.0404,
+          "130N": 0.0314,
+          "130C": 0.0302,
+          "131N": 0.0255,
+          "131C": 0.0228,
+          "132N": 0.0165,
+          "132C": 0.0168,
+          "133N": 0.011,
+          "133C": 0.0115,
+          "134N": 0.007
+        },
+        "psms_with_any_missing_excl_126": 0.0766
+      },
+      "human_cv": {
+        "psms_all16": 14332,
+        "median_psm_cv": 0.078,
+        "median_peptide_cv": 0.0755,
+        "peptides": 11913
+      },
+      "per_file": {
+        "a18207": {
+          "quantified_psms": 7062,
+          "yeast_psms": 1827,
+          "human_psms": 5085
+        },
+        "a18210": {
+          "quantified_psms": 7221,
+          "yeast_psms": 1838,
+          "human_psms": 5235
+        },
+        "a18213": {
+          "quantified_psms": 7207,
+          "yeast_psms": 1863,
+          "human_psms": 5210
+        }
+      },
+      "job": {
+        "engine": "upstream",
+        "method": "sps",
+        "input": "mzml",
+        "binary": "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage",
+        "binary_sha256": "065f9c7b445d2d5f4d3f23be007f123231e135b0344a586a656666585f8c402e",
+        "binary_version": "sage 0.15.0-beta.2",
+        "wall_seconds": 107.8,
+        "max_rss_gib": 5.54,
+        "config_sha256": "fccbfd9a60e63ee1d546bcbe6c081a92ec19fde660035a0d46e6fbc4cb9f1561"
+      }
+    },
+    "plus-b12-sps-mzml": {
+      "accepted_psms_q01": 22676,
+      "quantified": {
+        "all": {
+          "psms": 21777,
+          "peptides": 17757,
+          "proteins_q01": 5737
+        },
+        "human": {
+          "psms": 15707,
+          "peptides": 12894,
+          "proteins_q01": 4134
+        },
+        "yeast": {
+          "psms": 5590,
+          "peptides": 4539,
+          "proteins_q01": 1576
+        }
+      },
+      "cross_or_unassigned_species_excluded": 480,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 12602,
+          "median_log2": -3.7309,
+          "median_bias": 0.591,
+          "mae": 0.8929,
+          "median_abs_error": 0.6024,
+          "observed_fold_1x_over_level": 13.278,
+          "paper_fold": 13.55
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 12964,
+          "median_log2": -2.9792,
+          "median_bias": 0.3427,
+          "mae": 0.5746,
+          "median_abs_error": 0.3567,
+          "observed_fold_1x_over_level": 7.885,
+          "paper_fold": null
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 13246,
+          "median_log2": -1.8928,
+          "median_bias": 0.1072,
+          "mae": 0.27,
+          "median_abs_error": 0.1603,
+          "observed_fold_1x_over_level": 3.714,
+          "paper_fold": null
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 13393,
+          "median_log2": -0.9485,
+          "median_bias": 0.0515,
+          "mae": 0.1469,
+          "median_abs_error": 0.0986,
+          "observed_fold_1x_over_level": 1.93,
+          "paper_fold": 1.9
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 13509,
+          "median_log2": -0.0003,
+          "median_bias": -0.0003,
+          "mae": 0.0488,
+          "median_abs_error": 0.0341,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.8038,
+      "intercept": -0.089,
+      "compression_slope_spiked_levels": 0.7667,
+      "yeast_peptides_in_ratio_analysis": 4503,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 2492,
+        "peptides": 2164,
+        "compression_slope_spiked_levels": 0.85,
+        "levels": {
+          "1/20": {
+            "median_bias": 0.3269,
+            "mae": 0.5936,
+            "observed_fold_1x_over_level": 15.945,
+            "paper_fold": 13.55
+          },
+          "1/10": {
+            "median_bias": 0.2036,
+            "mae": 0.3831,
+            "observed_fold_1x_over_level": 8.684,
+            "paper_fold": null
+          },
+          "1/4": {
+            "median_bias": 0.045,
+            "mae": 0.1889,
+            "observed_fold_1x_over_level": 3.877,
+            "paper_fold": null
+          },
+          "1/2": {
+            "median_bias": 0.0264,
+            "mae": 0.1107,
+            "observed_fold_1x_over_level": 1.964,
+            "paper_fold": 1.9
+          },
+          "1": {
+            "median_bias": -0.0001,
+            "mae": 0.0382,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 5531,
+        "fraction_126_observed": 0.6552,
+        "median_126_over_1x_missing_as_0": 0.0164,
+        "mean_126_over_1x_missing_as_0": 0.0612,
+        "median_126_over_1x_observed_only": 0.0414,
+        "median_126_over_1_20_level_observed_only": 0.4638
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0325,
+        "human_excl_126": 0.0299,
+        "yeast_excl_126": 0.0413,
+        "yeast_126_missing": 0.3513,
+        "per_channel_all": {
+          "126": 0.1403,
+          "127N": 0.0664,
+          "127C": 0.0636,
+          "128N": 0.0541,
+          "128C": 0.0502,
+          "129N": 0.0418,
+          "129C": 0.0401,
+          "130N": 0.0311,
+          "130C": 0.03,
+          "131N": 0.0254,
+          "131C": 0.0225,
+          "132N": 0.0164,
+          "132C": 0.0166,
+          "133N": 0.0109,
+          "133C": 0.0114,
+          "134N": 0.007
+        },
+        "psms_with_any_missing_excl_126": 0.0762
+      },
+      "human_cv": {
+        "psms_all16": 14503,
+        "median_psm_cv": 0.0783,
+        "median_peptide_cv": 0.0758,
+        "peptides": 12026
+      },
+      "per_file": {
+        "a18207": {
+          "quantified_psms": 7160,
+          "yeast_psms": 1844,
+          "human_psms": 5143
+        },
+        "a18210": {
+          "quantified_psms": 7313,
+          "yeast_psms": 1864,
+          "human_psms": 5289
+        },
+        "a18213": {
+          "quantified_psms": 7304,
+          "yeast_psms": 1882,
+          "human_psms": 5275
+        }
+      },
+      "job": {
+        "engine": "plus",
+        "method": "sps",
+        "input": "mzml",
+        "binary": "/mnt/data1/sage-plus-scientific/tmt-hypro16/bin/sage-plus-v0.1.0-beta.12-x86_64-unknown-linux-gnu/sage",
+        "binary_sha256": "e11976c9a614e298e91c96881a4ba5ac7827d78e078bf3641358b04febc57c78",
+        "binary_version": "sage 0.1.0-beta.12",
+        "wall_seconds": 57.2,
+        "max_rss_gib": 3.91,
+        "config_sha256": "5cb468a10b0fa95395952b965d411206a8fd4855988ee168d07c96eb26982f1a"
+      }
+    },
+    "plus-b12-sps-raw": {
+      "accepted_psms_q01": 22602,
+      "quantified": {
+        "all": {
+          "psms": 21704,
+          "peptides": 17748,
+          "proteins_q01": 5736
+        },
+        "human": {
+          "psms": 15654,
+          "peptides": 12888,
+          "proteins_q01": 4133
+        },
+        "yeast": {
+          "psms": 5572,
+          "peptides": 4536,
+          "proteins_q01": 1576
+        }
+      },
+      "cross_or_unassigned_species_excluded": 478,
+      "levels": {
+        "1/20": {
+          "expected_log2": -4.3219,
+          "n_values": 12592,
+          "median_log2": -3.7303,
+          "median_bias": 0.5916,
+          "mae": 0.8936,
+          "median_abs_error": 0.6023,
+          "observed_fold_1x_over_level": 13.272,
+          "paper_fold": 13.55
+        },
+        "1/10": {
+          "expected_log2": -3.3219,
+          "n_values": 12955,
+          "median_log2": -2.9789,
+          "median_bias": 0.343,
+          "mae": 0.5755,
+          "median_abs_error": 0.3567,
+          "observed_fold_1x_over_level": 7.884,
+          "paper_fold": null
+        },
+        "1/4": {
+          "expected_log2": -2.0,
+          "n_values": 13237,
+          "median_log2": -1.8931,
+          "median_bias": 0.1069,
+          "mae": 0.2704,
+          "median_abs_error": 0.1604,
+          "observed_fold_1x_over_level": 3.714,
+          "paper_fold": null
+        },
+        "1/2": {
+          "expected_log2": -1.0,
+          "n_values": 13384,
+          "median_log2": -0.9483,
+          "median_bias": 0.0517,
+          "mae": 0.1473,
+          "median_abs_error": 0.099,
+          "observed_fold_1x_over_level": 1.93,
+          "paper_fold": 1.9
+        },
+        "1": {
+          "expected_log2": 0.0,
+          "n_values": 13500,
+          "median_log2": -0.0002,
+          "median_bias": -0.0002,
+          "mae": 0.0489,
+          "median_abs_error": 0.0341,
+          "observed_fold_1x_over_level": null,
+          "paper_fold": null
+        }
+      },
+      "compression_slope_all_levels": 0.8037,
+      "intercept": -0.0889,
+      "compression_slope_spiked_levels": 0.7666,
+      "yeast_peptides_in_ratio_analysis": 4500,
+      "sensitivity_high_signal": {
+        "filter": "yeast PSMs with 127N-134N all observed and summed intensity >= median",
+        "psms": 2483,
+        "peptides": 2163,
+        "compression_slope_spiked_levels": 0.8493,
+        "levels": {
+          "1/20": {
+            "median_bias": 0.3267,
+            "mae": 0.5974,
+            "observed_fold_1x_over_level": 15.947,
+            "paper_fold": 13.55
+          },
+          "1/10": {
+            "median_bias": 0.2026,
+            "mae": 0.3863,
+            "observed_fold_1x_over_level": 8.69,
+            "paper_fold": null
+          },
+          "1/4": {
+            "median_bias": 0.0448,
+            "mae": 0.1907,
+            "observed_fold_1x_over_level": 3.878,
+            "paper_fold": null
+          },
+          "1/2": {
+            "median_bias": 0.0271,
+            "mae": 0.1117,
+            "observed_fold_1x_over_level": 1.963,
+            "paper_fold": 1.9
+          },
+          "1": {
+            "median_bias": -0.0,
+            "mae": 0.0382,
+            "observed_fold_1x_over_level": null,
+            "paper_fold": null
+          }
+        }
+      },
+      "leakage_126": {
+        "yeast_psms": 5513,
+        "fraction_126_observed": 0.6563,
+        "median_126_over_1x_missing_as_0": 0.0165,
+        "mean_126_over_1x_missing_as_0": 0.0615,
+        "median_126_over_1x_observed_only": 0.0415,
+        "median_126_over_1_20_level_observed_only": 0.4648
+      },
+      "missing_channels": {
+        "all_species_excl_126": 0.0324,
+        "human_excl_126": 0.0296,
+        "yeast_excl_126": 0.0414,
+        "yeast_126_missing": 0.3503,
+        "per_channel_all": {
+          "126": 0.1399,
+          "127N": 0.0663,
+          "127C": 0.0634,
+          "128N": 0.054,
+          "128C": 0.05,
+          "129N": 0.0416,
+          "129C": 0.0399,
+          "130N": 0.0309,
+          "130C": 0.0299,
+          "131N": 0.0253,
+          "131C": 0.0224,
+          "132N": 0.0163,
+          "132C": 0.0165,
+          "133N": 0.0108,
+          "133C": 0.0114,
+          "134N": 0.0069
+        },
+        "psms_with_any_missing_excl_126": 0.076
+      },
+      "human_cv": {
+        "psms_all16": 14459,
+        "median_psm_cv": 0.0783,
+        "median_peptide_cv": 0.0759,
+        "peptides": 12023
+      },
+      "per_file": {
+        "a18207": {
+          "quantified_psms": 7145,
+          "yeast_psms": 1839,
+          "human_psms": 5133
+        },
+        "a18210": {
+          "quantified_psms": 7291,
+          "yeast_psms": 1858,
+          "human_psms": 5273
+        },
+        "a18213": {
+          "quantified_psms": 7268,
+          "yeast_psms": 1875,
+          "human_psms": 5248
+        }
+      },
+      "job": {
+        "engine": "plus",
+        "method": "sps",
+        "input": "raw",
+        "binary": "/mnt/data1/sage-plus-scientific/tmt-hypro16/bin/sage-plus-v0.1.0-beta.12-x86_64-unknown-linux-gnu/sage",
+        "binary_sha256": "e11976c9a614e298e91c96881a4ba5ac7827d78e078bf3641358b04febc57c78",
+        "binary_version": "sage 0.1.0-beta.12",
+        "wall_seconds": 96.0,
+        "max_rss_gib": 4.43,
+        "config_sha256": "6e5a257d59b1cc718f9f3b5192fbaf82c948afe62000e25958d0c898dcfd45ee"
+      }
+    }
+  },
+  "parity_raw_vs_mzml": {
+    "hrms2": {
+      "raw_quantified_psms": 33123,
+      "mzml_quantified_psms": 33217,
+      "shared_spectra": 33114,
+      "same_peptide": 33114,
+      "channel_values_compared": 529824,
+      "median_abs_log2_diff": 0.0,
+      "p99_abs_log2_diff": 0.0,
+      "fraction_exact_equal": 1.0,
+      "channel_missing_in_one_only": 0,
+      "channel_missing_in_both": 3921
+    },
+    "sps": {
+      "raw_quantified_psms": 21704,
+      "mzml_quantified_psms": 21777,
+      "shared_spectra": 21689,
+      "same_peptide": 21689,
+      "channel_values_compared": 347024,
+      "median_abs_log2_diff": 0.0,
+      "p99_abs_log2_diff": 0.0,
+      "fraction_exact_equal": 1.0,
+      "channel_missing_in_one_only": 0,
+      "channel_missing_in_both": 13575
+    }
+  },
+  "paired_upstream_vs_plus_per_file": {
+    "hrms2": {
+      "a18203": {
+        "upstream": {
+          "quantified_psms": 10817,
+          "yeast_psms": 2792,
+          "human_psms": 7847
+        },
+        "plus": {
+          "quantified_psms": 10892,
+          "yeast_psms": 2805,
+          "human_psms": 7904
+        }
+      },
+      "a18209": {
+        "upstream": {
+          "quantified_psms": 11145,
+          "yeast_psms": 2906,
+          "human_psms": 8044
+        },
+        "plus": {
+          "quantified_psms": 11239,
+          "yeast_psms": 2930,
+          "human_psms": 8108
+        }
+      },
+      "a18212": {
+        "upstream": {
+          "quantified_psms": 11007,
+          "yeast_psms": 2879,
+          "human_psms": 7958
+        },
+        "plus": {
+          "quantified_psms": 11086,
+          "yeast_psms": 2902,
+          "human_psms": 8005
+        }
+      }
+    },
+    "sps": {
+      "a18207": {
+        "upstream": {
+          "quantified_psms": 7062,
+          "yeast_psms": 1827,
+          "human_psms": 5085
+        },
+        "plus": {
+          "quantified_psms": 7160,
+          "yeast_psms": 1844,
+          "human_psms": 5143
+        }
+      },
+      "a18210": {
+        "upstream": {
+          "quantified_psms": 7221,
+          "yeast_psms": 1838,
+          "human_psms": 5235
+        },
+        "plus": {
+          "quantified_psms": 7313,
+          "yeast_psms": 1864,
+          "human_psms": 5289
+        }
+      },
+      "a18213": {
+        "upstream": {
+          "quantified_psms": 7207,
+          "yeast_psms": 1863,
+          "human_psms": 5210
+        },
+        "plus": {
+          "quantified_psms": 7304,
+          "yeast_psms": 1882,
+          "human_psms": 5275
+        }
+      }
+    }
+  },
+  "provenance": {
+    "inputs": {
+      "fasta/human-yeast.fasta": {
+        "bytes": 17522138,
+        "sha256": "64b4055b549ffa18df63a3fc2bb62dae2e3ea4e13385762e4bc1cbc11b6170dd",
+        "made_by": "cat human.fasta yeast.fasta"
+      },
+      "fasta/human.fasta": {
+        "bytes": 13666795,
+        "sha256": "dffdff3807ec6eb7e752035b5475aaefa26d1b36e513e3344198d521a2169c42",
+        "receipt": "/mnt/data1/sage-plus-scientific/20260914/references/human.receipt.json"
+      },
+      "fasta/yeast.fasta": {
+        "bytes": 3855343,
+        "sha256": "1aaa81860c8bda68e81e4290703d871c7c8bd12a928038772fbc91b7e17b342a",
+        "receipt": "/mnt/data1/sage-plus-scientific/20260914/references/yeast.receipt.json"
+      },
+      "mzml/a18203.mzML": {
+        "bytes": 305377827,
+        "sha256": "a781398ebdaf0351869bb6d35e1a9659191e0fe7dc306f8252ddd4fd0013535d"
+      },
+      "mzml/a18207.mzML": {
+        "bytes": 640829114,
+        "sha256": "41fea58c56e39a85d39a57b420b6d74dda30d2e139c70d126a5564b693f7f9bf"
+      },
+      "mzml/a18209.mzML": {
+        "bytes": 296662098,
+        "sha256": "12a6006d808e3f48b8414737f06c315f10e7e9bcc04216aa43f1abfb260885dd"
+      },
+      "mzml/a18210.mzML": {
+        "bytes": 638239325,
+        "sha256": "782b72016da5766d515f6570fc4f0c0022a9466f20ad6caa707c875319646587"
+      },
+      "mzml/a18212.mzML": {
+        "bytes": 293389218,
+        "sha256": "026d5e1d319fa33ebeff0cdbbaa932aba6b1f4660fd1285588f8a270e4ca3fd8"
+      },
+      "mzml/a18213.mzML": {
+        "bytes": 642074211,
+        "sha256": "e54c2d42878179fb406c5300031475837e8e3c1efadc322bc03667c6c5c3c04a"
+      },
+      "raw/a18203.raw": {
+        "bytes": 277859801,
+        "sha256": "16decb176ee1504d182a3163416819381a2dc223bdc3803eaef5571bfe2cba95"
+      },
+      "raw/a18207.raw": {
+        "bytes": 251612736,
+        "sha256": "5137afd6c69efdb4c4e01587d94958e756511930d13adfe97afcd075542cceb3"
+      },
+      "raw/a18209.raw": {
+        "bytes": 262285211,
+        "sha256": "501855515dacab126373ffd11ca05bb1be9523a8829ab58c6cb24b7f45e83ad5"
+      },
+      "raw/a18210.raw": {
+        "bytes": 248201395,
+        "sha256": "b7054d417ed604b6721e4c9ff4d1cb8c13cf385fcc0eff4d4fc2cd3754f7e54b"
+      },
+      "raw/a18212.raw": {
+        "bytes": 255589225,
+        "sha256": "2ab85e8a64369f0230929db4ef4b928eccbb956a5fb2068cb64df1759e484959"
+      },
+      "raw/a18213.raw": {
+        "bytes": 245163665,
+        "sha256": "67c806a4fbeefc0a29b2ad15683f130729de14fe1a02079bc9254c75f0453f59"
+      }
+    },
+    "thermorawfileparser": "/mnt/data1/sage-plus-scientific/20260914/tools/thermo/ThermoRawFileParser",
+    "trfp_zip_sha256": "19566762ce6759a93cee9aa4cef50de1e9ae2ad9078bd95826e8e733d4bb0d52",
+    "upstream": "df9219951cc9a54c (df92199), sage 0.15.0-beta.2; same binary as the 20260914 LFQ pilot",
+    "channel_map_source": "metadata/channel-map-source.md"
+  },
+  "settings": {
+    "q_value": 0.01,
+    "channels": [
+      "126",
+      "127N",
+      "127C",
+      "128N",
+      "128C",
+      "129N",
+      "129C",
+      "130N",
+      "130C",
+      "131N",
+      "131C",
+      "132N",
+      "132C",
+      "133N",
+      "133C",
+      "134N"
+    ],
+    "yeast_level": [
+      0.0,
+      0.05,
+      0.05,
+      0.05,
+      0.1,
+      0.1,
+      0.1,
+      0.25,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.5,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "paper": {
+      "hrms2": {
+        "1/2": 1.81,
+        "1/4": 3.16,
+        "1/10": 5.67,
+        "1/20": 7.69
+      },
+      "sps": {
+        "1/2": 1.9,
+        "1/4": null,
+        "1/10": null,
+        "1/20": 13.55
+      },
+      "rts_reference": {
+        "1/2": 1.9,
+        "1/4": 3.64,
+        "1/10": 8.01,
+        "1/20": 13.55
+      }
+    },
+    "config_hrms2": {
+      "database": {
+        "enzyme": {
+          "missed_cleavages": 2,
+          "cleave_at": "KR",
+          "restrict": "P",
+          "min_len": 7,
+          "max_len": 50
+        },
+        "static_mods": {
+          "C": 57.021464,
+          "K": 304.207146,
+          "^": 304.207146
+        },
+        "variable_mods": {
+          "M": [
+            15.994915
+          ]
+        },
+        "max_variable_mods": 2,
+        "decoy_tag": "rev_",
+        "generate_decoys": true,
+        "fasta": "/mnt/data1/sage-plus-scientific/tmt-hypro16/fasta/human-yeast.fasta"
+      },
+      "precursor_tol": {
+        "ppm": [
+          -10.0,
+          10.0
+        ]
+      },
+      "fragment_tol": {
+        "ppm": [
+          -20.0,
+          20.0
+        ]
+      },
+      "isotope_errors": [
+        -1,
+        3
+      ],
+      "deisotope": true,
+      "quant": {
+        "tmt": "Tmt16",
+        "tmt_settings": {
+          "level": 2,
+          "sn": false
+        }
+      },
+      "mzml_paths": []
+    },
+    "config_sps": {
+      "database": {
+        "enzyme": {
+          "missed_cleavages": 2,
+          "cleave_at": "KR",
+          "restrict": "P",
+          "min_len": 7,
+          "max_len": 50
+        },
+        "static_mods": {
+          "C": 57.021464,
+          "K": 304.207146,
+          "^": 304.207146
+        },
+        "variable_mods": {
+          "M": [
+            15.994915
+          ]
+        },
+        "max_variable_mods": 2,
+        "decoy_tag": "rev_",
+        "generate_decoys": true,
+        "fasta": "/mnt/data1/sage-plus-scientific/tmt-hypro16/fasta/human-yeast.fasta"
+      },
+      "precursor_tol": {
+        "ppm": [
+          -10.0,
+          10.0
+        ]
+      },
+      "fragment_tol": {
+        "da": [
+          -0.5,
+          0.5
+        ]
+      },
+      "isotope_errors": [
+        -1,
+        3
+      ],
+      "deisotope": false,
+      "quant": {
+        "tmt": "Tmt16",
+        "tmt_settings": {
+          "level": 3,
+          "sn": false
+        }
+      },
+      "mzml_paths": []
+    }
+  }
+}
