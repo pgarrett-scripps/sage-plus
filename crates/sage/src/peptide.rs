@@ -901,8 +901,8 @@ impl Peptide {
     /// `protein_sites`, which also picks the displayed sequence of merged
     /// I/L twins. If any occurrence has the peptide's residues as written,
     /// the result is empty: a FASTA span without B, Z or X, a site without a
-    /// FASTA span, or a protein listed without a coordinate site (a peptide
-    /// TSV row, which is never expanded). Otherwise the first expanded
+    /// FASTA span, or a protein listed without a site (a peptide TSV row
+    /// without B, Z or X). Otherwise the first expanded
     /// occurrence gives the substitutions. A generated decoy reports its
     /// target span reversed like the decoy, at decoy positions.
     pub fn substitutions(&self) -> String {
@@ -910,14 +910,12 @@ impl Peptide {
         let len = self.sequence.len();
         let mut expanded = None;
         for site in self.protein_sites.iter() {
-            let span = site
-                .source
-                .as_ref()
-                .zip(site.start)
-                .and_then(|(protein, start)| {
-                    let start = start as usize;
-                    protein.as_bytes().get(start..start + len)
-                });
+            // A site without a start is an expanded peptide TSV row, whose
+            // source is the row as written.
+            let span = site.source.as_ref().and_then(|source| match site.start {
+                Some(start) => source.as_bytes().get(start as usize..start as usize + len),
+                None => Some(source.as_bytes()).filter(|row| row.len() == len),
+            });
             match span {
                 Some(span) if is_ambiguous(span) => {
                     if expanded.is_none() {

@@ -134,6 +134,9 @@ fn classify_cleavages(
     peptide
         .protein_sites
         .iter()
+        // An expanded peptide TSV row keeps its row as written in an
+        // occurrence without coordinates; like a plain row, it has no termini.
+        .filter(|occurrence| occurrence.start.is_some() || occurrence.source.is_none())
         .map(|occurrence| {
             let written = as_written(peptide, occurrence);
             let custom_boundaries = custom_cleavages

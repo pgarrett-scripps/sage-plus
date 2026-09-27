@@ -2850,3 +2850,66 @@ fn generated_decoys_that_are_twins_of_a_target_are_dropped() {
         assert_eq!(decoy, !merge);
     }
 }
+
+/// Peptide TSV rows with B, X or Z are expanded like FASTA digests when
+/// expansion is on, report their substitutions, and are otherwise skipped.
+#[test]
+fn ambiguous_peptide_tsv_rows_expand_with_substitutions() {
+    let tsv = "sequence\tprotein\nPEPXIDEK\tT1\nPEBTIDZK\tT2\nSAMPLEK\tT3\n";
+    let peptides = ambiguous_parameters(true).peptides_from_tsv(tsv);
+    let find = |sequence: &[u8]| {
+        peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let targets = |protein: &str| {
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == protein)
+            .count()
+    };
+    // 20 variants, with the I and L twins merged.
+    assert_eq!(targets("T1"), 19);
+    assert_eq!(targets("T2"), 4);
+    let expanded = find(b"PEPWIDEK");
+    assert_eq!(expanded.substitutions(), "X4W");
+    assert_eq!(expanded.proteins("rev_", false), "T1");
+    // No coordinates are invented: the row is still unplaced, like a plain one.
+    let enzyme = ambiguous_parameters(true)
+        .enzyme_parameters()
+        .enzyme
+        .unwrap();
+    assert_eq!(
+        crate::digestion::classify_peptide(&enzyme, expanded, false),
+        crate::digestion::classify_peptide(&enzyme, find(b"SAMPLEK"), false),
+    );
+    // The generated decoy of PEPWIDEK, at decoy positions.
+    let decoy = find(b"PEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"PENTIDQK").substitutions(), "B3N;Z7Q");
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+
+    // Expansion off: skipped with a warning, as before.
+    let peptides = ambiguous_parameters(false).peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) == "T3"));
+    assert!(!peptides.is_empty());
+
+    // Over the variant cap: the X row is dropped, the B/Z row (4) kept.
+    let mut capped = ambiguous_parameters(true);
+    capped.max_ambiguous_variants = 4;
+    let peptides = capped.peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) != "T1"));
+    assert_eq!(
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == "T2")
+            .count(),
+        4
+    );
+}
