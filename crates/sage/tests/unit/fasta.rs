@@ -233,7 +233,10 @@ fn ambiguous_residues_are_expanded_per_digest() {
             dropped: 1,
         })
     );
-    assert_eq!(fasta.ambiguous_expansion_summary(&trypsin(None), None), None);
+    assert_eq!(
+        fasta.ambiguous_expansion_summary(&trypsin(None), None),
+        None
+    );
 }
 
 #[test]

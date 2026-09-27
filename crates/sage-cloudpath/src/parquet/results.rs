@@ -194,11 +194,9 @@ pub fn serialize_features(
                 .flatten()
                 .map(|span| ByteArray::from(span.into_bytes()))
                 .collect::<Vec<_>>();
-            column.typed::<ByteArrayType>().write_batch(
-                &values,
-                Some(&definition_levels),
-                None,
-            )?;
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, Some(&definition_levels), None)?;
             column.close()?;
         }
         if has_labels {
