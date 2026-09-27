@@ -10,19 +10,40 @@ text.
 Sage `v0.15.0-beta.2` was obtained from #link(
   "https://github.com/lazear/sage",
 )[the Sage repository], source commit
-`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus `v0.1.0-beta.6` was
-obtained from #link("https://github.com/pgarrett-scripps/sage-plus")[the Sage
-  Plus repository], source commit `3e30135fb8786ec8a12c1f62e0ff9300e57f9567`.
-FDRBench `1.1.1` used source commit `3b619a9acf60d7292fb651a00da55f58cb67fb79`.
+`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus came from #link(
+  "https://github.com/pgarrett-scripps/sage-plus",
+)[the Sage Plus repository]. FDRBench `1.1.1` used source commit
+`3b619a9acf60d7292fb651a00da55f58cb67fb79`.
 
-The comparison was refreshed using the published Sage Plus Linux executable,
-verified against the release SHA256SUMS manifest. The evidence directory is
+The label-free, isobaric, and streamed ten- and thirty-times large-database
+searches used Sage Plus `v0.1.0-beta.13`, tagged at commit `efd1b52`. The
+executable was built from commit `8527f76` with SHA-256 prefix `43c6e19b`.
+Between that commit and the tag, only version strings, documentation, and a unit
+test changed, so the search code is the release code. The executable therefore
+reports the preceding version string. The label-free Sage Plus run is at
+`/mnt/data1/build-cache/b13-rc/lfq/lfq-plus-b13/`. The isobaric benchmark is at
+`benchmarks/scientific-results/20260927-tmt/` on the `bench/tmt-hypro16` branch.
+The large-database reruns are at
+`/mnt/data1/sage-plus-scientific/large-db-20260925/runs-b13/`.
+
+The remaining large-database searches used the `v0.1.0-beta.11` development
+build at commit `f924783`, with executable SHA-256 prefix `38c8e694`. The
+streamed one-hundred-times search used the `v0.1.0-beta.11` streaming build,
+executable SHA-256 prefix `47127fd7`, from `runs-v2-mp4/` in the same directory.
+The script `analysis/scripts/collect_large_db_streamed.py` gathers the streamed
+runs into `analysis/data/large-db-streamed.json` and records each build.
+
+The public timing, worker-scaling, identification, entrapment, mass-offset, and
+synthetic phosphorylation results used Sage Plus `v0.1.0-beta.6`, source commit
+`3e30135fb8786ec8a12c1f62e0ff9300e57f9567`. That comparison used the published
+Linux executable, verified against the release SHA256SUMS manifest. The Sage
+label-free run also comes from it. The evidence directory is
 `runs/paper-refresh-20260920/`, relative to the Sage Plus working repository.
 Its `evidence/` and `extension/` directories retain commands, configurations,
-executable and input hashes, run outcomes, and analytical outputs. Large spectra
-and unchanged reference inputs remain at their recorded acquisition paths. These
-are local reproducibility records, not an external deposition. All comparative
-results in this manuscript use the release pair specified above.
+executable and input hashes, run outcomes, and analytical outputs. The file
+`analysis/data/release-context.json` records every executable digest. Large
+spectra and unchanged reference inputs remain at their recorded acquisition
+paths. These are local reproducibility records, not an external deposition.
 
 = Development source map <sec:si-development>
 
@@ -431,6 +452,18 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
     and peptide q-values at most one percent. No direct MS2 is a subset of the
     complete control set, not an additional independent sample.],
 ) <tbl:si-control>
+
+#figure(
+  tbl("tbl.tmt"),
+  caption: [HYpro16 isobaric reporter ratios for Sage and Sage Plus. Quant PSMs
+    pass spectrum and peptide q-values of at most one percent. Yeast peptides
+    enter the ratio analysis after removing sequences shared with human. Fold is
+    the observed full-level to one-twentieth ratio, and Published is the
+    signal-to-noise filtered value from the original study. Slope is the
+    compression slope over the spiked levels. Missing is the percent of
+    quantified channels without an observed reporter, excluding the empty
+    channel.],
+) <tbl:si-tmt>
 
 #figure(
   tbl("tbl.mass-offset"),

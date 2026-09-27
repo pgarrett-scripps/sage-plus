@@ -32,6 +32,8 @@
   "entrapment",
   "benchmarking",
   "label-free quantification",
+  "tandem mass tags",
+  "false discovery rate",
 )
 
 #let paper-date = "September 2026"
@@ -52,30 +54,29 @@
 #let paper-abstract = [
   We developed Sage Plus as an independently maintained downstream distribution
   of the Sage proteomics search engine. The extensions address input support,
-  typed analytical output, memory use, execution controls, and
-  modification-aware analysis. Named modifications retain distinct residue and
-  terminal-group attachments, while search-time mass offsets limit index growth.
-  This study documents those changes and evaluates their consequences by
-  comparing Sage #lit("v0.15.0-beta.2") with Sage Plus #lit("v0.1.0-beta.6")
-  using matched public spectra, references, and search settings. The evaluation
-  covered computational resources, worker scaling, identification agreement,
-  peptide entrapment, and label-free quantification. Among completed repeated
-  searches, selected human and mixed-species files used #s(
+  typed analytical output, memory use, error control, provenance, and
+  modification-aware analysis. This study compares Sage #lit("v0.15.0-beta.2")
+  with Sage Plus #lit("v0.1.0-beta.13") using matched public spectra,
+  references, and search settings. On a three-species label-free benchmark, Sage
+  Plus retained #s("report.lfq.plus.target_precursors") target precursors at one
+  percent against #s("report.lfq.upstream.target_precursors") for Sage, with
+  nearly identical ratios on shared features. A new per-row extraction q-value
+  reduced foreign-species signal among transferred rows of a human-only control
+  from #s("report.lfq.plus.control.foreign_percent") to #s(
+    "report.lfq.extraction.foreign_percent",
+  ) percent. It remains a diagnostic rather than a calibrated transfer error
+  rate. Isobaric reporter ratio compression on a two-proteome standard matched
+  Sage for both acquisition methods. A streamed prefilter searched a human
+  reference combined with a gut catalog one hundred times its size within #s(
+    "large.streamed.100x.rss",
+  ) GiB. Resource and identification comparisons used the earlier release #lit(
+    "v0.1.0-beta.6",
+  ). There, selected human and mixed-species files used #s(
     "pilot.PXD001468.rss_reduction",
-  ) and #s(
-    "pilot.PXD028735.rss_reduction",
-  ) percent less peak resident memory with Sage Plus. Runtime favored Sage Plus
-  in the repeated public searches but favored Sage with entrapment-expanded
-  references. Accepted peptide-spectrum match Jaccard indices ranged from #s(
-    "pilot.overlap.min",
-  ) to #s("pilot.overlap.max"). Disagreement included both changed assignments
-  and identical assignments crossing different confidence thresholds. Mean
-  peptide entrapment estimates were similar, with conditional difference
-  intervals spanning zero. Label-free quantification produced nearly identical
-  ratios on shared features, while a human-only control revealed accepted
-  foreign-species signal in both engines. Sage Plus used less memory while
-  retaining high identification agreement on the tested workloads. Confidence in
-  cross-run extracted intensities remains unresolved.
+  ) and #s("pilot.PXD028735.rss_reduction") percent less peak memory. Accepted
+  peptide-spectrum match Jaccard indices ranged from #s("pilot.overlap.min") to
+  #s("pilot.overlap.max"), and peptide entrapment estimates were similar. Error
+  control for data-independent acquisition remains unvalidated.
 ]
 
 // -----------------------------------------------------------------------------

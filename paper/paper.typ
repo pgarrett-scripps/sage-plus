@@ -89,9 +89,12 @@ identification results and quantitative accuracy. Compact storage can reduce
 memory, whereas preprocessing and predictive models can change candidate
 rankings and confidence scores. We therefore compared Sage #lit(
   "v0.15.0-beta.2",
-) and Sage Plus #lit("v0.1.0-beta.6") using resource measurements, accepted
-peptide-spectrum match (PSM) identities, independent peptide entrapment
-estimates, known mixture ratios, and a species-absent quantitative control.
+) and Sage Plus #lit("v0.1.0-beta.13") using known mixture ratios, a
+species-absent quantitative control, isobaric reporter ratios, and large search
+databases. Resource measurements, accepted peptide-spectrum match (PSM)
+identities, and independent peptide entrapment estimates come from the earlier
+release #lit("v0.1.0-beta.6") and were not repeated for this release
+(@sec:si-provenance).
 
 = Development of Sage Plus <sec:development>
 
@@ -107,9 +110,9 @@ this chapter. The source map is in @sec:si-development.
   tbl("tbl.development"),
   caption: [Development areas in Sage Plus relative to Sage #lit(
       "v0.15.0-beta.2",
-    ). Changes describe the evaluated Sage Plus #lit("v0.1.0-beta.6") snapshot.
-    Evaluation refers to the complete released workflows. Individual mechanisms
-    were not isolated by ablation.],
+    ). Changes describe Sage Plus #lit("v0.1.0-beta.13"). Evaluation refers to
+    the complete released workflows. Individual mechanisms were not isolated by
+    ablation.],
 ) <tbl:development>
 
 == Input support and analytical output
@@ -223,24 +226,62 @@ evaluates the resulting memory and search-time tradeoff.
 LFQ adds configurable match-between-runs tolerance and a switch for cross-run
 extraction. Typed output records strict confirmation from tandem spectra and
 per-file signal diagnostics. These diagnostics include spectral agreement, trace
-agreement, and retention-time displacement. Their ranking score is not a
-calibrated probability that an individual transfer is correct. The quantitative
-experiment tests unlabeled LFQ ratios, coverage, and a species-absent control.
-Labeled channels and empirical spectral-library export remain unevaluated here.
+agreement, and retention-time displacement. Each precursor and file row also
+carries an extraction q-value. It estimates the chance that the row's feature,
+and therefore its intensity, came from a wrong or interfering peak. Each
+target's shifted decoy feature is scored at the target's own peak and serves as
+a null model for random peaks. The value is a diagnostic, not a calibrated
+transfer error rate, and match-between-runs stays on by default.
 
-When peptide or protein confidence modeling is underdetermined or gives a
-nonfinite posterior, Sage Plus falls back to count-based target-decoy q-values.
-Equal scores remain one threshold group. Localization with equally scoring best
-target arrangements reports no confidence in an arbitrary winning site, while
-retaining those arrangements in the localization competition population. The
-synthetic phosphorylation experiment evaluates peptide acceptance and synthesis
-consistency under explicit confidence thresholds (@sec:si-ptm).
+Isobaric reporter channels without an observed positive peak are written as
+missing values rather than zero intensities. A downstream ratio therefore cannot
+treat an absent reporter as a measured zero. The quantitative experiments test
+unlabeled LFQ ratios, coverage, a species-absent control, and reporter ratio
+compression. Labeled LFQ channels and empirical spectral-library export remain
+unevaluated here.
+
+Peptide, protein, and protein-group q-values use picked target-decoy competition
+@savitski2015. Only the better-scoring member of each target-decoy pair is
+ranked, so a target beaten by its own decoy cannot pass. Spectrum-level q-values
+are unchanged. Equal scores remain one threshold group. Protein and PTM site
+reports carry a site q-value estimated by the same target-decoy procedure. Decoy
+PSMs pass the same spectrum and localization gates as targets before sites are
+counted. Localization with equally scoring best target arrangements reports no
+confidence in an arbitrary winning site, while retaining those arrangements in
+the localization competition population. The synthetic phosphorylation
+experiment evaluates peptide acceptance and synthesis consistency under explicit
+confidence thresholds (@sec:si-ptm).
+
+== Digestion, quality control, and provenance
+
+Initiator methionine clipping is on by default. Proteins whose methionine
+precedes a small residue are also digested without it, as methionine
+aminopeptidase would process them. Peptides that differ only by isoleucine and
+leucine are merged into one candidate. The ambiguous residue J is scored with
+the shared isoleucine and leucine mass. An optional expansion searches B, Z, and
+X residues by substitution and records each replacement. These digestion changes
+alter the candidate space and hence accepted results.
+
+Every search writes a digestion summary and checks MS1 spectra for common
+polymer contaminant ladders. The run summary records recommended mass
+tolerances, the peak resident memory, and the worker thread count. Every Parquet
+output records the software version, source commit, effective configuration,
+spectrum inputs, and the FASTA with its content digest. A single result file can
+therefore be traced to the run that produced it. The run summary and the tabular
+side outputs have published schemas.
 
 = Evaluation design <sec:methods>
 
 == Software and comparison design
 
-The comparison used the released Sage and Sage Plus versions named above.
+The comparison used the released Sage and Sage Plus versions named above. The
+label-free, isobaric, and large-database searches ran Sage Plus #lit(
+  "v0.1.0-beta.13",
+). The public timing, worker-scaling, identification, entrapment, mass-offset,
+and synthetic phosphorylation searches ran the earlier release #lit(
+  "v0.1.0-beta.6",
+) and were not repeated. Later releases changed digestion defaults and peptide
+and protein q-values, so those results describe the earlier release.
 @sec:si-provenance records software versions, source commits, and the evidence
 record locations.
 
@@ -391,7 +432,7 @@ worker-count series.
 == Matched label-free quantification
 
 The quantification experiment jointly searched the four mixture acquisitions and
-the human-only control from PXD028735. Both releases used the same amended
+the human-only control from PXD028735. Both engines used the same amended
 reference, search settings, batch size, and eight-worker setting. Shared LFQ
 settings specified hybrid peak scoring, summed integration, a spectral-angle
 cutoff of #lit("0.7"), a #lit("5") parts-per-million mass tolerance, combined
@@ -422,7 +463,7 @@ mixture files for that engine. The denominator was that feature count multiplied
 by the number of mixture files. It does not include all theoretically detectable
 peptides. To separate changes in selected feature sets from changes in their
 intensities, we also compared ratio error on identical peptide and preparation
-pairs accepted by both releases.
+pairs accepted by both engines.
 
 The human-only control supplied a species-absent diagnostic. A foreign
 assignment had to map only to yeast or _E. coli_ proteins and lack an
@@ -431,7 +472,39 @@ foreign positive rows both in the complete accepted control set and among rows
 without direct accepted tandem spectral evidence. Direct tandem mass
 spectrometry (MS2) evidence required the same peptide in the same file at both
 spectrum and peptide q-values of at most #lit("1") percent. This common rule
-replaced release-specific confirmation flags.
+replaced release-specific confirmation flags. Rows without direct MS2 evidence
+are treated as transferred features.
+
+A second Sage Plus analysis of the same run kept an intensity only where its
+extraction q-value was at most #lit("1") percent. All other rows became missing,
+and the ratio and control endpoints were recomputed. The Sage results were
+unchanged because Sage reports no per-row extraction confidence.
+
+== Isobaric reporter ratio benchmark
+
+PRIDE accession PXD020815 supplied the HYpro16 standard @navarreteperea2021.
+Human peptides are equal in all sixteen TMTpro channels. Yeast peptides are
+absent from the first channel and spiked at #lit("1/20"), #lit("1/10"), #lit(
+  "1/4",
+), #lit("1/2"), and #lit("1") of full level in the others. Three files used
+high-resolution MS2 reporters and three used synchronous precursor selection MS3
+(SPS-MS3). Both engines searched converted mzML, and Sage Plus also read the
+vendor RAW files directly.
+
+The search combined human and yeast reference proteomes with generated decoys.
+TMTpro and carbamidomethyl labels were fixed, and methionine oxidation was
+variable. Fragment tolerance was ±#lit("20") parts per million for
+high-resolution MS2 and ±#lit("0.5") Da for ion-trap SPS-MS3 spectra. Reporter
+intensities were raw, without impurity correction or purity filtering. PSMs
+required spectrum and peptide q-values of at most #lit("1") percent, and
+peptides shared between the two proteomes were excluded.
+
+Each channel was scaled to the human median within its file. A yeast peptide
+ratio was its median log-base-two channel intensity relative to the mean of the
+full-level channels. The observed fold at the lowest spike is two raised to the
+negated median log ratio. Compression slope is the least-squares slope of
+observed on expected log ratios across the spiked levels. A slope of one means
+no ratio compression.
 
 == Modification strategy and attachment evaluation
 
@@ -469,13 +542,22 @@ with eight workers. Each database was searched twice, once with the prefilter
 enabled and once without it. The prefilter scans the spectra first and keeps a
 peptide only when one precursor hypothesis of a spectrum, a charge, isotope
 error, and mass offset, has at least three preliminary fragment matches, the
-default. Its retention therefore depends on the precursor search space, and a
-separate arm restricted isotope errors to the monoisotopic precursor. A sweep on
-the ten-times subset varied the required matches from one to six and limited the
-prefilter to each spectrum's #lit("75") or #lit("50") most intense peaks. One
-required match keeps every peptide that could enter the preliminary search.
-Outcomes were recorded as completed, refused by the preflight estimate before
-building, or stopped by the runtime memory guard.
+default in that build. Its retention therefore depends on the precursor search
+space, and a separate arm restricted isotope errors to the monoisotopic
+precursor. A sweep on the ten-times subset varied the required matches from one
+to six and limited the prefilter to each spectrum's #lit("75") or #lit("50")
+most intense peaks. One required match keeps every peptide that could enter the
+preliminary search. Outcomes were recorded as completed, refused by the
+preflight estimate before building, or stopped by the runtime memory guard.
+
+Later releases stream proteins through the prefilter, one per worker, instead of
+holding the unmodified digest. The default threshold also rose to four
+preliminary matches. We reran the ten- and thirty-times prefilter searches with
+the #lit("v0.1.0-beta.13") binary at four matches. The one-hundred-times search
+at four matches comes from the #lit("v0.1.0-beta.11") streaming build, with
+executable SHA-256 prefix `47127fd7` and a #lit("22") GiB memory limit. Its
+release rerun could not start because the host lacked the free memory to admit
+it.
 
 The scaling series searched one HEK file against the human reference combined
 with random subsets of the Integrated Gene Catalog of the human gut microbiome
@@ -715,7 +797,7 @@ advantage at controlled true error (@sec:si-matched-fdp).
 
 == Matched quantitative accuracy and coverage
 
-The matched LFQ extension completed in both releases. At the primary precursor
+The matched LFQ search completed in both engines. At the primary precursor
 threshold, Sage retained #s("report.lfq.upstream.target_precursors") target
 precursors and Sage Plus retained #s("report.lfq.plus.target_precursors"). Their
 positive target precursor-file counts were #s(
@@ -723,9 +805,13 @@ positive target precursor-file counts were #s(
 ) and #s("report.lfq.plus.positive_target_file_rows"), respectively. These
 counts span the jointly searched mixture and control files. They are not protein
 counts or counts of independently confirmed recipient-file transfers. Sage Plus
-precursor yield changed by #s("report.lfq.yield_change.0.01") percent at the
+precursor yield was higher by #s("report.lfq.yield_change.0.01") percent at the
 primary threshold and by #s("report.lfq.yield_change.0.05") percent at the
-secondary threshold. The direction therefore depended on the confidence cutoff.
+secondary threshold. The comparison did not isolate the cause of this gain. Its
+run summary reported #s("report.lfq.plus.run.peptides") peptides and #s(
+  "report.lfq.plus.run.proteins",
+) proteins at one percent. The search took #s("report.lfq.plus.run.seconds")
+seconds with a peak resident memory of #s("report.lfq.plus.run.peak_gb") GB.
 
 @fig:lfq displays the species-specific ratio distributions. @fig:lfq-endpoints
 compares bias, absolute ratio error, preparation CVs, and missingness. Each
@@ -807,6 +893,65 @@ numerators and denominators used for the control calculation.
     represent independent samples.],
 ) <fig:control>
 
+== Per-row extraction confidence <sec:lfq-extraction>
+
+The extraction q-value addresses the transfers that the control exposes. Without
+it, #s("report.lfq.plus.control.foreign_without_strict_ms2") of #s(
+  "report.lfq.plus.control.without_strict_ms2",
+) Sage Plus control rows without direct MS2 support carried foreign signal.
+Keeping only intensities with extraction q-values of at most #lit("1") percent
+left #s("report.lfq.extraction.control.foreign_without_strict_ms2") foreign rows
+among #s("report.lfq.extraction.control.without_strict_ms2"). The foreign
+fraction among these transferred rows fell from #s(
+  "report.lfq.plus.control.foreign_percent",
+) to #s("report.lfq.extraction.foreign_percent") percent. Across all control
+rows, #s("report.lfq.extraction.control.foreign") of #s(
+  "report.lfq.extraction.control.quantified",
+) remained foreign.
+
+The filter also changed the mixture ratios. Positive target precursor-file rows
+fell from #s("report.lfq.plus.positive_target_file_rows") to #s(
+  "report.lfq.extraction.rows",
+). Median absolute log-ratio error moved from #s("report.lfq.plus.human.mae") to
+#s("report.lfq.extraction.human.mae") for human, from #s(
+  "report.lfq.plus.yeast.mae",
+) to #s("report.lfq.extraction.yeast.mae") for yeast, and from #s(
+  "report.lfq.plus.ecoli.mae",
+) to #s("report.lfq.extraction.ecoli.mae") for _E. coli_. The _E. coli_ bias
+moved from #s("report.lfq.plus.ecoli.bias") to #s(
+  "report.lfq.extraction.ecoli.bias",
+). Many accepted transfers in the human-only file still quantified foreign
+signal, so the extraction q-value does not yet control the transfer error rate
+at its nominal level. It ranks rows by the chance of a wrong or interfering peak
+and is best used as a diagnostic filter.
+
+== Isobaric reporter ratio compression
+
+Sage Plus reproduced Sage's reporter ratios on the HYpro16 standard
+(@tbl:si-tmt). At the #lit("1/20") spike, high-resolution MS2 gave observed
+folds of #s("tmt.hrms2.upstream.fold20") for Sage and #s(
+  "tmt.hrms2.plus.fold20",
+) for Sage Plus. SPS-MS3 gave #s("tmt.sps.upstream.fold20") and #s(
+  "tmt.sps.plus.fold20",
+). The published folds at this level were #lit("7.69") and #lit("13.55")
+@navarreteperea2021. That study filtered reporters by signal-to-noise, which
+neither engine reports for these inputs, so the absolute folds are not directly
+comparable.
+
+Compression slopes were #s("tmt.hrms2.upstream.slope") and #s(
+  "tmt.hrms2.plus.slope",
+) for high-resolution MS2 and #s("tmt.sps.upstream.slope") and #s(
+  "tmt.sps.plus.slope",
+) for SPS-MS3. The expected ratio compression of MS2 reporters relative to
+SPS-MS3 therefore appeared equally in both engines. Reading vendor RAW files
+directly gave folds of #s("tmt.hrms2.plus.raw.fold20") and #s(
+  "tmt.sps.plus.raw.fold20",
+). Missing reporter channels, excluding the empty channel, were #s(
+  "tmt.hrms2.plus.missing",
+) and #s("tmt.sps.plus.missing") percent of quantified channels in Sage Plus.
+Sage Plus writes these channels as missing values, whereas Sage writes zero
+intensities.
+
 = Mass offset search <sec:offsets>
 
 Searching a modification as a mass offset moves work from the fragment index to
@@ -884,6 +1029,19 @@ completed at #s("large.10x.rss") GiB in #s("large.10x.minutes") minutes, keeping
 times, it completed at #s("large.30x.rss") GiB in #s("large.30x.minutes")
 minutes, keeping #s("large.30x.kept") of #s("large.30x.streamed") million.
 
+Streaming the prefilter digest lowered memory further and extended the range.
+With four required matches, the current default, the ten-times search peaked at
+#s("large.streamed.10x.rss") GiB in #s("large.streamed.10x.minutes") minutes.
+The thirty-times search peaked at #s("large.streamed.30x.rss") GiB in #s(
+  "large.streamed.30x.minutes",
+) minutes. They accepted #s("large.streamed.10x.psms") and #s(
+  "large.streamed.30x.psms",
+) PSMs. The streaming build searched the one-hundred-times subset at #s(
+  "large.streamed.100x.rss",
+) GiB in #s("large.streamed.100x.minutes") minutes and accepted #s(
+  "large.streamed.100x.psms",
+) PSMs.
+
 The prefilter changed results little where both modes completed. Across #s(
   "large.pairs.compared",
 ) completed pairs, the prefilter search accepted at least #s(
@@ -920,7 +1078,8 @@ The match threshold set how much of each database the prefilter kept
 (@tbl:si-prefilter-sweep). At ten times, one required match kept #s(
   "large.sweep.exact.retention",
 ) percent of peptides with a peak of #s("large.sweep.exact.rss") GiB. The
-default of three kept #s("large.sweep.default.retention") percent at #s(
+then-default threshold of three kept #s("large.sweep.default.retention") percent
+at #s(
   "large.sweep.default.rss",
 ) GiB and accepted #s("large.sweep.psm.loss") percent fewer PSMs. Combined
 entrapment FDP was #s("large.sweep.default.fdp") against #s(
@@ -934,10 +1093,10 @@ times. With monoisotopic precursors only, it kept #s(
 ) and #s("large.mono.30x.retention") percent at ten and thirty times, peaking at
 #s("large.mono.10x.rss") and #s("large.mono.30x.rss") GiB and accepting #s(
   "large.mono.10x.psms",
-) and #s("large.mono.30x.psms") PSMs. The prefilter still holds the unmodified
-digest while scanning. The preflight refused the larger subsets and the full
-catalog before building, estimating #s("large.100x.need") GiB at one hundred
-times.
+) and #s("large.mono.30x.psms") PSMs. In that build the prefilter still held the
+unmodified digest while scanning. Its preflight refused the larger subsets and
+the full catalog before building, estimating #s("large.100x.need") GiB at one
+hundred times.
 
 Six-frame translation searched #s("large.six.frame.peptides") million peptides
 against #s("large.six.annotated.peptides") million for the annotated reference.
@@ -959,6 +1118,81 @@ unfiltered searches were refused at estimates of at least #s(
   "large.campi.F05.rss",
 ) GiB.
 
+= Conformance with proteomics software constraints <sec:grounding>
+
+We checked Sage Plus against a set of hard constraints for proteomics search
+software. The rules cover error control, quantification, reporting, efficiency,
+and interoperability. The repository file `benchmarks/GROUNDING.md` maps each
+rule to its tests. @tbl:grounding summarizes the rules that this release changed
+or that remain open. A rule marked as met describes implemented behavior and its
+tests, not a calibration result.
+
+#let gcell(body) = text(size: 8pt, body)
+#figure(
+  table(
+    columns: (0.9fr, 1.3fr, 0.5fr, 2fr),
+    inset: 4pt,
+    align: left,
+    table.header(
+      gcell[*Rule*],
+      gcell[*Requirement*],
+      gcell[*Status*],
+      gcell[*Evidence in this release*],
+    ),
+    gcell[`HC-FDR-01`, `HC-FDR-04`],
+    gcell[Separate error control for each reported level, with gates applied
+      before estimation],
+    gcell[Met],
+    gcell[Picked peptide and protein q-values. Site q-values with identical
+      target and decoy gates.],
+
+    gcell[`HC-FDR-06`],
+    gcell[Error control for cross-run transfers],
+    gcell[Partial],
+    gcell[Per-row extraction q-value. Diagnostic only, not calibrated
+      (@sec:lfq-extraction).],
+
+    gcell[`HC-FDR-05`],
+    gcell[Validated error control for data-independent acquisition],
+    gcell[Open],
+    gcell[No decoy model, peak-group scoring, or entrapment validation for this
+      acquisition mode. Its q-values are not certified.],
+
+    gcell[`HC-QUANT-02`],
+    gcell[Missing signals stay missing],
+    gcell[Met],
+    gcell[Unobserved reporter channels and LFQ gaps are written as nulls.],
+
+    gcell[`HC-RPT-01`, `HC-INTER-03`],
+    gcell[Every output traces to its version, parameters, and inputs],
+    gcell[Met],
+    gcell[Parquet footers record version, commit, configuration, spectrum
+      inputs, and the FASTA digest.],
+
+    gcell[`HC-EFF-05`],
+    gcell[Bounded memory use],
+    gcell[Met],
+    gcell[Preflight estimate, memory guard, streamed prefilter, and peak memory
+      in the run summary.],
+
+    gcell[`HC-TEST-03`],
+    gcell[Validation on known quantitative ratios],
+    gcell[Partial],
+    gcell[Label-free and isobaric mixtures in this study, one public dataset
+      each.],
+
+    gcell[`HC-INTER-02`],
+    gcell[Controlled vocabularies in outputs],
+    gcell[Open],
+    gcell[Outputs carry mass deltas and configured names, not Unimod
+      accessions.],
+  ),
+  caption: [Status of selected hard constraints for Sage Plus #lit(
+      "v0.1.0-beta.13",
+    ). Met means implemented and covered by tests. Partial means implemented
+    with a stated limit. Open means not implemented.],
+) <tbl:grounding>
+
 = Discussion <sec:discussion>
 
 Explicit attachment identity makes modification evidence interpretable across
@@ -975,22 +1209,25 @@ one offset per candidate limits combinations of search-time modifications.
 Indexed modifications can coexist with that offset, but the configured search
 space remains part of the scientific interpretation.
 
-Sage Plus used less peak resident memory in every completed workload. Compact
-storage is a plausible contributor, but the complete-executable comparison
-cannot isolate its effect from preprocessing, modeling, or execution changes.
-The enlarged entrapment databases also showed that lower memory need not imply
-shorter runtime. The scaling results suggest that memory savings could help when
-processing several files concurrently. Testing aggregate throughput at a fixed
-worker budget would establish whether that benefit occurs in practice.
+The earlier Sage Plus release used less peak resident memory than Sage in every
+completed workload. Compact storage is a plausible contributor, but the
+complete-executable comparison cannot isolate its effect from preprocessing,
+modeling, or execution changes. The enlarged entrapment databases also showed
+that lower memory need not imply shorter runtime. The scaling results suggest
+that memory savings could help when processing several files concurrently.
+Testing aggregate throughput at a fixed worker budget would establish whether
+that benefit occurs in practice.
 
 The prefilter makes large search databases a memory question the preflight can
-answer before a search starts. Requiring three preliminary fragment matches
-discards most of a large database for a small loss of identifications, and one
-required match restores results identical to an unfiltered search. Its reach is
-bounded by a cost it does not remove. The FASTA and the unmodified digest are
-still loaded in full, which set the limit at thirty times the human residues.
-Streaming the database would extend the range. Metaproteomic FDP estimation in
-sample-specific databases also remains outside what these searches test.
+answer before a search starts. Requiring three or four preliminary fragment
+matches discards most of a large database for a small loss of identifications,
+and one required match restores results identical to an unfiltered search. Its
+reach is bounded by costs it does not remove. Holding the unmodified digest in
+full set the earlier limit at thirty times the human residues. Streaming the
+digest reached one hundred times within #s("large.streamed.100x.rss") GiB. The
+FASTA is still loaded in full, and the full catalog was not searched.
+Metaproteomic FDP estimation in sample-specific databases also remains outside
+what these searches test.
 
 High PSM agreement and similar entrapment estimates show that the two releases
 produced similar accepted identification sets and peptide-level error estimates
@@ -1002,33 +1239,50 @@ equivalence margin or power analysis. Yield at matched nominal q-values should
 therefore not be interpreted as yield at equal independently estimated error.
 The exploratory comparison near a common estimated FDP ceiling also remains
 descriptive because threshold selection reused the entrapment observations.
+These identification results predate the current digestion defaults and picked
+q-values. Picked q-values changed identifications at one percent only slightly
+in the release benchmarks, but methionine clipping and isoleucine and leucine
+merging alter the candidate space. Current identification agreement therefore
+needs a fresh comparison.
 
 The LFQ comparison found nearly identical ratios on shared features, yet both
 engines retained foreign-species signal in the human-only control. A precursor
 confidence score shared across files does not establish confidence in each
-extracted intensity. Confidence in cross-run extracted intensities needs
-separate validation alongside ratio accuracy and coverage. The control cannot
-detect erroneous human-to-human transfers, and contamination or reference errors
-can contribute foreign signal. Its fractions are therefore diagnostics rather
-than a general transfer-error rate.
+extracted intensity. The per-row extraction q-value is a first step. It removed
+most foreign transfers from the control and reduced ratio error, but the
+remaining foreign fraction exceeds its nominal threshold. One likely reason is
+that decoy features model random peaks, whereas a wrong transfer can land on a
+real interfering peak. A calibrated transfer error rate therefore needs a better
+null model or an empirical correction. The control cannot detect erroneous
+human-to-human transfers, and contamination or reference errors can contribute
+foreign signal. Its fractions are therefore diagnostics rather than a general
+transfer-error rate.
+
+Isobaric reporter ratios were indistinguishable between the engines, including
+the ratio compression expected for high-resolution MS2 reporters. Writing
+missing channels as nulls changes no ratio in this benchmark, because the
+analysis already treated zeros as missing. It prevents a consumer from averaging
+an absent reporter as a measured zero.
 
 The evaluation covers selected files from two public studies on one workstation.
 Compute repeats and many precursor measurements do not add independent
 biological studies. The selected workloads limit generalization. These datasets
 also informed development and were not held out from implementation choices.
-Common converted inputs leave the native readers unevaluated, while labeled
-channels, library export, and automation interfaces require separate assessment.
-The retention-time and final discriminant models reuse observations for fitting
-and scoring, so held-out evaluation and controlled ablations remain necessary.
-Sage Plus retained identifications in the restricted synthetic phosphorylation
-search under the joint peptide and spectrum thresholds. Sparse decoy evidence
-and unaudited acquisition-to-library mapping still limit interpretation of the
-site diagnostic (@sec:si-ptm).
+Direct Thermo RAW reading matched converted mzML in the isobaric benchmark,
+while other native readers remain unevaluated. Labeled LFQ channels, library
+export, automation interfaces, and site q-values require separate assessment.
+Error control for data-independent acquisition is not validated. The
+retention-time and final discriminant models reuse observations for fitting and
+scoring, so held-out evaluation and controlled ablations remain necessary. Sage
+Plus retained identifications in the restricted synthetic phosphorylation search
+under the joint peptide and spectrum thresholds. Sparse decoy evidence and
+unaudited acquisition-to-library mapping still limit interpretation of the site
+diagnostic (@sec:si-ptm).
 
-Sage Plus reduced memory use while maintaining similar identification and LFQ
-results on the tested datasets. Runtime remains workload dependent, and
-quantitative transfer confidence and PTM localization require further
-validation.
+Sage Plus matched Sage on label-free and isobaric quantitative accuracy while
+retaining more precursors, and the earlier release reduced memory with similar
+identification results. Runtime remains workload dependent. Transfer confidence,
+PTM localization, and data-independent acquisition require further validation.
 
 // <<< BODY END
 
