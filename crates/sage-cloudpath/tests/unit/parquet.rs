@@ -31,10 +31,12 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
             file_evidence: vec![
                 Some(sage_core::lfq::FileEvidence {
                     score: 0.75,
+                    extraction_q_value: Some(0.004),
                     ..Default::default()
                 }),
                 None,
             ],
+            paired_decoy_evidence: Vec::new(),
         },
     );
 
@@ -49,7 +51,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("5")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -70,6 +72,12 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     );
     assert_eq!(values(&rows[0])["file_score"], &Field::Double(0.75));
     assert_eq!(values(&rows[1])["file_score"], &Field::Null);
+    assert_eq!(values(&rows[0])["extraction_q_value"], &Field::Float(0.004));
+    assert_eq!(values(&rows[1])["extraction_q_value"], &Field::Null);
+    assert!(metadata.iter().any(|entry| {
+        entry.key == "sage.lfq.extraction_q_value_scope"
+            && entry.value.as_deref() == Some("precursor_file_all_rows")
+    }));
     Ok(())
 }
 
@@ -97,6 +105,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         ms2_confirmed: vec![true],
         ms2_confirmed_strict: vec![true],
         file_evidence: vec![Some(Default::default())],
+        paired_decoy_evidence: Vec::new(),
     };
     let second_peak = || QuantifiedPeak {
         peak: sage_core::lfq::Peak {
@@ -109,6 +118,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         ms2_confirmed: vec![false],
         ms2_confirmed_strict: vec![false],
         file_evidence: vec![Some(Default::default())],
+        paired_decoy_evidence: Vec::new(),
     };
 
     let mut forward = HashMap::new();
@@ -158,6 +168,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
                 ms2_confirmed: vec![true],
                 ms2_confirmed_strict: vec![true],
                 file_evidence: vec![Some(Default::default())],
+                paired_decoy_evidence: Vec::new(),
             },
         );
     }
@@ -170,7 +181,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("6")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -182,6 +193,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
             .map(|(name, field)| (name.as_str(), field))
             .collect::<HashMap<_, _>>();
         assert_eq!(values["label_group"], &Field::Str("PEPTIDER".into()));
+        assert_eq!(values["extraction_q_value"], &Field::Null);
         match values["label_channel"] {
             Field::Str(channel) if channel == "light" => {
                 assert_eq!(values["ratio_to_reference"], &Field::Double(1.0));
