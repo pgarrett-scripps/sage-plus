@@ -137,7 +137,7 @@ sage config.json s3://my-bucket/YYYY-MM-DD_expt_A_fraction_1.mzML.gz
 
 Running Sage will produce several output files (located in either the current directory, or `output_directory` if that option is specified):
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
-- MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row.
+- MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row; a channel that was not observed is null. With TMT on, `run-summary.json` adds `quantification.tmt_channels`: per channel, the number of quantified spectra where it was observed or missing and the median observed intensity (missing channels are skipped, not counted as 0).
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
 - A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
@@ -1388,6 +1388,7 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 - `protein_q`: Assigned protein-level q-value.
 - `ms1_intensity`: Intensity of the selected MS1 precursor ion (not label-free quant)
 - `ms2_intensity`: Total intensity of MS2 spectrum
+- `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
