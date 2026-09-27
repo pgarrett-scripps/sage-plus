@@ -591,3 +591,22 @@ fn quickcheck_semi_missed_cleavages(RandomSequence { sequence }: RandomSequence)
         assert!(digest.missed_cleavages <= 2);
     }
 }
+
+#[test]
+fn unsupported_enzyme_residues_are_errors() {
+    for (cleave, restrict, field) in [
+        ("KB", "", "cleave_at"),
+        ("KZ", "P", "cleave_at"),
+        ("kr", "", "cleave_at"),
+        ("KR", "X", "restrict"),
+        ("KR", "J", "restrict"),
+    ] {
+        let error = Enzyme::try_new(cleave, restrict, true, false)
+            .err()
+            .unwrap_or_else(|| panic!("accepted {cleave}/{restrict}"));
+        assert!(error.contains(field), "{error}");
+    }
+    assert!(Enzyme::try_new("KR", "P", true, false).unwrap().is_some());
+    assert!(Enzyme::try_new("$", "", true, false).unwrap().is_some());
+    assert!(Enzyme::try_new("", "", true, false).unwrap().is_none());
+}

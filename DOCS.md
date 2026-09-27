@@ -408,6 +408,7 @@ The enzyme section contains parameters related to the enzyme used for digestion.
 - **max_len**: Integer. The maximum AA length of peptides to search (default: 50).
 - **cleave_at**: String. Amino acids to cleave at (default: 'KR').
 - **restrict**: String. Do not cleave if one of these amino acids follows the cleavage site (default: 'P').
+- Both accept only the uppercase one-letter codes `ACDEFGHIKLMNPQRSTVWYUO`; `cleave_at` also accepts `""` and `"$"`. Ambiguity codes such as `B`, `Z`, `J` and `X`, lowercase letters and other symbols are configuration errors.
 - **c_terminal**: Boolean. Cleave at the C-terminus of matching amino acids (default:true).
 
 Example: 

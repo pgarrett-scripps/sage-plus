@@ -267,6 +267,15 @@ fn modification_preview_cli_needs_no_search_inputs() -> anyhow::Result<()> {
         .output()?;
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("invalid modification key `KK`"));
+    std::fs::write(&config, r#"{"database":{"enzyme":{"cleave_at":"KB"}}}"#)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg(&config)
+        .args(["--preview-modifications", "KAKAK"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(stderr.contains("unsupported residues `B`"), "{stderr}");
     std::fs::remove_dir_all(root)?;
     Ok(())
 }

@@ -64,6 +64,7 @@ pub fn preview_with_flanks(
     builder
         .validate_modification_keys()
         .map_err(anyhow::Error::msg)?;
+    builder.validate_enzyme().map_err(anyhow::Error::msg)?;
     let mut parameters = builder.make_parameters();
     parameters.validate_channels().map_err(anyhow::Error::msg)?;
     parameters

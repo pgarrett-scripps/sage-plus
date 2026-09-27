@@ -266,23 +266,70 @@ pub struct DigestSite {
 }
 
 impl Enzyme {
+    /// Check that `cleave` (`cleave_at`) and `skip_suffix` (`restrict`) name
+    /// only residues Sage can digest. Ambiguity codes such as B, Z, J and X,
+    /// lowercase letters and other symbols are rejected; `cleave` may also be
+    /// empty (no digestion) or `$` (cleave at the C-terminus only).
+    pub fn validate_residues(cleave: &str, skip_suffix: &str) -> Result<(), String> {
+        let invalid = |residues: &str| {
+            residues
+                .chars()
+                .filter(|x| !x.is_ascii() || !VALID_AA.contains(&(*x as u8)))
+                .collect::<String>()
+        };
+        let bad = invalid(cleave);
+        if !bad.is_empty() && cleave != "$" {
+            return Err(format!(
+                "`database.enzyme.cleave_at` contains unsupported residues `{bad}` in `{cleave}`; \
+                 use one-letter codes from {}, `$`, or an empty string",
+                std::str::from_utf8(&VALID_AA).unwrap_or_default()
+            ));
+        }
+        let bad = invalid(skip_suffix);
+        if !bad.is_empty() {
+            return Err(format!(
+                "`database.enzyme.restrict` contains unsupported residues `{bad}` in `{skip_suffix}`; \
+                 use one-letter codes from {}",
+                std::str::from_utf8(&VALID_AA).unwrap_or_default()
+            ));
+        }
+        Ok(())
+    }
+
+    /// Build an enzyme, returning an error for unsupported residues instead of
+    /// panicking. `Ok(None)` means no digestion (empty `cleave`).
+    pub fn try_new(
+        cleave: &str,
+        skip_suffix: &str,
+        c_terminal: bool,
+        semi_enzymatic: bool,
+    ) -> Result<Option<Self>, String> {
+        Self::validate_residues(cleave, skip_suffix)?;
+        Ok(Self::build(cleave, skip_suffix, c_terminal, semi_enzymatic))
+    }
+
+    /// Build an enzyme from validated residues.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `cleave` or `skip_suffix` contains unsupported residues;
+    /// use [`Enzyme::try_new`] for untrusted input.
     pub fn new(
         cleave: &str,
         skip_suffix: &str,
         c_terminal: bool,
         semi_enzymatic: bool,
     ) -> Option<Self> {
-        assert!(
-            cleave.chars().all(|x| VALID_AA.contains(&(x as u8))) || cleave == "$",
-            "Enzyme cleavage sequence contains non-amino acid characters: {}",
-            cleave
-        );
-        assert!(
-            skip_suffix.chars().all(|x| VALID_AA.contains(&(x as u8))),
-            "Enzyme cleavage restriction contains non-amino acid characters: {}",
-            skip_suffix,
-        );
+        Self::try_new(cleave, skip_suffix, c_terminal, semi_enzymatic)
+            .unwrap_or_else(|error| panic!("{error}"))
+    }
 
+    fn build(
+        cleave: &str,
+        skip_suffix: &str,
+        c_terminal: bool,
+        semi_enzymatic: bool,
+    ) -> Option<Self> {
         // At this point, cleave can be three things: empty, "$", or a string of valid AA's
         match cleave {
             "" => None,

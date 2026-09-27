@@ -141,6 +141,17 @@ pub struct Builder {
 }
 
 impl Builder {
+    /// Reject enzyme residues that would otherwise abort database building.
+    pub fn validate_enzyme(&self) -> Result<(), String> {
+        let Some(enzyme) = &self.enzyme else {
+            return Ok(());
+        };
+        Enzyme::validate_residues(
+            enzyme.cleave_at.as_deref().unwrap_or("KR"),
+            enzyme.restrict.as_deref().unwrap_or(""),
+        )
+    }
+
     pub fn validate_modification_keys(&self) -> Result<(), String> {
         for key in self
             .static_mods

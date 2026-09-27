@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Fixed
+- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
+  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
+  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added
