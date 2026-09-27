@@ -390,6 +390,7 @@ impl Runner {
         self.parameters.output_paths.push(path);
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let polymers = self.polymer_stats(&filenames);
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
 
@@ -644,7 +645,10 @@ impl Runner {
                     })
                     .collect(),
             },
-            qc: super::qc::QcRunStats { digestion },
+            qc: super::qc::QcRunStats {
+                digestion,
+                polymers,
+            },
             output_paths,
         };
         self.cancellation.check()?;

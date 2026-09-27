@@ -17,6 +17,7 @@ pub mod modification;
 pub mod motif;
 pub mod peff;
 pub mod peptide;
+pub mod polymer;
 pub mod protein_grouping;
 pub mod ptm;
 pub mod ptm_library;

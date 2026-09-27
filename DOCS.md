@@ -1278,7 +1278,7 @@ Sage does not report a `missing_reason`: it cannot reliably distinguish biologic
 
 ## Quality-control outputs
 
-Every search summarizes how the sample was digested. The summary is written to `digestion.tsv` and to `run-summary.json` under `qc.digestion`, and a one-line summary is logged.
+Every search summarizes how the sample was digested and checks MS1 spectra for polymer contamination. The digestion summary is written to `digestion.tsv` and to `run-summary.json` under `qc.digestion`; polymer shares are logged and written to `run-summary.json` under `qc.polymers`.
 
 ### Digestion summary (`digestion.tsv`)
 
@@ -1293,3 +1293,11 @@ The summary counts distinct peptide sequences (modifications ignored), not PSMs,
 - `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: Each count as a percentage of `peptides`; `missed_cleavage_pct` covers peptides with at least one missed cleavage.
 
 A terminus is enzymatic when it is a protein terminus or the enzyme cuts the bond between the flanking residue and the peptide. A peptide found in several proteins is classified at its most enzymatic occurrence. Ragged and non-enzymatic peptides can only be identified when the database contains them, so these rates are zero for a fully enzymatic search unless semi-enzymatic digestion (`semi_enzymatic`), custom cleavage sites, or a peptide list add such peptides. Peptides without recorded protein occurrences (for example from a peptide list without flanking residues) count towards `peptides` and missed cleavages but not towards the termini classes. Non-specific digestion (`cleave_at: ""`) reports every peptide as enzymatic with no missed cleavages.
+
+### Polymer contamination (`qc.polymers`)
+
+Detergents and plastics ionize as ladders of peaks one repeat unit apart. Sage searches each centroided MS1 spectrum for three ladders: polyethylene glycol (PEG, 44.0262 Da repeat, water end group), polypropylene glycol (PPG, 58.0419 Da, water end group) and cyclic polysiloxane (74.0188 Da, e.g. the 445.12 lock mass), at charges 1 to 3 with H+, Na+ and NH4+ adducts. A peak counts only when at least 4 consecutive ladder members are found within 10 ppm; each peak counts once per polymer.
+
+For each file, `qc.polymers` reports the number of centroided MS1 spectra scanned (`ms1_spectra`), profile MS1 spectra skipped (`skipped_profile_spectra`), the summed MS1 intensity (`total_ion_current`), and per polymer the ladder intensity and its percent of the MS1 TIC (`polymers[].tic_pct`). A log line gives the shares per file. When one polymer carries more than 5% of a file's MS1 TIC, Sage logs a warning and records it in `run-summary.json` `warnings` with code `polymer_contamination`.
+
+The check is always on and needs no extra reading: mzML, mzMLb and Thermo RAW readers already parse MS1 spectra in DDA searches, and the scan adds about 1% to spectrum reading (85 ms against 9.2 s of file IO for a 1.2 GB Orbitrap DDA mzML with 26,352 MS1 spectra, debug build; up to 2% on a loaded machine). Files without MS1 spectra (MGF), and Bruker TDF files, whose MS1 frames are only read for `quant.lfq` or DIA, have no `qc.polymers` entry. Profile-mode MS1 spectra are skipped.

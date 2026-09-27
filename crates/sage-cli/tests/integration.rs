@@ -707,6 +707,8 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .unwrap()
         .iter()
         .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
+    // The test file has no MS1 spectra, so no polymer rows are reported.
+    assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
     std::fs::remove_dir_all(root)?;
     Ok(())
 }

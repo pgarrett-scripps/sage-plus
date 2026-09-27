@@ -16,6 +16,12 @@ entries are retained below for provenance.
   and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
   decoy peptides class by class. A one-line summary is logged. The run-summary schema stays at
   version 9.
+- Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
+  1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
+  percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
+  A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files are checked
+  only when MS1 is read (LFQ or DIA).
 - Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
   `sage_core::digestion` classifies and summarizes peptide termini.
 
