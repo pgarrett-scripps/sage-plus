@@ -165,6 +165,7 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
             prev_aa: reference.prev_aa,
             next_aa: reference.next_aa,
             source: None,
+            met_clipped: false,
         }],
         reference,
     }
@@ -578,6 +579,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
             prev_aa: None,
             next_aa: None,
             source: None,
+            met_clipped: false,
         }],
     }]);
     let heavy = peptides

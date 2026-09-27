@@ -12,6 +12,7 @@ fn occurrence(prev_aa: Option<u8>, next_aa: Option<u8>) -> ProteinOccurrence {
         prev_aa,
         next_aa,
         source: None,
+        met_clipped: false,
     }
 }
 

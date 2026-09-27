@@ -258,6 +258,9 @@ impl Runner {
             .map(|(accession, sequence)| (accession.as_ref(), sequence.as_str()))
             .collect::<HashMap<_, _>>();
 
+        // Digestion ignores initiator Met clipping for non-specific digests.
+        let clip_n_term_met = self.database_parameters.clip_n_term_met
+            && self.database_parameters.enzyme_parameters().enzyme.is_some();
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
         for row in self.collect_site_rows(features, filenames) {
@@ -289,10 +292,10 @@ impl Runner {
                     }
                     // A peptide at offset 1 of a clippable protein starts at
                     // the protein N-terminus left by initiator Met removal.
-                    let n_term = start == 0
-                        || (start == 1
-                            && self.database_parameters.clip_n_term_met
-                            && sage_core::enzyme::metap_clips(sequence.as_bytes()));
+                    let met_clipped = start == 1
+                        && clip_n_term_met
+                        && sage_core::enzyme::metap_clips(sequence.as_bytes());
+                    let n_term = start == 0 || met_clipped;
                     let position =
                         match (n_term, start + row.peptide_sequence.len() == sequence.len()) {
                             (true, true) => sage_core::enzyme::Position::Full,
@@ -319,7 +322,7 @@ impl Runner {
                                             sequence.as_bytes(),
                                             start,
                                             row.peptide_sequence.len(),
-                                            position,
+                                            met_clipped,
                                         ),
                                     )
                                     .contains(&site)

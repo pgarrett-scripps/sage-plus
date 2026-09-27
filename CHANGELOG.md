@@ -24,7 +24,10 @@ entries are retained below for provenance.
   N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
   semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
   prefilter, and the memory estimate include them. Non-specific digests and peptide TSV input
-  are unchanged. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
+  are unchanged. A motif's `<` anchor matches at residue 2 only for occurrences digested with
+  clipping, so a peptide that is protein N-terminal in another protein no longer satisfies it
+  at residue 2 when clipping is off or the digest is non-specific; the exported site library
+  follows the same rule. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
   this adds 0.9% digests.
 - `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
   (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand

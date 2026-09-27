@@ -276,7 +276,11 @@ missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
 - Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
   sites and PTM-library `protein_n_term` records apply to them (for example,
   N-terminal acetylation of the new first residue), and a motif's `<` anchor
-  matches at residue 2.
+  matches at residue 2. The anchor matches there only for peptides digested with
+  clipping on, both during the search and in the exported site library, so with
+  `clip_n_term_met` false or a non-specific digest residue 2 is an ordinary
+  internal position even when the peptide is protein N-terminal in another
+  protein.
 - Their enzymatic state and missed cleavages are those of the unclipped
   N-terminal peptide, so they are never semi-enzymatic because of the clip. A
   semi-enzymatic or custom-cleavage peptide that already starts at residue 2 is

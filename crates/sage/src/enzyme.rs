@@ -54,6 +54,11 @@ pub struct ProteinOccurrence {
     /// reference to the FASTA allocation, not a copy, and it does not take part
     /// in equality, ordering, or reporting.
     pub source: Option<ProteinSequence>,
+    /// The occurrence was digested from the protein with its initiator
+    /// methionine clipped (see [`metap_clips`]), so it starts the mature
+    /// protein at offset 1. Set only when clipping was enabled for an
+    /// enzymatic digest; it does not take part in equality or ordering.
+    pub met_clipped: bool,
 }
 
 impl ProteinOccurrence {
@@ -95,6 +100,8 @@ impl ProteinOccurrence {
             prev_aa: digest.prev_aa,
             next_aa: digest.next_aa,
             source,
+            met_clipped: digest.protein_start == Some(1)
+                && matches!(digest.position, Position::Nterm | Position::Full),
         }
     }
 
@@ -111,6 +118,7 @@ impl std::fmt::Debug for ProteinOccurrence {
             .field("prev_aa", &self.prev_aa)
             .field("next_aa", &self.next_aa)
             .field("source", &self.source.is_some())
+            .field("met_clipped", &self.met_clipped)
             .finish()
     }
 }

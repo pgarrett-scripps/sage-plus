@@ -149,21 +149,20 @@ impl<'a> MotifContext<'a> {
         }
     }
 
-    /// [`Self::in_protein`] for an occurrence digested at `position`. A
-    /// protein N-terminal peptide at offset 1 comes from a protein whose
-    /// initiator methionine was clipped, so the methionine is not a flank
-    /// and the peptide starts at the protein N-terminus.
+    /// [`Self::in_protein`] for an occurrence digested from `protein`. When
+    /// `met_clipped`, the occurrence comes from the protein with its
+    /// initiator methionine clipped (see
+    /// [`crate::enzyme::ProteinOccurrence::met_clipped`]), so the methionine
+    /// is not a flank and a peptide at offset 1 starts the protein
+    /// N-terminus. Without clipping, offset 1 is an ordinary internal span.
     pub fn in_digested_protein(
         protein: &'a [u8],
         start: usize,
         len: usize,
-        position: Position,
+        met_clipped: bool,
     ) -> Self {
         let mut context = Self::in_protein(protein, start, len);
-        if start == 1
-            && matches!(position, Position::Nterm | Position::Full)
-            && crate::enzyme::metap_clips(protein)
-        {
+        if met_clipped && start == 1 && crate::enzyme::metap_clips(protein) {
             context.left = &protein[..0];
             context.left_boundary = true;
         }
