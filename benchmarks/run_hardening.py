@@ -35,7 +35,6 @@ def main():
     configurations = {name: json.loads(getattr(args, name).read_text()) for name in ("standard", "modified", "feature")}
     configurations["prefilter"] = json.loads(json.dumps(configurations["standard"]))
     configurations["prefilter"]["database"]["prefilter"] = True
-    configurations["prefilter"]["database"]["prefilter_chunk_size"] = 1000
     inputs = list(binaries.values()) + [args.duckdb.resolve(strict=True), Path("/usr/bin/time"), Path("/usr/bin/prlimit")]
     for name, config in configurations.items():
         config.pop("output_directory", None)

@@ -569,7 +569,7 @@ def render_report(metadata: dict[str, Any], records: list[dict[str, Any]]) -> st
     return "\n".join(lines)
 
 
-def make_prefilter_configs(session: BenchmarkSession, source: Path, chunk_size: int) -> tuple[Path, Path]:
+def make_prefilter_configs(session: BenchmarkSession, source: Path) -> tuple[Path, Path]:
     base = read_json(source)
     database = base.get("database")
     if not isinstance(database, dict):
@@ -578,7 +578,6 @@ def make_prefilter_configs(session: BenchmarkSession, source: Path, chunk_size: 
     for enabled in (False, True):
         config = json.loads(json.dumps(base))
         config["database"]["prefilter"] = enabled
-        config["database"]["prefilter_chunk_size"] = chunk_size
         path = session.result_directory / "configs" / f"prefilter-{'on' if enabled else 'off'}.json"
         write_json(path, config)
         paths.append(path)
@@ -644,8 +643,6 @@ def validate_arguments(args: argparse.Namespace) -> None:
         raise RuntimeError("--warmups must not be negative")
     if hasattr(args, "memory_peptides") and args.memory_peptides < 1:
         raise RuntimeError("--memory-peptides must be at least one")
-    if hasattr(args, "prefilter_chunk_size") and args.prefilter_chunk_size < 1:
-        raise RuntimeError("--prefilter-chunk-size must be at least one")
     if hasattr(args, "config"):
         config = Path(args.config).resolve()
         if not config.is_file():
@@ -682,7 +679,7 @@ def execute_suite(args: argparse.Namespace) -> Path:
             )
         if args.command in {"prefilter", "all"}:
             config = Path(args.config).resolve()
-            off, on = make_prefilter_configs(session, config, args.prefilter_chunk_size)
+            off, on = make_prefilter_configs(session, config)
             session.run_search_case("prefilter", "off", build["candidate_binary"], off)
             session.run_search_case("prefilter", "on", build["candidate_binary"], on)
         if args.command == "memory":
@@ -727,7 +724,6 @@ def parser() -> argparse.ArgumentParser:
 
     prefilter = commands.add_parser("prefilter", help="compare candidate prefilter modes")
     prefilter.add_argument("--config", required=True)
-    prefilter.add_argument("--prefilter-chunk-size", type=int, default=1000)
     add_common_arguments(prefilter, include_baseline=False)
 
     memory = commands.add_parser("memory", help="run the synthetic peak-memory comparison")
@@ -740,7 +736,6 @@ def parser() -> argparse.ArgumentParser:
 
     all_command = commands.add_parser("all", help="run the real-search benchmark suite")
     all_command.add_argument("--config", required=True)
-    all_command.add_argument("--prefilter-chunk-size", type=int, default=1000)
     add_common_arguments(all_command)
 
     clean_command = commands.add_parser("clean", help="remove generated benchmark data")

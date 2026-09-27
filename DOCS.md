@@ -831,9 +831,10 @@ alongside the library, because the location table does not embed chemical masses
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
-  searching before building the search index. The spectra are indexed once, and the database is
-  generated in chunks and streamed through the spectrum index, so no fragment index is built for
-  discarded peptides. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
+  searching before building the search index. The spectra are indexed once, and proteins are
+  streamed through the spectrum index in parallel: each protein is digested, modified, and
+  checked on its own, and only its survivors are kept, so neither the whole digest nor a
+  fragment index for discarded peptides is ever held. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
   offset) of a spectrum has at least `prefilter_min_matched_peaks` preliminary fragment matches,
   counted as the search counts them. Targets, paired decoys, and label-channel partners are
   retained together. The default of three matches keeps a small fraction of a large database and
@@ -841,17 +842,14 @@ alongside the library, because the location table does not embed chemical masses
   `prefilter_max_peaks`, every peptide that could enter the preliminary search is kept, and the
   results equal a full database search.
   The spectrum index is limited to a quarter of `max_memory_gb`, or 8 GiB without a limit. Larger
-  inputs are indexed in file batches, and the database is streamed once per batch. Spectra read by the
+  inputs are indexed in file batches, and the proteins are streamed once per batch. Spectra read by the
   prefilter are kept for the search, from the first file batch up to the same budget, so those
   files are read and processed once. If keeping them would push the final fragment index past
   the memory limit, they are released and read again by the search.
-  The unmodified digest is not held whole. When its estimate exceeds an eighth of
-  `max_memory_gb` (2 GiB without a limit), the FASTA is
-  digested once per sequence bucket and each bucket is expanded and streamed on its own. A
-  peptide and its reversed decoy always share a bucket, so decoy collision checks and results are
-  unchanged.
-- **prefilter_chunk_size**: Integer. Approximate number of FASTA sequences per generated chunk.
-  A value of zero selects the chunk size from the estimated number of modified peptides.
+  Digests whose sequence, or generated decoy sequence, occurs more than once in the database
+  (shared peptides, repeated proteins, decoy collisions) are set aside while streaming and
+  filtered together, as a whole-database digest would, so results are unchanged.
+- **prefilter_chunk_size**: Deprecated and ignored; accepted so older configurations parse.
 - **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor
   hypothesis of a spectrum needs to keep a peptide (default: 3, and never more than
   `min_matched_peaks`). Preliminary fragments skip the first `min_ion_index` ions, so this counts
@@ -985,7 +983,7 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 - **min_free_memory_gb**: Ignored since Beta 11 and accepted only so older configurations still parse. Keeping memory free for other programs is left to the system.
 - **batch_size**: Integer. Number of input files to load and search at once. Smaller values reduce temporary spectrum memory at the cost of throughput (default: half the number of CPUs, with a minimum of one). The `--batch-size` command-line option overrides this value.
 
-Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts plus the prefilter plan, and exits without reading spectra.
+Sage never refuses or stops a search because of a memory estimate: database size cannot be predicted reliably, especially with PTM libraries, custom cleavages, or peptide lists. Only measured memory is checked against `max_memory_gb`. To preview database memory before a search, run `sage config.json --estimate`; it reads the FASTA, prints rough peptide, fragment, and memory counts and whether the prefilter is on, and exits without reading spectra.
 
 ## DIA pseudo-spectrum search
 

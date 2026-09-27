@@ -14,11 +14,12 @@ entries are retained below for provenance.
   prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
   `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
   `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
-- The prefilter streams the unmodified digest in sequence buckets instead of holding it whole,
-  so its memory no longer grows with the full digest. Results are unchanged. The per-bucket
-  budget is an eighth of `max_memory_gb`.
+- The prefilter streams proteins through the spectrum index in parallel, one protein per
+  worker, instead of digesting the database whole or in chunks. Digests shared between proteins
+  or colliding with a generated decoy are filtered together, so the retained peptides are
+  unchanged. Its memory no longer grows with the full digest.
 - `sage config.json --estimate` prints a rough database memory estimate (peptides, fragments,
-  prefilter plan) and exits without searching.
+  whether the prefilter is on) and exits without searching.
 - Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
   key (for example intra- vs inter-protein crosslinks or glycan classes) with the same
   conventions as `spectrum_q_value`. `Scorer::with_db` builds a scorer with the same settings
@@ -27,8 +28,11 @@ entries are retained below for provenance.
 ### Changed
 - Memory estimates no longer refuse or stop a search. Estimates could not predict database size
   reliably (PTM libraries, custom cleavages, peptide lists) and rejected searches that would
-  have fit. `max_memory_gb` is now enforced only on measured memory; estimates only size the
-  prefilter. Use `--estimate` for a preview.
+  have fit. `max_memory_gb` is now enforced only on measured memory. Use `--estimate` for a
+  preview.
+- `prefilter_chunk_size` is deprecated and ignored with a warning; turning the prefilter on
+  always prefilters. The `database_estimated` event is no longer emitted, and
+  `prefilter_chunk_size` no longer appears in the parameters written to `results.json`.
 - The `SAGE_PREFILTER_INDEX_GB` environment variable is removed; the prefilter's budgets come
   only from `max_memory_gb`.
 - `min_free_memory_gb` is ignored with a warning. It is still accepted so older configurations

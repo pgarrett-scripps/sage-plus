@@ -38,8 +38,7 @@
     "decoy_tag": "rev_",
     "generate_decoys": true,
     "fasta": "data/silac-k6r6/human-reviewed.fasta",
-    "prefilter": true,
-    "prefilter_chunk_size": 2000
+    "prefilter": true
   },
   "precursor_tol": {
     "ppm": [

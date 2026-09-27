@@ -32,8 +32,7 @@
     "decoy_tag": "rev_",
     "generate_decoys": true,
     "fasta": "/data/sage-plus-scientific/20260914/references/hye-irt-defined.fasta",
-    "prefilter": true,
-    "prefilter_chunk_size": 2000
+    "prefilter": true
   },
   "precursor_tol": {
     "ppm": [-10.0, 10.0]

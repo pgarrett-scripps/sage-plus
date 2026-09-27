@@ -106,7 +106,9 @@ Other benefits describe the intended effect and have not all been validated inde
 
 Database prefiltering keeps every peptide that can match a fragment in any spectrum, then builds
 the search index from those peptides only. It gives the same results as a full search. Beta 7
-indexes the spectra once and streams the generated peptides through that index.
+indexes the spectra once and streams the generated peptides through that index. The next
+release streams proteins through it in parallel, one per worker, so the whole digest is never
+held.
 
 | Workload | Beta 6 prefilter | Beta 7 prefilter | No prefilter | Peptides kept |
 |---|---:|---:|---:|---:|
