@@ -1182,11 +1182,17 @@ impl Parameters {
         log::trace!("sorting and deduplicating peptides");
 
         let init_size = target_decoys.len();
-        // This is equivalent to a stable sort
+        // This is equivalent to a stable sort. The same peptide can come from
+        // digests with different enzymatic state, e.g. a protein N-terminal
+        // peptide that is semi-enzymatic in another protein. The
+        // kept copy is then the most enzymatic one, whatever the input order.
         target_decoys.par_sort_unstable_by(|a, b| {
             a.monoisotopic
                 .total_cmp(&b.monoisotopic)
                 .then_with(|| a.initial_sort(b))
+                .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
+                .then(a.missed_cleavages.cmp(&b.missed_cleavages))
+                .then(a.position.cmp(&b.position))
         });
         target_decoys.dedup_by(|remove, keep| {
             if remove.monoisotopic == keep.monoisotopic
