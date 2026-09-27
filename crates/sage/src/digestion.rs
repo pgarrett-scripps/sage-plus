@@ -178,10 +178,7 @@ fn as_written<'a>(peptide: &'a Peptide, occurrence: &'a ProteinOccurrence) -> Co
     if is_expansion_of(span, sequence) {
         return Cow::Borrowed(span);
     }
-    let mut reversed = span.to_vec();
-    if len > 2 {
-        reversed[1..len - 1].reverse();
-    }
+    let reversed = crate::sequence::reverse_interior(span);
     match is_expansion_of(&reversed, sequence) {
         true => Cow::Owned(reversed),
         false => Cow::Borrowed(sequence),

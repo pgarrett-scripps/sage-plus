@@ -5,6 +5,18 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, Range};
 use std::sync::{Arc, OnceLock};
 
+/// `sequence` with every residue but the first and last reversed, the way a
+/// generated decoy is made. Sequences of two residues or fewer are returned
+/// unchanged.
+pub fn reverse_interior(sequence: &[u8]) -> Vec<u8> {
+    let mut reversed = sequence.to_vec();
+    let len = reversed.len();
+    if len > 2 {
+        reversed[1..len - 1].reverse();
+    }
+    reversed
+}
+
 /// One protein-sized allocation shared by every peptide span derived from it.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SequenceStorage {
@@ -106,12 +118,7 @@ impl PeptideSequence {
     }
 
     pub fn reversed_internal(&self) -> Self {
-        let mut sequence = self.as_bytes().to_vec();
-        let last = sequence.len().saturating_sub(1);
-        if last > 1 {
-            sequence[1..last].reverse();
-        }
-        sequence.into()
+        reverse_interior(self.as_bytes()).into()
     }
 
     #[cfg(test)]
@@ -354,6 +361,12 @@ mod tests {
         assert_eq!(PeptideSequence::from("AB").reversed_internal(), "AB");
         assert_eq!(PeptideSequence::from("A").reversed_internal(), "A");
         assert_eq!(PeptideSequence::default().reversed_internal(), "");
+
+        assert_eq!(reverse_interior(b"PEPTIDEK"), b"PEDITPEK");
+        for short in [&b""[..], b"A", b"AB", b"ABC"] {
+            assert_eq!(reverse_interior(short), short);
+        }
+        assert_eq!(reverse_interior(b"ABCD"), b"ACBD");
     }
 
     #[test]

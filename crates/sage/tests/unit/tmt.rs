@@ -8,7 +8,7 @@ fn predefined_tags_expose_expected_channels_and_masses() {
         (Isobaric::Tmt10, 10, 229.162932),
         (Isobaric::Tmt11, 11, 229.162932),
         (Isobaric::Tmt16, 16, 304.2071),
-        (Isobaric::Tmt18, 18, 304.2135),
+        (Isobaric::Tmt18, 18, 304.2071),
     ] {
         assert_eq!(tag.reporter_masses().len(), channels);
         assert_eq!(tag.headers().len(), channels);

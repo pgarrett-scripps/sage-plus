@@ -670,11 +670,7 @@ impl ModificationSpecificity {
         }
         let len = sequence.len();
         let last = len.saturating_sub(1);
-        let reversed = (decoy && last > 1).then(|| {
-            let mut target = sequence.to_vec();
-            target[1..last].reverse();
-            target
-        });
+        let reversed = (decoy && last > 1).then(|| crate::sequence::reverse_interior(sequence));
         let mut sites = Vec::new();
         let mut collect = |target: &[u8], context: MotifContext<'_>, mirror: bool| {
             for site in self.sites_in_context(target, position, context) {

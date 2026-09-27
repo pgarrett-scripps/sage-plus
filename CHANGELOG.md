@@ -21,6 +21,14 @@ entries are retained below for provenance.
   channels); the run-summary schema stays at version 9. Sage has no other consumer of reporter
   intensities: the PIN, TSV and HTML report outputs do not include them, and no reporter
   normalisation or ratio is computed.
+- timsTOF diaPASEF files searched without LFQ are now scanned for diagnostic ions; they were
+  left out of `diagnostic_ions.tsv` and the run summary. Their polymer QC stays absent because
+  no MS1 is read. A file without any QC scan now logs a warning.
+- The PTM library locates merged I/L peptides in every listed protein, including those with the
+  other isoform (and, with `expand_ambiguous_residues`, B, Z or X spans); such proteins were
+  dropped. An I/L site records the residue as written in the FASTA.
+- `Tmt18` reports the TMTpro reagent mass 304.2071, as `Tmt16` does, instead of 304.2135
+  (inherited from upstream Sage).
 
 ### Added
 - Every Parquet output records run provenance in its key-value footer: `sage.version`,

@@ -738,7 +738,8 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     let root = std::env::temp_dir().join(format!("sage-motif-{}-{nonce}", std::process::id()));
     std::fs::create_dir_all(&root)?;
     let fasta = ">GLYCO\nMRLSPEPTIDENKSGGAWLNGTEDVAPRQVNPTEFLKDEGNLTAYHR\n\
-                 >OTHER\nMKAGDTLEWVNKPQYFLSAKGHNESTIMDR\n";
+                 >OTHER\nMKAGDTLEWVNKPQYFLSAKGHNESTIMDR\n\
+                 >TWIN\nMRLSPEPTLDENKSGGA\n";
     std::fs::write(root.join("proteins.fasta"), fasta)?;
     let database = serde_json::json!({
         "fasta": root.join("proteins.fasta"),
@@ -819,6 +820,13 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
         library
             .lines()
             .any(|line| line.starts_with("GLYCO\t12\tN\tHexNAc\tresidue")),
+        "{library}"
+    );
+    // TWIN carries the L twin of the merged peptide, displayed with I.
+    assert!(
+        library
+            .lines()
+            .any(|line| line.starts_with("TWIN\t12\tN\tHexNAc\tresidue")),
         "{library}"
     );
 

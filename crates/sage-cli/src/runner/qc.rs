@@ -239,7 +239,13 @@ impl Runner {
         let file_qc = self.file_qc.lock().expect("file QC lock");
         let mut files = Vec::new();
         for (file_id, file) in filenames.iter().enumerate() {
-            let Some(stats) = file_qc.get(&file_id).and_then(|qc| qc.polymers.clone()) else {
+            let Some(qc) = file_qc.get(&file_id) else {
+                // Every file read records a QC entry; a gap means a read path
+                // skipped the scan, so polymer and diagnostic-ion QC miss it.
+                warn!("{file}: no quality-control scan was recorded; polymer and diagnostic-ion QC omit this file");
+                continue;
+            };
+            let Some(stats) = qc.polymers.clone() else {
                 continue;
             };
             let shares = stats

@@ -33,8 +33,9 @@ impl Isobaric {
     pub fn modification_mass(&self) -> Option<f32> {
         match self {
             Isobaric::Tmt6 | Isobaric::Tmt10 | Isobaric::Tmt11 => Some(229.162932),
-            Isobaric::Tmt16 => Some(304.2071),
-            Isobaric::Tmt18 => Some(304.2135),
+            // TMTpro 18plex adds channels to the same TMTpro reagent
+            // (Unimod 2016, 304.207146); upstream Sage listed 304.2135.
+            Isobaric::Tmt16 | Isobaric::Tmt18 => Some(304.2071),
             Isobaric::User(_) => None,
         }
     }

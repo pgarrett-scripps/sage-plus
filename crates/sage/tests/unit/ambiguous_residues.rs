@@ -79,3 +79,29 @@ fn orients_spans_like_the_peptide() {
     assert_eq!(oriented_span(b"PEPBIDEK", b"PEPTIDEK"), None);
     assert_eq!(oriented_span(b"PEPXIDEK", b"PEPTIDE"), None);
 }
+
+#[test]
+fn merged_isoleucine_leucine_peptides_locate_every_twin() {
+    // The displayed merged peptide has I; the protein carries the L twin.
+    let protein = b"MKPEPLDEKRPEPJDEKRPEPIDEK";
+    assert_eq!(
+        peptide_starts(protein, b"PEPIDEK", true, false),
+        vec![2, 10, 18]
+    );
+    // Without merging only the literal span matches.
+    assert_eq!(peptide_starts(protein, b"PEPIDEK", false, false), vec![18]);
+    assert!(peptide_starts(b"PEPLDEK", b"PEPIDEK", false, false).is_empty());
+}
+
+#[test]
+fn expanded_peptides_locate_their_ambiguous_spans() {
+    let protein = b"MKPEPBIDEKR";
+    assert!(peptide_starts(protein, b"PEPNIDEK", true, false).is_empty());
+    assert_eq!(peptide_starts(protein, b"PEPNIDEK", true, true), vec![2]);
+    assert_eq!(peptide_starts(protein, b"PEPNLDEK", true, true), vec![2]);
+    // X in the peptide is not a wildcard for the protein.
+    assert!(peptide_starts(b"PEPNIDEK", b"PEPXIDEK", true, true).is_empty());
+    assert!(peptide_starts(b"PEP", b"PEPTIDE", true, true).is_empty());
+    assert!(residue_fits(b'L', b'I', true, false));
+    assert!(!residue_fits(b'L', b'I', false, true));
+}
