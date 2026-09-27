@@ -1,9 +1,35 @@
 # Chapter analysis and regeneration
 
-The chapter compares upstream Sage v0.15.0-beta.2 with Sage Plus v0.1.0-beta.6.
-The Sage Plus executable is the published Linux GNU release, verified against
-its SHA256SUMS archive manifest. Exact binary hashes and evidence roots are
-recorded in `analysis/data/release-context.json`.
+The chapter compares upstream Sage v0.15.0-beta.2 with Sage Plus v0.1.0-beta.13.
+Exact binary hashes and evidence roots are recorded in
+`analysis/data/release-context.json`.
+
+## Beta 13 searches
+
+- Executable: `/mnt/data1/build-cache/b13-rc/sage`, built from `8527f76`
+  (SHA-256 `43c6e19b…8418814`). The tag `efd1b52` differs only in version
+  strings, docs and one unit test, so the binary prints `0.1.0-beta.12`.
+- LFQ: `/mnt/data1/build-cache/b13-rc/lfq/lfq-plus-b13/`, run by `run_lfq.sh`
+  with the frozen `extension-selected/lfq-plus/config.json`. `release-context.json`
+  key `lfq_plus` points the collector at it. Regenerate with
+  `uv run scripts/collect_report.py lfq` and `... lfq_extraction` from `analysis/`.
+  The upstream LFQ run is unchanged.
+- TMT: `analysis/data/tmt-hypro16.json` is a copy of
+  `benchmarks/scientific-results/20260927-tmt/summary-b13.json` from branch
+  `bench/tmt-hypro16`.
+- Large databases: 10x and 30x prefilter reruns (4 matched peaks) in
+  `/mnt/data1/sage-plus-scientific/large-db-20260925/runs-b13/`. The 100x
+  release rerun could not start under the host memory gate, so 100x comes from
+  the beta.11 streaming build (SHA-256 prefix 47127fd7) in `runs-v2-mp4/`.
+  `uv run scripts/collect_large_db_streamed.py` from `analysis/` writes
+  `analysis/data/large-db-streamed.json`, preferring `runs-b13/` when a run
+  exists there. The other large-database results are from the beta.11
+  development build f924783 (`benchmarks/scientific-results/large-db-20260925/`).
+
+## Beta 6 searches
+
+The remaining comparisons used the published beta.6 Linux GNU release, verified
+against its SHA256SUMS archive manifest.
 
 ## Search evidence
 
@@ -25,7 +51,7 @@ Input and output verification is recorded in
 The shared spectra, reference databases, acquisition receipts, and construction
 seeds remain under `/data/sage-plus-scientific/20260914`. Reuse of these inputs
 preserves the study selection and pairing. It does not reuse older Sage Plus
-search results. All current comparisons use the same latest-release executable.
+search results. All beta.6 comparisons use the same beta.6 executable.
 The records are local evidence, not a public deposition.
 
 ## Reproduce the analysis

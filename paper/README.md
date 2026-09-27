@@ -1,9 +1,12 @@
 # Development and Evaluation of Sage Plus
 
 This chapter compares upstream Sage `v0.15.0-beta.2` with Sage Plus
-`v0.1.0-beta.6`, the latest published releases checked on September 20, 2026.
-The manuscript presents one comparison between the two engines. It does not
-compare successive Sage Plus releases.
+`v0.1.0-beta.13`, the latest release on September 27, 2026. The manuscript
+presents one comparison between the two engines. It does not compare successive
+Sage Plus releases. The label-free, TMT, and large-database results use
+beta.13. Public timing, worker scaling, identification, entrapment, mass-offset,
+and synthetic phosphorylation results still come from the `v0.1.0-beta.6`
+refresh and say so in the text.
 
 The source is `paper.typ`, with the abstract in `config.typ` and supporting
 methods in `si-body.typ`. All reported comparative outcomes are regenerated
