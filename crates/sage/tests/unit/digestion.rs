@@ -51,7 +51,7 @@ fn termini_and_missed_cleavages_are_classified() {
     assert_eq!(missed_cleavages(&enzyme, sequence), 0);
     assert_eq!(missed_cleavages(&enzyme, b"AKEPTIDERK"), 2);
 
-    let class = |prev, next| classify_occurrence(&enzyme, sequence, &occurrence(prev, next));
+    let class = |prev, next| classify_occurrence(&enzyme, sequence, &occurrence(prev, next), true);
     assert_eq!(class(Some(b'K'), Some(b'A')), TerminusClass::Enzymatic);
     assert_eq!(class(None, Some(b'A')), TerminusClass::Enzymatic);
     assert_eq!(class(Some(b'A'), Some(b'A')), TerminusClass::SemiN);
@@ -59,7 +59,7 @@ fn termini_and_missed_cleavages_are_classified() {
     assert_eq!(class(Some(b'A'), Some(b'P')), TerminusClass::NonEnzymatic);
     // Protein C-terminus counts as enzymatic whatever the last residue.
     assert_eq!(
-        classify_occurrence(&enzyme, b"SEPTIDE", &occurrence(Some(b'K'), None)),
+        classify_occurrence(&enzyme, b"SEPTIDE", &occurrence(Some(b'K'), None), true),
         TerminusClass::Enzymatic
     );
 }
@@ -76,11 +76,11 @@ fn most_enzymatic_occurrence_wins() {
         ],
     );
     assert_eq!(
-        classify_peptide(&enzyme, &shared),
+        classify_peptide(&enzyme, &shared, true),
         Some(TerminusClass::Enzymatic)
     );
     assert_eq!(
-        classify_peptide(&enzyme, &peptide("SEPTIDEK", false, vec![])),
+        classify_peptide(&enzyme, &peptide("SEPTIDEK", false, vec![]), true),
         None
     );
 }
@@ -99,7 +99,7 @@ fn summary_counts_distinct_sequences_and_subtracts_decoys() {
         peptide("SEMIK", false, vec![occurrence(Some(b'A'), Some(b'A'))]),
         peptide("DECOYK", true, vec![occurrence(Some(b'A'), Some(b'A'))]),
     ];
-    let summary = summarize(Some(&enzyme), &peptides);
+    let summary = summarize(Some(&enzyme), true, &peptides);
     assert_eq!(summary.target_peptides, 5);
     assert_eq!(summary.decoy_peptides, 1);
     assert_eq!(summary.peptides, 4);
@@ -112,7 +112,39 @@ fn summary_counts_distinct_sequences_and_subtracts_decoys() {
     assert!((summary.semi_n_pct - 25.0).abs() < 1e-9);
     assert!((summary.missed_cleavage_pct - 50.0).abs() < 1e-9);
 
-    let unspecific = summarize(None, &peptides);
+    let unspecific = summarize(None, true, &peptides);
     assert_eq!(unspecific.semi_n, 0);
     assert_eq!(unspecific.missed_cleavages_0, 4);
+}
+
+#[test]
+fn clipped_initiator_methionine_peptides_start_the_protein() {
+    let enzyme = trypsin();
+    let clipped = ProteinOccurrence {
+        start: Some(1),
+        ..occurrence(Some(b'M'), Some(b'G'))
+    };
+    // ASPEPTIDEK after the initiator Met of MASPEPTIDEKG.
+    assert_eq!(
+        classify_occurrence(&enzyme, b"ASPEPTIDEK", &clipped, true),
+        TerminusClass::Enzymatic
+    );
+    assert_eq!(
+        classify_occurrence(&enzyme, b"ASPEPTIDEK", &clipped, false),
+        TerminusClass::SemiN
+    );
+    // MetAP does not remove the Met before a large residue.
+    assert_eq!(
+        classify_occurrence(&enzyme, b"KSPEPTIDEK", &clipped, true),
+        TerminusClass::SemiN
+    );
+    // Residue 2 after an internal-looking M elsewhere is not the protein start.
+    let internal = ProteinOccurrence {
+        start: Some(7),
+        ..occurrence(Some(b'M'), Some(b'G'))
+    };
+    assert_eq!(
+        classify_occurrence(&enzyme, b"ASPEPTIDEK", &internal, true),
+        TerminusClass::SemiN
+    );
 }

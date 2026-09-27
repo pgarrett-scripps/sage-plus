@@ -287,6 +287,7 @@ impl Runner {
         filenames: &[String],
     ) -> DigestionRunStats {
         let enzyme = EnzymeParameters::from(self.database_parameters.enzyme.clone()).enzyme;
+        let clip = self.database_parameters.clip_n_term_met;
         let passing = features
             .iter()
             .filter(|feature| {
@@ -302,6 +303,7 @@ impl Runner {
                 file: file.clone(),
                 summary: sage_core::digestion::summarize(
                     enzyme.as_ref(),
+                    clip,
                     passing
                         .iter()
                         .filter(|feature| feature.file_id == file_id)
@@ -311,6 +313,7 @@ impl Runner {
             .collect();
         let total = sage_core::digestion::summarize(
             enzyme.as_ref(),
+            clip,
             passing
                 .iter()
                 .map(|feature| &self.database[feature.peptide_idx]),

@@ -6,7 +6,7 @@
 //! many target peptides in each class are false, and that count is
 //! subtracted class by class before rates are formed.
 
-use crate::enzyme::{Enzyme, ProteinOccurrence};
+use crate::enzyme::{Enzyme, ProteinOccurrence, METAP_SECOND_RESIDUES};
 use crate::peptide::Peptide;
 use std::collections::HashSet;
 
@@ -37,11 +37,22 @@ impl TerminusClass {
 /// Whether an occurrence starts at its protein's N-terminus, so its
 /// N-terminus is not a cleavage product.
 ///
-/// A peptide with no preceding residue starts the protein. Initiator
-/// methionine removal belongs here too: a peptide at residue 2 after an `M`
-/// then also starts the mature protein.
-fn at_protein_n_terminus(occurrence: &ProteinOccurrence) -> bool {
-    occurrence.prev_aa.is_none()
+/// A peptide with no preceding residue starts the protein. With initiator
+/// methionine clipping, a peptide at residue 2 after an `M` that MetAP
+/// removes (see [`crate::enzyme::metap_clips`]) also starts the mature protein.
+fn at_protein_n_terminus(
+    sequence: &[u8],
+    occurrence: &ProteinOccurrence,
+    clip_n_term_met: bool,
+) -> bool {
+    let clipped = || {
+        occurrence.start == Some(1)
+            && occurrence.prev_aa == Some(b'M')
+            && sequence
+                .first()
+                .is_some_and(|first| METAP_SECOND_RESIDUES.contains(first))
+    };
+    occurrence.prev_aa.is_none() || (clip_n_term_met && clipped())
 }
 
 /// Whether an occurrence ends at its protein's C-terminus.
@@ -54,11 +65,12 @@ pub fn classify_occurrence(
     enzyme: &Enzyme,
     sequence: &[u8],
     occurrence: &ProteinOccurrence,
+    clip_n_term_met: bool,
 ) -> TerminusClass {
     let (Some(&first), Some(&last)) = (sequence.first(), sequence.last()) else {
         return TerminusClass::Enzymatic;
     };
-    let n_enzymatic = at_protein_n_terminus(occurrence)
+    let n_enzymatic = at_protein_n_terminus(sequence, occurrence, clip_n_term_met)
         || occurrence
             .prev_aa
             .is_some_and(|previous| enzyme.cleaves_between(previous, first));
@@ -72,7 +84,11 @@ pub fn classify_occurrence(
 /// Classify a peptide at its most enzymatic protein occurrence (the one with
 /// the most enzymatic termini, first on ties). `None` when the peptide has
 /// no recorded protein occurrence.
-pub fn classify_peptide(enzyme: &Enzyme, peptide: &Peptide) -> Option<TerminusClass> {
+pub fn classify_peptide(
+    enzyme: &Enzyme,
+    peptide: &Peptide,
+    clip_n_term_met: bool,
+) -> Option<TerminusClass> {
     let sequence = peptide.sequence.as_bytes();
     let rank = |class: TerminusClass| match class {
         TerminusClass::Enzymatic => 0,
@@ -82,7 +98,7 @@ pub fn classify_peptide(enzyme: &Enzyme, peptide: &Peptide) -> Option<TerminusCl
     peptide
         .protein_sites
         .iter()
-        .map(|occurrence| classify_occurrence(enzyme, sequence, occurrence))
+        .map(|occurrence| classify_occurrence(enzyme, sequence, occurrence, clip_n_term_met))
         .min_by_key(|&class| rank(class))
 }
 
@@ -184,7 +200,11 @@ impl DigestionSummary {
 /// and decoys; each distinct sequence is counted once per population. With
 /// no enzyme (non-specific digestion) every peptide counts as enzymatic with
 /// no missed cleavages.
-pub fn summarize<'a, I>(enzyme: Option<&Enzyme>, peptides: I) -> DigestionSummary
+pub fn summarize<'a, I>(
+    enzyme: Option<&Enzyme>,
+    clip_n_term_met: bool,
+    peptides: I,
+) -> DigestionSummary
 where
     I: IntoIterator<Item = &'a Peptide>,
 {
@@ -198,7 +218,7 @@ where
         let (missed, class) = match enzyme {
             Some(enzyme) => (
                 missed_cleavages(enzyme, peptide.sequence.as_bytes()),
-                classify_peptide(enzyme, peptide),
+                classify_peptide(enzyme, peptide, clip_n_term_met),
             ),
             None => (0, Some(TerminusClass::Enzymatic)),
         };
