@@ -10,6 +10,10 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Fixed
+- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
+  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
+  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
+  renamed `Median MS1 Mass Bias (ppm)`.
 - `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
   `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
   residues instead of panicking. `Enzyme::try_new` is the fallible constructor.

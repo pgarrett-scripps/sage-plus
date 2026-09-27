@@ -1206,6 +1206,7 @@ Notes:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
   - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, and output paths.
+  - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
   ```json
   "output_directory": "s3://my-mass-spec-results/PXD003881/"
