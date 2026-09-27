@@ -269,6 +269,8 @@ pub struct Runner {
     retained_spectra: std::sync::Mutex<RetainedSpectra>,
     /// Search-time mass corrections selected for each searched file.
     mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
+    /// Quality-control scans of each file's raw spectra, by file id.
+    file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -308,6 +310,10 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
+    /// Quality-control summaries (digestion, and the optional MS1 and MS2
+    /// checks when enabled).
+    #[serde(default)]
+    pub qc: qc::QcRunStats,
     pub output_paths: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<crate::events::RunWarning>,
@@ -814,6 +820,7 @@ impl Runner {
         events.emit(EventKind::DatabaseStarted);
         let limits = MemoryLimits::from_gib(parameters.max_memory_gb)?;
         let mut retained_spectra = RetainedSpectra::default();
+        let file_qc = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
         // Collect peptides from FASTA (if configured).
@@ -881,6 +888,7 @@ impl Runner {
                         cancellation: cancellation.clone(),
                         retained_spectra: Default::default(),
                         mass_recalibration: Default::default(),
+                        file_qc: file_qc.clone(),
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -981,6 +989,7 @@ impl Runner {
             cancellation,
             retained_spectra: std::sync::Mutex::new(retained_spectra),
             mass_recalibration: Default::default(),
+            file_qc,
         })
     }
 }
@@ -989,6 +998,7 @@ pub mod estimate;
 mod execution;
 mod postprocess;
 pub(crate) mod prefilter;
+pub mod qc;
 mod search;
 
 #[cfg(test)]

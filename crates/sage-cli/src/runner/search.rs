@@ -692,6 +692,9 @@ impl Runner {
                     self.parameters.bruker_config,
                     requires_ms1 || !dia.is_off(),
                 );
+                if let Ok(spectra) = &res {
+                    self.collect_file_qc(file_id, spectra);
+                }
                 // DIA pseudo mode: replace the MS2 scans with MS1-anchored
                 // pseudo-MS2 spectra before the usual processing.
                 match res {

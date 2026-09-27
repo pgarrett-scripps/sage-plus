@@ -848,3 +848,85 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn quality_control_outputs_are_written() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-qc-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    // A window covering the whole spectrum matches its most intense peak.
+    config["diagnostic_ions"] = serde_json::json!([
+        {"name": "anything", "mz": 1000.0, "tolerance": {"da": [-1000.0, 1000.0]}},
+        {"name": "HexNAc", "mz": 204.0867}
+    ]);
+    std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
+    let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(root.join("config.json"))
+        .arg("--output_directory")
+        .arg(root.join("output"))
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("digestion: "), "{stderr}");
+
+    let digestion = std::fs::read_to_string(root.join("output/digestion.tsv"))?;
+    let lines = digestion.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 3, "{digestion}");
+    assert!(lines[0].starts_with("file\ttarget_peptides\tdecoy_peptides\tpeptides\t"));
+    assert!(lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\t"));
+    assert!(lines[2].starts_with("total\t"));
+
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(summary["schema_version"], 9);
+    let total = &summary["qc"]["digestion"]["total"];
+    assert!(total["target_peptides"].as_u64().is_some());
+    assert_eq!(
+        summary["qc"]["digestion"]["files"][0]["file"],
+        "LQSRPAAPPAPGPGQLTLR.mzML"
+    );
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
+    // The test file has no MS1 spectra, so no polymer rows are reported.
+    assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
+
+    assert!(
+        stderr.contains("diagnostic ions in 1 MS2 spectra: anything 100.00%, HexNAc 0.00%"),
+        "{stderr}"
+    );
+    let diagnostic = std::fs::read_to_string(root.join("output/diagnostic_ions.tsv"))?;
+    let lines = diagnostic.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "{diagnostic}");
+    assert_eq!(lines[0], "file\tscannr\tion\tmz\trelative_intensity");
+    let row = lines[1].split('\t').collect::<Vec<_>>();
+    assert_eq!(row[0], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert_eq!(row[2], "anything");
+    let relative_intensity = row[4].parse::<f64>()?;
+    assert!(relative_intensity > 0.0 && relative_intensity <= 1.0);
+    let ions = &summary["qc"]["diagnostic_ions"];
+    assert_eq!(ions["ms2_spectra"], 1);
+    assert_eq!(ions["ions"][0]["spectra"], 1);
+    assert_eq!(ions["ions"][1]["spectra"], 0);
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("diagnostic_ions.tsv")));
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

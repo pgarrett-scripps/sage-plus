@@ -391,6 +391,15 @@ impl Runner {
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
 
+        let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let polymers = self.polymer_stats(&filenames);
+        let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
+        if let Some(path) = self.write_diagnostic_ions(&filenames)? {
+            self.parameters.output_paths.push(path);
+        }
+        let path = self.write_digestion(&digestion)?;
+        self.parameters.output_paths.push(path);
+
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
                 &output_features,
@@ -642,6 +651,11 @@ impl Runner {
                         SpectralLibraryFormat::MzSpecLib => "mzspeclib".into(),
                     })
                     .collect(),
+            },
+            qc: super::qc::QcRunStats {
+                digestion,
+                polymers,
+                diagnostic_ions,
             },
             output_paths,
         };

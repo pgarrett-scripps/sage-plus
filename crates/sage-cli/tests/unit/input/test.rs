@@ -1,4 +1,5 @@
 use super::{resolve_batch_size, Input, OutputFilter, PtmLocalizationSettings};
+use sage_core::diagnostic::{default_ions, DiagnosticIonsConfig};
 use sage_core::{
     database::EnzymeBuilder,
     enzyme::EnzymeParameters,
@@ -667,4 +668,65 @@ fn unsupported_enzyme_residues_fail_validation() {
         assert!(error.contains(expected), "{error}");
         assert!(error.contains("unsupported residues"), "{error}");
     }
+}
+
+#[test]
+fn diagnostic_ions_config() -> anyhow::Result<()> {
+    let fixture = serde_json::json!({
+        "database": {"fasta": "tests/Q99536.fasta"},
+        "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"],
+        "precursor_tol": {"ppm": [-10, 10]},
+        "fragment_tol": {"ppm": [-20, 20]}
+    });
+    let parse = |value: Option<serde_json::Value>| {
+        let mut config = fixture.clone();
+        if let Some(value) = value {
+            config["diagnostic_ions"] = value;
+        }
+        serde_json::from_value::<Input>(config).unwrap()
+    };
+    assert!(parse(None).diagnostic_ions.is_none());
+    assert_eq!(
+        parse(Some(serde_json::json!(true)))
+            .diagnostic_ions
+            .and_then(DiagnosticIonsConfig::resolve),
+        Some(default_ions())
+    );
+    assert_eq!(
+        parse(Some(serde_json::json!(false)))
+            .diagnostic_ions
+            .and_then(DiagnosticIonsConfig::resolve),
+        None
+    );
+    let custom = parse(Some(serde_json::json!([
+        {"name": "TMT126", "mz": 126.1277, "tolerance": {"da": [-0.005, 0.005]}},
+        {"name": "HexNAc", "mz": 204.0867}
+    ])));
+    custom.validate()?;
+    let ions = custom
+        .diagnostic_ions
+        .and_then(DiagnosticIonsConfig::resolve)
+        .unwrap();
+    assert_eq!(ions.len(), 2);
+    assert_eq!(
+        ions[1].tolerance(),
+        sage_core::mass::Tolerance::Ppm(-20.0, 20.0)
+    );
+
+    for invalid in [
+        serde_json::json!([]),
+        serde_json::json!([{"name": "", "mz": 204.0867}]),
+        serde_json::json!([{"name": "bad", "mz": -1.0}]),
+        serde_json::json!([{"name": "bad", "mz": 204.0, "tolerance": {"ppm": [5, 10]}}]),
+    ] {
+        assert!(
+            parse(Some(invalid.clone())).validate().is_err(),
+            "{invalid}"
+        );
+    }
+    let unknown_field = serde_json::json!([{"name": "x", "mz": 1.0, "charge": 2}]);
+    let mut config = fixture.clone();
+    config["diagnostic_ions"] = unknown_field;
+    assert!(serde_json::from_value::<Input>(config).is_err());
+    Ok(())
 }

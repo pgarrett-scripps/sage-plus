@@ -66,6 +66,29 @@ entries are retained below for provenance.
   modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
   as L.
 
+### Added
+- Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
+  row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
+  and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
+  and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
+  decoy peptides class by class. A one-line summary is logged. The run-summary schema stays at
+  version 9.
+- Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
+  1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
+  percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
+  A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files are checked
+  only when MS1 is read (LFQ or DIA).
+- Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
+  fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
+  user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
+  `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
+  spectra containing each ion is logged and written to `run-summary.json` under
+  `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
+- Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
+  `sage_core::digestion` classifies and summarizes peptide termini;
+  `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
+
 ## [v0.1.0-beta.11] - 2026-09-26
 
 ### Added
