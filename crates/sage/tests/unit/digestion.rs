@@ -211,5 +211,8 @@ fn custom_cleavage_termini_are_enzymatic() {
     assert_eq!((plain.semi_n, plain.semi_c), (1, 1));
     let custom =
         summarize_with_custom_cleavages(Some(&enzyme), true, Some(&library), [&mature, &signal]);
-    assert_eq!((custom.semi_n, custom.semi_c, custom.non_enzymatic), (0, 0, 0));
+    assert_eq!(
+        (custom.semi_n, custom.semi_c, custom.non_enzymatic),
+        (0, 0, 0)
+    );
 }

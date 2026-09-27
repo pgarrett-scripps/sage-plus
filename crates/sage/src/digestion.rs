@@ -313,9 +313,7 @@ where
             continue;
         }
         let (missed, class) = match enzyme {
-            Some(enzyme) => {
-                classify_cleavages(enzyme, peptide, clip_n_term_met, custom_cleavages)
-            }
+            Some(enzyme) => classify_cleavages(enzyme, peptide, clip_n_term_met, custom_cleavages),
             None => (0, Some(TerminusClass::Enzymatic)),
         };
         if peptide.decoy {

@@ -260,7 +260,11 @@ impl Runner {
 
         // Digestion ignores initiator Met clipping for non-specific digests.
         let clip_n_term_met = self.database_parameters.clip_n_term_met
-            && self.database_parameters.enzyme_parameters().enzyme.is_some();
+            && self
+                .database_parameters
+                .enzyme_parameters()
+                .enzyme
+                .is_some();
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
         for row in self.collect_site_rows(features, filenames) {
