@@ -1391,7 +1391,7 @@ Two Parquet site reports are written:
 1. Decoy PSMs pass through the same gates as target PSMs: spectrum q-value ≤ `ptm_localization.psm_q_value`, localization, no impossible-site decoy win, and localization q-value ≤ `ptm_localization.localization_q_value`. Decoy PSMs never enter the false-localization-rate competition. Each takes the localization q-value of the target competition at its own score, so the localization cutoff is the same score threshold for both.
 2. Target and decoy site rows are collapsed with the same key: protein, modified peptide, position in the peptide, modification and attachment. Decoy sites sit on decoy proteins.
 3. Each site is scored by the best discriminant score of its supporting PSMs, the same score used for PSM, peptide and protein FDR.
-4. Target and decoy sites compete without pairing. Q-values come from the same posterior-error model as the peptide and protein levels, or from +1-corrected target-decoy counts when that model is underdetermined. Tied site scores share the most conservative q-value in the tie.
+4. Target and decoy sites compete without pairing. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
 
 Site FDR is about identity: is this modified site on this protein real? Localization confidence is a separate question and stays in `best_localization_probability` and `best_localization_q_value`.
 
@@ -1567,11 +1567,14 @@ table, and it does not roll PSM or LFQ intensities up to proteins.
 - **`protein_group_q`**: picked protein-group FDR over peptides that map to exactly one group.
   A decoy competes with the target group of the protein it was generated from. Peptides shared
   between groups get `protein_group_q = 1`.
-- **Estimator**: peptide, protein and protein-group q-values use the same estimator. A posterior
-  error model (kernel density) is fitted to the winner of each target-decoy pair. Then both
-  entries of every pair are ranked by score. q at each rank is (1 + the running sum of posterior
-  error) / targets, made monotonic. When the model cannot be fitted, Sage logs a warning and uses
-  (decoys + 1) / targets instead.
+- **Estimator**: peptide, protein and protein-group q-values use picked target-decoy
+  competition. Each target is paired with its own decoy: a peptide with its reversed sequence,
+  a protein with its decoy protein, a group with the decoys of its member proteins. The pair's
+  score is its best PSM `sage_discriminant_score`. Only the winner of each pair is ranked (a tie
+  goes to the decoy); the loser gets q = 1. q is `(decoys + 1) / targets` after each complete
+  tied-score group, then the reverse cumulative minimum, capped at 1. With decoys supplied in
+  the FASTA (`generate_decoys: false`) decoy proteins do not pair with their targets, so
+  `protein_q` reduces to classic, conservative protein-level target-decoy counting.
 
 `sage.protein_inference` in the Parquet footer and `provenance.metadata.protein_inference` in
 `run-summary.json` record the strategy used (`idpicker_parsimony`, or `protein_lists` with
