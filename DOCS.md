@@ -1083,6 +1083,16 @@ Example:
   }
 ```
 
+### What quantification does not do
+
+- **No protein rollup.** TMT reporter intensities are per PSM row in `results.sage.parquet`, and
+  LFQ intensities are per precursor and file in `lfq.parquet`. Sage does not combine them into
+  peptide or protein abundances. Use `proteins` or `protein_groups` to aggregate downstream.
+- **No normalization.** LFQ intensities are integrated MS1 signal, and TMT values are raw reporter
+  intensities (or signal-to-noise with `sn`). Sage applies no between-file, between-channel or
+  total-intensity scaling, and no reporter isotope-impurity correction.
+- **No imputation.** A missing LFQ signal is null, never zero.
+
 
 ## Precursor Tolerance
 
