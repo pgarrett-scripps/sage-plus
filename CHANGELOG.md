@@ -46,6 +46,11 @@ entries are retained below for provenance.
   (`delta_next` 0) and split protein inference. Set false for the previous behavior.
 - `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
   expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
+- `results.sage.parquet` has a `substitutions` column listing the ambiguous residues replaced in
+  an expanded peptide, as `X4K;B7D` (residue as written, one-based position, residue searched).
+  It is empty for other peptides and when any protein has the residues as written. J is not
+  listed, since it is scored as I/L. It is computed at output time from the protein
+  occurrences, so peptides take no extra memory.
 - Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
   row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
   and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages

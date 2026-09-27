@@ -2422,6 +2422,104 @@ fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
         .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
 }
 
+#[test]
+fn expanded_peptides_report_substitutions() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n>P3\nMRABEZAK\n>P4\nMRSAMPLEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let database = ambiguous_parameters(true).build(fasta);
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    // Written plainly in P2, so nothing was substituted.
+    assert_eq!(find(b"GEPTIDEK").substitutions(), "");
+    assert_eq!(find(b"GEPWIDEK").substitutions(), "X4W");
+    // The generated decoy of GEPWIDEK, at decoy positions.
+    let decoy = find(b"GEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"ADEQAK").substitutions(), "B2D;Z4Q");
+    assert_eq!(find(b"ANEEAK").substitutions(), "B2N;Z4E");
+    // No ambiguous residues.
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+}
+
+/// Merged copies from several proteins: the substitutions come from the first
+/// expanded occurrence in protein order, and any occurrence with the residues
+/// as written leaves them empty.
+#[test]
+fn substitutions_follow_the_first_expanded_occurrence() {
+    let parameters = |merge: bool| {
+        serde_json::from_value::<Builder>(serde_json::json!({
+            "enzyme": {"missed_cleavages": 0, "min_len": 5},
+            "generate_decoys": false,
+            "expand_ambiguous_residues": true,
+            "merge_isoleucine_leucine": merge,
+        }))
+        .unwrap()
+        .make_parameters()
+    };
+    let peptide = |fasta: &str, merge: bool| {
+        let fasta = Fasta::parse(fasta.into(), "rev_", false).unwrap();
+        parameters(merge)
+            .digest(&fasta)
+            .into_iter()
+            .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+            .expect("AEPTIDEK")
+    };
+
+    // Both proteins are expanded, at different residues: the first in
+    // protein order, A, gives them, whatever the FASTA order.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTXDEK\n",
+        ">B\nGGKAEPTXDEK\n>A\nGGKAEPXIDEK\n",
+    ] {
+        for merge in [false, true] {
+            let merged = peptide(fasta, merge);
+            assert_eq!(merged.proteins("rev_", false), "A;B");
+            assert_eq!(merged.substitutions(), "X4T");
+        }
+    }
+
+    // A real residue in any protein wins, before or after the expanded one.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTIDEK\n",
+        ">A\nGGKAEPTIDEK\n>B\nGGKAEPXIDEK\n",
+    ] {
+        let merged = peptide(fasta, true);
+        assert_eq!(merged.proteins("rev_", false), "A;B");
+        assert_eq!(merged.substitutions(), "");
+    }
+    // Also a merged I/L/J twin; unmerged, the twin is another peptide.
+    let fasta = ">A\nGGKAEPXIDEK\n>B\nGGKAEPTJDEK\n";
+    let merged = peptide(fasta, true);
+    assert_eq!(merged.proteins("rev_", false), "A;B");
+    assert_eq!(merged.substitutions(), "");
+    let unmerged = peptide(fasta, false);
+    assert_eq!(unmerged.proteins("rev_", false), "A");
+    assert_eq!(unmerged.substitutions(), "X4T");
+
+    // A peptide TSV row lists the sequence as written.
+    let fasta = Fasta::parse(">A\nGGKAEPXIDEK\n".into(), "rev_", false).unwrap();
+    let parameters = parameters(true);
+    let mut peptides = parameters.digest(&fasta);
+    peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nAEPTIDEK\tT1\n"));
+    parameters.reorder_merged_peptides(&mut peptides);
+    let merged = peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+        .unwrap();
+    assert_eq!(merged.proteins("rev_", false), "A;T1");
+    assert_eq!(merged.substitutions(), "");
+}
+
 /// Small deterministic generator so the randomized comparisons are repeatable.
 struct Lcg(u64);
 

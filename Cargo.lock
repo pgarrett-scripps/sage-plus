@@ -3204,6 +3204,7 @@ dependencies = [
  "log",
  "maud",
  "num_cpus",
+ "parquet",
  "rayon",
  "regex",
  "report-builder",
