@@ -1553,6 +1553,13 @@
             }
           ]
         },
+        "expand_ambiguous_residues": {
+          "description": "Expand ambiguous FASTA residues into every residue they may stand\nfor: B to D or N, Z to E or Q, X to each of the 20 standard residues\n(default false: peptides containing B, X or Z are not searched).\nJ (Ile or Leu) is always searched with the I/L mass.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "fasta": {
           "description": "Path to fasta database",
           "type": [
@@ -1573,6 +1580,15 @@
           },
           "type": [
             "array",
+            "null"
+          ]
+        },
+        "max_ambiguous_variants": {
+          "description": "Peptides whose ambiguous residues expand into more sequences than\nthis are dropped (default 20, one X per peptide). Values below 1 are\nnormalized to 1.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         },
