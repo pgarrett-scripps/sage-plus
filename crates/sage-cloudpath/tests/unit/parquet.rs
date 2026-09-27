@@ -671,7 +671,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         file_id: 0,
         occurrence,
         ion_injection_time: 0.0,
-        peaks: vec![intensity, intensity],
+        peaks: vec![Some(intensity), Some(intensity)],
     };
     let bytes = serialize_features(
         &[&first, &second],
@@ -694,5 +694,66 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         })
         .collect::<parquet::errors::Result<Vec<_>>>()?;
     assert_eq!(reporters, ["[10.0, 10.0]", "[20.0, 20.0]"]);
+    Ok(())
+}
+
+#[test]
+fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()> {
+    use parquet::record::Field;
+
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: (&b"PEPTIDE"[..]).into(),
+        ..Peptide::default()
+    });
+    let feature = |psm_id: usize, spec_id: &str| Feature {
+        psm_id,
+        spec_id: spec_id.into(),
+        peptide_idx: PeptideIx(0),
+        ..Feature::default()
+    };
+    let (quantified, unquantified) = (feature(1, "scan=1"), feature(2, "scan=2"));
+    let bytes = serialize_features(
+        &[&quantified, &unquantified],
+        &[TmtQuant {
+            spec_id: "scan=1".into(),
+            file_id: 0,
+            occurrence: 0,
+            ion_injection_time: 0.0,
+            peaks: vec![Some(10.0), None, Some(0.5), None],
+        }],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let reporters = reader
+        .get_row_iter(None)?
+        .map(|row| {
+            row.map(|row| {
+                row.get_column_iter()
+                    .find(|(name, _)| name.as_str() == "reporter_ion_intensity")
+                    .map(|(_, field)| field.clone())
+                    .unwrap()
+            })
+        })
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+
+    let Field::ListInternal(channels) = &reporters[0] else {
+        panic!("expected a reporter list, got {:?}", reporters[0]);
+    };
+    assert_eq!(channels.len(), 4);
+    let elements = channels.elements();
+    assert_eq!(elements[0], Field::Float(10.0));
+    assert_eq!(
+        elements[1],
+        Field::Null,
+        "missing channel must be NULL, not 0"
+    );
+    assert_eq!(elements[2], Field::Float(0.5));
+    assert_eq!(elements[3], Field::Null);
+    // A PSM without a reporter spectrum keeps a null list.
+    assert_eq!(reporters[1], Field::Null);
     Ok(())
 }

@@ -15,7 +15,7 @@ fn result(index: usize) -> SageResults {
             file_id: index,
             occurrence: 0,
             ion_injection_time: index as f32,
-            peaks: vec![index as f32],
+            peaks: vec![Some(index as f32)],
         }],
         repeated_spectrum_psms: HashMap::from([(index, index + 1)]),
     }
