@@ -87,11 +87,7 @@ pub fn oriented_span<'a>(written: &'a [u8], peptide: &[u8]) -> Option<Cow<'a, [u
     if fits(written) {
         return Some(Cow::Borrowed(written));
     }
-    let mut reversed = written.to_vec();
-    let len = reversed.len();
-    if len > 2 {
-        reversed[1..len - 1].reverse();
-    }
+    let reversed = crate::sequence::reverse_interior(written);
     fits(&reversed).then_some(Cow::Owned(reversed))
 }
 
