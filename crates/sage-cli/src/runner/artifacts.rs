@@ -1,8 +1,132 @@
 use super::*;
 
+/// One reported protein site: a localized modification on a peptide,
+/// attributed to one protein the peptide maps to, aggregated over every
+/// supporting PSM. Decoy sites come from decoy PSMs on decoy proteins and are
+/// built with the same key; they only feed the site-level FDR.
+pub(super) struct ProteinSite {
+    pub(super) decoy: bool,
+    pub(super) attachment: sage_core::ptm_library::Attachment,
+    pub(super) protein: String,
+    pub(super) peptide: String,
+    pub(super) residue: u8,
+    /// 1-based position within the peptide.
+    pub(super) position: usize,
+    pub(super) modification: String,
+    pub(super) modification_mass: f32,
+    pub(super) n_psms: u32,
+    pub(super) best_probability: f32,
+    pub(super) best_delta_score: f32,
+    pub(super) best_localization_q_value: f32,
+    pub(super) best_spectrum_q: f32,
+    /// Site score: best discriminant score of any supporting PSM.
+    pub(super) score: f32,
+    /// Site-level target-decoy q-value.
+    pub(super) q_value: f32,
+}
+
+type ProteinSiteKey = (
+    String,
+    String,
+    usize,
+    String,
+    sage_core::ptm_library::Attachment,
+);
+
+fn protein_site_key(protein: &str, row: &SiteRow) -> ProteinSiteKey {
+    (
+        protein.to_string(),
+        row.peptide.clone(),
+        row.position,
+        row.modification.clone(),
+        row.attachment,
+    )
+}
+
+/// Collapse site rows into protein sites and estimate site-level FDR.
+///
+/// Every row has already passed the PSM identification cutoff and the
+/// localization gates, which are applied identically to target and decoy
+/// PSMs. Site q-values are then estimated on exactly this set, which is the
+/// set written to the protein-site report, so no filter follows estimation.
+/// Target and decoy sites are returned together, sorted by protein, peptide
+/// and position.
+pub(super) fn aggregate_protein_sites(rows: &[SiteRow]) -> Vec<ProteinSite> {
+    // Protein coordinates are not resolved (the FASTA is consumed during
+    // indexing), so a site is keyed on (protein, modified peptide, position
+    // in peptide, modification, attachment) and a shared peptide yields one
+    // site per protein, on the target and the decoy side alike.
+    let mut map: HashMap<ProteinSiteKey, ProteinSite> = HashMap::new();
+    for row in rows {
+        for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
+            let entry = map
+                .entry(protein_site_key(protein, row))
+                .or_insert_with(|| ProteinSite {
+                    decoy: row.decoy,
+                    attachment: row.attachment,
+                    protein: protein.to_string(),
+                    peptide: row.peptide.clone(),
+                    residue: row.residue,
+                    position: row.position,
+                    modification: row.modification.clone(),
+                    modification_mass: row.modification_mass,
+                    n_psms: 0,
+                    best_probability: 0.0,
+                    best_delta_score: f32::MIN,
+                    best_localization_q_value: 1.0,
+                    best_spectrum_q: f32::MAX,
+                    score: f32::MIN,
+                    q_value: 1.0,
+                });
+            entry.decoy &= row.decoy;
+            entry.n_psms += 1;
+            entry.best_probability = entry.best_probability.max(row.localization_probability);
+            entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
+            entry.best_localization_q_value = entry
+                .best_localization_q_value
+                .min(row.localization_q_value);
+            entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
+            entry.score = entry.score.max(row.discriminant_score);
+        }
+    }
+
+    let mut sites: Vec<ProteinSite> = map.into_values().collect();
+    sites.sort_by(|a, b| {
+        a.protein
+            .cmp(&b.protein)
+            .then_with(|| a.peptide.cmp(&b.peptide))
+            .then_with(|| a.position.cmp(&b.position))
+            .then_with(|| a.modification.cmp(&b.modification))
+            .then_with(|| a.attachment.as_str().cmp(b.attachment.as_str()))
+    });
+    let evidence = sites
+        .iter()
+        .map(|site| (site.score, site.decoy))
+        .collect::<Vec<_>>();
+    for (site, q_value) in sites
+        .iter_mut()
+        .zip(sage_core::fdr::site_q_values(&evidence))
+    {
+        site.q_value = q_value;
+    }
+    sites
+}
+
+/// Site-level q-value of a PSM site row: the best q-value among the protein
+/// sites it supports.
+fn row_site_q_value(row: &SiteRow, q_values: &HashMap<ProteinSiteKey, f32>) -> f32 {
+    row.proteins
+        .split(';')
+        .filter(|p| !p.is_empty())
+        .filter_map(|protein| q_values.get(&protein_site_key(protein, row)).copied())
+        .fold(1.0, f32::min)
+}
+
 impl Runner {
-    /// Flatten FDR-passing target PSMs into one [`SiteRow`] per localized
-    /// modification site. Shared by the PSM-site and protein-site reports.
+    /// Flatten localized PSMs that pass the PTM identification cutoff into one
+    /// [`SiteRow`] per localized modification site. Decoy PSMs are included,
+    /// flagged, for site-level FDR. Shared by the PSM-site, protein-site and
+    /// PTM-library reports.
     pub(super) fn collect_site_rows(
         &self,
         features: &[Feature],
@@ -10,8 +134,7 @@ impl Runner {
     ) -> Vec<SiteRow> {
         let mut rows = Vec::new();
         for feature in features {
-            // Only confidently-identified target PSMs.
-            if !passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value) {
+            if !passes_site_psm_filter(feature, self.parameters.ptm_localization.psm_q_value) {
                 continue;
             }
             let localization = match &feature.localization {
@@ -49,6 +172,8 @@ impl Runner {
 
                 for site in &m.best_sites {
                     rows.push(SiteRow {
+                        decoy: feature.label != 1,
+                        discriminant_score: feature.discriminant_score,
                         ambiguous: m.candidate_sites > m.site_count
                             && (!m.delta_score.is_finite() || m.delta_score <= 0.0),
                         protein_sites: peptide.protein_sites.clone(),
@@ -82,17 +207,34 @@ impl Runner {
     }
 
     /// Write a per-PSM-site PTM localization report (one row per localized
-    /// modification site of each FDR-passing PSM).
-    pub fn write_ptm_sites(
+    /// modification site of each passing target PSM), with the site-level
+    /// q-value of the protein sites each row supports.
+    pub(super) fn write_ptm_sites(
         &self,
-        features: &[Feature],
-        filenames: &[String],
+        rows: &[SiteRow],
+        protein_sites: &[ProteinSite],
     ) -> anyhow::Result<Url> {
-        let rows = self.collect_site_rows(features, filenames);
+        let q_values = protein_sites
+            .iter()
+            .filter(|site| !site.decoy)
+            .map(|site| {
+                (
+                    (
+                        site.protein.clone(),
+                        site.peptide.clone(),
+                        site.position,
+                        site.modification.clone(),
+                        site.attachment,
+                    ),
+                    site.q_value,
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         use sage_cloudpath::parquet::PtmSiteRecord;
         let records = rows
             .iter()
+            .filter(|row| !row.decoy)
             .map(|row| PtmSiteRecord {
                 attachment: row.attachment.as_str().into(),
                 psm_id: row.psm_id as i64,
@@ -115,6 +257,7 @@ impl Runner {
                 site_determining_ions_matched: row.site_determining_matched as i32,
                 site_determining_ions_total: row.site_determining_total as i32,
                 site_probabilities: row.site_probabilities.clone(),
+                site_q_value: row_site_q_value(row, &q_values),
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.ptm-sites.parquet");
@@ -124,102 +267,28 @@ impl Runner {
         Ok(path)
     }
 
-    /// Write a collapsed protein-site report: the best localization for each
-    /// (protein, modified peptide site) aggregated across all supporting PSMs.
-    pub fn write_protein_sites(
-        &self,
-        features: &[Feature],
-        filenames: &[String],
-    ) -> anyhow::Result<Url> {
-        let rows = self.collect_site_rows(features, filenames);
-
-        // Key on (protein, peptide, position, mod mass). Protein coordinates
-        // are not resolved (the FASTA is consumed during indexing), so a row
-        // represents a localized site on a peptide, attributed to each protein
-        // the peptide maps to.
-        #[derive(Clone)]
-        struct Agg {
-            attachment: sage_core::ptm_library::Attachment,
-            protein: String,
-            peptide: String,
-            residue: u8,
-            position: usize,
-            modification: String,
-            modification_mass: f32,
-            n_psms: u32,
-            best_probability: f32,
-            best_delta_score: f32,
-            best_localization_q_value: f32,
-            best_spectrum_q: f32,
-        }
-
-        let mut map: HashMap<
-            (
-                String,
-                String,
-                usize,
-                String,
-                sage_core::ptm_library::Attachment,
-            ),
-            Agg,
-        > = HashMap::new();
-        for row in &rows {
-            for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
-                let key = (
-                    protein.to_string(),
-                    row.peptide.clone(),
-                    row.position,
-                    row.modification.clone(),
-                    row.attachment,
-                );
-                let entry = map.entry(key).or_insert_with(|| Agg {
-                    attachment: row.attachment,
-                    protein: protein.to_string(),
-                    peptide: row.peptide.clone(),
-                    residue: row.residue,
-                    position: row.position,
-                    modification: row.modification.clone(),
-                    modification_mass: row.modification_mass,
-                    n_psms: 0,
-                    best_probability: 0.0,
-                    best_delta_score: f32::MIN,
-                    best_localization_q_value: 1.0,
-                    best_spectrum_q: f32::MAX,
-                });
-                entry.n_psms += 1;
-                entry.best_probability = entry.best_probability.max(row.localization_probability);
-                entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
-                entry.best_localization_q_value = entry
-                    .best_localization_q_value
-                    .min(row.localization_q_value);
-                entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
-            }
-        }
-
-        let mut aggregated: Vec<Agg> = map.into_values().collect();
-        aggregated.sort_by(|a, b| {
-            a.protein
-                .cmp(&b.protein)
-                .then_with(|| a.peptide.cmp(&b.peptide))
-                .then_with(|| a.position.cmp(&b.position))
-        });
-
+    /// Write the collapsed protein-site report: one row per target protein
+    /// site, with its best localization evidence and its site-level q-value.
+    pub(super) fn write_protein_sites(&self, protein_sites: &[ProteinSite]) -> anyhow::Result<Url> {
         use sage_cloudpath::parquet::ProteinSiteRecord;
-        let records = aggregated
+        let records = protein_sites
             .iter()
-            .map(|agg| ProteinSiteRecord {
-                attachment: agg.attachment.as_str().into(),
-                protein: agg.protein.clone(),
-                peptide: agg.peptide.clone(),
-                residue: (agg.residue as char).to_string(),
-                position_in_peptide: agg.position as i32,
-                modification: agg.modification.clone(),
-                modification_mass: agg.modification_mass,
-                num_psms: agg.n_psms as i32,
-                best_localization_probability: agg.best_probability,
-                best_delta_localization_score: agg.best_delta_score,
-                best_localization_q_value: agg.best_localization_q_value,
-                best_spectrum_q: agg.best_spectrum_q,
+            .filter(|site| !site.decoy)
+            .map(|site| ProteinSiteRecord {
+                attachment: site.attachment.as_str().into(),
+                protein: site.protein.clone(),
+                peptide: site.peptide.clone(),
+                residue: (site.residue as char).to_string(),
+                position_in_peptide: site.position as i32,
+                modification: site.modification.clone(),
+                modification_mass: site.modification_mass,
+                num_psms: site.n_psms as i32,
+                best_localization_probability: site.best_probability,
+                best_delta_localization_score: site.best_delta_score,
+                best_localization_q_value: site.best_localization_q_value,
+                best_spectrum_q: site.best_spectrum_q,
+                site_score: site.score,
+                site_q_value: site.q_value,
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.protein-sites.parquet");
@@ -232,11 +301,7 @@ impl Runner {
     /// Emit a compact, reusable protein-coordinate site library from passing
     /// localized PSMs. Only names defined by this search's `variable_mods` are
     /// included, so every emitted row can be resolved by the same config.
-    pub(super) fn write_ptm_library(
-        &self,
-        features: &[Feature],
-        filenames: &[String],
-    ) -> anyhow::Result<Vec<Url>> {
+    pub(super) fn write_ptm_library(&self, rows: &[SiteRow]) -> anyhow::Result<Vec<Url>> {
         if self.database_parameters.fasta.is_empty() {
             return Ok(Vec::new());
         }
@@ -269,8 +334,8 @@ impl Runner {
                 .is_some();
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
-        for row in self.collect_site_rows(features, filenames) {
-            if row.ambiguous {
+        for row in rows {
+            if row.decoy || row.ambiguous {
                 continue;
             }
             if !known_names.contains(&row.modification) {

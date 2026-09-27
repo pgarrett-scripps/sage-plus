@@ -53,6 +53,15 @@ fn target_decoy_q_values_are_monotonic() {
 }
 
 #[test]
+fn probe_scores_read_the_population_q_curve() {
+    let evidence = [(100.0, false), (90.0, false), (80.0, true), (70.0, false)];
+    let q = target_decoy_q_values(&evidence);
+    let probes = q_values_at_scores(&evidence, &q, &[120.0, 90.0, 85.0, 75.0, 70.0, 10.0]);
+    assert_eq!(probes, vec![0.5, 0.5, 2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 1.0]);
+    assert_eq!(q_values_at_scores(&[], &[], &[1.0]), vec![1.0]);
+}
+
+#[test]
 fn site_determining_rule() {
     // 2 candidates, 1 mod: a prefix containing exactly one candidate is
     // determining; containing zero or both is not.

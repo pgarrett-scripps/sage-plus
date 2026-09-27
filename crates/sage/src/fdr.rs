@@ -105,7 +105,7 @@ impl<Ix: Default + Send> Competition<Ix> {
         scores.par_sort_by(|a, b| b.score.total_cmp(&a.score));
 
         if estimator.is_none() {
-            log::warn!("peptide/protein confidence model is underdetermined, using target-decoy counts with a +1 correction");
+            log::warn!("peptide/protein/site confidence model is underdetermined, using target-decoy counts with a +1 correction");
             let passing = assign_count_q_values(&mut scores, threshold);
             return (
                 scores
@@ -407,6 +407,57 @@ fn decoy_competition_group(
         .and_then(|protein| target_groups.get(protein.as_str()))
         .map(|group| group.to_string())
         .or_else(|| feat.protein_groups.clone())
+}
+
+/// Site-level target-decoy q-values, one per `(score, decoy)` entry in caller
+/// order.
+///
+/// Each entry is one reported site, scored so that higher is better. Target
+/// and decoy sites are not paired: every site competes on its own side, and the
+/// q-values come from the same posterior-error model as the peptide and protein
+/// levels, falling back to +1-corrected target-decoy counts when that model is
+/// underdetermined. Sites with the same score share one q-value, the most
+/// conservative in the tie, so the result never depends on input order.
+pub fn site_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
+    let map = evidence
+        .iter()
+        .enumerate()
+        .map(|(ix, &(score, decoy))| {
+            let mut competition = Competition::<usize>::default();
+            if decoy {
+                competition.reverse = score;
+                competition.reverse_ix = Some(ix);
+            } else {
+                competition.forward = score;
+                competition.foward_ix = Some(ix);
+            }
+            (ix, competition)
+        })
+        .collect::<FnvHashMap<_, _>>();
+    let (scores, _) = Competition::assign_q_value(map, 0.01);
+    let mut q_values = (0..evidence.len())
+        .map(|ix| scores.get(&ix).copied().unwrap_or(1.0))
+        .collect::<Vec<_>>();
+
+    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
+    let mut start = 0;
+    while start < order.len() {
+        let score = evidence[order[start]].0;
+        let mut end = start + 1;
+        while end < order.len() && evidence[order[end]].0.total_cmp(&score).is_eq() {
+            end += 1;
+        }
+        let tied = order[start..end]
+            .iter()
+            .map(|&ix| q_values[ix])
+            .fold(0.0f32, f32::max);
+        for &ix in &order[start..end] {
+            q_values[ix] = tied;
+        }
+        start = end;
+    }
+    q_values
 }
 
 pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {

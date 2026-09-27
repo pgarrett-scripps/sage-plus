@@ -566,32 +566,30 @@ fn deserialize_custom_cleavage_library() -> parquet::errors::Result<()> {
 
 #[test]
 fn serialize_ptm_site_reports() {
-    let ptm = serialize_ptm_sites(
-        &[PtmSiteRecord {
-            attachment: "residue".into(),
-            psm_id: 42,
-            filename: "sample.mzML".into(),
-            scannr: "scan=42".into(),
-            peptide: "AAS[+79.966]AATAA".into(),
-            proteins: "P12345".into(),
-            charge: 2,
-            spectrum_q: 0.005,
-            peptide_q: 0.006,
-            modification: "Phospho".into(),
-            modification_mass: 79.96633,
-            position: 3,
-            residue: "S".into(),
-            localization_probability: 0.982,
-            delta_localization_score: 18.7,
-            target_decoy_score: 21.0,
-            localization_q_value: 0.01,
-            candidate_sites: 2,
-            site_determining_ions_matched: 6,
-            site_determining_ions_total: 8,
-            site_probabilities: "S3:0.982;T6:0.018".into(),
-        }],
-        &[],
-    )
+    let ptm = serialize_ptm_sites(&[PtmSiteRecord {
+        attachment: "residue".into(),
+        psm_id: 42,
+        filename: "sample.mzML".into(),
+        scannr: "scan=42".into(),
+        peptide: "AAS[+79.966]AATAA".into(),
+        proteins: "P12345".into(),
+        charge: 2,
+        spectrum_q: 0.005,
+        peptide_q: 0.006,
+        modification: "Phospho".into(),
+        modification_mass: 79.96633,
+        position: 3,
+        residue: "S".into(),
+        localization_probability: 0.982,
+        delta_localization_score: 18.7,
+        target_decoy_score: 21.0,
+        localization_q_value: 0.01,
+        candidate_sites: 2,
+        site_determining_ions_matched: 6,
+        site_determining_ions_total: 8,
+        site_probabilities: "S3:0.982;T6:0.018".into(),
+        site_q_value: 0.004,
+    }], &[])
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(ptm)).unwrap();
     assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
@@ -601,26 +599,26 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        21
+        22
     );
+    assert_site_schema(&reader, "ptm_sites", 0.004);
 
-    let protein = serialize_protein_sites(
-        &[ProteinSiteRecord {
-            attachment: "residue".into(),
-            protein: "P12345".into(),
-            peptide: "AAS[+79.966]AATAA".into(),
-            residue: "S".into(),
-            position_in_peptide: 3,
-            modification: "Phospho".into(),
-            modification_mass: 79.96633,
-            num_psms: 2,
-            best_localization_probability: 0.982,
-            best_delta_localization_score: 18.7,
-            best_localization_q_value: 0.01,
-            best_spectrum_q: 0.005,
-        }],
-        &[],
-    )
+    let protein = serialize_protein_sites(&[ProteinSiteRecord {
+        attachment: "residue".into(),
+        protein: "P12345".into(),
+        peptide: "AAS[+79.966]AATAA".into(),
+        residue: "S".into(),
+        position_in_peptide: 3,
+        modification: "Phospho".into(),
+        modification_mass: 79.96633,
+        num_psms: 2,
+        best_localization_probability: 0.982,
+        best_delta_localization_score: 18.7,
+        best_localization_q_value: 0.01,
+        best_spectrum_q: 0.005,
+        site_score: 1.25,
+        site_q_value: 0.003,
+    }], &[])
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(protein)).unwrap();
     assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
@@ -630,8 +628,28 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        12
+        14
     );
+    assert_site_schema(&reader, "protein_sites", 0.003);
+}
+
+fn assert_site_schema(reader: &SerializedFileReader<bytes::Bytes>, name: &str, site_q: f32) {
+    let metadata = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap()
+        .iter()
+        .map(|kv| (kv.key.as_str(), kv.value.as_deref().unwrap_or_default()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(metadata["sage.schema.name"], name);
+    assert_eq!(metadata["sage.schema.version"], "3");
+    let row = reader.get_row_iter(None).unwrap().next().unwrap().unwrap();
+    let value = row
+        .get_column_iter()
+        .find_map(|(column, field)| (column == "site_q_value").then(|| field.clone()))
+        .unwrap();
+    assert_eq!(value, parquet::record::Field::Float(site_q));
 }
 
 #[test]

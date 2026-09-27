@@ -87,8 +87,11 @@ impl Runner {
         }
 
         if localize {
+            // Decoy PSMs under the same PSM cutoff are localized too, so decoy
+            // sites can compete in the site-level FDR. They never reach the
+            // localization FLR population or any written report.
             for (idx, feature) in features.iter().enumerate() {
-                if passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value)
+                if passes_site_psm_filter(feature, self.parameters.ptm_localization.psm_q_value)
                     && sage_core::ptm::has_localizable_modification(
                         &self.database[feature.peptide_idx],
                         &self
@@ -250,12 +253,19 @@ impl Runner {
             );
         }
 
-        let localized_psms = localizations.len();
+        let localized_psms = localizations
+            .iter()
+            .filter(|(idx, _)| features[*idx].label == 1)
+            .count();
         for (idx, localization) in localizations {
             features[idx].localization = Some(localization);
         }
 
-        let localization_indices = features
+        // The false-localization-rate competition uses target PSMs only.
+        // Decoy PSMs read their q-value off the target curve at their own
+        // score, so a localization cutoff applies the same score threshold to
+        // target and decoy PSMs before site-level FDR is estimated.
+        let (target_indices, decoy_indices): (Vec<_>, Vec<_>) = features
             .iter()
             .enumerate()
             .flat_map(|(feature_idx, feature)| {
@@ -268,17 +278,27 @@ impl Runner {
                         .map(move |(mod_idx, _)| (feature_idx, mod_idx))
                 })
             })
-            .collect::<Vec<_>>();
-        let evidence = localization_indices
+            .partition(|&(feature_idx, _)| features[feature_idx].label == 1);
+        let modification = |features: &[Feature], (feature_idx, mod_idx): (usize, usize)| {
+            let modification = &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
+            (modification.target_decoy_score, modification.decoy_winner)
+        };
+        let evidence = target_indices
             .iter()
-            .map(|&(feature_idx, mod_idx)| {
-                let modification =
-                    &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
-                (modification.target_decoy_score, modification.decoy_winner)
-            })
+            .map(|&index| modification(features, index))
             .collect::<Vec<_>>();
         let q_values = sage_core::ptm::target_decoy_q_values(&evidence);
-        for ((feature_idx, mod_idx), q_value) in localization_indices.into_iter().zip(q_values) {
+        let decoy_scores = decoy_indices
+            .iter()
+            .map(|&index| modification(features, index).0)
+            .collect::<Vec<_>>();
+        let decoy_q_values =
+            sage_core::ptm::q_values_at_scores(&evidence, &q_values, &decoy_scores);
+        for ((feature_idx, mod_idx), q_value) in target_indices
+            .into_iter()
+            .zip(q_values)
+            .chain(decoy_indices.into_iter().zip(decoy_q_values))
+        {
             features[feature_idx].localization.as_mut().unwrap().mods[mod_idx]
                 .set_competition_q_value(q_value);
         }
