@@ -130,7 +130,7 @@ pub struct Builder {
     /// Pre-filter the database to minimize memory usage
     pub prefilter: Option<bool>,
     /// Preliminary fragment matches one precursor hypothesis of a spectrum
-    /// needs for the prefilter to keep a peptide (default 3).
+    /// needs for the prefilter to keep a peptide (default 4).
     pub prefilter_min_matched_peaks: Option<u16>,
     /// Only each spectrum's most intense peaks are used by the prefilter
     /// (default: every processed peak).
@@ -187,7 +187,7 @@ impl Builder {
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter: self.prefilter.unwrap_or(false),
-            prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(3).max(1),
+            prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(4).max(1),
             prefilter_max_peaks: self.prefilter_max_peaks.filter(|&n| n > 0),
             loaded_ptm_library: None,
         }

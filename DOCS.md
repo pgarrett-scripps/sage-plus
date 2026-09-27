@@ -837,7 +837,7 @@ alongside the library, because the location table does not embed chemical masses
   fragment index for discarded peptides is ever held. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
   offset) of a spectrum has at least `prefilter_min_matched_peaks` preliminary fragment matches,
   counted as the search counts them. Targets, paired decoys, and label-channel partners are
-  retained together. The default of three matches keeps a small fraction of a large database and
+  retained together. The default of four matches keeps a small fraction of a large database and
   can drop a few weak identifications. With `prefilter_min_matched_peaks: 1` and no
   `prefilter_max_peaks`, every peptide that could enter the preliminary search is kept, and the
   results equal a full database search.
@@ -853,7 +853,7 @@ alongside the library, because the location table does not embed chemical masses
   unchanged.
 - **prefilter_chunk_size**: Deprecated and ignored; accepted so older configurations parse.
 - **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor
-  hypothesis of a spectrum needs to keep a peptide (default: 3, and never more than
+  hypothesis of a spectrum needs to keep a peptide (default: 4, and never more than
   `min_matched_peaks`). Preliminary fragments skip the first `min_ion_index` ions, so this counts
   fewer ions than `min_matched_peaks`. Set it to 1 for results identical to a full search.
 - **prefilter_max_peaks**: Integer. Only each spectrum's most intense peaks are used by the

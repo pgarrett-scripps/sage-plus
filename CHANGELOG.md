@@ -10,7 +10,7 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
-- `prefilter_min_matched_peaks` (default 3) and `prefilter_max_peaks` (default: all peaks). The
+- `prefilter_min_matched_peaks` (default 4) and `prefilter_max_peaks` (default: all peaks). The
   prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
   `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
   `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
@@ -41,6 +41,9 @@ entries are retained below for provenance.
   human plus 10x gut catalog search it kept 19% of peptides instead of 76%, halved peak memory,
   and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
   to keep the previous exact behavior.
+- The default `prefilter_min_matched_peaks` is now four. Against three on human plus gut
+  catalog searches it accepted 1.3% fewer PSMs at 10x and 0.5% fewer at 30x, used 60% and 46%
+  less peak memory, and let the 100x search finish in 19 GiB (14,459 PSMs in 451 s).
 
 ### Fixed
 - mzML files read without an MS-level filter no longer gain an empty spectrum (blank id, MS
