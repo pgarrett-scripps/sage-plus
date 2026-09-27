@@ -1408,46 +1408,62 @@ The `results.sage.parquet` file contains the following columns:
 
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
+Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
+scores; columns without one are descriptive. `results.sage.v1.parquet.schema` and
+`results.sage.v2.parquet.schema` in [`schemas/`](schemas/) are the exact contract.
+
+- `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
+- `filename`: File containing this PSM.
+- `scannr`: Spectrum identifier from the mzML file.
 - `peptide`: Peptide sequence, including modifications (e.g., NC\[+57.021\]HKGSFK).
-- `proteins`: Proteins containing the peptide sequence.
-- `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `ambiguity_sequence`, `mass_shift`: Fragment-evidence annotation; see [Sequence-ambiguity annotation](#sequence-ambiguity-annotation).
+- `stripped_peptide`: Peptide sequence without modifications.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
+- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 2).
+- `proteins`: Proteins containing the peptide sequence, joined by `;`.
+- `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
+- `protein_groups`: Protein groups for the peptide, joined by `;`. With `protein_grouping` on, these are the IDPicker groups; with it off, the peptide's proteins. See [Protein inference](#protein-inference).
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
-- `filename`: File containing this PSM
-- `scannr`: Spectrum identifier from mzML file.
-- `rank`: Rank of the PSM. If `report_psms > 1`, then the best match will have rank = 1, the second best match will have rank = 2, etc. 
-- `label`: Target/Decoy label (-1: decoy, 1: target).
+- `num_protein_groups`: Number of protein groups assigned to the peptide. Only peptides with exactly one group take part in `protein_group_q`.
+- `rank`: Rank of the PSM. If `report_psms > 1`, then the best match will have rank = 1, the second best match will have rank = 2, etc.
+- `is_decoy`: True for decoy PSMs.
 - `expmass`: Experimental mass of the peptide.
 - `calcmass`: Calculated mass of the peptide.
 - `charge`: Reported precursor charge.
-- `pepide_len`: Length of the peptide sequence.
+- `peptide_len`: Length of the peptide sequence.
 - `missed_cleavages`: Number of missed cleavages.
+- `semi_enzymatic`: True for peptides from semi-enzymatic digestion.
+- `ms2_intensity`: Summed intensity of the matched fragment ions (not the total MS2 intensity; `matched_intensity_pct` relates the two). Higher is better.
 - `isotope_error`: C13 isotope error.
-- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million. Always the raw, uncorrected error, and `expmass` is always the raw experimental mass, even with `mass_recalibration`.
-- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions. Always computed from raw fragment m/z.
+- `precursor_ppm`: Difference between experimental mass and calculated mass, reported in parts-per-million. Always the raw, uncorrected error, and `expmass` is always the raw experimental mass, even with `mass_recalibration`. Closer to zero is better.
+- `fragment_ppm`: Average parts-per-million (delta mass) for matched fragment ions compared to theoretical ions. Always computed from raw fragment m/z. Closer to zero is better.
 - `calibrated_precursor_ppm` / `calibrated_fragment_ppm`: Residual errors after mass correction: the search-time `mass_recalibration` model when one was applied, otherwise the post-search per-file alignment.
-- `hyperscore`: X!Tandem hyperscore for the PSM.
-- `delta_next`: Difference between the hyperscore of this candidate and the next best candidate.
-- `delta_bext`: Difference between the hyperscore of the best candidate (rank=1) and this candidate.
+- `hyperscore`: X!Tandem hyperscore for the PSM. Higher is better.
+- `delta_next`: Hyperscore of this candidate minus that of the next-ranked candidate (its full hyperscore when there is none). Higher is better.
+- `delta_best`: Hyperscore of the best candidate (rank 1) minus that of this candidate; 0 for rank 1. Lower is better.
 - `rt`: Retention time.
 - `aligned_rt`: Globally aligned retention time.
 - `predicted_rt`: Predicted retention time, if enabled.
-- `delta_rt_model`: Difference between predicted and observed retention time.
-- `matched_peaks`: Number of matched theoretical fragment ions.
-- `longest_b`: Longest b-ion series.
-- `longest_y`: Longest y-ion series.
-- `longest_y_pct`: Longest y-ion series, divided by peptide length (as a percentage).
-- `matched_intensity_pct`: Fraction of MS2 intensity explained by matched b- and y-ions (as a percentage of total MS2 intensity for this spectrum).
+- `delta_rt_model`: Absolute difference between predicted and aligned retention time. Lower is better.
+- `ion_mobility`: Observed ion mobility, when the spectra have it.
+- `predicted_mobility`: Predicted ion mobility, when `ion_mobility_model` is enabled.
+- `delta_mobility`: Absolute difference between predicted and observed ion mobility. Lower is better.
+- `matched_peaks`: Number of matched theoretical fragment ions. Higher is better.
+- `longest_b`: Longest b-ion series. Higher is better.
+- `longest_y`: Longest y-ion series. Higher is better.
+- `longest_y_pct`: Longest y-ion series divided by peptide length, as a fraction from 0 to 1. Higher is better.
+- `matched_intensity_pct`: Percentage of the MS2 spectrum's total intensity explained by matched fragment ions. Higher is better.
+- `spectral_angle`, `explained_library_intensity`, `explained_query_intensity`: Former library-search columns, kept for schema compatibility. Always 0.
 - `scored_candidates`: Number of scored candidates for this spectrum.
-- `poisson`: Probability of matching exactly N peaks across all candidates (Pr(x=k)).
-- `sage_discriminant_score`: Combined score from linear discriminant analysis, used for FDR (False Discovery Rate) calculation.
-- `posterior_error`: Posterior error probability for this PSM / local FDR.
-- `spectrum_q`: Assigned spectrum-level q-value.
-- `peptide_q`: Assigned peptide-level q-value.
-- `protein_q`: Assigned protein-level q-value.
-- `ms1_intensity`: Intensity of the selected MS1 precursor ion (not label-free quant)
-- `ms2_intensity`: Total intensity of MS2 spectrum
+- `poisson`: log10 of the Poisson probability of matching exactly this many fragment peaks, with the expected count set to the average over all candidates for the spectrum. It is 0 or negative. For a top-ranked PSM, which matches more peaks than the average, more negative is better. It is not a p-value or a tail probability.
+- `sage_discriminant_score`: Combined score from linear discriminant analysis, used to rank PSMs for FDR. Higher is better.
+- `posterior_error`: log10 of the posterior error probability (local FDR) for this PSM, 0 or negative; -324 stands for a probability that underflows to zero. `10^posterior_error` gives the probability. Lower (more negative) is better.
+- `spectrum_q`: Spectrum-level q-value. Lower is better.
+- `peptide_q`: Peptide-level q-value. Lower is better.
+- `protein_q`: Protein-level q-value from picked-protein FDR over peptides unique to one protein; 1 for shared peptides. Lower is better.
+- `protein_group_q`: Protein-group q-value from picked group FDR over peptides in exactly one group; 1 for peptides shared between groups. Lower is better.
+- `reporter_ion_intensity`: TMT or iTRAQ reporter-ion intensities in channel order, when isobaric quantification is configured; otherwise null.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
