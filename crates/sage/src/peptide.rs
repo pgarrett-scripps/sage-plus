@@ -774,6 +774,13 @@ impl Peptide {
     pub fn initial_sort(&self, other: &Self) -> std::cmp::Ordering {
         self.sequence
             .cmp(&other.sequence)
+            .then_with(|| self.modification_sort(other))
+    }
+
+    /// The part of [`Self::initial_sort`] after the sequence: modifications
+    /// by position, termini, then label channel.
+    pub fn modification_sort(&self, other: &Self) -> std::cmp::Ordering {
+        std::cmp::Ordering::Equal
             .then_with(|| {
                 (0..self.sequence.len())
                     .find_map(|index| {

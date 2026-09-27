@@ -1671,6 +1671,13 @@
             "null"
           ]
         },
+        "merge_isoleucine_leucine": {
+          "description": "Merge peptides that differ only in I, L and J (Ile or Leu) into one\npeptide listing every protein, when their modifications and decoy\nflag also match (default true). They have the same mass and fragments.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "min_ion_index": {
           "description": "Minimum ion index to be generated: 1 will remove b1/y1 ions\n2 will remove b1/b2/y1/y2 ions, etc",
           "format": "uint",

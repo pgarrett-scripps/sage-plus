@@ -306,9 +306,29 @@ the FASTA.
 
 J (Ile or Leu) is always searched with the shared I/L mass and reported as J.
 Static or variable modifications declared on I or L do not apply to J.
-A J peptide stays a separate peptide from its identical I and L twins: they
-have the same mass, so the best PSM ties with a twin (`delta_next` 0) and
-protein inference sees the twins' proteins as separate groups.
+
+I, L and J have the same mass, so peptides that differ only in them (twins,
+such as `PEPIDEK`, `PEPLDEK` and `PEPJDEK`) give identical spectra. With
+`database.merge_isoleucine_leucine: true` (the default) twins become one
+peptide when their modifications (positions and masses) and decoy flag also
+match:
+
+- The merged peptide lists every twin's proteins and positions. Its
+  enzymatic state (`semi_enzymatic`, missed cleavages, terminal position) is
+  the most enzymatic twin's, as for a peptide found in several proteins.
+- It shows the sequence of the twin found first in protein order (by
+  accession, then position). Generated decoys merge the same way, so each
+  merged target keeps one decoy, and a generated decoy that is a twin of a
+  target is dropped like a decoy equal to a target.
+- A modification declared only on I or only on L keeps the modified twin
+  apart (J carries neither); the unmodified twins still merge.
+- Merging happens in the shared deduplication step, so results with and
+  without the prefilter are identical. `--estimate` counts digests before
+  deduplication and stays an overcount.
+
+With `merge_isoleucine_leucine: false`, twins stay separate peptides: the
+best PSM ties with a twin (`delta_next` 0) and protein inference sees the
+twins' proteins as separate groups.
 
 B (Asp or Asn), Z (Glu or Gln) and X (any residue) have no single mass. By
 default, peptides containing them are dropped with a warning. With
@@ -381,6 +401,7 @@ For additional information about configuration options and output file formats, 
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
     "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
+    "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
     "custom_cleavage_sites": "cleavage-sites.tsv" // Optional protein-specific sites
   },
   "quant": {                // Optional - specify only if TMT or LFQ
@@ -922,6 +943,9 @@ alongside the library, because the location table does not embed chemical masses
   [Ambiguous residues](#ambiguous-residues).
 - **max_ambiguous_variants**: Integer. Peptides that expand into more sequences than this are
   dropped (default: 20; values below 1 become 1).
+- **merge_isoleucine_leucine**: Boolean. Merge peptides that differ only in I, L and J into
+  one peptide listing all their proteins (default: true). See
+  [Ambiguous residues](#ambiguous-residues).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
   searching before building the search index. The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and

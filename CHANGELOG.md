@@ -39,6 +39,11 @@ entries are retained below for provenance.
   prefilter are identical. A PTM library record at a B, Z or X position validates, also in
   strict mode, when its residue is one the FASTA residue expands to, and modifies only that
   variant.
+- `database.merge_isoleucine_leucine` (default true) merges peptides that differ only in I,
+  L and J, with the same modifications and decoy flag, into one peptide listing every
+  protein. It keeps the most enzymatic occurrence and shows the sequence of the twin found
+  first in protein order; generated decoys merge the same way. Previously twins tied
+  (`delta_next` 0) and split protein inference. Set false for the previous behavior.
 - `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
   expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
 - Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total

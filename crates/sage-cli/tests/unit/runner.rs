@@ -739,7 +739,10 @@ fn ptm_library_records_match_expanded_ambiguous_residues() {
 
     // Without expansion the B cannot stand for the recorded N.
     let error = runner(false).err().expect("strict library aborts");
-    assert!(format!("{error:#}").contains("expects residue N"), "{error:#}");
+    assert!(
+        format!("{error:#}").contains("expects residue N"),
+        "{error:#}"
+    );
 
     // With expansion the record validates and modifies the N variant only.
     let runner = runner(true).unwrap();
@@ -751,6 +754,81 @@ fn ptm_library_records_match_expanded_ambiguous_residues() {
         .map(|peptide| String::from_utf8_lossy(&peptide.sequence).to_string())
         .collect::<Vec<_>>();
     assert!(!modified.is_empty());
-    assert!(modified.iter().all(|sequence| sequence.contains("PEPNIDEK")), "{modified:?}");
+    assert!(
+        modified
+            .iter()
+            .all(|sequence| sequence.contains("PEPNIDEK")),
+        "{modified:?}"
+    );
     std::fs::remove_dir_all(directory).ok();
+}
+
+/// I/L/J twins of the test spectrum's peptide in other proteins merge the
+/// same way whether the prefilter streams the digest or not.
+#[test]
+fn isoleucine_leucine_twins_merge_with_and_without_prefilter() -> anyhow::Result<()> {
+    use super::prefilter::PrefilterBudgets;
+    use crate::events::{CancellationToken, EventEmitter};
+
+    let (directory, root) = temporary_output("il-merge");
+    std::fs::create_dir_all(&root)?;
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fasta = root.join("proteins.fasta");
+    let q99536 = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    std::fs::write(
+        &fasta,
+        q99536
+            + "\n>sp|TWIN_I|ISOLEUCINE\nMSSKLQSRPAAPPAPGPGQITLRGGWK\n"
+            + ">sp|TWIN_J|AMBIGUOUS\nMWWKLQSRPAAPPAPGPGQJTLRAAYK\n",
+    )?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta.display().to_string().into();
+    config["database"]["prefilter"] = true.into();
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["mzml_paths"] = serde_json::json!([workspace
+        .join("tests/LQSRPAAPPAPGPGQLTLR.mzML")
+        .display()
+        .to_string()]);
+    config["output_directory"] = directory.display().to_string().into();
+    let input: crate::input::Input = serde_json::from_value(config)?;
+    let mut search = input.build()?;
+    // A one-byte index budget streams the digest protein by protein.
+    search.prefilter_budgets = Some(PrefilterBudgets { index_bytes: 1 });
+    let runner = super::Runner::new_with_control(
+        search,
+        1,
+        EventEmitter::from_writer(EventLog::default()),
+        CancellationToken::default(),
+    )?;
+    let database = runner.database_parameters.clone();
+    let proteins = super::load_fasta(&database)?;
+    let whole = runner.prefilter_whole_digest(1, &proteins, None)?;
+    let (streamed, _) = runner.prefilter_peptides(1, proteins, None)?;
+    assert_eq!(streamed, whole);
+
+    let twins = |decoy: bool| {
+        whole
+            .iter()
+            .filter(|peptide| {
+                peptide.decoy == decoy
+                    && peptide.modifications.is_empty()
+                    && sage_core::ambiguous_residues::isoleucine_leucine_eq(
+                        &peptide.sequence,
+                        match decoy {
+                            false => b"LQSRPAAPPAPGPGQLTLR",
+                            true => b"LLTLQGPGPAPPAAPRSQR",
+                        },
+                    )
+            })
+            .collect::<Vec<_>>()
+    };
+    let (targets, decoys) = (twins(false), twins(true));
+    assert_eq!((targets.len(), decoys.len()), (1, 1));
+    // Q99536 sorts first, so its L form is displayed.
+    assert_eq!(targets[0].to_string(), "LQSRPAAPPAPGPGQLTLR");
+    assert_eq!(targets[0].proteins.len(), 3);
+    assert_eq!(decoys[0].proteins, targets[0].proteins);
+    std::fs::remove_dir_all(directory).ok();
+    Ok(())
 }

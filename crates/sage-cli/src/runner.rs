@@ -935,7 +935,7 @@ impl Runner {
 
         // Merge, deduplicate, and build the index.
         if !reordered {
-            Parameters::reorder_peptides(&mut all_peptides);
+            database_parameters.reorder_merged_peptides(&mut all_peptides);
         }
         // Prefilter spectra are kept to skip rereading them, unless the
         // fragment index looks unlikely to fit beside them. The search

@@ -134,6 +134,10 @@ pub struct Builder {
     /// this are dropped (default 20, one X per peptide). Values below 1 are
     /// normalized to 1.
     pub max_ambiguous_variants: Option<usize>,
+    /// Merge peptides that differ only in I, L and J (Ile or Leu) into one
+    /// peptide listing every protein, when their modifications and decoy
+    /// flag also match (default true). They have the same mass and fragments.
+    pub merge_isoleucine_leucine: Option<bool>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
     /// Required column: `sequence`. Optional columns: `protein`, `decoy`.
     /// Configured static, variable, and channel-aware modifications are applied.
@@ -214,6 +218,7 @@ impl Builder {
             fasta: self.fasta.unwrap_or_default(),
             expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
             max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
+            merge_isoleucine_leucine: self.merge_isoleucine_leucine.unwrap_or(true),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
             prefilter: self.prefilter.unwrap_or(false),
@@ -250,6 +255,7 @@ pub struct Parameters {
     pub fasta: String,
     pub expand_ambiguous_residues: bool,
     pub max_ambiguous_variants: usize,
+    pub merge_isoleucine_leucine: bool,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
     pub prefilter: bool,
@@ -303,9 +309,22 @@ fn digest_bytes(sequence_len: u64) -> u64 {
 /// of the decoy generated from it. Equal sequences hash equally; unequal
 /// sequences rarely do.
 pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
+    canonical_sequence_hashes(sequence, false)
+}
+
+/// [`sequence_hashes`], with I, L and J hashed as one residue when
+/// `merge_isoleucine_leucine` is set, so peptides that
+/// [`Parameters::merge_isoleucine_leucine`] merges share their hashes.
+pub fn canonical_sequence_hashes(sequence: &[u8], merge_isoleucine_leucine: bool) -> (u64, u64) {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let step = |hash: u64, byte: &u8| (hash ^ u64::from(*byte)).wrapping_mul(PRIME);
+    let step = |hash: u64, byte: &u8| {
+        let byte = match merge_isoleucine_leucine {
+            true => crate::ambiguous_residues::isoleucine_leucine_canonical(*byte),
+            false => *byte,
+        };
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    };
     let forward = sequence.iter().fold(OFFSET, step);
     let reversed = match sequence {
         [first, middle @ .., last] if !middle.is_empty() => {
@@ -1126,18 +1145,36 @@ impl Parameters {
         digests
     }
 
+    /// Key under which target sequences are recorded and generated decoys
+    /// looked up, so a decoy equal to a target is dropped. With
+    /// `merge_isoleucine_leucine`, I, L and J count as one residue, as a
+    /// decoy that is a target's I/L twin would merge with it.
+    pub fn decoy_collision_key(&self, sequence: &PeptideSequence) -> PeptideSequence {
+        match self.merge_isoleucine_leucine {
+            true => sequence
+                .as_bytes()
+                .iter()
+                .map(|&residue| crate::ambiguous_residues::isoleucine_leucine_canonical(residue))
+                .collect::<Vec<_>>()
+                .into(),
+            false => sequence.clone(),
+        }
+    }
+
     /// Expand variable modifications and generate decoys from an unmodified digest.
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
         let target_sequences = digests
             .iter()
             .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.clone())
+            .map(|digest| self.decoy_collision_key(&digest.reference.sequence))
             .collect::<HashSet<_>>();
         self.modify_digests_with_target_sequences(digests, &target_sequences)
     }
 
     /// Expand a digest chunk while checking generated decoys against every
-    /// target sequence in the complete database.
+    /// target sequence in the complete database. Record the targets by
+    /// [`Self::decoy_collision_key`] so decoys that are I/L twins of a
+    /// target are dropped too.
     pub fn modify_digests_with_target_sequences(
         &self,
         digests: Vec<DigestGroup>,
@@ -1186,7 +1223,11 @@ impl Parameters {
     /// Sort and deduplicate peptides as [`Self::modify_digests`] does,
     /// merging label channels with this database's reference channel.
     pub fn reorder_peptides_with_labels(&self, target_decoys: &mut Vec<Peptide>) {
-        Self::reorder_peptides_with_reference(target_decoys, self.label_reference().as_deref());
+        Self::reorder_peptides_with_reference(
+            target_decoys,
+            self.label_reference().as_deref(),
+            self.merge_isoleucine_leucine,
+        );
     }
 
     /// Run `f` with a [`DigestExpander`] for this database's modification
@@ -1238,7 +1279,13 @@ impl Parameters {
     }
 
     pub fn reorder_peptides(target_decoys: &mut Vec<Peptide>) {
-        Self::reorder_peptides_with_reference(target_decoys, None);
+        Self::reorder_peptides_with_reference(target_decoys, None, false);
+    }
+
+    /// [`Self::reorder_peptides`], merging I/L/J twins when this database's
+    /// `merge_isoleucine_leucine` is set.
+    pub fn reorder_merged_peptides(&self, target_decoys: &mut Vec<Peptide>) {
+        Self::reorder_peptides_with_reference(target_decoys, None, self.merge_isoleucine_leucine);
     }
 
     /// Add reversed decoys to an already filtered target set.
@@ -1251,7 +1298,7 @@ impl Parameters {
             .iter()
             .filter(|peptide| !peptide.decoy)
             .for_each(|peptide| {
-                target_sequences.insert(peptide.sequence.clone());
+                target_sequences.insert(self.decoy_collision_key(&peptide.sequence));
             });
 
         let mut target_decoys = targets
@@ -1261,7 +1308,7 @@ impl Parameters {
                     return vec![peptide];
                 }
                 let decoy = peptide.reverse();
-                if target_sequences.contains(&decoy.sequence[..]) {
+                if target_sequences.contains(&self.decoy_collision_key(&decoy.sequence)) {
                     vec![peptide]
                 } else {
                     vec![decoy, peptide]
@@ -1271,11 +1318,17 @@ impl Parameters {
         Self::reorder_peptides_with_reference(
             &mut target_decoys,
             self.label_reference().as_deref(),
+            self.merge_isoleucine_leucine,
         );
         target_decoys
     }
 
-    fn reorder_peptides_with_reference(target_decoys: &mut Vec<Peptide>, reference: Option<&str>) {
+    fn reorder_peptides_with_reference(
+        target_decoys: &mut Vec<Peptide>,
+        reference: Option<&str>,
+        merge_isoleucine_leucine: bool,
+    ) {
+        use crate::ambiguous_residues::{isoleucine_leucine_canonical, isoleucine_leucine_eq};
         log::trace!("sorting and deduplicating peptides");
 
         let init_size = target_decoys.len();
@@ -1292,18 +1345,55 @@ impl Parameters {
                 .iter()
                 .any(|occurrence| occurrence.start.is_some())
         };
-        target_decoys.par_sort_unstable_by(|a, b| {
-            a.monoisotopic
-                .total_cmp(&b.monoisotopic)
-                .then_with(|| a.initial_sort(b))
-                .then_with(|| from_tsv(a).cmp(&from_tsv(b)))
+        let enzymatic_state = |a: &Peptide, b: &Peptide| {
+            from_tsv(a)
+                .cmp(&from_tsv(b))
                 .then(a.semi_enzymatic.cmp(&b.semi_enzymatic))
                 .then(a.missed_cleavages.cmp(&b.missed_cleavages))
                 .then(a.position.cmp(&b.position))
-        });
+        };
+        match merge_isoleucine_leucine {
+            // I/L/J twins sort next to each other: by sequence with I, L
+            // and J as one residue, modifications, decoy flag, then the
+            // most enzymatic copy first. An exact copy of a target in a
+            // FASTA decoy protein sorts right after the target's twins.
+            true => target_decoys.par_sort_unstable_by(|a, b| {
+                fn canonical(peptide: &Peptide) -> impl Iterator<Item = u8> + '_ {
+                    peptide
+                        .sequence
+                        .iter()
+                        .map(|&residue| isoleucine_leucine_canonical(residue))
+                }
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| canonical(a).cmp(canonical(b)))
+                    .then_with(|| a.modification_sort(b))
+                    .then(a.decoy.cmp(&b.decoy))
+                    .then_with(|| enzymatic_state(a, b))
+                    .then_with(|| a.sequence.cmp(&b.sequence))
+            }),
+            false => target_decoys.par_sort_unstable_by(|a, b| {
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| a.initial_sort(b))
+                    .then_with(|| enzymatic_state(a, b))
+            }),
+        }
+        // Protein occurrence that names a merged twin's displayed sequence.
+        let first_occurrence = |peptide: &Peptide| {
+            (
+                peptide.protein_sites.is_empty(),
+                peptide.protein_sites.iter().min().cloned(),
+                peptide.proteins.iter().min().cloned(),
+            )
+        };
         target_decoys.dedup_by(|remove, keep| {
+            let twins = remove.sequence != keep.sequence
+                && merge_isoleucine_leucine
+                && remove.decoy == keep.decoy
+                && isoleucine_leucine_eq(&remove.sequence, &keep.sequence);
             if remove.monoisotopic == keep.monoisotopic
-                && remove.sequence == keep.sequence
+                && (remove.sequence == keep.sequence || twins)
                 && chemical_modifications_eq(remove, keep)
                 && (remove.modifications == keep.modifications
                     || channel_zero_provenance_eq(remove, keep))
@@ -1323,6 +1413,11 @@ impl Parameters {
                         })
                         .flatten();
                 }
+                // Twins show the sequence of the one found first in
+                // protein order; the rest of `keep` is the most enzymatic.
+                if twins && first_occurrence(remove) < first_occurrence(keep) {
+                    keep.sequence = remove.sequence.clone();
+                }
                 keep.proteins.extend(remove.proteins.iter().cloned());
                 if !remove.protein_sites.is_empty() {
                     let mut sites = keep.protein_sites.to_vec();
@@ -1340,6 +1435,18 @@ impl Parameters {
             }
         });
 
+        if merge_isoleucine_leucine {
+            // Restore the database order, which lookups such as
+            // `paired_peptide_index` binary-search: by mass, then sequence as
+            // written. Only peptides of equal mass move. A FASTA decoy that
+            // copies a target but not its displayed twin sorts after it.
+            target_decoys.par_sort_unstable_by(|a, b| {
+                a.monoisotopic
+                    .total_cmp(&b.monoisotopic)
+                    .then_with(|| a.initial_sort(b))
+                    .then(a.decoy.cmp(&b.decoy))
+            });
+        }
         target_decoys
             .par_iter_mut()
             .for_each(|peptide| peptide.proteins.sort_unstable());
@@ -1473,7 +1580,7 @@ impl Parameters {
         // Build target sequence set for decoy deduplication.
         let targets: DashSet<PeptideSequence, FnvBuildHasher> = DashSet::default();
         raw.iter().filter(|p| !p.decoy).for_each(|p| {
-            targets.insert(p.sequence.clone());
+            targets.insert(self.decoy_collision_key(&p.sequence));
         });
 
         // Emit targets (+ generated decoys) into the final list.
@@ -1482,7 +1589,7 @@ impl Parameters {
             .flat_map(|peptide| {
                 if self.generate_decoys && !peptide.decoy {
                     let rev = peptide.reverse();
-                    if !targets.contains(&rev.sequence[..]) {
+                    if !targets.contains(&self.decoy_collision_key(&rev.sequence)) {
                         vec![rev, peptide]
                     } else {
                         vec![peptide]
@@ -1493,7 +1600,11 @@ impl Parameters {
             })
             .collect();
 
-        Self::reorder_peptides_with_reference(&mut result, label_reference.as_deref());
+        Self::reorder_peptides_with_reference(
+            &mut result,
+            label_reference.as_deref(),
+            self.merge_isoleucine_leucine,
+        );
         result
     }
 
@@ -1670,7 +1781,11 @@ impl DigestExpander<'_> {
     /// Sort and deduplicate expanded peptides, as
     /// [`Parameters::modify_digests`] does.
     pub fn reorder(&self, target_decoys: &mut Vec<Peptide>) {
-        Parameters::reorder_peptides_with_reference(target_decoys, self.label_reference.as_deref());
+        Parameters::reorder_peptides_with_reference(
+            target_decoys,
+            self.label_reference.as_deref(),
+            self.parameters.merge_isoleucine_leucine,
+        );
     }
 
     /// Modified peptides and generated decoys of one digest group, unsorted.
@@ -1716,8 +1831,13 @@ impl DigestExpander<'_> {
                 })
                 .filter(|peptide| {
                     !peptide.decoy
-                        || !target_sequences
-                            .is_some_and(|targets| targets.contains(&(peptide.sequence[..])))
+                        || !target_sequences.is_some_and(|targets| {
+                            targets.contains(&peptide.sequence)
+                                || (parameters.merge_isoleucine_leucine
+                                    && targets.contains(
+                                        &parameters.decoy_collision_key(&peptide.sequence),
+                                    ))
+                        })
                 })
                 .collect::<Vec<_>>()
         };

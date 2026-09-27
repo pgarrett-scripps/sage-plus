@@ -741,6 +741,7 @@ fn digestion() {
         fasta: "none".into(),
         expand_ambiguous_residues: false,
         max_ambiguous_variants: 20,
+        merge_isoleucine_leucine: false,
         peptides: None,
         custom_cleavage_sites: None,
         prefilter: false,
@@ -2561,4 +2562,149 @@ fn batched_page_search_matches_per_peak_page_search() {
         }
     }
     assert!(matched > 10_000, "only {matched} matches compared");
+}
+
+fn isoleucine_leucine_parameters(merge: bool, extra: serde_json::Value) -> Parameters {
+    let mut config = serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5, "semi_enzymatic": false},
+        "peptide_min_mass": 100.0,
+        "generate_decoys": true,
+        "merge_isoleucine_leucine": merge,
+    });
+    for (key, value) in extra.as_object().unwrap() {
+        config[key] = value.clone();
+    }
+    serde_json::from_value::<Builder>(config)
+        .unwrap()
+        .make_parameters()
+}
+
+/// Unmodified peptides equal to APEPLDEK once I, L and J are one residue.
+fn isoleucine_leucine_twins(peptides: &[Peptide], decoy: bool) -> Vec<&Peptide> {
+    let canonical: &[u8] = if decoy { b"AEDLPEPK" } else { b"APEPLDEK" };
+    peptides
+        .iter()
+        .filter(|peptide| {
+            peptide.decoy == decoy
+                && peptide.modifications.is_empty()
+                && crate::ambiguous_residues::isoleucine_leucine_eq(&peptide.sequence, canonical)
+        })
+        .collect()
+}
+
+#[test]
+fn isoleucine_leucine_twins_merge_into_one_peptide() {
+    // APEPIDEK in "a" follows a G: with semi-enzymatic digestion it is
+    // semi-enzymatic there, and fully enzymatic as APEPLDEK in "b".
+    let fasta = Fasta::parse(
+        ">c\nSSRAPEPJDEKWWK\n>b\nLLRAPEPLDEKGGWR\n>a\nGGGAPEPIDEKR\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let semi = serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5, "semi_enzymatic": true}
+    });
+    let peptides = isoleucine_leucine_parameters(true, semi.clone()).digest(&fasta);
+    let targets = isoleucine_leucine_twins(&peptides, false);
+    let decoys = isoleucine_leucine_twins(&peptides, true);
+    assert_eq!((targets.len(), decoys.len()), (1, 1), "{targets:?}");
+    // The displayed sequence comes from the first protein, "a"; the rest
+    // is the most enzymatic occurrence, in "b".
+    let target = targets[0];
+    assert_eq!(target.to_string(), "APEPIDEK");
+    assert!(!target.semi_enzymatic);
+    assert_eq!(
+        target.proteins.as_slice(),
+        &["a".into(), "b".into(), "c".into()]
+    );
+    assert_eq!(target.protein_sites.len(), 3);
+    assert_eq!(decoys[0].to_string(), "AEDIPEPK");
+    assert_eq!(decoys[0].proteins, target.proteins);
+    // The decoy is the target's pair in the built database.
+    let fasta_again = Fasta::parse(
+        ">c\nSSRAPEPJDEKWWK\n>b\nLLRAPEPLDEKGGWR\n>a\nGGGAPEPIDEKR\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let database = isoleucine_leucine_parameters(true, semi.clone()).build(fasta_again);
+    let index = database
+        .peptides
+        .iter()
+        .position(|peptide| peptide.to_string() == "APEPIDEK" && !peptide.decoy)
+        .unwrap();
+    let pair = database
+        .paired_peptide_index(PeptideIx(index as u32))
+        .expect("paired decoy");
+    assert_eq!(database.peptides[pair.0 as usize].to_string(), "AEDIPEPK");
+
+    // Without merging, each twin is its own target with its own decoy.
+    let peptides = isoleucine_leucine_parameters(false, semi).digest(&fasta);
+    assert_eq!(isoleucine_leucine_twins(&peptides, false).len(), 3);
+    assert_eq!(isoleucine_leucine_twins(&peptides, true).len(), 3);
+}
+
+#[test]
+fn modifications_on_isoleucine_or_leucine_keep_twins_apart() {
+    let fasta = Fasta::parse(
+        ">a\nGGRAPEPIDEKR\n>b\nLLRAPEPLDEKGGWR\n>c\nSSRAPEPJDEKWWK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let names = |peptides: &[Peptide]| {
+        let mut names = peptides
+            .iter()
+            .filter(|peptide| {
+                !peptide.decoy
+                    && peptide.sequence.len() == 8
+                    && crate::ambiguous_residues::isoleucine_leucine_eq(
+                        &peptide.sequence,
+                        b"APEPLDEK",
+                    )
+            })
+            .map(|peptide| (peptide.to_string(), peptide.proteins.len()))
+            .collect::<Vec<_>>();
+        names.sort();
+        names
+    };
+
+    // A static modification on I: the I twin is heavier, L and J merge.
+    let peptides =
+        isoleucine_leucine_parameters(true, serde_json::json!({"static_mods": {"I": 10.0}}))
+            .digest(&fasta);
+    assert_eq!(
+        names(&peptides),
+        [
+            ("APEPI[+10]DEK".to_string(), 1),
+            ("APEPLDEK".to_string(), 2)
+        ]
+    );
+
+    // A variable modification on L: the modified L twin stays apart, the
+    // unmodified forms merge; J never carries it.
+    let peptides =
+        isoleucine_leucine_parameters(true, serde_json::json!({"variable_mods": {"L": [15.9949]}}))
+            .digest(&fasta);
+    assert_eq!(
+        names(&peptides),
+        [
+            ("APEPIDEK".to_string(), 3),
+            ("APEPL[+15.9949]DEK".to_string(), 1)
+        ]
+    );
+}
+
+#[test]
+fn generated_decoys_that_are_twins_of_a_target_are_dropped() {
+    // The decoy of DLGEENFK is DFNEEGLK, a twin of the target DFNEEGIK.
+    let fasta = Fasta::parse(">c\nDLGEENFKR\n>d\nMSSRDFNEEGIKR\n".into(), "rev_", true).unwrap();
+    for merge in [false, true] {
+        let peptides = isoleucine_leucine_parameters(merge, serde_json::json!({})).digest(&fasta);
+        let decoy = peptides
+            .iter()
+            .any(|peptide| peptide.decoy && peptide.to_string() == "DFNEEGLK");
+        assert_eq!(decoy, !merge);
+    }
 }
