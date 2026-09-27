@@ -1,5 +1,5 @@
 {
-  "description": "Reviewed development inventory and evaluation coverage for the evaluated release pair. Historical motivations and expected consequences retain design intent.",
+  "description": "Reviewed development inventory and evaluation coverage for Sage v0.15.0-beta.2 against Sage Plus v0.1.0-beta.13. Historical motivations and expected consequences retain design intent.",
   "sources": {
     "upstream": {
       "commit": "df9219951cc9a54cf4cd55d76541af24b687bd3d",
@@ -196,10 +196,10 @@
     {
       "area": "Storage",
       "upstream": "Peptide arrays and dense modification vectors",
-      "plus": "Protein spans and compact search structures",
+      "plus": "Protein spans, compact search structures, streamed spectrum-indexed prefilter",
       "motivation": "Reduce allocation and record size",
       "expected": "Lower memory with possible access costs",
-      "evaluation": "Memory, runtime, and worker scaling."
+      "evaluation": "Memory, runtime, worker scaling, large-database scaling."
     },
     {
       "area": "Execution",
@@ -218,6 +218,22 @@
       "evaluation": "PSM agreement and entrapment. No ablations."
     },
     {
+      "area": "Digestion",
+      "upstream": "Canonical residues, fixed enzyme rules",
+      "plus": "Initiator Met clipping, ambiguous residues, I/L merge, B/Z/X substitutions",
+      "motivation": "Search real protein N-termini and ambiguous database entries",
+      "expected": "More candidate peptides, clearer residue handling",
+      "evaluation": "Release regression tests only."
+    },
+    {
+      "area": "Confidence",
+      "upstream": "Target-decoy competition q-values",
+      "plus": "Picked target-decoy protein FDR, site-level q-values",
+      "motivation": "Protein and site claims need their own error control",
+      "expected": "Small changes in accepted proteins, new site endpoint",
+      "evaluation": "Release entrapment benchmark only. Site q-values not evaluated."
+    },
+    {
       "area": "PTM",
       "upstream": "Mass-based static and variable modifications",
       "plus": "Named sites, typed attachments, mass offsets, localization",
@@ -228,10 +244,18 @@
     {
       "area": "Quantification",
       "upstream": "LFQ tracing and reporter-ion quantification",
-      "plus": "Label channels, tracing controls, library export",
+      "plus": "Label channels, tracing controls, library export, per-row extraction q-values, null missing reporter channels",
       "motivation": "Extend quantification and result reuse",
       "expected": "More options, distinct validation needs",
-      "evaluation": "LFQ ratios, coverage, and species-absent control."
+      "evaluation": "LFQ ratios, coverage, species-absent control, extraction q filter, TMT ratio compression."
+    },
+    {
+      "area": "Reporting",
+      "upstream": "Run summary and result files",
+      "plus": "QC outputs, Parquet provenance, peak memory in the run summary, published schemas, thread control",
+      "motivation": "Record how each result was produced",
+      "expected": "Self-describing outputs, larger metadata",
+      "evaluation": "Run summaries used for LFQ memory and counts."
     }
   ]
 }

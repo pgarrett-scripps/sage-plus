@@ -62,6 +62,8 @@ analysis/data/*
 !analysis/data/matched-fdp.json
 !analysis/data/concurrency-feasibility.json
 !analysis/data/development-changes.json
+!analysis/data/tmt-hypro16.json
+!analysis/data/large-db-streamed.json
 !analysis/data/report-extension/
 analysis/data/report-extension/*
 !analysis/data/report-extension/*.json

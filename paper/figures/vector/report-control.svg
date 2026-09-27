@@ -164,16 +164,16 @@ z
    <g id="patch_5">
     <path d="M 152.77824 204.254531 
 L 196.94197 204.254531 
-L 196.94197 153.041914 
-L 152.77824 153.041914 
+L 196.94197 157.307229 
+L 152.77824 157.307229 
 z
 " clip-path="url(#p9bd4c22aed)" style="fill: #d57632"/>
    </g>
    <g id="patch_6">
     <path d="M 316.347611 204.254531 
 L 360.511342 204.254531 
-L 360.511342 66.215552 
-L 316.347611 66.215552 
+L 360.511342 72.649664 
+L 316.347611 72.649664 
 z
 " clip-path="url(#p9bd4c22aed)" style="fill: #d57632"/>
    </g>
@@ -194,10 +194,10 @@ L 410.4 204.254531
     <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="286.087278" y="59.830098" transform="rotate(-0 286.087278 59.830098)">66.0%</text>
    </g>
    <g id="text_11">
-    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="174.860105" y="145.399336" transform="rotate(-0 174.860105 145.399336)">24.7%</text>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="174.860105" y="149.664651" transform="rotate(-0 174.860105 149.664651)">22.6%</text>
    </g>
    <g id="text_12">
-    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="338.429477" y="58.572974" transform="rotate(-0 338.429477 58.572974)">66.6%</text>
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #273444" x="338.429477" y="65.007086" transform="rotate(-0 338.429477 65.007086)">63.5%</text>
    </g>
   </g>
   <g id="legend_1">

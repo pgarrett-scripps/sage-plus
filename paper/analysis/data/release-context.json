@@ -1,11 +1,20 @@
 {
   "analysis_repository": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source",
+  "current_release": {
+    "built_from": "8527f76",
+    "note": "Built from 8527f76. Between 8527f76 and the tag only version strings, docs and one unit test changed, so the search code is the release code. The binary reports 0.1.0-beta.12 because the crate version was bumped after the build.",
+    "tag_commit": "efd1b52",
+    "version": "v0.1.0-beta.13"
+  },
   "evidence": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected",
   "executables": {
     "/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage": "065f9c7b445d2d5f4d3f23be007f123231e135b0344a586a656666585f8c402e",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage": "fc0b47f9904d6a20af8309749c6818353eab188cfa8d3da4da261d75bbcf9c45"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage": "fc0b47f9904d6a20af8309749c6818353eab188cfa8d3da4da261d75bbcf9c45",
+    "/mnt/data1/build-cache/b13-rc/sage": "43c6e19b719efc32ed78e079bcb0ffc3d9da0a25fafc1b6959786998bb418814"
   },
   "extension": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/extension-selected",
+  "lfq_plus": "/mnt/data1/build-cache/b13-rc/lfq/lfq-plus-b13",
+  "note": "Upstream runs and the beta.6 evidence are frozen. The LFQ Sage Plus run (lfq_plus) and the TMT and large-database reruns use the beta.13 release code.",
   "sage_plus_commit": "3e30135fb8786ec8a12c1f62e0ff9300e57f9567",
   "sage_plus_version": "v0.1.0-beta.6",
   "sage_version": "v0.15.0-beta.2"

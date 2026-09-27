@@ -2,5 +2,5 @@
 #table(columns: 5, inset: 4pt, align: left,
 table.header([#text(size: 8pt)[Engine]], [#text(size: 8pt)[Control rows]], [#text(size: 8pt)[Foreign]], [#text(size: 8pt)[No direct MS2]], [#text(size: 8pt)[Foreign, no direct MS2]]),
 [#text(size: 8pt)[Sage]], [#text(size: 8pt)[24,262]], [#text(size: 8pt)[5,965]], [#text(size: 8pt)[8,985]], [#text(size: 8pt)[5,928]],
-[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[23,771]], [#text(size: 8pt)[5,872]], [#text(size: 8pt)[8,765]], [#text(size: 8pt)[5,836]],
+[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[31,380]], [#text(size: 8pt)[7,106]], [#text(size: 8pt)[11,128]], [#text(size: 8pt)[7,064]],
 )

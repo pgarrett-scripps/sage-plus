@@ -4,7 +4,8 @@ from pathlib import Path
 
 PAPER = Path(__file__).resolve().parents[2]
 SUMMARY = '../benchmarks/scientific-results/large-db-20260925/summary.json'
-LARGE_DB_INPUTS = [SUMMARY]
+STREAMED = 'analysis/data/large-db-streamed.json'
+LARGE_DB_INPUTS = [SUMMARY, STREAMED]
 MULTIPLE_ORDER = [0, '1x', '3x', '10x', '30x', '100x', 'full']
 OUTCOME = {'completed': 'completed', 'refused': 'refused by preflight',
            'guard': 'stopped by memory guard', 'ceiling': 'allocation failed at ceiling',
@@ -68,7 +69,25 @@ def sweep(summary, min_matched, max_peaks=None):
                 if row['min_matched'] == min_matched and row['max_peaks'] == max_peaks)
 
 
+def add_streamed_stats(st):
+    """Streamed-prefilter reruns collected by collect_large_db_streamed.py."""
+    runs = json.loads((PAPER / STREAMED).read_text())['runs']
+    for row in runs:
+        key = f"large.streamed.{row['multiple']}"
+        st.add(f'{key}.rss', row['peak_rss_gib'], fmt='.1f',
+               desc=f"{row['multiple']} streamed prefilter peak RSS GiB ({row['build']})",
+               between=(0, 22))
+        st.add(f'{key}.minutes', row['wall_seconds'] / 60, fmt='.1f',
+               desc=f"{row['multiple']} streamed prefilter wall minutes ({row['build']})", sign='+')
+        st.add(f'{key}.psms', row['psms_at_one_percent_fdr'], fmt=',',
+               desc=f"{row['multiple']} streamed prefilter PSMs at 1% FDR ({row['build']})", sign='+')
+        st.add(f'{key}.peptides', row['peptides_at_one_percent_fdr'], fmt=',',
+               desc=f"{row['multiple']} streamed prefilter peptides at 1% FDR ({row['build']})",
+               sign='+')
+
+
 def add_large_db_stats(st):
+    add_streamed_stats(st)
     summary = load()
     databases = summary['databases']
     subsets = databases['subsets']

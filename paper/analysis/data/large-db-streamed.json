@@ -1,0 +1,49 @@
+{
+  "runs": [
+    {
+      "multiple": "10x",
+      "name": "hek-igc-10x-prefilter",
+      "build": "v0.1.0-beta.13",
+      "binary_sha256": "43c6e19b719efc32ed78e079bcb0ffc3d9da0a25fafc1b6959786998bb418814",
+      "run_dir": "/mnt/data1/sage-plus-scientific/large-db-20260925/runs-b13/hek-igc-10x-prefilter",
+      "prefilter_min_matched_peaks": 4,
+      "max_memory_gb": 16,
+      "wall_seconds": 58.38,
+      "peak_rss_gib": 1.362,
+      "peptides_in_database": 1454079,
+      "psms_at_one_percent_fdr": 16211,
+      "peptides_at_one_percent_fdr": 8875,
+      "proteins_at_one_percent_fdr": 4084
+    },
+    {
+      "multiple": "30x",
+      "name": "hek-igc-30x-prefilter",
+      "build": "v0.1.0-beta.13",
+      "binary_sha256": "43c6e19b719efc32ed78e079bcb0ffc3d9da0a25fafc1b6959786998bb418814",
+      "run_dir": "/mnt/data1/sage-plus-scientific/large-db-20260925/runs-b13/hek-igc-30x-prefilter",
+      "prefilter_min_matched_peaks": 4,
+      "max_memory_gb": 16,
+      "wall_seconds": 154.9,
+      "peak_rss_gib": 5.0,
+      "peptides_in_database": 3784169,
+      "psms_at_one_percent_fdr": 15671,
+      "peptides_at_one_percent_fdr": 8360,
+      "proteins_at_one_percent_fdr": 3886
+    },
+    {
+      "multiple": "100x",
+      "name": "hek-igc-100x-prefilter",
+      "build": "v0.1.0-beta.11 streaming build, executable SHA-256 prefix 47127fd7",
+      "binary_sha256": "47127fd74e13bdd56e0eb656fa3c164a5ddcacb7073b446af70dbe65cb906190",
+      "run_dir": "/mnt/data1/sage-plus-scientific/large-db-20260925/runs-v2-mp4/hek-igc-100x-prefilter",
+      "prefilter_min_matched_peaks": 4,
+      "max_memory_gb": 22,
+      "wall_seconds": 451.02,
+      "peak_rss_gib": 19.186,
+      "peptides_in_database": 10901940,
+      "psms_at_one_percent_fdr": 14459,
+      "peptides_at_one_percent_fdr": 7692,
+      "proteins_at_one_percent_fdr": 3758
+    }
+  ]
+}

@@ -2,22 +2,26 @@
   "_about": "Numbers the manuscript states in prose, read as #s(\"<id>\"). Scripts own each entry's value; fmt, unit, desc and expect are the author's to edit here. Entries with origin.by = \"hand\" are entirely yours.",
   "sources": {
     "analysis/scripts/gen_stats.py": {
-      "analysis/scripts/gen_stats.py": "sha256:5b9fb8f39040ea87e3c8e783e907bfce91c8ad940ae1cc5111e8532f9dc4ea67",
+      "analysis/scripts/gen_stats.py": "sha256:15d6815e914b12d6e0ed478bfcae32ede6b1855844bd17c139d3099e763a8637",
       "analysis/scripts/_scientific.py": "sha256:84967b5494c6956520690704c014ef20687b90966d4c99fd6e6c42a6ee2efc34",
-      "analysis/scripts/_report.py": "sha256:349c6d36dbb525c41cda946d30771b2d9d87372dce39d4ec7d68dbeb229988c7",
+      "analysis/scripts/_report.py": "sha256:a6ca323826c353f1a7e222a396b441dc184ba808ae68c6e7baee2cfbdb846f19",
       "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
       "analysis/scripts/_mass_offset.py": "sha256:95951ccbd942d6ecf5b2b500aeb20d73ff474dc70c11a8a7dcaabef9e0b19997",
-      "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
+      "analysis/scripts/_large_db.py": "sha256:ea0262117009b4fa4b6ea06ae5672f5d1d5048b0d51965a308fb6ef2f73e8d3a",
+      "analysis/scripts/_tmt.py": "sha256:e56c294750821b7a03948bdac037f0e2ff4a73b723091e3b7eb617b0683bacc0",
       "../benchmarks/scientific-results/20260920/pilot-summary.json": "sha256:b455c63bc1c165dea5b5ee57d441ae426187f09beea7a52b498d178333c98601",
       "../benchmarks/scientific-results/20260920/evidence-verification.json": "sha256:90b7201f76435148c4bad6dd526f109f03adc9a1b7b732185b3a213649299838",
       "analysis/data/report-extension/public.json": "sha256:ca3d6ff8c0d8dadbb3d1ee8274f91038268bd53bcfc469806ecad556aede3cd1",
       "analysis/data/report-extension/ptm.json": "sha256:f34ab13df7f79561c758ad7653b78d3257d1b7e54db6efd18872c1ee09d64c6f",
-      "analysis/data/report-extension/lfq.json": "sha256:6876bac44fc6b064e0b68ad16242ce0b8f6ac8cdfaf56f79a19663511e69a657",
+      "analysis/data/report-extension/lfq.json": "sha256:7d2c1b9be7b25a3d76588fa40ec1ac0b358186cb83b29bbdff3ad665911408a8",
+      "analysis/data/report-extension/lfq-extraction.json": "sha256:c35ce6cd776e6407f0315a6f94e8ed6937c119962d623ce2bac4e6c3b76089c0",
       "analysis/data/report-extension/scaling.json": "sha256:14781e59641d7bb8e721ee68318fde3872f128ae6697a3c0c1b8fd26cab8a78d",
       "analysis/data/report-extension/verification.json": "sha256:70d90eddb4beb2b9c7969ca203abe4b72ef2462449863dc0e196a3460d19ec88",
       "analysis/data/matched-fdp.json": "sha256:366dcc75b3a6f6973f9cf9e49ce64c8a4e68211e92229221ec248f27f99f0daa",
       "../benchmarks/scientific-results/mass-offset-20260920/summary.json": "sha256:f2c61d4dc4f340ba02f447cc554ce21236cc69e5e1fc457266b2b00e27746028",
       "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
+      "analysis/data/large-db-streamed.json": "sha256:8152c216de1b962b08b6e2e1b1ecbf3c2e91e849d91dafba1dc699cbe28f5938",
+      "analysis/data/tmt-hypro16.json": "sha256:efb8f162e77716a791fadf55dfdaea73e14354450fbbc43139e9bc017d9c73c3",
       "analysis/data/execution.json": "sha256:57b81bdbb7570be98469e1c53fb73d9a59384c97c4d3125d5caa05896421ef57",
       "analysis/data/named-modifications.json": "sha256:8daf80ce678ba5a02147b1660087c3f52ea82fee5742115cb50e4c29e97251a1"
     }
@@ -900,6 +904,177 @@
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
         "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.streamed.100x.minutes": {
+      "value": 7.5169999999999995,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "100x streamed prefilter wall minutes (streaming build 47127fd (beta.11 series))",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:55b277d110ddbe27",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.100x.peptides": {
+      "value": 7692,
+      "fmt": ",",
+      "unit": "",
+      "desc": "100x streamed prefilter peptides at 1% FDR (streaming build 47127fd (beta.11 series))",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:95935676a6f8cf11",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.100x.psms": {
+      "value": 14459,
+      "fmt": ",",
+      "unit": "",
+      "desc": "100x streamed prefilter PSMs at 1% FDR (streaming build 47127fd (beta.11 series))",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:d3ccc3c3a442b275",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.100x.rss": {
+      "value": 19.186,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "100x streamed prefilter peak RSS GiB (streaming build 47127fd (beta.11 series))",
+      "expect": {
+        "min": 0,
+        "max": 22
+      },
+      "checksum": "v2:cbf1b8dd81815da6",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.10x.minutes": {
+      "value": 0.9730000000000001,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x streamed prefilter wall minutes (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:c4c5be9dc6db9baa",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.10x.peptides": {
+      "value": 8875,
+      "fmt": ",",
+      "unit": "",
+      "desc": "10x streamed prefilter peptides at 1% FDR (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:ea1bb1f23416db8e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.10x.psms": {
+      "value": 16211,
+      "fmt": ",",
+      "unit": "",
+      "desc": "10x streamed prefilter PSMs at 1% FDR (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:d37c118e7abfecbb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.10x.rss": {
+      "value": 1.362,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x streamed prefilter peak RSS GiB (v0.1.0-beta.13)",
+      "expect": {
+        "min": 0,
+        "max": 22
+      },
+      "checksum": "v2:c5966ff9d8ff9a1e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.30x.minutes": {
+      "value": 2.5816666666666666,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x streamed prefilter wall minutes (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:02213a07d6d1e1fe",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.30x.peptides": {
+      "value": 8360,
+      "fmt": ",",
+      "unit": "",
+      "desc": "30x streamed prefilter peptides at 1% FDR (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:8b87536f8a2b8b84",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.30x.psms": {
+      "value": 15671,
+      "fmt": ",",
+      "unit": "",
+      "desc": "30x streamed prefilter PSMs at 1% FDR (v0.1.0-beta.13)",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:a931856f758f2d0e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
+      }
+    },
+    "large.streamed.30x.rss": {
+      "value": 5.0,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x streamed prefilter peak RSS GiB (v0.1.0-beta.13)",
+      "expect": {
+        "min": 0,
+        "max": 22
+      },
+      "checksum": "v2:a19a1584344c1f37",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:31:09Z"
       }
     },
     "large.sweep.default.fdp": {
@@ -2027,8 +2202,184 @@
         "at": "2026-09-20T23:25:57Z"
       }
     },
+    "report.lfq.extraction.control.foreign": {
+      "value": 402,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Control foreign after extraction q filter",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:b7c7470e59e2a2df",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.control.foreign_without_strict_ms2": {
+      "value": 385,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Control foreign_without_strict_ms2 after extraction q filter",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:131b0c35e2d7edef",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.control.quantified": {
+      "value": 15761,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Control quantified after extraction q filter",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:c9d19a6d3e52386f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.control.without_strict_ms2": {
+      "value": 1730,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Control without_strict_ms2 after extraction q filter",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:dab2e78c8b5b1d04",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.ecoli.bias": {
+      "value": 0.06556535376744366,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "ecoli log2 B/A bias after extraction q filter",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:2b699d20b510445b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.ecoli.mae": {
+      "value": 0.34627341018492863,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "ecoli median absolute log2 error after extraction q filter",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:5bd38dd11727c69f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.foreign_percent": {
+      "value": 22.254335260115607,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Percent foreign among control rows without strict MS2 after extraction q filter",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:03381a14bff6464d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.human.bias": {
+      "value": -0.05821902560477619,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "human log2 B/A bias after extraction q filter",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:b65fc398ea34feab",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.human.mae": {
+      "value": 0.18104385331253156,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "human median absolute log2 error after extraction q filter",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:3c8fb63fb80a7885",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.rows": {
+      "value": 123115,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Positive precursor-file rows after extraction q filter",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:72c6f9103a26a34b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.yeast.bias": {
+      "value": -0.1268084841450956,
+      "fmt": "+.3f",
+      "unit": "",
+      "desc": "yeast log2 B/A bias after extraction q filter",
+      "expect": {
+        "min": -10,
+        "max": 10
+      },
+      "checksum": "v2:35da473b7b6ad37c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.extraction.yeast.mae": {
+      "value": 0.2564493639434544,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "yeast median absolute log2 error after extraction q filter",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:35ef68976497811b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
     "report.lfq.plus.control.foreign": {
-      "value": 5872,
+      "value": 7106,
       "fmt": ",",
       "unit": "",
       "desc": "plus human-only control foreign",
@@ -2036,14 +2387,14 @@
         "min": 0,
         "max": 1000000
       },
-      "checksum": "v2:142a0115209db40e",
+      "checksum": "v2:6cbc4c3512a64b4b",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.control.foreign_percent": {
-      "value": 66.58300057045065,
+      "value": 63.479511143062545,
       "fmt": ".1f",
       "unit": "",
       "desc": "plus percent foreign among control rows without strict MS2 evidence",
@@ -2051,14 +2402,29 @@
         "min": 0,
         "max": 100
       },
-      "checksum": "v2:bfe50bafac711eb9",
+      "checksum": "v2:ef8be16f5da80d09",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.control.foreign_without_strict_ms2": {
+      "value": 7064,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Sage Plus control foreign_without_strict_ms2",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:1f6909d0ba546f32",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.control.quantified": {
-      "value": 23771,
+      "value": 31380,
       "fmt": ",",
       "unit": "",
       "desc": "plus human-only control quantified",
@@ -2066,14 +2432,29 @@
         "min": 0,
         "max": 1000000
       },
-      "checksum": "v2:d2c1dd979bc7fbbb",
+      "checksum": "v2:74c54c634a392547",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.control.without_strict_ms2": {
+      "value": 11128,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Sage Plus control without_strict_ms2",
+      "expect": {
+        "min": 0,
+        "max": 1000000
+      },
+      "checksum": "v2:d5c88c93b090985e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.ecoli.bias": {
-      "value": 0.18856865208572837,
+      "value": 0.18415144514543091,
       "fmt": "+.3f",
       "unit": "",
       "desc": "plus ecoli log2 B/A bias",
@@ -2081,14 +2462,28 @@
         "min": -10,
         "max": 10
       },
-      "checksum": "v2:b854f1b670b2b4f2",
+      "checksum": "v2:137b007814d9e67f",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.ecoli.mae": {
+      "value": 0.4659378802456835,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Sage Plus ecoli median absolute log2 error",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:65d1d90973601db6",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.human.bias": {
-      "value": -0.045151746949985944,
+      "value": -0.03856578632069299,
       "fmt": "+.3f",
       "unit": "",
       "desc": "plus human log2 B/A bias",
@@ -2096,42 +2491,112 @@
         "min": -10,
         "max": 10
       },
-      "checksum": "v2:2c2d9e8159455dee",
+      "checksum": "v2:c9d11e93ee2be858",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.human.mae": {
+      "value": 0.20919392512059473,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Sage Plus human median absolute log2 error",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:1a7642491ac8adce",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.positive_target_file_rows": {
-      "value": 121179,
+      "value": 159685,
       "fmt": ",",
       "unit": "",
       "desc": "plus LFQ primary positive_target_file_rows",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:6dc9041d14f287da",
+      "checksum": "v2:db889f3e8bbfef0b",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.run.peak_gb": {
+      "value": 5.680791552,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "Sage Plus LFQ run summary peak resident memory in GB",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:6988f52f67155216",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.run.peptides": {
+      "value": 59654,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Sage Plus LFQ run summary peptides at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:cc15956b65257ed0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.run.proteins": {
+      "value": 7086,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Sage Plus LFQ run summary proteins at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:5b9b460fd7808dd0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.run.seconds": {
+      "value": 96,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Sage Plus LFQ run summary seconds at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:7b1a278f5abe8e9d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.target_precursors": {
-      "value": 24510,
+      "value": 32102,
       "fmt": ",",
       "unit": "",
       "desc": "plus LFQ primary target_precursors",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:c259b7fb7bda7d12",
+      "checksum": "v2:42dfc4c98cccea44",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.plus.yeast.bias": {
-      "value": -0.14099914407258485,
+      "value": -0.1415031383517218,
       "fmt": "+.3f",
       "unit": "",
       "desc": "plus yeast log2 B/A bias",
@@ -2139,80 +2604,94 @@
         "min": -10,
         "max": 10
       },
-      "checksum": "v2:755e4c389507efef",
+      "checksum": "v2:4b886e0c212f0d30",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "report.lfq.plus.yeast.mae": {
+      "value": 0.2734483770674154,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "Sage Plus yeast median absolute log2 error",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:95a4b1a97566e880",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.shared.ecoli": {
-      "value": 1788,
+      "value": 1776,
       "fmt": ",",
       "unit": "",
       "desc": "ecoli paired ratios shared across releases",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:ad7a0849a3ea6e33",
+      "checksum": "v2:475368189e17ec9d",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.shared.human": {
-      "value": 33792,
+      "value": 33715,
       "fmt": ",",
       "unit": "",
       "desc": "human paired ratios shared across releases",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:f73f5f09fd62d3c3",
+      "checksum": "v2:9a6cf76e63c3fad0",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.shared.yeast": {
-      "value": 10183,
+      "value": 10171,
       "fmt": ",",
       "unit": "",
       "desc": "yeast paired ratios shared across releases",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:1672dd4cc2c449cb",
+      "checksum": "v2:be79fb1513c1a678",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.shared_difference.max": {
-      "value": 0.006681798514294908,
+      "value": 0.019082877479988027,
       "fmt": ".4f",
       "unit": "",
       "desc": "max species median absolute inter-engine log2 ratio difference",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:eb0b0835d5bdf953",
+      "checksum": "v2:9f71fd4955b7c113",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.shared_difference.min": {
-      "value": 0.006235535535662029,
+      "value": 0.013153015392983747,
       "fmt": ".4f",
       "unit": "",
       "desc": "min species median absolute inter-engine log2 ratio difference",
       "expect": {
         "sign": "+"
       },
-      "checksum": "v2:ab0d193a7dc5c69c",
+      "checksum": "v2:32fa9ba55fddf74c",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.upstream.control.foreign": {
@@ -2334,23 +2813,23 @@
       }
     },
     "report.lfq.yield_change.0.01": {
-      "value": -2.0305380126309003,
+      "value": 28.315612758813646,
       "fmt": "+.2f",
       "unit": "",
       "desc": "Percent LFQ precursor yield change at 0.01",
       "expect": {
         "min": -100,
         "max": 100,
-        "sign": "-"
+        "sign": "+"
       },
-      "checksum": "v2:3f56ddec9a944bcf",
+      "checksum": "v2:db88b5331c58d162",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.lfq.yield_change.0.05": {
-      "value": 0.24179915691266984,
+      "value": 7.515032204224004,
       "fmt": "+.2f",
       "unit": "",
       "desc": "Percent LFQ precursor yield change at 0.05",
@@ -2359,10 +2838,10 @@
         "max": 100,
         "sign": "+"
       },
-      "checksum": "v2:53c980e14e98ed0f",
+      "checksum": "v2:73f328328a5f727f",
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
-        "at": "2026-09-15T08:05:54Z"
+        "at": "2026-09-27T23:23:14Z"
       }
     },
     "report.mixture.entrapment.rss": {
@@ -2661,6 +3140,354 @@
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
         "at": "2026-09-15T08:05:54Z"
+      }
+    },
+    "tmt.hrms2.plus.fold20": {
+      "value": 6.151,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus hrms2 observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:51e878cad967754e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.missing": {
+      "value": 0.48,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus hrms2 percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:3eb631bfaea8cd12",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.psms": {
+      "value": 33208,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus hrms2 quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:bbcf7eca21be693e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.raw.fold20": {
+      "value": 6.15,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus.raw hrms2 observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:a04860428153c647",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.raw.missing": {
+      "value": 0.48,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus.raw hrms2 percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:3eb631bfaea8cd12",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.raw.psms": {
+      "value": 33109,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus.raw hrms2 quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:f74e1803e892ec82",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.raw.slope": {
+      "value": 0.5427,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus.raw hrms2 log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:0afba7b6d85762c9",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.plus.slope": {
+      "value": 0.5428,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus hrms2 log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:cf16ee170adc0f00",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.upstream.fold20": {
+      "value": 6.149,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "upstream hrms2 observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:cd2dbadda0f15154",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.upstream.missing": {
+      "value": 0.47000000000000003,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "upstream hrms2 percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:ea2f90ca14a885a0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.upstream.psms": {
+      "value": 32969,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream hrms2 quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:c659a3ba3e54fe5d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.hrms2.upstream.slope": {
+      "value": 0.5422,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "upstream hrms2 log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:87ca376f4c3339dd",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.fold20": {
+      "value": 13.287,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus sps observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:85b682c6833f275e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.missing": {
+      "value": 3.25,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus sps percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:930f3f2c94c89e83",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.psms": {
+      "value": 21762,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus sps quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:2ec759bb74da4815",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.raw.fold20": {
+      "value": 13.279,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus.raw sps observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:770c77f2c2ed1cb1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.raw.missing": {
+      "value": 3.2399999999999998,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "plus.raw sps percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:c605d4b85d3c8ede",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.raw.psms": {
+      "value": 21691,
+      "fmt": ",",
+      "unit": "",
+      "desc": "plus.raw sps quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:657fa6d81637d870",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.raw.slope": {
+      "value": 0.7672,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus.raw sps log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:cd29b70b87190336",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.plus.slope": {
+      "value": 0.7671,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "plus sps log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:005129e529502054",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.upstream.fold20": {
+      "value": 13.323,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "upstream sps observed yeast fold at the 20:1 level",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:1de2a0232beb8265",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.upstream.missing": {
+      "value": 3.27,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "upstream sps percent missing reporter channels, 126 excluded",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:a0e254be0e5790fe",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.upstream.psms": {
+      "value": 21490,
+      "fmt": ",",
+      "unit": "",
+      "desc": "upstream sps quantified PSMs at one percent",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:bfddaeaaf020cb15",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
+      }
+    },
+    "tmt.sps.upstream.slope": {
+      "value": 0.7677,
+      "fmt": ".3f",
+      "unit": "",
+      "desc": "upstream sps log-log compression slope over spiked levels",
+      "expect": {
+        "min": 0,
+        "max": 2
+      },
+      "checksum": "v2:17cfd05228bcc43b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-27T23:23:14Z"
       }
     }
   }

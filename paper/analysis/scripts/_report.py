@@ -3,7 +3,7 @@ import json
 from statistics import median
 from _scientific import PAPER, load, timing
 
-REPORT_INPUTS = [f'analysis/data/report-extension/{name}.json' for name in ('public','ptm','lfq','scaling','verification')]
+REPORT_INPUTS = [f'analysis/data/report-extension/{name}.json' for name in ('public','ptm','lfq','lfq-extraction','scaling','verification')]
 
 
 def report(name):
@@ -80,6 +80,21 @@ def add_report_stats(st):
         st.add(f'report.lfq.{e}.control.foreign_percent',fraction,fmt='.1f',desc=f'{e} percent foreign among control rows without strict MS2 evidence',between=(0,100))
         for species,metrics in row['species'].items():
             st.add(f'report.lfq.{e}.{species}.bias',metrics['median_log2_bias'],fmt='+.3f',desc=f'{e} {species} log2 B/A bias',between=(-10,10))
+    plus_summary = quant_engines['plus']['run_summary']
+    for key,name in (('peptides_at_one_percent_fdr','peptides'),('proteins_at_one_percent_fdr','proteins'),('runtime_secs','seconds')):
+        st.add(f'report.lfq.plus.run.{name}',plus_summary[key],fmt=',',desc=f'Sage Plus LFQ run summary {name} at one percent',sign='+')
+    st.add('report.lfq.plus.run.peak_gb',plus_summary['peak_rss_bytes']/1e9,fmt='.2f',desc='Sage Plus LFQ run summary peak resident memory in GB',sign='+')
+    x = {r['engine']:r for r in report('lfq-extraction')['engines']}['plus']
+    st.add('report.lfq.extraction.rows',x['thresholds']['0.01']['positive_target_file_rows'],fmt=',',desc='Positive precursor-file rows after extraction q filter',sign='+')
+    st.add('report.lfq.extraction.foreign_percent',100*x['control']['foreign_without_strict_ms2']/x['control']['without_strict_ms2'],fmt='.1f',desc='Percent foreign among control rows without strict MS2 after extraction q filter',between=(0,100))
+    for key in ('foreign','quantified','without_strict_ms2','foreign_without_strict_ms2'):
+        st.add(f'report.lfq.extraction.control.{key}',x['control'][key],fmt=',',desc=f'Control {key} after extraction q filter',between=(0,1000000))
+    for key in ('foreign_without_strict_ms2','without_strict_ms2'):
+        st.add(f'report.lfq.plus.control.{key}',quant_engines['plus']['control'][key],fmt=',',desc=f'Sage Plus control {key}',between=(0,1000000))
+    for species,metrics in x['species'].items():
+        st.add(f'report.lfq.extraction.{species}.bias',metrics['median_log2_bias'],fmt='+.3f',desc=f'{species} log2 B/A bias after extraction q filter',between=(-10,10))
+        st.add(f'report.lfq.extraction.{species}.mae',metrics['median_absolute_log2_error'],fmt='.3f',desc=f'{species} median absolute log2 error after extraction q filter',sign='+')
+        st.add(f'report.lfq.plus.{species}.mae',quant_engines['plus']['species'][species]['median_absolute_log2_error'],fmt='.3f',desc=f'Sage Plus {species} median absolute log2 error',sign='+')
     for sp,row in q['shared_ratio_pairs'].items():
         st.add(f'report.lfq.shared.{sp}',row['pairs'],fmt=',',desc=f'{sp} paired ratios shared across releases',sign='+')
     for e in ('upstream','plus'):

@@ -85,14 +85,16 @@ def ptm():
     return output
 
 
-def lfq():
+def lfq(extraction_q=None):
+    """Precursor LFQ agreement. With extraction_q, Sage Plus keeps an intensity only
+    where its per-row extraction_q_value passes that threshold."""
     references = {name: '\x00'.join(sequence.replace('I', 'L') for _, sequence in fasta_entries(track(ROOT/f'references/{name}.fasta'))) for name in ('human', 'yeast', 'ecoli')}
     protein_species = load(ROOT/'references/hye-species.json')
     membership = {}
     result = []
     expected = {'human': 0, 'yeast': -1, 'ecoli': 2}
     for engine in ('upstream', 'plus'):
-        path = EXT/f'lfq-{engine}'
+        path = Path(CONTEXT['lfq_plus']) if engine == 'plus' and 'lfq_plus' in CONTEXT else EXT/f'lfq-{engine}'
         run = load(path/'result.json')
         assert run['status'] == 'complete'
         strict = accepted_ms2_keys(psms(path, engine))
@@ -106,6 +108,8 @@ def lfq():
                 converted = [dict(peptide=r['peptide'],charge='',proteins=r['proteins'],q_value=r['q_value'],is_decoy=False,filename=Path(k).name,intensity=v) for k,v in samples.items()]
             else:
                 converted = [dict(r, charge='' if r.get('charge') in ('', '-1', None) else str(r['charge']),filename=Path(r['filename']).name)]
+                if extraction_q is not None and (r.get('extraction_q_value') in ('', None) or float(r['extraction_q_value']) > extraction_q):
+                    converted[0]['intensity'] = ''
             for item in converted:
                 key = (item['filename'],canonical_peptide(item['peptide']),str(item['charge']))
                 item['ms2_confirmed'] = key in strict
@@ -150,13 +154,21 @@ def lfq():
                     ratios[sp][f'{peptide}|{charge}|{prep}'] = math.log2(pair['B']/pair['A'])
         for sp in expected:
             assert len(ratios[sp]) == metrics['species'][sp]['ratio_pairs']
-        result.append(dict(engine=engine, seconds=run['wall_seconds'], rss=run['peak_rss_mib'], thresholds=lfq_threshold_yields(rows), species=metrics['species'], control=dict(control), ratios=ratios))
+        summary = {}
+        if (path/'run-summary.json').exists():
+            keys = ('version','schema_version','runtime_secs','peak_rss_bytes','psms_at_one_percent_fdr','peptides_at_one_percent_fdr','proteins_at_one_percent_fdr','protein_groups_at_one_percent_fdr')
+            summary = {k: v for k, v in load(path/'run-summary.json').items() if k in keys}
+        result.append(dict(engine=engine, seconds=run['wall_seconds'], rss=run['peak_rss_mib'], run_summary=summary, thresholds=lfq_threshold_yields(rows), species=metrics['species'], control=dict(control), ratios=ratios))
     paired = {}
     for sp in expected:
         a,b = [r['ratios'][sp] for r in result]
         common = sorted(a.keys() & b.keys())
         paired[sp] = {'pairs':len(common),'median_absolute_error': {e: stats.median(abs(r[k]-expected[sp]) for k in common) if common else None for e,r in (('upstream',a),('plus',b))},'median_absolute_ratio_difference':stats.median(abs(a[k]-b[k]) for k in common) if common else None}
     return {'engines':result,'shared_ratio_pairs':paired}
+
+
+def lfq_extraction():
+    return lfq(extraction_q=.01)
 
 
 def scaling():
@@ -176,13 +188,13 @@ def scaling():
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('section', choices=('public','ptm','lfq','scaling'))
+    p.add_argument('section', choices=('public','ptm','lfq','lfq_extraction','scaling'))
     args = p.parse_args()
     data = globals()[args.section]()
     sources = [Path(__file__)] + [REPO/'benchmarks'/name for name in ('scientific_metrics.py','scientific_diagnostics.py','analyze_scientific.py','generate_ptm_library_benchmark.py')]
     analysis = {str(path.resolve()):hashlib.file_digest(path.open('rb'),'sha256').hexdigest() for path in sources}
     record = {'data':data,'inputs_sha256':INPUTS,'analysis_sources_sha256':analysis}
-    (OUT/f'{args.section}.json').write_text(json.dumps(record,indent=2,sort_keys=True)+'\n')
+    (OUT/f"{args.section.replace('_', '-')}.json").write_text(json.dumps(record,indent=2,sort_keys=True)+'\n')
     print(args.section, len(INPUTS), 'input files hashed')
 
 
