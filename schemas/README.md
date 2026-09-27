@@ -32,3 +32,8 @@ Spectral libraries use version 2 only when labeled entries are present.
 Beta 6 adds `ptm_library.v2.parquet.schema`, `ptm_sites.v2.parquet.schema`, and
 `protein_sites.v2.parquet.schema`. These schemas retain terminal-group versus residue
 attachment identity. Legacy PTM libraries without attachment are read as residue sites.
+
+Beta 13 adds `ptm_sites.v3.parquet.schema` and `protein_sites.v3.parquet.schema`. Both keep every
+version 2 column and append site-level FDR: `site_q_value` on PSM-site rows, and `site_score` plus
+`site_q_value` on protein-site rows. `best_spectrum_q` remains the lowest PSM q-value of a site's
+supporting PSMs and is not a site-level FDR.

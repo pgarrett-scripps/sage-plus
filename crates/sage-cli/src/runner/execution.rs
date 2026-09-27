@@ -453,17 +453,29 @@ impl Runner {
             self.parameters.output_paths.push(path);
         }
 
-        // PTM site reports follow the selected main output format.
+        // PTM site reports follow the selected main output format. Site-level
+        // FDR is estimated once, on the final site set, after every PSM and
+        // localization filter has been applied to targets and decoys alike.
+        let mut site_stats = SiteFdrRunStats::default();
         if self.parameters.ptm_localization.enabled {
+            let site_rows = self.collect_site_rows(&outputs.features, &filenames);
+            let protein_sites = artifacts::aggregate_protein_sites(&site_rows);
+            site_stats = SiteFdrRunStats::from_sites(&protein_sites);
+            log::info!(
+                "discovered {} target protein sites at 1% site FDR ({} target and {} decoy sites competed)",
+                site_stats.protein_sites_at_one_percent_fdr,
+                site_stats.target_protein_sites,
+                site_stats.decoy_protein_sites,
+            );
             self.parameters
                 .output_paths
-                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+                .push(self.write_ptm_sites(&site_rows, &protein_sites)?);
             self.parameters
                 .output_paths
-                .push(self.write_protein_sites(&outputs.features, &filenames)?);
+                .push(self.write_protein_sites(&protein_sites)?);
             self.parameters
                 .output_paths
-                .extend(self.write_ptm_library(&outputs.features, &filenames)?);
+                .extend(self.write_ptm_library(&site_rows)?);
         }
 
         // Write percolator input file if requested
@@ -556,6 +568,9 @@ impl Runner {
                 localized_psms,
                 psm_q_value: self.parameters.ptm_localization.psm_q_value,
                 localization_q_value: self.parameters.ptm_localization.localization_q_value,
+                target_protein_sites: site_stats.target_protein_sites,
+                decoy_protein_sites: site_stats.decoy_protein_sites,
+                protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,
             },
             models: ModelRunStats {
                 mass_alignment_applied: mass_alignment_files

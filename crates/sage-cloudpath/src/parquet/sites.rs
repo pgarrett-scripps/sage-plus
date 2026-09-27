@@ -191,6 +191,8 @@ pub struct PtmSiteRecord {
     pub site_determining_ions_matched: i32,
     pub site_determining_ions_total: i32,
     pub site_probabilities: String,
+    /// Best site-level q-value among the protein sites this row supports.
+    pub site_q_value: f32,
 }
 
 pub struct ProteinSiteRecord {
@@ -205,7 +207,12 @@ pub struct ProteinSiteRecord {
     pub best_localization_probability: f32,
     pub best_delta_localization_score: f32,
     pub best_localization_q_value: f32,
+    /// Lowest PSM q-value among supporting PSMs; not a site-level FDR.
     pub best_spectrum_q: f32,
+    /// Site score: best discriminant score of any supporting PSM.
+    pub site_score: f32,
+    /// Site-level target-decoy q-value.
+    pub site_q_value: f32,
 }
 
 /// Read a protein-specific custom cleavage library from Parquet bytes.
@@ -311,54 +318,15 @@ fn parquet_position(field: Option<&Field>, row: usize) -> parquet::errors::Resul
 }
 
 fn ptm_site_schema() -> parquet::errors::Result<Type> {
-    parquet::schema::parser::parse_message_type(
-        r#"
-        message schema {
-            required int64 psm_id;
-            required byte_array filename (utf8);
-            required byte_array scannr (utf8);
-            required byte_array peptide (utf8);
-            required byte_array proteins (utf8);
-            required int32 charge;
-            required float spectrum_q;
-            required float peptide_q;
-            required byte_array modification (utf8);
-            required float modification_mass;
-            required int32 position;
-            required byte_array residue (utf8);
-            required float localization_probability;
-            required float delta_localization_score;
-            required float target_decoy_score;
-            required float localization_q_value;
-            required int32 candidate_sites;
-            required int32 site_determining_ions_matched;
-            required int32 site_determining_ions_total;
-            required byte_array site_probabilities (utf8);
-            required byte_array attachment (utf8);
-        }
-        "#,
-    )
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../../schemas/ptm_sites.v3.parquet.schema"
+    ))
 }
 
 fn protein_site_schema() -> parquet::errors::Result<Type> {
-    parquet::schema::parser::parse_message_type(
-        r#"
-        message schema {
-            required byte_array protein (utf8);
-            required byte_array peptide (utf8);
-            required byte_array residue (utf8);
-            required int32 position_in_peptide;
-            required byte_array modification (utf8);
-            required float modification_mass;
-            required int32 num_psms;
-            required float best_localization_probability;
-            required float best_delta_localization_score;
-            required float best_localization_q_value;
-            required float best_spectrum_q;
-            required byte_array attachment (utf8);
-        }
-        "#,
-    )
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../../schemas/protein_sites.v3.parquet.schema"
+    ))
 }
 
 pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result<Vec<u8>> {
@@ -366,7 +334,7 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
     let options = WriterProperties::builder()
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("ptm_sites".into())),
-            KeyValue::new("sage.schema.version".into(), Some("2".into())),
+            KeyValue::new("sage.schema.version".into(), Some("3".into())),
         ]))
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .build();
@@ -527,6 +495,11 @@ pub fn serialize_ptm_sites(records: &[PtmSiteRecord]) -> parquet::errors::Result
                 .collect::<Vec<ByteArray>>(),
             ByteArrayType
         );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.site_q_value).collect::<Vec<_>>(),
+            FloatType
+        );
         rg.close()?;
     }
 
@@ -538,7 +511,7 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
     let options = WriterProperties::builder()
         .set_key_value_metadata(Some(vec![
             KeyValue::new("sage.schema.name".into(), Some("protein_sites".into())),
-            KeyValue::new("sage.schema.version".into(), Some("2".into())),
+            KeyValue::new("sage.schema.version".into(), Some("3".into())),
         ]))
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
         .build();
@@ -638,6 +611,16 @@ pub fn serialize_protein_sites(records: &[ProteinSiteRecord]) -> parquet::errors
                 .map(|r| r.attachment.as_str().into())
                 .collect::<Vec<ByteArray>>(),
             ByteArrayType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.site_score).collect::<Vec<_>>(),
+            FloatType
+        );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.site_q_value).collect::<Vec<_>>(),
+            FloatType
         );
         rg.close()?;
     }

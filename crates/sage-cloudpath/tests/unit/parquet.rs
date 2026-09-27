@@ -585,6 +585,7 @@ fn serialize_ptm_site_reports() {
         site_determining_ions_matched: 6,
         site_determining_ions_total: 8,
         site_probabilities: "S3:0.982;T6:0.018".into(),
+        site_q_value: 0.004,
     }])
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(ptm)).unwrap();
@@ -595,8 +596,9 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        21
+        22
     );
+    assert_site_schema(&reader, "ptm_sites", 0.004);
 
     let protein = serialize_protein_sites(&[ProteinSiteRecord {
         attachment: "residue".into(),
@@ -611,6 +613,8 @@ fn serialize_ptm_site_reports() {
         best_delta_localization_score: 18.7,
         best_localization_q_value: 0.01,
         best_spectrum_q: 0.005,
+        site_score: 1.25,
+        site_q_value: 0.003,
     }])
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(protein)).unwrap();
@@ -621,8 +625,28 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        12
+        14
     );
+    assert_site_schema(&reader, "protein_sites", 0.003);
+}
+
+fn assert_site_schema(reader: &SerializedFileReader<bytes::Bytes>, name: &str, site_q: f32) {
+    let metadata = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap()
+        .iter()
+        .map(|kv| (kv.key.as_str(), kv.value.as_deref().unwrap_or_default()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(metadata["sage.schema.name"], name);
+    assert_eq!(metadata["sage.schema.version"], "3");
+    let row = reader.get_row_iter(None).unwrap().next().unwrap().unwrap();
+    let value = row
+        .get_column_iter()
+        .find_map(|(column, field)| (column == "site_q_value").then(|| field.clone()))
+        .unwrap();
+    assert_eq!(value, parquet::record::Field::Float(site_q));
 }
 
 #[test]
