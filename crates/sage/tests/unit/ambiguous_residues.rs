@@ -38,3 +38,44 @@ fn recognizes_expanded_sequences() {
     assert!(!is_expansion_of(b"PEPXIDE", b"PEPTIDES"));
     assert!(!is_expansion_of(b"PEPTIDE", b"PEPXIDE"));
 }
+
+#[test]
+fn formats_substitutions_in_position_order() {
+    assert_eq!(format_substitutions(b"PEPTIDE", b"PEPTIDE"), "");
+    assert_eq!(format_substitutions(b"PEPXIDE", b"PEPTIDE"), "X4T");
+    assert_eq!(
+        format_substitutions(b"GBPXIDZK", b"GDPKIDQK"),
+        "B2D;X4K;Z7Q"
+    );
+    // Two-digit positions, and an X kept as a residue it may stand for.
+    assert_eq!(
+        format_substitutions(b"AAAAAAAAAXB", b"AAAAAAAAAAN"),
+        "X10A;B11N"
+    );
+    // J is scored as I/L, not substituted.
+    assert_eq!(format_substitutions(b"PEPJXDE", b"PEPLTDE"), "X5T");
+}
+
+#[test]
+fn orients_spans_like_the_peptide() {
+    assert_eq!(
+        oriented_span(b"PEPXIDEK", b"PEPTIDEK").as_deref(),
+        Some(&b"PEPXIDEK"[..])
+    );
+    // A generated decoy reverses the interior.
+    assert_eq!(
+        oriented_span(b"PEPXIDEK", b"PEDITPEK").as_deref(),
+        Some(&b"PEDIXPEK"[..])
+    );
+    // Merged I/L twins may show another twin's residues.
+    assert_eq!(
+        oriented_span(b"PEPXJDEK", b"PEPTLDEK").as_deref(),
+        Some(&b"PEPXJDEK"[..])
+    );
+    assert_eq!(
+        oriented_span(b"PEPXIDEK", b"PEPTLDEK").as_deref(),
+        Some(&b"PEPXIDEK"[..])
+    );
+    assert_eq!(oriented_span(b"PEPBIDEK", b"PEPTIDEK"), None);
+    assert_eq!(oriented_span(b"PEPXIDEK", b"PEPTIDE"), None);
+}

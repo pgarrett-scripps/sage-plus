@@ -258,7 +258,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
 }
 
 #[test]
-fn results_report_ambiguous_database_peptides() -> parquet::errors::Result<()> {
+fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::errors::Result<()> {
     let protein: sage_core::sequence::ProteinSequence = "MKPEPXIDER".into();
     let mut database = IndexedDatabase::default();
     for (sequence, source) in [("PEPTIDE", Some(protein.clone())), ("PEPKIDE", None)] {
@@ -293,16 +293,18 @@ fn results_report_ambiguous_database_peptides() -> parquet::errors::Result<()> {
     let rows = reader
         .get_row_iter(None)?
         .collect::<parquet::errors::Result<Vec<_>>>()?;
-    let database_peptides = rows
-        .iter()
-        .map(|row| {
-            row.get_column_iter()
-                .find(|(name, _)| name.as_str() == "database_peptide")
-                .map(|(_, field)| field.to_string())
-                .unwrap()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(database_peptides, ["\"PEPXIDE\"", "null"]);
+    let column = |column: &str| {
+        rows.iter()
+            .map(|row| {
+                row.get_column_iter()
+                    .find(|(name, _)| name.as_str() == column)
+                    .map(|(_, field)| field.to_string())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(column("database_peptide"), ["\"PEPXIDE\"", "null"]);
+    assert_eq!(column("substitutions"), ["\"X4T\"", "\"\""]);
     Ok(())
 }
 

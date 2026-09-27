@@ -157,10 +157,11 @@ fn combined_database_features_match_with_and_without_prefilter() -> anyhow::Resu
         let header = lines.next().expect("pin header").to_string();
         let rows = lines.map(str::to_string).collect::<BTreeSet<_>>();
         let digestion = std::fs::read_to_string(run.join("output/digestion.tsv"))?;
-        outputs.push((header, rows, digestion));
+        let substitutions = substitutions(&run.join("output/results.sage.parquet"))?;
+        outputs.push((header, rows, digestion, substitutions));
     }
 
-    let (header, rows, _) = &outputs[0];
+    let (header, rows, _, substitutions) = &outputs[0];
     let columns = header.split('\t').collect::<Vec<_>>();
     let column = |name: &str| columns.iter().position(|c| *c == name).expect(name);
     let (label, rank, peptide, semi) = (
@@ -178,9 +179,54 @@ fn combined_database_features_match_with_and_without_prefilter() -> anyhow::Resu
         assert_eq!(row[label], "1", "{truth}");
         assert_eq!(row[semi], "0", "{truth} is not semi-enzymatic");
     }
-    // Every pin row and column, and the digestion summary, are unchanged.
+    // Only the peptides expanded from B, Z or X report substitutions; J is
+    // scored as I/L, not substituted.
+    let rank_one = |truth: &str| {
+        substitutions
+            .iter()
+            .find(|(_, rank, peptide, _)| *rank == 1 && peptide == truth)
+            .map(|(.., substitutions)| substitutions.as_str())
+            .unwrap_or_else(|| panic!("{truth} is not a rank-1 PSM"))
+    };
+    assert_eq!(rank_one(TRUTHS[0]), "");
+    assert_eq!(rank_one(TRUTHS[1]), "");
+    assert_eq!(rank_one(TRUTHS[2]), "X6A");
+    assert_eq!(rank_one(TRUTHS[3]), "B2N");
+    assert_eq!(rank_one(TRUTHS[4]), "");
+    // Every pin row and column, the digestion summary and the substitutions
+    // are unchanged.
     assert_eq!(outputs[0], outputs[1], "prefilter changed the results");
 
     std::fs::remove_dir_all(root)?;
     Ok(())
+}
+
+/// `(scannr, rank, peptide, substitutions)` of every PSM in a results file,
+/// sorted.
+fn substitutions(path: &std::path::Path) -> anyhow::Result<Vec<(String, i32, String, String)>> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    use parquet::record::Field;
+    let reader = SerializedFileReader::new(std::fs::File::open(path)?)?;
+    let mut psms = Vec::new();
+    for row in reader.get_row_iter(None)? {
+        let row = row?;
+        let (mut scannr, mut rank, mut peptide, mut substitutions) = (None, None, None, None);
+        for (name, field) in row.get_column_iter() {
+            match (name.as_str(), field) {
+                ("scannr", Field::Str(value)) => scannr = Some(value.clone()),
+                ("rank", Field::Int(value)) => rank = Some(*value),
+                ("peptide", Field::Str(value)) => peptide = Some(value.clone()),
+                ("substitutions", Field::Str(value)) => substitutions = Some(value.clone()),
+                _ => {}
+            }
+        }
+        psms.push((
+            scannr.expect("scannr"),
+            rank.expect("rank"),
+            peptide.expect("peptide"),
+            substitutions.expect("substitutions"),
+        ));
+    }
+    psms.sort();
+    Ok(psms)
 }

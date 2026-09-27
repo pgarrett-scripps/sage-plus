@@ -686,6 +686,12 @@ impl ModificationSpecificity {
                 });
             }
         };
+        // An expanded peptide TSV row keeps its row as written in an
+        // occurrence without coordinates; it says nothing about neighbors.
+        let occurrences = occurrences
+            .iter()
+            .filter(|occurrence| occurrence.start.is_some() || occurrence.source.is_none())
+            .collect::<Vec<_>>();
         if occurrences.is_empty() {
             match &reversed {
                 Some(target) => collect(target, MotifContext::peptide_only(position), true),

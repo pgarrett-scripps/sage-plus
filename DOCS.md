@@ -344,13 +344,18 @@ digests dropped.
   FASTA residues.
 - Each variant keeps its protein and position, and merges with the same
   sequence from other proteins. The `database_peptide` results column shows
-  the FASTA sequence it came from.
+  the FASTA sequence it came from, and `substitutions` lists the replaced
+  residues (`X4T` for a `PEPTIDE` match to `PEPXIDE`). A peptide that is
+  also written plainly in another protein reports no substitutions.
 - Decoy proteins in the FASTA are expanded like targets; generated decoys are
   reversed from the expanded targets.
 - Expansion happens per digest, so it applies equally with and without the
   prefilter and in `--estimate`.
-- Only FASTA digests are expanded: a `database.peptides` TSV row containing
-  B, Z or X is skipped with a warning even with expansion on.
+- A `database.peptides` TSV row containing B, Z or X is expanded the same
+  way, with the same `max_ambiguous_variants` cap (a row over it is skipped
+  with a warning), and its variants fill `substitutions`; `database_peptide`
+  stays empty, since a row has no FASTA position. With expansion off, such a
+  row is skipped with a warning.
 - A `database.ptm_library` record at a B, Z or X position matches when its
   residue is one the FASTA residue expands to (N at a B, for example), also
   with `strict: true`, and modifies only that variant. Without expansion such
@@ -1347,6 +1352,7 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 - `proteins`: Proteins containing the peptide sequence.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
+- `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
 - `num_proteins`: Number of proteins assigned to the peptide sequence.
 - `filename`: File containing this PSM
 - `scannr`: Spectrum identifier from mzML file.

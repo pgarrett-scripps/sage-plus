@@ -740,7 +740,7 @@ fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> 
 
 fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
     let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
-    sage_cloudpath::util::read_fasta(
+    let fasta = sage_cloudpath::util::read_fasta(
         &fasta_url,
         &database_parameters.decoy_tag,
         database_parameters.generate_decoys,
@@ -750,7 +750,9 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             "Failed to build database from `{}`",
             database_parameters.fasta
         )
-    })
+    })?;
+    database_parameters.log_ambiguous_proteins(&fasta);
+    Ok(fasta)
 }
 
 fn load_custom_cleavages(

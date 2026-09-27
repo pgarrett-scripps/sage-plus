@@ -199,6 +199,11 @@ pub fn serialize_features(
                 .write_batch(&values, Some(&definition_levels), None)?;
             column.close()?;
         }
+        // Empty unless the peptide was expanded from ambiguous FASTA residues.
+        write_col!(
+            |f: &&Feature| database[f.peptide_idx].substitutions().into_bytes().into(),
+            ByteArrayType
+        );
         if has_labels {
             write_col!(
                 |f: &&Feature| database[f.peptide_idx]

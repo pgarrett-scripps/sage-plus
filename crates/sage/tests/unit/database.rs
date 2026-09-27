@@ -2422,6 +2422,138 @@ fn expanded_ambiguous_peptides_keep_proteins_and_database_sequence() {
         .all(|peptide| !crate::ambiguous_residues::is_ambiguous(&peptide.sequence)));
 }
 
+#[test]
+fn ambiguous_proteins_are_reported_as_expanded_or_dropped() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPJIDEK\n>P3\nMRBZK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    assert_eq!(fasta.ambiguous_protein_count(), 2);
+    let (level, message) = ambiguous_parameters(true)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Info);
+    assert!(message.starts_with("2 FASTA protein(s)"), "{message}");
+    assert!(
+        message.contains("expanded into up to 20 variant(s)"),
+        "{message}"
+    );
+    let (level, message) = ambiguous_parameters(false)
+        .ambiguous_proteins_message(&fasta)
+        .unwrap();
+    assert_eq!(level, log::Level::Warn);
+    assert!(
+        message.contains("not searched unless database.expand_ambiguous_residues"),
+        "{message}"
+    );
+    // J alone carries the I/L mass and needs neither.
+    let fasta = Fasta::parse(">P2\nMRGEPJIDEK\n".into(), "rev_", true).unwrap();
+    assert_eq!(
+        ambiguous_parameters(false).ambiguous_proteins_message(&fasta),
+        None
+    );
+}
+
+#[test]
+fn expanded_peptides_report_substitutions() {
+    let fasta = Fasta::parse(
+        ">P1\nMRGEPXIDEK\n>P2\nMRGEPTIDEK\n>P3\nMRABEZAK\n>P4\nMRSAMPLEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let database = ambiguous_parameters(true).build(fasta);
+    let find = |sequence: &[u8]| {
+        database
+            .peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    // Written plainly in P2, so nothing was substituted.
+    assert_eq!(find(b"GEPTIDEK").substitutions(), "");
+    assert_eq!(find(b"GEPWIDEK").substitutions(), "X4W");
+    // The generated decoy of GEPWIDEK, at decoy positions.
+    let decoy = find(b"GEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"ADEQAK").substitutions(), "B2D;Z4Q");
+    assert_eq!(find(b"ANEEAK").substitutions(), "B2N;Z4E");
+    // No ambiguous residues.
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+}
+
+/// Merged copies from several proteins: the substitutions come from the first
+/// expanded occurrence in protein order, and any occurrence with the residues
+/// as written leaves them empty.
+#[test]
+fn substitutions_follow_the_first_expanded_occurrence() {
+    let parameters = |merge: bool| {
+        serde_json::from_value::<Builder>(serde_json::json!({
+            "enzyme": {"missed_cleavages": 0, "min_len": 5},
+            "generate_decoys": false,
+            "expand_ambiguous_residues": true,
+            "merge_isoleucine_leucine": merge,
+        }))
+        .unwrap()
+        .make_parameters()
+    };
+    let peptide = |fasta: &str, merge: bool| {
+        let fasta = Fasta::parse(fasta.into(), "rev_", false).unwrap();
+        parameters(merge)
+            .digest(&fasta)
+            .into_iter()
+            .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+            .expect("AEPTIDEK")
+    };
+
+    // Both proteins are expanded, at different residues: the first in
+    // protein order, A, gives them, whatever the FASTA order.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTXDEK\n",
+        ">B\nGGKAEPTXDEK\n>A\nGGKAEPXIDEK\n",
+    ] {
+        for merge in [false, true] {
+            let merged = peptide(fasta, merge);
+            assert_eq!(merged.proteins("rev_", false), "A;B");
+            assert_eq!(merged.substitutions(), "X4T");
+        }
+    }
+
+    // A real residue in any protein wins, before or after the expanded one.
+    for fasta in [
+        ">A\nGGKAEPXIDEK\n>B\nGGKAEPTIDEK\n",
+        ">A\nGGKAEPTIDEK\n>B\nGGKAEPXIDEK\n",
+    ] {
+        let merged = peptide(fasta, true);
+        assert_eq!(merged.proteins("rev_", false), "A;B");
+        assert_eq!(merged.substitutions(), "");
+    }
+    // Also a merged I/L/J twin; unmerged, the twin is another peptide.
+    let fasta = ">A\nGGKAEPXIDEK\n>B\nGGKAEPTJDEK\n";
+    let merged = peptide(fasta, true);
+    assert_eq!(merged.proteins("rev_", false), "A;B");
+    assert_eq!(merged.substitutions(), "");
+    let unmerged = peptide(fasta, false);
+    assert_eq!(unmerged.proteins("rev_", false), "A");
+    assert_eq!(unmerged.substitutions(), "X4T");
+
+    // A peptide TSV row lists the sequence as written.
+    let fasta = Fasta::parse(">A\nGGKAEPXIDEK\n".into(), "rev_", false).unwrap();
+    let parameters = parameters(true);
+    let mut peptides = parameters.digest(&fasta);
+    peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nAEPTIDEK\tT1\n"));
+    parameters.reorder_merged_peptides(&mut peptides);
+    let merged = peptides
+        .iter()
+        .find(|peptide| &peptide.sequence[..] == b"AEPTIDEK")
+        .unwrap();
+    assert_eq!(merged.proteins("rev_", false), "A;T1");
+    assert_eq!(merged.substitutions(), "");
+}
+
 /// Small deterministic generator so the randomized comparisons are repeatable.
 struct Lcg(u64);
 
@@ -2646,6 +2778,16 @@ fn isoleucine_leucine_twins_merge_into_one_peptide() {
 }
 
 #[test]
+fn twins_from_one_protein_list_it_once() {
+    let fasta = Fasta::parse(">a\nGGRAPEPIDEKAPEPLDEKR\n".into(), "rev_", true).unwrap();
+    let peptides = isoleucine_leucine_parameters(true, serde_json::json!({})).digest(&fasta);
+    let targets = isoleucine_leucine_twins(&peptides, false);
+    assert_eq!(targets.len(), 1, "{targets:?}");
+    assert_eq!(targets[0].proteins.as_slice(), &["a".into()]);
+    assert_eq!(targets[0].protein_sites.len(), 2);
+}
+
+#[test]
 fn modifications_on_isoleucine_or_leucine_keep_twins_apart() {
     let fasta = Fasta::parse(
         ">a\nGGRAPEPIDEKR\n>b\nLLRAPEPLDEKGGWR\n>c\nSSRAPEPJDEKWWK\n".into(),
@@ -2707,4 +2849,67 @@ fn generated_decoys_that_are_twins_of_a_target_are_dropped() {
             .any(|peptide| peptide.decoy && peptide.to_string() == "DFNEEGLK");
         assert_eq!(decoy, !merge);
     }
+}
+
+/// Peptide TSV rows with B, X or Z are expanded like FASTA digests when
+/// expansion is on, report their substitutions, and are otherwise skipped.
+#[test]
+fn ambiguous_peptide_tsv_rows_expand_with_substitutions() {
+    let tsv = "sequence\tprotein\nPEPXIDEK\tT1\nPEBTIDZK\tT2\nSAMPLEK\tT3\n";
+    let peptides = ambiguous_parameters(true).peptides_from_tsv(tsv);
+    let find = |sequence: &[u8]| {
+        peptides
+            .iter()
+            .find(|peptide| &peptide.sequence[..] == sequence)
+            .unwrap_or_else(|| panic!("{}", String::from_utf8_lossy(sequence)))
+    };
+    let targets = |protein: &str| {
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == protein)
+            .count()
+    };
+    // 20 variants, with the I and L twins merged.
+    assert_eq!(targets("T1"), 19);
+    assert_eq!(targets("T2"), 4);
+    let expanded = find(b"PEPWIDEK");
+    assert_eq!(expanded.substitutions(), "X4W");
+    assert_eq!(expanded.proteins("rev_", false), "T1");
+    // No coordinates are invented: the row is still unplaced, like a plain one.
+    let enzyme = ambiguous_parameters(true)
+        .enzyme_parameters()
+        .enzyme
+        .unwrap();
+    assert_eq!(
+        crate::digestion::classify_peptide(&enzyme, expanded, false),
+        crate::digestion::classify_peptide(&enzyme, find(b"SAMPLEK"), false),
+    );
+    // The generated decoy of PEPWIDEK, at decoy positions.
+    let decoy = find(b"PEDIWPEK");
+    assert!(decoy.decoy);
+    assert_eq!(decoy.substitutions(), "X5W");
+    assert_eq!(find(b"PENTIDQK").substitutions(), "B3N;Z7Q");
+    assert_eq!(find(b"SAMPLEK").substitutions(), "");
+
+    // Expansion off: skipped with a warning, as before.
+    let peptides = ambiguous_parameters(false).peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) == "T3"));
+    assert!(!peptides.is_empty());
+
+    // Over the variant cap: the X row is dropped, the B/Z row (4) kept.
+    let mut capped = ambiguous_parameters(true);
+    capped.max_ambiguous_variants = 4;
+    let peptides = capped.peptides_from_tsv(tsv);
+    assert!(peptides
+        .iter()
+        .all(|peptide| peptide.proteins("rev_", false) != "T1"));
+    assert_eq!(
+        peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && peptide.proteins("rev_", false) == "T2")
+            .count(),
+        4
+    );
 }
