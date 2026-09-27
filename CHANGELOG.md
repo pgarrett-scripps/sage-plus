@@ -68,7 +68,9 @@ entries are retained below for provenance.
   search space.
 - When the same peptide comes from digests with different enzymatic state, the kept copy is now
   the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
-  sort order.
+  sort order or protein accession order. This also holds between proteins that share a
+  peptide at the same terminal position (for example a Met-clipped fully enzymatic N-terminal
+  peptide and a semi-enzymatic N-terminal copy in another protein).
 - FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
   peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
   modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
