@@ -61,6 +61,7 @@ impl Default for EnzymeBuilder {
 impl From<EnzymeBuilder> for EnzymeParameters {
     fn from(en: EnzymeBuilder) -> EnzymeParameters {
         EnzymeParameters {
+            clip_n_term_met: false,
             missed_cleavages: en.missed_cleavages.unwrap_or(1),
             min_len: en.min_len.unwrap_or(5),
             max_len: en.max_len.unwrap_or(50),
@@ -116,6 +117,11 @@ pub struct Builder {
     pub decoy_tag: Option<String>,
 
     pub generate_decoys: Option<bool>,
+    /// Also search each protein with its initiator methionine removed when
+    /// the second residue is G, A, S, T, C, P, or V (MetAP clipping). The
+    /// clipped peptides are protein N-terminal. Enzymatic digests only.
+    /// Default: true.
+    pub clip_n_term_met: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
     /// Path to a pre-digested peptide TSV file (additive with `fasta`).
@@ -183,6 +189,7 @@ impl Builder {
             max_total_variable_mods,
             ptm_library: self.ptm_library,
             generate_decoys: self.generate_decoys.unwrap_or(true),
+            clip_n_term_met: self.clip_n_term_met.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
             peptides: self.peptides,
             custom_cleavage_sites: self.custom_cleavage_sites,
@@ -216,6 +223,7 @@ pub struct Parameters {
     pub ptm_library: Option<PtmLibrarySettings>,
     pub decoy_tag: String,
     pub generate_decoys: bool,
+    pub clip_n_term_met: bool,
     pub fasta: String,
     pub peptides: Option<String>,
     pub custom_cleavage_sites: Option<String>,
@@ -292,6 +300,15 @@ pub fn sequence_hashes(sequence: &[u8]) -> (u64, u64) {
 }
 
 impl Parameters {
+    /// Digest settings for this database, including initiator methionine
+    /// clipping.
+    pub fn enzyme_parameters(&self) -> EnzymeParameters {
+        EnzymeParameters {
+            clip_n_term_met: self.clip_n_term_met,
+            ..self.enzyme.clone().into()
+        }
+    }
+
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
         let max_len = self.enzyme.max_len.unwrap_or(50);
         if max_len > u8::MAX as usize {
@@ -714,7 +731,7 @@ impl Parameters {
     ) -> DatabaseMemoryEstimate {
         const ALLOCATION_OVERHEAD: u64 = 16;
 
-        let enzyme: EnzymeParameters = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let decoy_multiplier = if self.generate_decoys { 2 } else { 1 };
         let rules = self.variable_modifications();
 
@@ -1044,7 +1061,7 @@ impl Parameters {
         custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
     ) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
-        let enzyme = self.enzyme.clone().into();
+        let enzyme = self.enzyme_parameters();
         let digests = fasta.digest_with_custom_cleavages(&enzyme, custom_cleavages);
 
         log::trace!("grouping digests");

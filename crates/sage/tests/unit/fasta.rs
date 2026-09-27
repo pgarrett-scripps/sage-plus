@@ -2,6 +2,7 @@ use super::*;
 
 fn whole_protein_digest(length: usize) -> EnzymeParameters {
     EnzymeParameters {
+        clip_n_term_met: false,
         missed_cleavages: 0,
         min_len: length,
         max_len: length,

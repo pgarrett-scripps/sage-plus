@@ -241,6 +241,21 @@ pub struct EnzymeParameters {
     /// Inclusive
     pub max_len: usize,
     pub enzyme: Option<Enzyme>,
+    /// Also digest each protein as if methionine aminopeptidase removed its
+    /// initiator methionine. See [`metap_clips`]. Ignored by non-specific
+    /// digests.
+    pub clip_n_term_met: bool,
+}
+
+/// Residues that let methionine aminopeptidase (MetAP) remove an initiator
+/// methionine when they sit at the second position of a protein.
+pub const METAP_SECOND_RESIDUES: &[u8] = b"GASTCPV";
+
+/// Does MetAP remove the initiator methionine of `protein`? True when the
+/// protein starts with M followed by a small residue in
+/// [`METAP_SECOND_RESIDUES`]. The clipped protein starts at offset 1.
+pub fn metap_clips(protein: &[u8]) -> bool {
+    matches!(protein, [b'M', second, ..] if METAP_SECOND_RESIDUES.contains(second))
 }
 
 #[derive(Clone)]
@@ -497,11 +512,43 @@ impl EnzymeParameters {
             }
         }
 
+        // Initiator methionine clipping: every site anchored at the protein
+        // N-terminus is repeated from offset 1, where the clipped protein
+        // starts. These peptides are protein N-terminal, keep the enzymatic
+        // state of their unclipped counterpart, and stay in real protein
+        // coordinates. A span that the digest already produced from offset 1
+        // (a semi-enzymatic or custom cleavage after the Met) is emitted once,
+        // as the clipped N-terminal peptide.
+        let mut clipped_sites = Vec::new();
+        if self.clip_n_term_met && self.enzyme.is_some() && metap_clips(sequence.as_bytes()) {
+            // An enzyme boundary after the Met is not a missed cleavage of the
+            // clipped protein.
+            let cut_after_met = enzyme_boundaries.binary_search(&1).is_ok();
+            clipped_sites.extend(
+                sites
+                    .iter()
+                    .filter(|site| site.site.start == 0 && site.site.end > 1)
+                    .map(|site| DigestSite {
+                        site: 1..site.site.end,
+                        missed_cleavages: site.missed_cleavages.saturating_sub(cut_after_met as u8),
+                        semi_enzymatic: site.semi_enzymatic,
+                    }),
+            );
+        }
+
         // Keep ranges unique while preserving repeated peptide sequences at
         // different protein positions for protein-coordinate PTM libraries.
         let mut seen = FnvHashSet::default();
+        seen.extend(
+            clipped_sites
+                .iter()
+                .map(|site| (site.site.start, site.site.end)),
+        );
+        let mut seen_clipped = FnvHashSet::default();
 
-        for site in sites.iter_mut() {
+        let regular = sites.iter().map(|site| (site, false));
+        let clipped = clipped_sites.iter().map(|site| (site, true));
+        for (site, is_clipped) in regular.chain(clipped) {
             let start = site.site.start;
             let end = site.site.end;
 
@@ -512,14 +559,18 @@ impl EnzymeParameters {
 
             let len = peptide_sequence.len();
 
-            let position = match (start == 0, end == n) {
+            let position = match (start == 0 || is_clipped, end == n) {
                 (true, true) => Position::Full,
                 (true, false) => Position::Nterm,
                 (false, true) => Position::Cterm,
                 (false, false) => Position::Internal,
             };
 
-            if len >= self.min_len && len <= self.max_len && len > 0 && seen.insert((start, end)) {
+            let unique = match is_clipped {
+                true => seen_clipped.insert((start, end)),
+                false => seen.insert((start, end)),
+            };
+            if len >= self.min_len && len <= self.max_len && len > 0 && unique {
                 digests.push(Digest {
                     sequence: peptide_sequence,
                     missed_cleavages: site.missed_cleavages,

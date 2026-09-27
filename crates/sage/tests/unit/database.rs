@@ -266,7 +266,7 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
         // As the streamed prefilter does: digests whose sequence and decoy
         // sequence are unique are expanded one protein at a time without a
         // target check; the rest are expanded per canonical key.
-        let enzyme: EnzymeParameters = parameters.enzyme.clone().into();
+        let enzyme = parameters.enzyme_parameters();
         let digests = (0..fasta.targets.len())
             .map(|index| fasta.digest_protein(index, &enzyme, None))
             .collect::<Vec<_>>();
@@ -697,6 +697,7 @@ fn digestion() {
         ptm_library: None,
         decoy_tag: "rev_".into(),
         generate_decoys: false,
+        clip_n_term_met: false,
         fasta: "none".into(),
         peptides: None,
         custom_cleavage_sites: None,
@@ -2166,4 +2167,56 @@ fn same_peptidoform_compares_chemistry_decoy_state_and_sequence() {
     assert!(!same_peptidoform(oxidized, &decoy));
     // Reversing twice restores the same chemical peptidoform.
     assert!(same_peptidoform(oxidized, &oxidized.reverse().reverse()));
+}
+
+#[test]
+fn clipped_initiator_methionine_peptides_take_protein_n_terminal_mods() {
+    let fasta = Fasta::parse(">P1\nMASPEPTIDEAAKGGLLR\n".into(), "rev_", true).unwrap();
+    let parameters = |clip: Option<bool>| {
+        let mut config = serde_json::json!({
+            "enzyme": {"missed_cleavages": 0, "min_len": 5},
+            "peptide_min_mass": 100.0,
+            "variable_mods": {"[": [42.010565]},
+            "generate_decoys": true,
+        });
+        if let Some(clip) = clip {
+            config["clip_n_term_met"] = clip.into();
+        }
+        serde_json::from_value::<Builder>(config)
+            .unwrap()
+            .make_parameters()
+    };
+
+    let defaults = parameters(None);
+    assert!(defaults.clip_n_term_met);
+    let peptides = defaults.digest(&fasta);
+    let describe = |peptide: &Peptide| (peptide.decoy, peptide.to_string());
+    let names = peptides.iter().map(describe).collect::<HashSet<_>>();
+    for expected in [
+        (false, "MASPEPTIDEAAK"),
+        (false, "[+42.010567]-MASPEPTIDEAAK"),
+        (false, "ASPEPTIDEAAK"),
+        (false, "[+42.010567]-ASPEPTIDEAAK"),
+        // The generated decoy of a clipped peptide is N-terminal too.
+        (true, "AAAEDITPEPSK"),
+        (true, "[+42.010567]-AAAEDITPEPSK"),
+    ] {
+        assert!(
+            names.contains(&(expected.0, expected.1.to_string())),
+            "missing {expected:?} in {names:?}"
+        );
+    }
+    let clipped = peptides
+        .iter()
+        .find(|peptide| peptide.to_string() == "ASPEPTIDEAAK")
+        .unwrap();
+    assert_eq!(clipped.position, Position::Nterm);
+    assert!(!clipped.semi_enzymatic);
+    assert_eq!(clipped.protein_sites[0].start, Some(1));
+
+    let unclipped = parameters(Some(false)).digest(&fasta);
+    assert_eq!(unclipped.len() + 4, peptides.len());
+    assert!(unclipped
+        .iter()
+        .all(|peptide| !peptide.sequence.starts_with("ASPEPT")));
 }
