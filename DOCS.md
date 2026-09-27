@@ -1391,6 +1391,20 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
+#### How peptide, protein and protein-group q-values are computed
+
+All three use picked target-decoy competition. Each target is paired with its own decoy: a
+peptide with its reversed sequence, a protein with its decoy protein (unique peptides only),
+and a protein group with the decoys of its member proteins (peptides unique to one group
+only). The pair's score is its best PSM `sage_discriminant_score`. Only the winner of each pair
+is ranked (a tie goes to the decoy); the loser gets q = 1. Winners are sorted by score, and q
+is `(decoys + 1) / targets` after each complete tied-score group, followed by the reverse
+cumulative minimum and a cap at 1. `spectrum_q` is plain target-decoy competition over PSMs
+with the same `+ 1`. Peptides shared between proteins (or groups) get `protein_q`
+(`protein_group_q`) = 1. With decoys supplied in the FASTA (`generate_decoys: false`) decoy
+proteins do not pair with their targets for `protein_q`, so it reduces to classic,
+conservative protein-level target-decoy competition.
+
 ## Label-free quantification output
 
 `lfq.parquet` is a separate long-form table with one row per quantified precursor and acquisition file. All intensities are produced by Sage's cross-run feature-tracing workflow; `ms2_confirmed` records whether that precursor also has an accepted target PSM in the specific file.

@@ -9,6 +9,17 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Peptide, protein and protein-group q-values are now textbook picked FDR (Savitski et al.
+  2015; The et al. 2022). Only the winner of each target-decoy pair is ranked, q is
+  `(decoys + 1) / targets` over complete tied-score groups, and the losing member is reported
+  with q = 1. Previously both members were ranked and the numerator was a running sum of a
+  KDE posterior error fitted on the winners, so a target beaten by its own decoy could still
+  pass. On two human-only entrapment searches the entrapment FDP at 1% is unchanged within
+  noise and identifications at 1% change by at most 0.3% (`benchmarks/PICKED_FDR.md`).
+  Spectrum q-values and the per-PSM `posterior_error` are unchanged. Output columns and
+  schemas are unchanged.
+
 ## [v0.1.0-beta.12] - 2026-09-27
 
 ### Added
