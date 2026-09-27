@@ -432,6 +432,107 @@ fn post_fdr_reread_does_not_repeat_file_events() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A PTM site library must give the same PSMs with and without the prefilter.
+/// The test spectrum is LQSRPAAPPAPGPGQLTLR. Its serine is replaced by alanine
+/// in the FASTA, and a library-only +15.994915 site on that alanine restores
+/// the exact residue mass, so the spectrum is identified only through the
+/// library placement.
+#[test]
+fn ptm_library_sites_match_with_and_without_prefilter() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-cli-ptm-library-prefilter-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+
+    let fasta = std::fs::read_to_string(workspace.join("tests/Q99536.fasta"))?;
+    let (header, sequence) = fasta.split_once('\n').expect("FASTA header");
+    let sequence = sequence.replace('\n', "");
+    // One-based position 66 is the S of LQSR.
+    let start = sequence.find("LQSRPAAPPAPGPGQLTLR").expect("test peptide") + 2;
+    assert_eq!(start + 1, 66);
+    let mutated = format!("{}A{}", &sequence[..start], &sequence[start + 1..]);
+    let fasta_path = root.join("proteins.fasta");
+    std::fs::write(
+        &fasta_path,
+        format!(
+            "{header}\n{mutated}\n>sp|P02768|ALBU_HUMAN\n\
+             MKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n"
+        ),
+    )?;
+    let library_path = root.join("sites.tsv");
+    std::fs::write(
+        &library_path,
+        "protein\tposition\tresidue\tmodification\nsp|Q99536|VAT1_HUMAN\t66\tA\tHydroxyl\n",
+    )?;
+
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta_path.display().to_string().into();
+    config["database"]["variable_mods"] = serde_json::json!({
+        "Hydroxyl": {"mass": 15.994915, "sites": ["A"], "site_mode": "library", "max_count": 1}
+    });
+    config["database"]["ptm_library"] = serde_json::json!({"path": library_path});
+    // Keep every peptide with a single matched fragment, so the prefilter
+    // cannot drop a true hit.
+    config["database"]["prefilter_min_matched_peaks"] = 1.into();
+    config["report_psms"] = 5.into();
+    config["write_pin"] = true.into();
+
+    let mut results = Vec::new();
+    for prefilter in [false, true] {
+        let run_root = root.join(format!("prefilter-{prefilter}"));
+        std::fs::create_dir_all(&run_root)?;
+        let mut config = config.clone();
+        config["database"]["prefilter"] = prefilter.into();
+        let config_path = run_root.join("config.json");
+        std::fs::write(&config_path, serde_json::to_vec(&config)?)?;
+        run_sage_with_events(&workspace, &config_path, &run_root)?;
+
+        let pin = std::fs::read_to_string(run_root.join("output/results.sage.pin"))?;
+        let mut lines = pin.lines();
+        let headers = lines
+            .next()
+            .expect("pin header")
+            .split('\t')
+            .collect::<Vec<_>>();
+        let column = |name: &str| headers.iter().position(|h| *h == name).expect(name);
+        let columns = [
+            "SpecId",
+            "Label",
+            "rank",
+            "Peptide",
+            "Proteins",
+            "ln(hyperscore)",
+            "matched_peaks",
+        ]
+        .map(column);
+        let mut psms = lines
+            .map(|line| {
+                let fields = line.split('\t').collect::<Vec<_>>();
+                columns.map(|idx| fields[idx].to_string())
+            })
+            .collect::<Vec<_>>();
+        psms.sort();
+        results.push(psms);
+    }
+
+    let (without, with) = (&results[0], &results[1]);
+    assert!(
+        without
+            .iter()
+            .any(|psm| psm[3] == "LQA[Hydroxyl]RPAAPPAPGPGQLTLR"
+                && psm[4].contains("sp|Q99536|VAT1_HUMAN")),
+        "no PSM carries the library site: {without:?}"
+    );
+    assert_eq!(without, with, "prefilter changed the PTM library PSMs");
+
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
 /// End-to-end N-glycosylation motif search on a synthetic spectrum. The sequon
 /// of the identified peptide is completed by the residue after it, so the
 /// search, localization, and reusable library all need protein context.
