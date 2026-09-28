@@ -597,8 +597,6 @@ impl Parameters {
             .collect()
     }
 
-    /// Group search-time mass offsets by chemical definition. Each group keeps
-    /// every configured specificity so placement and localization agree.
     /// Validated generic fragment losses, or `None` when not configured.
     /// Panics on an invalid configuration; the CLI validates it first with
     /// [`Builder::validate_fragment_losses`].
@@ -611,6 +609,8 @@ impl Parameters {
         .unwrap_or_else(|error| panic!("{error}"))
     }
 
+    /// Group search-time mass offsets by chemical definition. Each group keeps
+    /// every configured specificity so placement and localization agree.
     pub fn mass_offset_modifications(&self) -> Vec<MassOffset> {
         let mut groups: Vec<MassOffset> = Vec::new();
         let mut entries = self

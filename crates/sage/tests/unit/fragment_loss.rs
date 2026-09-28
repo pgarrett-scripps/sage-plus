@@ -219,6 +219,82 @@ fn terminal_sites_select_the_terminal_fragments() {
         .all(|(_, totals)| totals == &vec![WATER]));
 }
 
+/// Generic losses stack on each modification neutral-loss form of the group,
+/// and a required modification loss removes the generic-only form too.
+#[test]
+fn generic_losses_combine_with_modification_losses() {
+    use crate::modification::{ModificationDefinition, NeutralLossMode};
+    use std::collections::HashMap;
+    const MOD_LOSS: f32 = 10.0;
+    let with_mod = |mode| {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 20.0,
+            name: Some(Arc::from("TestMod")),
+            neutral_losses: Arc::from([MOD_LOSS]),
+            site_losses: None,
+            neutral_loss_mode: mode,
+            channel_offsets: Arc::default(),
+        });
+        peptide("AMEK")
+            .apply(
+                &[(
+                    ModificationSpecificity::Residue(b'M'),
+                    modification,
+                    Some(1),
+                )],
+                &HashMap::default(),
+                1,
+                None,
+            )
+            .into_iter()
+            .find(|peptide| peptide.to_string().contains("TestMod"))
+            .unwrap()
+    };
+    let water = losses(
+        BTreeMap::from([("Water".to_string(), entry(WATER, &["E"], &[Kind::B]))]),
+        None,
+    );
+    let totals = |groups: Vec<crate::ion_series::IonGroup>, generic: bool| {
+        groups
+            .iter()
+            .map(|group| {
+                group
+                    .variants
+                    .iter()
+                    .filter(|variant| variant.fragment_loss == generic)
+                    .map(|variant| variant.neutral_loss.unwrap_or(0.0))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // b1 = A, b2 = AM (modified, no water site), b3 = AME.
+    let optional = with_mod(NeutralLossMode::Optional);
+    let forms = loss_forms(&optional, Kind::B, &water);
+    assert_eq!(forms[0].1, Vec::<f32>::new());
+    assert_eq!(forms[1].1, Vec::<f32>::new());
+    assert_eq!(forms[2].1, vec![WATER, WATER + MOD_LOSS]);
+    // The modification-loss forms are the same as without generic losses.
+    assert_eq!(
+        totals(
+            IonGroupSeries::with_fragment_losses(&optional, Kind::B, Some(&water)).collect(),
+            false
+        ),
+        totals(IonGroupSeries::new(&optional, Kind::B).collect(), false)
+    );
+    assert_eq!(
+        totals(IonGroupSeries::new(&optional, Kind::B).collect(), false)[2],
+        vec![0.0, MOD_LOSS]
+    );
+
+    // Required: only the forms that carry the modification loss.
+    let required = with_mod(NeutralLossMode::Required);
+    assert_eq!(
+        loss_forms(&required, Kind::B, &water)[2].1,
+        vec![WATER + MOD_LOSS]
+    );
+}
+
 #[test]
 fn without_losses_the_groups_are_unchanged() {
     let peptide = peptide("PEPTIDEK");
