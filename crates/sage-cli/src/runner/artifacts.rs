@@ -207,6 +207,7 @@ impl Runner {
                         site_determining_matched: m.site_determining_matched,
                         site_determining_total: m.site_determining_ions,
                         site_probabilities: site_probabilities.clone(),
+                        mixed_isomers: m.mixed_isomers.clone(),
                     });
                 }
             }
@@ -266,6 +267,28 @@ impl Runner {
                 site_determining_ions_total: row.site_determining_total as i32,
                 site_probabilities: row.site_probabilities.clone(),
                 site_q_value: row_site_q_value(row, &q_values),
+                mixed_isomers: row.mixed_isomers.as_ref().is_some_and(|m| m.flagged),
+                mixed_isomers_q_value: row.mixed_isomers.as_ref().map(|m| m.q_value),
+                mixed_isomers_p_value: row.mixed_isomers.as_ref().map(|m| m.p_value),
+                runner_up_sites: row.mixed_isomers.as_ref().map(|m| {
+                    m.runner_up_sites
+                        .iter()
+                        .map(|site| format!("{}{}", site.residue as char, site.position + 1))
+                        .collect::<Vec<_>>()
+                        .join(";")
+                }),
+                runner_up_unique_ions_total: row
+                    .mixed_isomers
+                    .as_ref()
+                    .map(|m| m.unique_ions as i32),
+                runner_up_unique_ions_matched: row
+                    .mixed_isomers
+                    .as_ref()
+                    .map(|m| m.unique_matched as i32),
+                runner_up_intensity_fraction: row
+                    .mixed_isomers
+                    .as_ref()
+                    .map(|m| m.intensity_fraction),
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.ptm-sites.parquet");

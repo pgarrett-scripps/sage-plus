@@ -173,6 +173,7 @@ fn site_row(peptide: &str, proteins: &str, score: f32, decoy: bool) -> super::Si
         site_determining_matched: 0,
         site_determining_total: 0,
         site_probabilities: String::new(),
+        mixed_isomers: None,
     }
 }
 
@@ -964,4 +965,89 @@ fn isoleucine_leucine_twins_merge_with_and_without_prefilter() -> anyhow::Result
     assert_eq!(decoys[0].proteins, targets[0].proteins);
     std::fs::remove_dir_all(directory).ok();
     Ok(())
+}
+
+/// `mixed_isomers` is reported beside the localization: assigning its q-values
+/// must leave the localization q, site inputs and FLR evidence byte-identical.
+#[test]
+fn mixed_isomer_q_values_leave_localization_fields_unchanged() {
+    use sage_core::ptm::{Localization, MixedIsomerEvidence, ModLocalization, SiteScore};
+    use sage_core::ptm_library::Attachment;
+
+    let site = |position| SiteScore {
+        attachment: Attachment::Residue,
+        position,
+        residue: b'S',
+        probability: 0.9,
+    };
+    let modification = |p_value: f32, decoy_p_value: f32| ModLocalization {
+        mass: 79.96633,
+        label: Some("Phospho".into()),
+        site_count: 1,
+        candidate_sites: 2,
+        site_determining_ions: 8,
+        site_determining_matched: 6,
+        delta_score: 4.0,
+        target_decoy_score: 12.0,
+        decoy_winner: false,
+        competition_eligible: true,
+        localization_q_value: 0.003,
+        best_sites: vec![site(2)],
+        all_sites: vec![site(2), site(5)],
+        mixed_isomers: Some(MixedIsomerEvidence {
+            runner_up_sites: vec![site(5)],
+            unique_ions: 6,
+            unique_matched: 5,
+            intensity_fraction: 0.4,
+            p_value,
+            decoy_p_value,
+            q_value: 1.0,
+            flagged: false,
+        }),
+    };
+    let feature = |label, p_value, decoy_p_value| Feature {
+        label,
+        localization: Some(Localization {
+            mods: vec![modification(p_value, decoy_p_value)],
+        }),
+        ..Feature::default()
+    };
+    let mut features = vec![
+        feature(1, 1e-9, 0.5),
+        feature(1, 1e-7, 1e-10),
+        feature(1, 0.5, 1.0),
+        feature(-1, 1e-9, 1.0),
+    ];
+    let strip = |features: &[Feature]| {
+        features
+            .iter()
+            .map(|feature| {
+                let mut localization = feature.localization.clone().unwrap();
+                for m in &mut localization.mods {
+                    m.mixed_isomers = None;
+                }
+                localization
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = strip(&features);
+
+    let stats = super::postprocess::assign_mixed_isomer_q_values(&mut features);
+
+    assert_eq!(strip(&features), before);
+    assert_eq!((stats.tested, stats.flagged), (3, 2));
+    assert_eq!(stats.decoy_placement_flags, 1);
+    let flags = features
+        .iter()
+        .map(|feature| {
+            let evidence = feature.localization.as_ref().unwrap().mods[0]
+                .mixed_isomers
+                .as_ref()
+                .unwrap();
+            (evidence.flagged, evidence.q_value)
+        })
+        .collect::<Vec<_>>();
+    assert!(flags[0].0 && flags[1].0 && !flags[2].0);
+    // Decoy PSMs are not tested.
+    assert_eq!(flags[3], (false, 1.0));
 }

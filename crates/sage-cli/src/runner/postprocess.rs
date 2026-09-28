@@ -306,6 +306,7 @@ impl Runner {
             features[feature_idx].localization.as_mut().unwrap().mods[mod_idx]
                 .set_competition_q_value(q_value);
         }
+        let mixed_isomers = assign_mixed_isomer_q_values(features);
 
         log::info!(
             "- post-FDR MS2 pass: {} annotated PSMs ({} fragments), {} localized PSMs in {} ms",
@@ -315,11 +316,91 @@ impl Runner {
             start.elapsed().as_millis()
         );
 
+        if mixed_isomers.tested > 0 {
+            log::info!(
+                "- mixed isomers: {} of {} target localizations flagged at q <= {}; the same cutoff flags {} impossible-site placements (null check)",
+                mixed_isomers.flagged,
+                mixed_isomers.tested,
+                sage_core::ptm::MIXED_ISOMERS_Q_VALUE,
+                mixed_isomers.decoy_placement_flags
+            );
+        }
+
         Ok(PostprocessStats {
+            mixed_isomers,
             annotated_psms: annotated_indices.len(),
             annotated_fragments,
             localized_psms,
             library_selections,
         })
     }
+}
+
+/// Counts behind the `mixed_isomers` flag, for the log and the run summary.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct MixedIsomerStats {
+    /// Target localizations with a runner-up placement to test.
+    pub(super) tested: usize,
+    /// Of those, flagged `mixed_isomers`.
+    pub(super) flagged: usize,
+    /// Target localizations whose impossible-site placement passes the same
+    /// p-value cutoff: flags the null produces where no isomer can exist.
+    pub(super) decoy_placement_flags: usize,
+}
+
+/// Benjamini-Hochberg over the runner-up p-values of target-PSM
+/// localizations, separately per modification type, then set the
+/// `mixed_isomers` flag. Decoy PSMs keep q = 1 and are never flagged. Only
+/// the `mixed_isomers` evidence is written; localization q-values are not
+/// read or changed.
+pub(super) fn assign_mixed_isomer_q_values(features: &mut [Feature]) -> MixedIsomerStats {
+    let mut indices = Vec::new();
+    let mut p_values = Vec::new();
+    for (feature_idx, feature) in features.iter().enumerate() {
+        if feature.label != 1 {
+            continue;
+        }
+        let Some(localization) = &feature.localization else {
+            continue;
+        };
+        for (mod_idx, modification) in localization.mods.iter().enumerate() {
+            if let Some(evidence) = &modification.mixed_isomers {
+                indices.push((feature_idx, mod_idx));
+                p_values.push((modification.modification_type(), evidence.p_value));
+            }
+        }
+    }
+    let q_values = sage_core::ptm::mixed_isomer_q_values_by_type(&p_values);
+
+    // The p-value cutoff that BH sets for each type: the largest flagged p.
+    let mut cutoffs: HashMap<sage_core::ptm::ModificationType, f32> = HashMap::new();
+    for ((kind, p_value), q_value) in p_values.iter().zip(&q_values) {
+        if *q_value <= sage_core::ptm::MIXED_ISOMERS_Q_VALUE {
+            let cutoff = cutoffs.entry(kind.clone()).or_insert(0.0);
+            *cutoff = cutoff.max(*p_value);
+        }
+    }
+
+    let mut stats = MixedIsomerStats {
+        tested: indices.len(),
+        ..Default::default()
+    };
+    for (((feature_idx, mod_idx), (kind, _)), q_value) in
+        indices.into_iter().zip(&p_values).zip(q_values)
+    {
+        let evidence = features[feature_idx].localization.as_mut().unwrap().mods[mod_idx]
+            .mixed_isomers
+            .as_mut()
+            .unwrap();
+        evidence.q_value = q_value;
+        evidence.flagged = q_value <= sage_core::ptm::MIXED_ISOMERS_Q_VALUE;
+        stats.flagged += usize::from(evidence.flagged);
+        if cutoffs
+            .get(kind)
+            .is_some_and(|&cutoff| evidence.decoy_p_value <= cutoff)
+        {
+            stats.decoy_placement_flags += 1;
+        }
+    }
+    stats
 }

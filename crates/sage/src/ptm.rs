@@ -84,6 +84,53 @@ pub struct ModLocalization {
     pub best_sites: Vec<SiteScore>,
     /// Marginal localization probability for *every* candidate site.
     pub all_sites: Vec<SiteScore>,
+    /// Evidence that the runner-up placement is also present in the spectrum
+    /// (a co-isolated positional isomer). `None` when there is no alternative
+    /// placement to test.
+    pub mixed_isomers: Option<MixedIsomerEvidence>,
+}
+
+/// q-value at or below which a localization is flagged `mixed_isomers`.
+pub const MIXED_ISOMERS_Q_VALUE: f32 = 0.01;
+
+/// Evidence for a co-isolated positional isomer: the runner-up placement's
+/// own site-determining ions, the ones that tell it apart from the winner,
+/// tested against the spectrum's random-match rate.
+///
+/// Localization scoring competes placements, so at most one wins. A spectrum
+/// holding two co-isolated isomers shows the runner-up's distinguishing ions
+/// as well. Following Thesaurus (Searle et al. 2019, Nat Methods), which
+/// scores each isomer's site-specific ions independently against a
+/// background and applies Benjamini-Hochberg, the runner-up is scored on its
+/// own; the background here is the per-spectrum binomial random-match model
+/// of the localization score. This field never changes the localization,
+/// its q-value or the FLR.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct MixedIsomerEvidence {
+    /// Sites of the runner-up placement, with their marginal localization
+    /// probabilities.
+    pub runner_up_sites: Vec<SiteScore>,
+    /// Theoretical ion slots unique to the runner-up (ion, charge), excluding
+    /// any m/z also produced by the winner.
+    pub unique_ions: u32,
+    /// Runner-up-unique ion slots matched to a peak.
+    pub unique_matched: u32,
+    /// Summed intensity of matched runner-up-unique ions over that plus the
+    /// summed intensity of matched winner-unique ions (0 when neither matches).
+    pub intensity_fraction: f32,
+    /// Binomial upper-tail probability of `unique_matched` under the random-
+    /// match rate, times the number of alternative placements the runner-up
+    /// was picked from (Bonferroni), capped at 1.
+    pub p_value: f32,
+    /// The same test for the best impossible-site (decoy residue) placement,
+    /// which cannot be present: an empirical check of the null. 1.0 when the
+    /// peptide has no decoy placements.
+    pub decoy_p_value: f32,
+    /// Benjamini-Hochberg q-value of `p_value` across target localizations
+    /// of the same modification type, assigned after all PSMs are localized.
+    pub q_value: f32,
+    /// `q_value <= MIXED_ISOMERS_Q_VALUE`.
+    pub flagged: bool,
 }
 
 impl ModLocalization {
@@ -426,6 +473,7 @@ fn localize_mass(
                 .iter()
                 .map(|&p| site_score(p, peptide, f32::NAN))
                 .collect(),
+            mixed_isomers: None,
         });
     }
 
@@ -481,18 +529,7 @@ fn localize_mass(
         0.0
     };
     if let Some(best) = arrangements.first() {
-        let signature = |sites: &[usize]| {
-            let mut mapped = sites
-                .iter()
-                .map(|&index| match decode_site(index, peptide.sequence.len()) {
-                    Site::Nterm => 0,
-                    Site::Cterm => peptide.sequence.len() - 1,
-                    Site::Sequence(i) => i as usize,
-                })
-                .collect::<Vec<_>>();
-            mapped.sort_unstable();
-            mapped
-        };
+        let signature = |sites: &[usize]| placement_signature(sites, peptide.sequence.len());
         if arrangements
             .iter()
             .skip(1)
@@ -504,7 +541,11 @@ fn localize_mass(
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
-    let best_decoy_score = decoy_candidates.as_ref().and_then(|decoys| {
+    let n_decoy_arrangements = decoy_candidates
+        .as_ref()
+        .map(|decoys| num_combinations(decoys.len(), k))
+        .unwrap_or(0);
+    let best_decoy = decoy_candidates.as_ref().and_then(|decoys| {
         decoys
             .iter()
             .copied()
@@ -521,10 +562,11 @@ fn localize_mass(
                     max_charge,
                 );
                 let pvalue = binomial_tail(matched, trials, p_random);
-                -10.0 * pvalue.log10()
+                (-10.0 * pvalue.log10(), combo)
             })
-            .max_by(|a, b| a.total_cmp(b))
+            .max_by(|a, b| a.0.total_cmp(&b.0))
     });
+    let best_decoy_score = best_decoy.as_ref().map(|(score, _)| *score);
     let (target_decoy_score, decoy_winner) = match best_decoy_score {
         Some(decoy_score) => (
             (best_target_score - decoy_score).abs() as f32,
@@ -577,6 +619,24 @@ fn localize_mass(
         .collect();
     best_sites.sort_by_key(|s| s.position);
 
+    let mixed_isomers = mixed_isomer_evidence(
+        &all_sites,
+        peptide,
+        spectrum,
+        ion_kinds,
+        mass,
+        &candidates,
+        &arrangements
+            .iter()
+            .map(|arrangement| arrangement.sites.as_slice())
+            .collect::<Vec<_>>(),
+        best_decoy.as_ref().map(|(_, combo)| combo.as_slice()),
+        n_decoy_arrangements,
+        p_random,
+        fragment_tol,
+        max_charge,
+    );
+
     Some(ModLocalization {
         mass,
         label: group.label(),
@@ -591,7 +651,215 @@ fn localize_mass(
         localization_q_value: 1.0,
         best_sites,
         all_sites,
+        mixed_isomers,
     })
+}
+
+/// Placements are compared by residue position, so an N-terminal and a
+/// first-residue placement of the same mass are one placement.
+fn placement_signature(sites: &[usize], length: usize) -> Vec<usize> {
+    let mut mapped = sites
+        .iter()
+        .map(|&index| match decode_site(index, length) {
+            Site::Nterm => 0,
+            Site::Cterm => length - 1,
+            Site::Sequence(i) => i as usize,
+        })
+        .collect::<Vec<_>>();
+    mapped.sort_unstable();
+    mapped
+}
+
+/// Test the runner-up placement of `ranked` (target placements, best first)
+/// for its own distinguishing ions. See [`MixedIsomerEvidence`].
+#[allow(clippy::too_many_arguments)]
+fn mixed_isomer_evidence(
+    all_sites: &[SiteScore],
+    peptide: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    mass: f32,
+    candidates: &[usize],
+    ranked: &[&[usize]],
+    best_decoy: Option<&[usize]>,
+    n_decoy_arrangements: usize,
+    p_random: f64,
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> Option<MixedIsomerEvidence> {
+    let length = peptide.sequence.len();
+    let (winner, alternatives) = ranked.split_first()?;
+    let winner_signature = placement_signature(winner, length);
+    let runner_up = alternatives
+        .iter()
+        .find(|sites| placement_signature(sites, length) != winner_signature)?;
+
+    let winner_variant = build_variant(peptide, mass, candidates, winner);
+    let winner_ions = ion_mzs(&winner_variant, ion_kinds, max_charge);
+
+    let test = |other: &[usize], n_alternatives: usize| {
+        let variant = build_variant(peptide, mass, candidates, other);
+        let ions = distinguishing_ions(
+            &winner_variant,
+            &winner_ions,
+            &variant,
+            spectrum,
+            ion_kinds,
+            fragment_tol,
+            max_charge,
+        );
+        let p_value = (binomial_tail(ions.other_matched, ions.other_total, p_random)
+            * n_alternatives.max(1) as f64)
+            .min(1.0);
+        (ions, p_value as f32)
+    };
+
+    let (ions, p_value) = test(runner_up, alternatives.len());
+    let decoy_p_value = best_decoy
+        .map(|decoy| test(decoy, n_decoy_arrangements).1)
+        .unwrap_or(1.0);
+    let total_intensity = ions.other_intensity + ions.winner_intensity;
+    let mut runner_up_sites = runner_up
+        .iter()
+        .map(|&position| {
+            all_sites
+                .iter()
+                .find(|site| site.position == position)
+                .cloned()
+                .unwrap_or_else(|| site_score(position, peptide, 0.0))
+        })
+        .collect::<Vec<_>>();
+    runner_up_sites.sort_by_key(|site| site.position);
+
+    Some(MixedIsomerEvidence {
+        runner_up_sites,
+        unique_ions: ions.other_total,
+        unique_matched: ions.other_matched,
+        intensity_fraction: if total_intensity > 0.0 {
+            (ions.other_intensity / total_intensity) as f32
+        } else {
+            0.0
+        },
+        p_value,
+        decoy_p_value,
+        q_value: 1.0,
+        flagged: false,
+    })
+}
+
+/// Every theoretical fragment m/z of `variant` over the scored ion kinds and
+/// fragment charges, sorted.
+fn ion_mzs(variant: &Peptide, ion_kinds: &[Kind], max_charge: u8) -> Vec<f32> {
+    let mut mzs = Vec::new();
+    for kind in ion_kinds {
+        for ion in IonSeries::new(variant, *kind) {
+            for charge in 1..max_charge {
+                mzs.push(ion.monoisotopic_mass / charge as f32);
+            }
+        }
+    }
+    mzs.sort_by(|a, b| a.total_cmp(b));
+    mzs
+}
+
+fn within_tolerance(sorted: &[f32], mz: f32, tolerance: Tolerance) -> bool {
+    let (lo, hi) = tolerance.bounds(mz);
+    let start = sorted.partition_point(|value| *value < lo);
+    sorted.get(start).is_some_and(|value| *value <= hi)
+}
+
+#[derive(Default)]
+struct DistinguishingIons {
+    other_total: u32,
+    other_matched: u32,
+    other_intensity: f64,
+    winner_intensity: f64,
+}
+
+/// Fragments whose mass differs between the winner and `other` (the
+/// modification count in the fragment differs). Ion slots of `other` whose
+/// m/z the winner also produces are left out, as are winner slots whose m/z
+/// `other` also produces, so every counted slot can only be explained by its
+/// own placement.
+fn distinguishing_ions(
+    winner: &Peptide,
+    winner_ions: &[f32],
+    other: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> DistinguishingIons {
+    let other_ions = ion_mzs(other, ion_kinds, max_charge);
+    let mut out = DistinguishingIons::default();
+    let intensity_at = |mz: f32| {
+        select_most_intense_peak(
+            &spectrum.masses,
+            &spectrum.intensities,
+            mz,
+            fragment_tol,
+            None,
+        )
+        .map(|peak| spectrum.intensities[peak] as f64)
+    };
+    for kind in ion_kinds {
+        for (w, o) in IonSeries::new(winner, *kind).zip(IonSeries::new(other, *kind)) {
+            if (w.monoisotopic_mass - o.monoisotopic_mass).abs() < MASS_EPS {
+                continue;
+            }
+            for charge in 1..max_charge {
+                let other_mz = o.monoisotopic_mass / charge as f32;
+                if !within_tolerance(winner_ions, other_mz, fragment_tol) {
+                    out.other_total += 1;
+                    if let Some(intensity) = intensity_at(other_mz) {
+                        out.other_matched += 1;
+                        out.other_intensity += intensity;
+                    }
+                }
+                let winner_mz = w.monoisotopic_mass / charge as f32;
+                if !within_tolerance(&other_ions, winner_mz, fragment_tol) {
+                    if let Some(intensity) = intensity_at(winner_mz) {
+                        out.winner_intensity += intensity;
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Benjamini-Hochberg q-values, in caller order.
+pub fn benjamini_hochberg(p_values: &[f32]) -> Vec<f32> {
+    let n = p_values.len();
+    let mut order = (0..n).collect::<Vec<_>>();
+    order.sort_by(|&a, &b| p_values[a].total_cmp(&p_values[b]));
+    let mut q_values = vec![1.0f32; n];
+    let mut minimum = 1.0f32;
+    for (rank, &ix) in order.iter().enumerate().rev() {
+        let q = (p_values[ix] as f64 * n as f64 / (rank + 1) as f64).min(1.0) as f32;
+        minimum = minimum.min(q);
+        q_values[ix] = minimum;
+    }
+    q_values
+}
+
+/// Benjamini-Hochberg q-values of `mixed_isomers` p-values, computed
+/// separately for each modification type, in caller order.
+pub fn mixed_isomer_q_values_by_type<K: Eq + std::hash::Hash + Clone>(
+    p_values: &[(K, f32)],
+) -> Vec<f32> {
+    let mut groups: std::collections::HashMap<K, Vec<usize>> = std::collections::HashMap::new();
+    for (ix, (key, _)) in p_values.iter().enumerate() {
+        groups.entry(key.clone()).or_default().push(ix);
+    }
+    let mut q_values = vec![1.0f32; p_values.len()];
+    for indices in groups.into_values() {
+        let group = indices.iter().map(|&ix| p_values[ix].1).collect::<Vec<_>>();
+        for (&ix, q) in indices.iter().zip(benjamini_hochberg(&group)) {
+            q_values[ix] = q;
+        }
+    }
+    q_values
 }
 
 /// Select evenly distributed, unmodified residues that are impossible target

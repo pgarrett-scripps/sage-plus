@@ -196,6 +196,51 @@ pub struct PtmSiteRecord {
     pub site_probabilities: String,
     /// Best site-level q-value among the protein sites this row supports.
     pub site_q_value: f32,
+    /// Whether the runner-up placement's own distinguishing ions are present
+    /// (a co-isolated positional isomer), at `mixed_isomers_q_value <= 0.01`.
+    pub mixed_isomers: bool,
+    /// Benjamini-Hochberg q-value of the runner-up test; null without a
+    /// runner-up placement.
+    pub mixed_isomers_q_value: Option<f32>,
+    /// Bonferroni-adjusted binomial p-value of the runner-up test.
+    pub mixed_isomers_p_value: Option<f32>,
+    /// Runner-up placement as residue plus 1-based position, `;`-separated.
+    pub runner_up_sites: Option<String>,
+    pub runner_up_unique_ions_total: Option<i32>,
+    pub runner_up_unique_ions_matched: Option<i32>,
+    pub runner_up_intensity_fraction: Option<f32>,
+}
+
+/// Write the next column of `rg` as an optional (nullable) flat column.
+fn write_optional_column<W, I, V, T, F>(
+    rg: &mut parquet::file::writer::SerializedRowGroupWriter<'_, W>,
+    values: I,
+    convert: F,
+) -> parquet::errors::Result<()>
+where
+    W: std::io::Write + Send,
+    I: Iterator<Item = Option<V>>,
+    T: DataType,
+    F: Fn(V) -> T::T,
+{
+    let mut present = Vec::new();
+    let mut levels = Vec::new();
+    for value in values {
+        match value {
+            Some(value) => {
+                present.push(convert(value));
+                levels.push(1);
+            }
+            None => levels.push(0),
+        }
+    }
+    if let Some(mut column) = rg.next_column()? {
+        column
+            .typed::<T>()
+            .write_batch(&present, Some(&levels), None)?;
+        column.close()?;
+    }
+    Ok(())
 }
 
 pub struct ProteinSiteRecord {
@@ -322,7 +367,7 @@ fn parquet_position(field: Option<&Field>, row: usize) -> parquet::errors::Resul
 
 fn ptm_site_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/ptm_sites.v3.parquet.schema"
+        "../../../../schemas/ptm_sites.v4.parquet.schema"
     ))
 }
 
@@ -340,7 +385,7 @@ pub fn serialize_ptm_sites(
     let options = writer_properties(
         vec![
             KeyValue::new("sage.schema.name".into(), Some("ptm_sites".into())),
-            KeyValue::new("sage.schema.version".into(), Some("3".into())),
+            KeyValue::new("sage.schema.version".into(), Some("4".into())),
         ],
         provenance,
     )?;
@@ -506,6 +551,41 @@ pub fn serialize_ptm_sites(
             records.iter().map(|r| r.site_q_value).collect::<Vec<_>>(),
             FloatType
         );
+        write_required_column!(
+            rg,
+            records.iter().map(|r| r.mixed_isomers).collect::<Vec<_>>(),
+            BoolType
+        );
+        write_optional_column::<_, _, _, FloatType, _>(
+            &mut rg,
+            records.iter().map(|r| r.mixed_isomers_q_value),
+            |value| value,
+        )?;
+        write_optional_column::<_, _, _, FloatType, _>(
+            &mut rg,
+            records.iter().map(|r| r.mixed_isomers_p_value),
+            |value| value,
+        )?;
+        write_optional_column::<_, _, _, ByteArrayType, _>(
+            &mut rg,
+            records.iter().map(|r| r.runner_up_sites.as_deref()),
+            ByteArray::from,
+        )?;
+        write_optional_column::<_, _, _, Int32Type, _>(
+            &mut rg,
+            records.iter().map(|r| r.runner_up_unique_ions_total),
+            |value| value,
+        )?;
+        write_optional_column::<_, _, _, Int32Type, _>(
+            &mut rg,
+            records.iter().map(|r| r.runner_up_unique_ions_matched),
+            |value| value,
+        )?;
+        write_optional_column::<_, _, _, FloatType, _>(
+            &mut rg,
+            records.iter().map(|r| r.runner_up_intensity_fraction),
+            |value| value,
+        )?;
         rg.close()?;
     }
 

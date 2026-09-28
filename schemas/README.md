@@ -50,3 +50,8 @@ Beta 13 adds `ptm_sites.v3.parquet.schema` and `protein_sites.v3.parquet.schema`
 version 2 column and append site-level FDR: `site_q_value` on PSM-site rows, and `site_score` plus
 `site_q_value` on protein-site rows. `best_spectrum_q` remains the lowest PSM q-value of a site's
 supporting PSMs and is not a site-level FDR.
+
+Beta 14 adds `ptm_sites.v4.parquet.schema`. It keeps every version 3 column and appends the
+`mixed_isomers` evidence: `mixed_isomers`, `mixed_isomers_q_value`, `mixed_isomers_p_value`,
+`runner_up_sites`, `runner_up_unique_ions_total`, `runner_up_unique_ions_matched` and
+`runner_up_intensity_fraction`. `protein_sites` stays at version 3.

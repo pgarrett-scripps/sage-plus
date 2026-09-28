@@ -602,6 +602,13 @@ fn serialize_ptm_site_reports() {
             site_determining_ions_total: 8,
             site_probabilities: "S3:0.982;T6:0.018".into(),
             site_q_value: 0.004,
+            mixed_isomers: true,
+            mixed_isomers_q_value: Some(0.002),
+            mixed_isomers_p_value: Some(0.0001),
+            runner_up_sites: Some("T6".into()),
+            runner_up_unique_ions_total: Some(5),
+            runner_up_unique_ions_matched: Some(4),
+            runner_up_intensity_fraction: None,
         }],
         &[],
     )
@@ -614,9 +621,31 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        22
+        29
     );
-    assert_site_schema(&reader, "ptm_sites", 0.004);
+    assert_site_schema(&reader, "ptm_sites", "4", 0.004);
+    let row = reader.get_row_iter(None).unwrap().next().unwrap().unwrap();
+    let fields = row
+        .get_column_iter()
+        .map(|(column, field)| (column.as_str(), field.clone()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(fields["mixed_isomers"], parquet::record::Field::Bool(true));
+    assert_eq!(
+        fields["mixed_isomers_q_value"],
+        parquet::record::Field::Float(0.002)
+    );
+    assert_eq!(
+        fields["runner_up_sites"],
+        parquet::record::Field::Str("T6".into())
+    );
+    assert_eq!(
+        fields["runner_up_unique_ions_matched"],
+        parquet::record::Field::Int(4)
+    );
+    assert_eq!(
+        fields["runner_up_intensity_fraction"],
+        parquet::record::Field::Null
+    );
 
     let protein = serialize_protein_sites(
         &[ProteinSiteRecord {
@@ -648,10 +677,15 @@ fn serialize_ptm_site_reports() {
             .num_columns(),
         14
     );
-    assert_site_schema(&reader, "protein_sites", 0.003);
+    assert_site_schema(&reader, "protein_sites", "3", 0.003);
 }
 
-fn assert_site_schema(reader: &SerializedFileReader<bytes::Bytes>, name: &str, site_q: f32) {
+fn assert_site_schema(
+    reader: &SerializedFileReader<bytes::Bytes>,
+    name: &str,
+    version: &str,
+    site_q: f32,
+) {
     let metadata = reader
         .metadata()
         .file_metadata()
@@ -661,7 +695,7 @@ fn assert_site_schema(reader: &SerializedFileReader<bytes::Bytes>, name: &str, s
         .map(|kv| (kv.key.as_str(), kv.value.as_deref().unwrap_or_default()))
         .collect::<HashMap<_, _>>();
     assert_eq!(metadata["sage.schema.name"], name);
-    assert_eq!(metadata["sage.schema.version"], "3");
+    assert_eq!(metadata["sage.schema.version"], version);
     let row = reader.get_row_iter(None).unwrap().next().unwrap().unwrap();
     let value = row
         .get_column_iter()

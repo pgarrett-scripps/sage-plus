@@ -280,6 +280,7 @@ impl Runner {
                 fragments: postprocess.annotated_fragments,
             });
         }
+        let mixed_isomers = postprocess.mixed_isomers;
         let localized_psms = if self.parameters.ptm_localization.enabled {
             self.events.emit(EventKind::PtmLocalizationCompleted {
                 psms: postprocess.localized_psms,
@@ -606,6 +607,9 @@ impl Runner {
                 target_protein_sites: site_stats.target_protein_sites,
                 decoy_protein_sites: site_stats.decoy_protein_sites,
                 protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,
+                mixed_isomer_tested: mixed_isomers.tested,
+                mixed_isomer_flagged: mixed_isomers.flagged,
+                mixed_isomer_decoy_placement_flags: mixed_isomers.decoy_placement_flags,
             },
             models: ModelRunStats {
                 mass_alignment_applied: mass_alignment_files

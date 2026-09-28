@@ -505,6 +505,17 @@ pub struct PtmLocalizationRunStats {
     /// Target protein sites at site-level q-value <= 0.01.
     #[serde(default)]
     pub protein_sites_at_one_percent_fdr: usize,
+    /// Target localizations with a runner-up placement, tested for a
+    /// co-isolated positional isomer.
+    #[serde(default)]
+    pub mixed_isomer_tested: usize,
+    /// Of those, flagged `mixed_isomers` (q <= 0.01).
+    #[serde(default)]
+    pub mixed_isomer_flagged: usize,
+    /// Impossible-site placements passing the same p-value cutoff: flags the
+    /// null model produces where no isomer can be present.
+    #[serde(default)]
+    pub mixed_isomer_decoy_placement_flags: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -649,6 +660,7 @@ struct SiteRow {
     site_determining_matched: u32,
     site_determining_total: u32,
     site_probabilities: String,
+    mixed_isomers: Option<sage_core::ptm::MixedIsomerEvidence>,
 }
 
 /// PSMs entering PTM localization and site-level FDR. Targets and decoys pass
@@ -715,6 +727,7 @@ struct PostprocessStats {
     annotated_fragments: usize,
     localized_psms: usize,
     library_selections: Vec<LibrarySelection>,
+    mixed_isomers: postprocess::MixedIsomerStats,
 }
 
 impl SpectrumAccumulator {

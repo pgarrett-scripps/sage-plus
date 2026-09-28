@@ -456,3 +456,105 @@ fn modification_type_identity_uses_name_and_mass() {
         ModificationType::new("+15.9949", 15.9990)
     );
 }
+
+/// Peaks of both placements of one phospho on `AASAAGAAPTAAGR` (S3 or T10),
+/// or of the S3 placement alone.
+fn isomer_spectra() -> (Peptide, ProcessedSpectrum, ProcessedSpectrum) {
+    let mut s_form = peptide("AASAAGAAPTAAGR");
+    s_form.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let mut t_form = peptide("AASAAGAAPTAAGR");
+    t_form.modifications = CompactModifications::from_sparse([(9, PHOSPHO)]);
+    let pure = synthetic_spectrum(&s_form);
+    let other = synthetic_spectrum(&t_form);
+    let mut peaks = pure
+        .masses
+        .iter()
+        .zip(&pure.intensities)
+        .chain(other.masses.iter().zip(&other.intensities))
+        .map(|(&mass, &intensity)| (mass, intensity))
+        .collect::<Vec<_>>();
+    peaks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    peaks.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4);
+    let (masses, intensities): (Vec<f32>, Vec<f32>) = peaks.into_iter().unzip();
+    let mixed = ProcessedSpectrum {
+        level: 2,
+        total_ion_current: intensities.iter().sum(),
+        masses,
+        intensities,
+        ..Default::default()
+    };
+    (s_form, pure, mixed)
+}
+
+fn localize_phospho(peptide: &Peptide, spectrum: &ProcessedSpectrum) -> ModLocalization {
+    let potential = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    let mut loc = localize(
+        peptide,
+        spectrum,
+        &[Kind::B, Kind::Y],
+        &potential,
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    assert_eq!(loc.mods.len(), 1);
+    loc.mods.remove(0)
+}
+
+#[test]
+fn runner_up_ions_in_a_mixed_spectrum_are_significant() {
+    let (s_form, _, mixed) = isomer_spectra();
+    let m = localize_phospho(&s_form, &mixed);
+    let evidence = m.mixed_isomers.as_ref().expect("runner-up tested");
+    let runner_up = evidence
+        .runner_up_sites
+        .iter()
+        .map(|site| site.position)
+        .collect::<Vec<_>>();
+    let winner = m.best_sites[0].position;
+    assert_ne!(runner_up, vec![winner]);
+    assert!(runner_up == vec![2] || runner_up == vec![9]);
+    assert!(evidence.unique_ions > 0);
+    assert_eq!(evidence.unique_matched, evidence.unique_ions);
+    assert!(evidence.p_value < 1e-6, "p was {}", evidence.p_value);
+    assert!((evidence.intensity_fraction - 0.5).abs() < 0.05);
+    // Assigned later, across the run.
+    assert_eq!(evidence.q_value, 1.0);
+    assert!(!evidence.flagged);
+}
+
+#[test]
+fn a_pure_spectrum_gives_no_runner_up_evidence() {
+    let (s_form, pure, _) = isomer_spectra();
+    let m = localize_phospho(&s_form, &pure);
+    assert_eq!(m.best_sites[0].position, 2);
+    let evidence = m.mixed_isomers.as_ref().expect("runner-up tested");
+    assert_eq!(
+        evidence
+            .runner_up_sites
+            .iter()
+            .map(|site| site.position)
+            .collect::<Vec<_>>(),
+        vec![9]
+    );
+    assert_eq!(evidence.unique_matched, 0);
+    assert_eq!(evidence.p_value, 1.0);
+    assert_eq!(evidence.intensity_fraction, 0.0);
+}
+
+#[test]
+fn benjamini_hochberg_matches_hand_computed_values() {
+    // Sorted p 0.01, 0.03, 0.04, 0.5 give raw 0.04, 0.06, 0.0533, 0.5; the
+    // running minimum from the top is 0.04, 0.0533, 0.0533, 0.5.
+    let q = benjamini_hochberg(&[0.01, 0.04, 0.03, 0.5]);
+    for (got, want) in q.iter().zip([0.04, 0.16 / 3.0, 0.16 / 3.0, 0.5]) {
+        assert!((got - want).abs() < 1e-6, "{q:?}");
+    }
+    assert!(benjamini_hochberg(&[]).is_empty());
+
+    let by_type = mixed_isomer_q_values_by_type(&[("a", 0.01), ("b", 0.01), ("a", 0.02)]);
+    assert_eq!(by_type, vec![0.02, 0.01, 0.02]);
+}
