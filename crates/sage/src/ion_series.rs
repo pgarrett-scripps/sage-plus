@@ -62,18 +62,37 @@ pub struct IonGroup {
 /// modification has optional loss behavior, plus the configured neutral-loss
 /// combinations. Required losses remove the retained option for fragments
 /// containing that modification.
+///
+/// Losses are those of the site each modification is placed on (see
+/// [`ModificationDefinition::losses_at`](crate::modification::ModificationDefinition::losses_at)).
+/// A placement without losses keeps its retained form, also under required
+/// mode.
 pub struct IonGroupSeries<'p> {
-    peptide: &'p Peptide,
     base: IonSeries<'p>,
     series_index: usize,
+    /// Placements that carry at least one loss, in applied order.
+    lossy: SmallVec<[(Site, &'p [f32], NeutralLossMode); 4]>,
 }
 
 impl<'p> IonGroupSeries<'p> {
     pub fn new(peptide: &'p Peptide, kind: Kind) -> Self {
+        let lossy = peptide
+            .applied_modifications()
+            .filter_map(|applied| {
+                let losses = applied
+                    .modification
+                    .losses_at(&peptide.sequence, applied.site);
+                (!losses.is_empty()).then_some((
+                    applied.site,
+                    losses,
+                    applied.modification.neutral_loss_mode,
+                ))
+            })
+            .collect();
         Self {
-            peptide,
             base: IonSeries::new(peptide, kind),
             series_index: 0,
+            lossy,
         }
     }
 
@@ -92,19 +111,19 @@ impl<'p> IonGroupSeries<'p> {
 
     fn losses(&self, series_index: usize) -> SmallVec<[f32; 4]> {
         let mut totals = smallvec![0.0f32];
-        for applied in self.peptide.applied_modifications().filter(|applied| {
-            self.contains_site(applied.site, series_index)
-                && !applied.modification.neutral_losses.is_empty()
-        }) {
-            let option_count = applied.modification.neutral_losses.len()
-                + usize::from(applied.modification.neutral_loss_mode == NeutralLossMode::Optional);
+        for (_, losses, mode) in self
+            .lossy
+            .iter()
+            .filter(|(site, _, _)| self.contains_site(*site, series_index))
+        {
+            let option_count = losses.len() + usize::from(*mode == NeutralLossMode::Optional);
             let mut next: SmallVec<[f32; 4]> =
                 SmallVec::with_capacity(totals.len().saturating_mul(option_count));
             for total in &totals {
-                if applied.modification.neutral_loss_mode == NeutralLossMode::Optional {
+                if *mode == NeutralLossMode::Optional {
                     next.push(*total);
                 }
-                for loss in applied.modification.neutral_losses.iter() {
+                for loss in losses.iter() {
                     next.push(total + loss);
                 }
             }
