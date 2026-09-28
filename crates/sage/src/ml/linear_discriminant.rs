@@ -357,12 +357,18 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
     // Generic fragment-loss evidence is only present when
     // `database.fragment_losses` is configured; without it the model is the
     // unchanged 20-feature one.
+    // Experiment hook: the loss-count feature as a fraction of matched peaks.
+    let loss_fraction =
+        std::env::var("SAGE_PLUS_FRAGMENT_LOSS_FEATURE_FRACTION").is_ok_and(|value| value == "1");
     let discriminants = if scores.iter().any(|perc| perc.fragment_loss.is_some()) {
         fit_discriminants(scores, &decoys, |perc: &Feature| -> [f64; LOSS_FEATURES] {
             let base = compute_features(perc);
             let loss = perc.fragment_loss.unwrap_or_default();
             std::array::from_fn(|j| match j {
                 j if j < FEATURES => base[j],
+                FEATURES if loss_fraction => {
+                    loss.matched_peaks as f64 / (perc.matched_peaks as f64).max(1.0)
+                }
                 FEATURES => (loss.matched_peaks as f64).ln_1p(),
                 _ => (loss.intensity_pct as f64).ln_1p(),
             })

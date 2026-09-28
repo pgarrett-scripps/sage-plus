@@ -7,16 +7,17 @@ peptides and proteins at 1% q-value, decoys at 1%, species-entrapment FDP
 (for human samples searched against human + yeast + E. coli), wall time and
 peak RSS.
 
-Variants (see FRAGMENT_LOSSES.md):
+Variants (see FRAGMENT_LOSSES.md and VARIANTS below):
   base  baseline executable, no `fragment_losses` key
-  A     candidate, no `fragment_losses` key (must equal base byte for byte)
-  B     candidate, losses scored inside the hyperscore
+  A     candidate, no `fragment_losses` key (must equal base row for row)
   C     candidate, losses as separate LDA features (the shipped behaviour)
-  D     candidate, as C but chimeric peak removal keeps loss-only peaks
+  B, B-int, B-intact, B-narrow, B-max2, Cs, Cf, P0, P05, P1, P0-narrow,
+  P0Cs, W02  experiment integrations, see VARIANTS
 The `-chimera` suffix runs a variant with `chimera: true` and `report_psms: 2`.
 
-B and D are selected with the experiment hook SAGE_PLUS_FRAGMENT_LOSS_SCORING,
-which exists only in the experiment commit named in FRAGMENT_LOSSES.md.
+Every variant except base, A and C is selected with the experiment hook
+variables SAGE_PLUS_FRAGMENT_LOSS_*, which exist only in the experiment
+commits named in FRAGMENT_LOSSES.md; later binaries ignore them and run C.
 
 usage: run_fragment_losses.py --base BIN --candidate BIN --output DIR
        [--datasets NAME ...] [--variants NAME ...]
@@ -110,15 +111,53 @@ DATASETS = {
     }),
 }
 
+# Narrower residue rules from ion-trap statistics (Tabb et al. 2003): water
+# from D and E only, ammonia from N and Q only (K and R excluded, so tryptic
+# y ions do not all carry an ammonia form).
+LOSSES_NARROW = {
+    "fragment_losses": {
+        "Water":   {"mass": 18.010565, "sites": ["D", "E"], "ion_kinds": ["b", "y"]},
+        "Ammonia": {"mass": 17.026549, "sites": ["N", "Q"], "ion_kinds": ["b", "y"]},
+    },
+    "max_fragment_losses": 1,
+}
+LOSSES_MAX2 = {**LOSSES, "max_fragment_losses": 2}
+
+S = "SAGE_PLUS_FRAGMENT_LOSS_"
+PARENT = {S + "SCORING": "parent"}
 VARIANTS = {
-    # name -> (engine, losses, scoring hook, chimera)
-    "base": ("base", False, None, False),
-    "A": ("candidate", False, None, False),
-    "B": ("candidate", True, "hyperscore", False),
-    "C": ("candidate", True, "features", False),
-    "base-chimera": ("base", False, None, True),
-    "C-chimera": ("candidate", True, "features", True),
-    "D-chimera": ("candidate", True, "features_keep_peaks", True),
+    # name -> (engine, loss config or None, experiment environment, chimera)
+    "base": ("base", None, {}, False),
+    "A": ("candidate", None, {}, False),
+    # B: loss forms are alternatives of their cleavage in the hyperscore.
+    "B": ("candidate", LOSSES, {S + "SCORING": "hyperscore"}, False),
+    # B-int: as B, but a loss-only cleavage adds intensity and no count.
+    "B-int": ("candidate", LOSSES, {S + "SCORING": "hyperscore_intensity"}, False),
+    # B-intact: as B, but the intact form wins when it matched.
+    "B-intact": ("candidate", LOSSES, {S + "SCORING": "intact_first"}, False),
+    "B-narrow": ("candidate", LOSSES_NARROW, {S + "SCORING": "hyperscore"}, False),
+    "B-max2": ("candidate", LOSSES_MAX2, {S + "SCORING": "hyperscore"}, False),
+    # W02: Comet-like, every matched loss peak adds 0.2 to the count and
+    # 0.2 times its intensity (Comet use_NL_ions weights loss bins 0.2).
+    "W02": ("candidate", LOSSES, {S + "SCORING": "weighted", S + "WEIGHT": "0.2"}, False),
+    # C: separate LDA features (matched_loss_peaks, loss_intensity_pct).
+    "C": ("candidate", LOSSES, {S + "SCORING": "features"}, False),
+    # Cs: features count only loss peaks whose intact parent matched.
+    "Cs": ("candidate", LOSSES, {S + "SCORING": "features", S + "FEATURE_PARENT": "1"}, False),
+    # Cf: as Cs, count feature as a fraction of matched peaks.
+    "Cf": ("candidate", LOSSES, {S + "SCORING": "features", S + "FEATURE_PARENT": "1",
+                                 S + "FEATURE_FRACTION": "1"}, False),
+    # P0: parent-supported loss adds intensity to its cleavage, no count.
+    "P0": ("candidate", LOSSES, {**PARENT, S + "WEIGHT": "0"}, False),
+    # P05, P1: parent-supported loss adds intensity and 0.5 or 1 to the count.
+    "P05": ("candidate", LOSSES, {**PARENT, S + "WEIGHT": "0.5"}, False),
+    "P1": ("candidate", LOSSES, {**PARENT, S + "WEIGHT": "1"}, False),
+    "P0-narrow": ("candidate", LOSSES_NARROW, {**PARENT, S + "WEIGHT": "0"}, False),
+    # P0Cs: P0 in the score plus the Cs features.
+    "P0Cs": ("candidate", LOSSES, {**PARENT, S + "WEIGHT": "0", S + "FEATURES": "1",
+                                   S + "FEATURE_PARENT": "1"}, False),
+    "base-chimera": ("base", None, {}, True),
+    "C-chimera": ("candidate", LOSSES, {S + "SCORING": "features"}, True),
 }
 
 
@@ -136,7 +175,11 @@ def config(dataset: str, variant: str) -> dict:
     _, losses, _, chimera = VARIANTS[variant]
     cfg = merge(copy.deepcopy(TEMPLATE), DATASETS[dataset][2])
     if losses:
-        merge(cfg["database"], LOSSES)
+        losses = copy.deepcopy(losses)
+        kinds = cfg["database"].get("ion_kinds", ["b", "y"])
+        for entry in losses["fragment_losses"].values():
+            entry["ion_kinds"] = [k for k in entry["ion_kinds"] if k in kinds]
+        merge(cfg["database"], losses)
     if chimera:
         # Chimeric search reports a second PSM only when report_psms > 1.
         cfg["chimera"] = True
@@ -144,11 +187,9 @@ def config(dataset: str, variant: str) -> dict:
     return cfg
 
 
-def run(binary: str, cfg_path: Path, out: Path, hook: str | None) -> dict:
-    env = dict(os.environ)
-    env.pop("SAGE_PLUS_FRAGMENT_LOSS_SCORING", None)
-    if hook:
-        env["SAGE_PLUS_FRAGMENT_LOSS_SCORING"] = hook
+def run(binary: str, cfg_path: Path, out: Path, hook: dict) -> dict:
+    env = {k: v for k, v in os.environ.items() if not k.startswith(S)}
+    env.update(hook)
     # Time inside the memory gate so queueing for memory is not counted.
     cmd = [MEMGATE, "6", TIME, "-v", binary, str(cfg_path), "-o", str(out), "--overwrite",
            "--disable-telemetry-i-dont-want-to-improve-sage"]
