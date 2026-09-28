@@ -8,7 +8,7 @@ Sage Plus is a fork of the [Sage proteomics search engine](https://github.com/la
 people who need more than a standard closed search: very large or PTM-heavy databases, site
 localization, Thermo RAW input without conversion, and machine-readable outputs. It keeps Sage's
 workflow and configuration style, and most additions are opt-in. The current release is
-**v0.1.0-beta.13**, a prerelease.
+**v0.1.0-beta.14**, a prerelease.
 
 ```shell
 # Download a binary from the releases page, or build from source (Rust 1.88+):
@@ -29,7 +29,9 @@ reference plus a 100x gut-microbiome catalog, which ran out of memory before Bet
 in 19 GiB (14,459 PSMs in 451 s). See [settings](DOCS.md#fasta) and [benchmark](benchmarks/PREFILTER.md).
 
 **Localize PTM sites with a false-localization rate.** `ptm_localization` rescores each arrangement
-of a PSM's modifications on site-determining ions against impossible-site decoys. It writes site
+of a PSM's modifications on site-determining ions against impossible-site decoys, with a separate
+false-localization rate per modification type (6,973 phospho localizations at 1% on PXD007058, up
+from 303 when all types were pooled). It writes site
 probabilities and localization q-values to PSM-level and protein-level site tables, a site-level
 target-decoy q-value (`site_q_value`), and a reusable site library. See [PTM site localization](DOCS.md#ptm-site-localization).
 
@@ -57,6 +59,7 @@ Better defaults and scoring for the spectra you already have.
 - Ambiguous residues: J scored as I/L, opt-in B/Z/X expansion with a `substitutions` column, I/L twins merged ([details](DOCS.md#ambiguous-residues)).
 - Averagine-scored deisotoping, charge-aware fragment matching, and `ambiguity_sequence` marking unsupported regions ([details](DOCS.md#sequence-ambiguity-annotation)).
 - Picked target-decoy FDR for peptides, proteins and protein groups: a target beaten by its own decoy no longer passes ([details](DOCS.md#protein-inference)).
+- Opt-in immonium-ion evidence and water/ammonia fragment losses as extra rescoring features, reported per PSM ([details](DOCS.md#immonium-ions)).
 - Opt-in DIA pseudo-spectrum mode for Orbitrap DIA and diaPASEF ([details](DOCS.md#dia-pseudo-spectrum-search)).
 
 ### Search PTMs with less setup
@@ -65,6 +68,7 @@ Say exactly where a modification can go, and check it before searching.
 - Named modifications with explicit sites such as `first_residue:K` or `peptide_n_term` ([details](DOCS.md#explicit-site-vocabulary)).
 - Motif sites such as `motif:N*-{P}-[ST]`, checked against the source protein ([details](DOCS.md#motif-sites)).
 - Per-modification `max_count` and `max_total_count`, variant caps, and a separate PEFF budget ([details](DOCS.md#static-and-variable-behavior)).
+- Per-site `neutral_losses` and `immonium_ions`, e.g. the H3PO4 loss on pS/pT but not pY ([details](DOCS.md#static-and-variable-behavior)).
 - PTM site libraries restrict placements to known sites instead of every eligible residue ([details](DOCS.md#ptm-site-libraries)).
 - `--preview-modifications` shows eligible sites and variants for a peptide without a search ([details](DOCS.md#preview-modification-placement)).
 
@@ -81,6 +85,7 @@ Most useful for large databases, many modifications, or many files.
 Label-free and labeled MS1 quantification, and TMT reporter ions with unobserved channels written as null, not 0.
 - LFQ with nonlinear alignment, configurable match-between-runs tolerance, and per-file MS2 confirmation ([details](DOCS.md#label-free-quantification-output)).
 - A per-row LFQ `extraction_q_value` for MS2-backed and transferred rows, a diagnostic of wrong-peak quantification, not yet a calibrated transfer FDR ([details](DOCS.md#label-free-quantification-output)).
+- Peak geometry per LFQ row (`apex_rt`, bounds, `fwhm`, `id_apex_offset`) and opt-in apex recentering ([details](DOCS.md#label-free-quantification-output)).
 - SILAC, dimethyl, and custom label channels defined on modifications, with channel-aware LFQ ([details](DOCS.md#modification-channels)).
 - Optional timsTOF MS1 denoising with dnoise for LFQ (`bruker_config.denoise`, [details](DOCS.md#spectrum-paths)).
 

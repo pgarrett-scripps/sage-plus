@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.14] - 2026-09-28
+
 ### Added
 - Opt-in per-PSM immonium-ion evidence (`immonium`, default off). For each PSM, the processed
   spectrum is checked for the immonium ions of unmodified P, V, L/I, H, F, Y and W (Hohmann et
@@ -76,6 +78,15 @@ entries are retained below for provenance.
   localization to each type's competition; decoy PSMs read their q-value off their own type's
   curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
   change; `localization_q_value` and `site_q_value` values change.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- Immonium `modified_explained` counts use the modification sites before PTM localization
+  relocates them.
+- `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
+  SILAC), and loss ions are matched at every fragment charge.
+- The per-modification FLR groups types by name and delta mass rounded to 0.001 Da.
 
 ## [v0.1.0-beta.13] - 2026-09-27
 
