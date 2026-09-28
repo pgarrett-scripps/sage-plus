@@ -200,13 +200,13 @@ pub struct Input {
     /// phosphotyrosine immonium ions; a list of `{name, mz, tolerance}`
     /// replaces them (tolerance defaults to 20 ppm). Default off.
     pub diagnostic_ions: Option<DiagnosticIonsConfig>,
-    /// Per-PSM immonium-ion evidence, written to `immonium.tsv` and the PIN
-    /// file. `true` looks for the unmodified F, Y, W, P, H, V and L/I ions
-    /// and the phosphotyrosine (216.0420) and acetyl-lysine (126.0913) ions.
-    /// An object sets `rescore` (add the counts to the linear discriminant,
-    /// default false), `residues` (default true), `modified` (a list of
-    /// `{name, residue, modification, mz}`) and `tolerance` (default
-    /// `fragment_tol`). Default off.
+    /// Per-PSM immonium-ion evidence, written to `results.sage.parquet` and
+    /// the PIN file and added to the linear discriminant. `true` looks for the
+    /// unmodified P, V, L/I, H, F, Y and W ions and for the modified-residue
+    /// ions that modifications declare in `immonium_ions`. An object sets
+    /// `rescore` (default true; false only reports the counts),
+    /// `residue_ions` (the global switch for the unmodified-residue ions,
+    /// default true) and `tolerance` (default `fragment_tol`). Default off.
     pub immonium: Option<ImmoniumConfig>,
 
     pub annotate_matches: Option<bool>,
@@ -691,8 +691,12 @@ impl Input {
                 );
             }
         }
-        if let Some(config) = &self.immonium {
-            if let Some(settings) = config.clone().resolve(self.fragment_tol) {
+        if let (Some(config), Some(database)) = (&self.immonium, &self.database) {
+            let modified = sage_core::immonium::modified_ions(
+                &sage_core::modification::validate_mods(database.static_mods.clone()),
+                &sage_core::modification::validate_var_mods(database.variable_mods.clone()),
+            );
+            if let Some(settings) = config.clone().resolve(self.fragment_tol, modified) {
                 settings.validate().map_err(anyhow::Error::msg)?;
             }
         }
@@ -784,9 +788,16 @@ impl Input {
         }
 
         let diagnostic_ions = self.diagnostic_ions.and_then(DiagnosticIonsConfig::resolve);
+        let modified_immonium_ions =
+            sage_core::immonium::modified_ions(&database.static_mods, &database.variable_mods);
         let immonium = self
             .immonium
-            .and_then(|config| config.resolve(self.fragment_tol));
+            .and_then(|config| config.resolve(self.fragment_tol, modified_immonium_ions.clone()));
+        if immonium.is_none() && !modified_immonium_ions.is_empty() {
+            log::warn!(
+                "modifications declare `immonium_ions` but `immonium` is off; the ions are not used"
+            );
+        }
 
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);

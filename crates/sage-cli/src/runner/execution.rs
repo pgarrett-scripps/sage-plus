@@ -404,6 +404,7 @@ impl Runner {
             &self.database,
             output_psm_q_value,
             &self.parquet_provenance,
+            self.parameters.immonium.as_ref(),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -414,9 +415,6 @@ impl Runner {
         let polymers = self.polymer_stats(&filenames);
         let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
-            self.parameters.output_paths.push(path);
-        }
-        if let Some(path) = self.write_immonium(&output_features, &filenames)? {
             self.parameters.output_paths.push(path);
         }
         let path = self.write_digestion(&digestion)?;

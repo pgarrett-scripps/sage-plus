@@ -946,8 +946,9 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// With `immonium` absent or `false` the outputs are byte-identical; turned
-/// on without `rescore` only `immonium.tsv` and the PIN columns are added.
+/// With `immonium` absent or `false` the outputs are byte-identical and the
+/// parquet immonium columns are null. On with `rescore: false` only fills
+/// those columns and adds the PIN columns; scores and q-values are unchanged.
 #[test]
 fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
     let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -976,8 +977,8 @@ fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
         };
     let base = run("absent", None)?;
     let off = run("off", Some(false.into()))?;
+    let report = run("report", Some(serde_json::json!({"rescore": false})))?;
     let on = run("on", Some(true.into()))?;
-    let rescore = run("rescore", Some(serde_json::json!({"rescore": true})))?;
 
     for file in [
         "results.sage.pin",
@@ -990,16 +991,53 @@ fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
             "{file} differs with immonium off"
         );
     }
-    assert!(!base.join("immonium.tsv").exists());
-    assert!(!off.join("immonium.tsv").exists());
+    for dir in [&base, &off, &report, &on] {
+        assert!(!dir.join("immonium.tsv").exists());
+    }
     for dir in [&base, &off] {
         let results: serde_json::Value =
             serde_json::from_slice(&std::fs::read(dir.join("results.json"))?)?;
         assert!(results.get("immonium").is_none());
     }
 
-    // On without rescoring: the PIN gains the immonium columns before
-    // `Peptide` and is otherwise unchanged.
+    // Parquet rows split into the immonium columns and everything else.
+    let rows = |dir: &std::path::Path| -> anyhow::Result<(Vec<String>, Vec<String>)> {
+        use parquet::file::reader::{FileReader, SerializedFileReader};
+        let reader =
+            SerializedFileReader::new(std::fs::File::open(dir.join("results.sage.parquet"))?)?;
+        let (mut other, mut immonium) = (Vec::new(), Vec::new());
+        for row in reader.get_row_iter(None)? {
+            let row = row?;
+            let (mut rest, mut evidence) = (Vec::new(), Vec::new());
+            for (name, field) in row.get_column_iter() {
+                if name.starts_with("immonium_") {
+                    evidence.push(format!("{name}={field}"));
+                } else {
+                    rest.push(format!("{name}={field}"));
+                }
+            }
+            assert_eq!(evidence.len(), 7, "{evidence:?}");
+            other.push(rest.join("|"));
+            immonium.push(evidence.join("|"));
+        }
+        Ok((other, immonium))
+    };
+    let (base_rows, base_immonium) = rows(&base)?;
+    assert!(!base_rows.is_empty());
+    assert!(base_immonium
+        .iter()
+        .all(|row| row.split('|').all(|value| value.ends_with("=null"))));
+    let (report_rows, report_immonium) = rows(&report)?;
+    assert_eq!(
+        base_rows, report_rows,
+        "report-only immonium changed results"
+    );
+    assert!(report_immonium
+        .iter()
+        .all(|row| row.split('|').all(|value| !value.ends_with("=null"))));
+
+    // Report only: the PIN gains the immonium columns before `Peptide` and is
+    // otherwise unchanged.
     let columns = sage_immonium_pin_columns();
     let strip = |pin: String| {
         let rows = pin
@@ -1026,8 +1064,8 @@ fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
     };
     let (none, base_pin) = strip(std::fs::read_to_string(base.join("results.sage.pin"))?);
     assert_eq!(none, 0);
-    let on_pin = std::fs::read_to_string(on.join("results.sage.pin"))?;
-    let header = on_pin
+    let report_pin = std::fs::read_to_string(report.join("results.sage.pin"))?;
+    let header = report_pin
         .lines()
         .next()
         .unwrap()
@@ -1035,25 +1073,17 @@ fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     let peptide = header.iter().position(|name| *name == "Peptide").unwrap();
     assert_eq!(header[peptide - columns.len()..peptide], columns);
-    let (added, on_pin) = strip(on_pin);
+    let (added, report_pin) = strip(report_pin);
     assert_eq!(added, columns.len());
-    assert_eq!(base_pin, on_pin);
+    assert_eq!(base_pin, report_pin);
 
-    let results: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(on.join("results.json"))?)?;
-    assert_eq!(results["immonium"]["rescore"], false);
-    assert_eq!(results["immonium"]["modified"][0]["name"], "pY");
-    for dir in [&on, &rescore] {
+    // `true` rescores by default.
+    for (dir, rescore) in [(&report, false), (&on, true)] {
+        let results: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("results.json"))?)?;
+        assert_eq!(results["immonium"]["rescore"], rescore);
+        assert_eq!(results["immonium"]["residue_ions"], true);
         assert_matches_published_schemas(&workspace, dir)?;
-        let table = std::fs::read_to_string(dir.join("immonium.tsv"))?;
-        assert_eq!(table.lines().count(), base_pin.len(), "{table}");
-        let summary: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(dir.join("run-summary.json"))?)?;
-        assert!(summary["output_paths"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|path| path.as_str().unwrap().ends_with("immonium.tsv")));
     }
     std::fs::remove_dir_all(root)?;
     Ok(())
@@ -1198,7 +1228,6 @@ fn assert_matches_published_schemas(
             "diagnostic_ions.v1.tsv.schema.json",
             false,
         ),
-        ("immonium.tsv", "immonium.v1.tsv.schema.json", false),
     ] {
         if !required && !output.join(file).exists() {
             continue;

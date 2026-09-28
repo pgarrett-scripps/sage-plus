@@ -7,6 +7,9 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 
 - `results.sage.v1.parquet.schema` describes unlabeled `results.sage.parquet`, including typed protein occurrence coordinates.
 - `results.sage.v2.parquet.schema` adds precursor label channel and group identity.
+- `results.sage.v3.parquet.schema` (unlabeled) and `results.sage.v4.parquet.schema` (labeled) are
+  v1 and v2 plus seven nullable `immonium_*` columns at the end, filled when `immonium` is on.
+  Current Sage writes v3 or v4.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.
@@ -20,9 +23,9 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
   matched fragment ion of a retained PSM.
 - `run-summary.v9.schema.json` is the JSON Schema for `run-summary.json` (`schema_version` 9).
   Objects allow additional properties; optional fields may be added without a version bump.
-- `digestion.v1.tsv.schema.json`, `diagnostic_ions.v1.tsv.schema.json` and
-  `immonium.v1.tsv.schema.json` are Frictionless Table Schemas giving the column order, types
-  and meaning of `digestion.tsv`, `diagnostic_ions.tsv` and `immonium.tsv`.
+- `digestion.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are Frictionless
+  Table Schemas giving the column order, types and meaning of `digestion.tsv` and
+  `diagnostic_ions.tsv`.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.

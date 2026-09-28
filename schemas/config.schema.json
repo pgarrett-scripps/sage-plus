@@ -642,25 +642,15 @@
     "ImmoniumOptions": {
       "additionalProperties": false,
       "properties": {
-        "modified": {
-          "description": "Modified-residue ions; the built-in pY and acK ions when omitted, none\nwhen empty.",
-          "items": {
-            "$ref": "#/$defs/ModifiedImmoniumIon"
-          },
-          "type": [
-            "array",
-            "null"
-          ]
-        },
         "rescore": {
-          "description": "Add the immonium counts to the linear discriminant (default false).",
+          "description": "Add the immonium counts to the linear discriminant (default true);\nfalse only reports them.",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "residues": {
-          "description": "Look for the unmodified F, Y, W, P, H, V and L/I ions (default true).",
+        "residue_ions": {
+          "description": "Global switch for the unmodified-residue ions of P, V, L/I, H, F, Y\nand W (default true). Modified-residue ions come from each\nmodification's `immonium_ions`.",
           "type": [
             "boolean",
             "null"
@@ -899,39 +889,6 @@
         }
       ]
     },
-    "ModifiedImmoniumIon": {
-      "additionalProperties": false,
-      "description": "A modified-residue immonium ion.",
-      "properties": {
-        "modification": {
-          "description": "Mass of the modification on that residue, matched within 0.01 Da.",
-          "format": "float",
-          "type": "number"
-        },
-        "mz": {
-          "description": "Singly charged m/z of the ion.",
-          "format": "float",
-          "type": "number"
-        },
-        "name": {
-          "description": "Label reported in the output.",
-          "type": "string"
-        },
-        "residue": {
-          "description": "Modified residue, as a one-letter code.",
-          "maxLength": 1,
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "residue",
-        "modification",
-        "mz"
-      ],
-      "type": "object"
-    },
     "NamedStaticModification": {
       "additionalProperties": false,
       "description": "Public definition keyed by modification identity, with explicit attachment rules.",
@@ -942,6 +899,10 @@
             "type": "number"
           },
           "type": "object"
+        },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
         },
         "mass": {
           "format": "float",
@@ -988,6 +949,10 @@
             "type": "number"
           },
           "type": "object"
+        },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
         },
         "mass": {
           "format": "float",
@@ -1226,6 +1191,30 @@
         }
       ]
     },
+    "SiteMap": {
+      "anyOf": [
+        {
+          "description": "Applies to every site of the modification.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Applies to the listed sites only; keys are sites from `sites`.",
+          "type": "object"
+        }
+      ],
+      "description": "A list for every site, or a map from declared site to list."
+    },
     "SiteMode": {
       "description": "Controls where candidates for a variable modification are generated.",
       "oneOf": [
@@ -1379,6 +1368,10 @@
             "type": "number"
           },
           "type": "object"
+        },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
         },
         "mass": {
           "format": "float",
@@ -1559,6 +1552,10 @@
             "type": "number"
           },
           "type": "object"
+        },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
         },
         "mass": {
           "format": "float",
@@ -1921,7 +1918,7 @@
           "type": "null"
         }
       ],
-      "description": "Per-PSM immonium-ion evidence, written to `immonium.tsv` and the PIN\nfile. `true` looks for the unmodified F, Y, W, P, H, V and L/I ions\nand the phosphotyrosine (216.0420) and acetyl-lysine (126.0913) ions.\nAn object sets `rescore` (add the counts to the linear discriminant,\ndefault false), `residues` (default true), `modified` (a list of\n`{name, residue, modification, mz}`) and `tolerance` (default\n`fragment_tol`). Default off."
+      "description": "Per-PSM immonium-ion evidence, written to `results.sage.parquet` and\nthe PIN file and added to the linear discriminant. `true` looks for the\nunmodified P, V, L/I, H, F, Y and W ions and for the modified-residue\nions that modifications declare in `immonium_ions`. An object sets\n`rescore` (default true; false only reports the counts),\n`residue_ions` (the global switch for the unmodified-residue ions,\ndefault true) and `tolerance` (default `fragment_tol`). Default off."
     },
     "ion_mobility_model": {
       "anyOf": [

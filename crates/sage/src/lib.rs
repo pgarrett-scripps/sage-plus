@@ -26,6 +26,7 @@ pub mod ptm;
 pub mod ptm_library;
 pub mod scoring;
 pub mod sequence;
+pub mod site_map;
 pub mod spectral_library;
 pub mod spectrum;
 pub mod spectrum_index;

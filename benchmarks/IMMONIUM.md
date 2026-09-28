@@ -27,14 +27,25 @@ peptides, not where.
 
 Opt-in `immonium` (default off). Per PSM, on the processed spectrum the search scored:
 
-1. Residue ions of unmodified P, V, L/I, H, F, Y, W: counts of `explained` (ion observed, residue
-   in the peptide), `missing` (residue in the peptide, ion absent) and `unexplained` (ion
-   observed, residue absent).
-2. Modified-residue ions from a list of `{name, residue, modification, mz}` (mass plus label, no
-   formulas); defaults pY 216.0420 and acK 126.0913: `modified_explained` / `modified_unexplained`.
-3. Output to `immonium.tsv` and, with `write_pin`, five `.pin` columns for external rescoring.
-4. `rescore: true` (default false) appends the five counts to the LDA feature row.
+1. Residue ions of unmodified P, V, L/I, H, F, Y, W (global switch `residue_ions`, default on):
+   counts of `explained` (ion observed, residue in the peptide), `missing` (residue in the
+   peptide, ion absent) and `unexplained` (ion observed, residue absent).
+2. Modified-residue ions declared on the modification, `immonium_ions` (a list for every site,
+   or a map from declared site to list, m/z only, no formulas). For example
+   `"Phospho": {..., "immonium_ions": {"Y": [216.0420]}}` gives the ion `Phospho@Y`, explained
+   only when the peptide carries Phospho on a Y. No ions are built in: `modified_explained` /
+   `modified_unexplained` are 0 unless a modification declares some.
+3. Output to seven nullable `immonium_*` columns of `results.sage.parquet` (null when off) and,
+   with `write_pin`, five `.pin` columns for external rescoring.
+4. `rescore` (default true when `immonium` is on) appends the five counts to the LDA feature row;
+   `rescore: false` only reports them.
 5. Never in the fragment index, hyperscore or localization.
+
+Design history: the first version (benchmarked below) wrote a separate `immonium.tsv`, took a
+global list of `{name, residue, modification, mz}` with built-in pY and acK ions, and left
+`rescore` off. The current design keeps the same counts and LDA features, moves the output into
+the results parquet, declares modified ions on the modification, and turns `rescore` on with the
+option. Scores are unchanged apart from the dropped built-in acK ion; see the rerun below.
 
 Our own design, not published:
 
@@ -44,12 +55,14 @@ Our own design, not published:
   starting above the ion is not read as absence.
 - A peak counts only if singly charged (or of unknown charge) after deisotoping.
 - A residue carrying any modification does not count as that unmodified residue; a modified ion
-  matches when the modification mass is within 0.01 Da.
+  is explained by the declaring modification (same name, or an unnamed one within 0.01 Da) on
+  one of the sites it was declared for.
 - The offline pY-ion test against PXD000138 known sites below. It is an evaluation only; nothing
   in localization reads immonium ions.
 
 ## Benchmark
 
+These runs used the first design (c1682d9: `immonium.tsv`, built-in pY and acK ions).
 Base is `b14/per-mod-flr` (ad1b86f); candidate is `b14/immonium`, release builds. Variants: `off`
 (no `immonium` key), `on` (`immonium: true`), `rescore` (`{"rescore": true}`). Two alternating
 repetitions each, one search at a time under the shared memory gate, on a machine shared with
@@ -81,7 +94,8 @@ Datasets:
 
 `off` matched base exactly on every count. With `off` and with `on`, `results.sage.parquet` and
 `results.sage.ptm-sites.parquet` are identical to base (pandas frame equality) on all four
-datasets: the option adds `immonium.tsv` and `.pin` columns and nothing else. Runtime and peak
+datasets: the option adds `immonium.tsv` and `.pin` columns and nothing else (in the current
+design, the filled `immonium_*` parquet columns and `.pin` columns). Runtime and peak
 RSS differences are within the run-to-run noise of this machine.
 
 **Entrapment (HYE Human_01, rank-1 target peptides at peptide q <= 0.01).** Entrapment to human
@@ -116,7 +130,7 @@ The counts separate targets from decoys, most in the pY-rich synthetic library, 
 information is already in the fragment features: rescoring adds 0.4-1.3% PSMs.
 
 **Offline pY test (PXD000138, our evaluation, not used by the engine).** Single-site phospho
-localizations at q <= 0.01 on peptides containing both Y and S/T, joined to `immonium.tsv`:
+localizations at q <= 0.01 on peptides containing both Y and S/T, joined to the immonium evidence:
 
 | True residue | pY ion seen | pY ion absent |
 |---|---:|---:|
@@ -130,12 +144,33 @@ demoted pY calls lacking the ion would fix at most 14 and put 250 correct pY cal
 headroom is too small, and no published method uses the ion for site choice, so localization is
 unchanged.
 
+## Rerun with the current design
+
+PXD007058, one repetition, release build of the current design. Mods were rewritten to the
+named form (`Oxidation` on M; `Phospho` on S, T, Y with `"immonium_ions": {"Y": [216.0420]}`)
+and `immonium: true` (so `rescore` on by default). Configs are
+`configs/pxd007058-v2-{off,on}.json`.
+
+| Variant | PSMs | Peptides | Proteins | Groups |
+|---|---:|---:|---:|---:|
+| first design, `rescore` | 17,374 | 7,257 | 2,456 | 2,493 |
+| current, off (named mods) | 17,292 | 7,211 | 2,449 | 2,487 |
+| current, on | 17,370 | 7,256 | 2,456 | 2,493 |
+
+Named mods with the option off match base exactly, and the `immonium_*` parquet columns are all
+null. With it on, the `Phospho@Y` ion is seen on the same 12 PSMs as the old `pY` ion. The first
+design also counted the built-in acK ion on 106 PSMs, all unexplained since the search had no
+acetyl-K; dropping it accounts for the 4-PSM, 1-peptide difference.
+
 ## Recommendation
 
-- Keep `immonium` off by default. When on, it is an output (`immonium.tsv`, `.pin` columns) for
-  QC and external rescoring and changes nothing else.
-- Keep `rescore` off by default. The 0.4-1.3% PSM gain is small, and on HYE the added peptides
-  are enriched for entrapment hits. Revisit with more entrapment data before turning it on.
+- Keep `immonium` off by default. Turning it on is a request for the evidence, and it then
+  rescores by default, since the counts are informative (table above) and cost nothing extra.
+  `rescore: false` gives the evidence without changing scores.
+- The rescore gain is small (0.4-1.3% PSMs), and on HYE the added peptides carried 7 entrapment
+  hits (combined FDP 1.67% to 1.73%, within counting noise). Revisit with more entrapment data
+  before turning the option on by default.
+- Declare modified ions only where published: pY 216.0420 on Y, acK 126.0913 on K.
 - Do not use immonium ions in localization.
 
 ## Limits

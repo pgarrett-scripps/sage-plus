@@ -50,6 +50,7 @@ fn parameters(offset: bool) -> Parameters {
             SearchMode::Database
         },
         channel_offsets: Default::default(),
+        immonium_ions: Default::default(),
     });
     let mut variable_mods = HashMap::new();
     for residue in ["S", "T", "Y"] {

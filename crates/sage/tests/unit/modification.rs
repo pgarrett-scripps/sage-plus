@@ -39,6 +39,7 @@ fn var_mod_entry_detailed_with_limit() {
         neutral_loss_mode: NeutralLossMode::Optional,
         site_mode: SiteMode::Exhaustive,
         channel_offsets: Default::default(),
+        immonium_ions: Default::default(),
     });
     assert_eq!(entry.mass(), 15.9949);
     assert_eq!(entry.max_count(), Some(1));
@@ -192,6 +193,7 @@ fn validate_var_mods_mixed() {
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Exhaustive,
                 channel_offsets: Default::default(),
+                immonium_ions: Default::default(),
             }),
         ],
     );
@@ -207,6 +209,7 @@ fn validate_var_mods_mixed() {
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode: SiteMode::Exhaustive,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })],
     );
     let result = validate_var_mods(Some(raw));
