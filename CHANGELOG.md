@@ -21,6 +21,15 @@ entries are retained below for provenance.
   localization to each type's competition; decoy PSMs read their q-value off their own type's
   curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
   change; `localization_q_value` and `site_q_value` values change.
+- PTM localization now scores the neutral-loss forms of site-determining fragments for
+  modifications that define `neutral_losses`, using the main-scoring loss model: losses apply
+  only to fragments containing the modified residue, `optional` keeps the retained form,
+  `required` replaces it, and impossible-residue decoy arrangements get the same loss ions.
+  Following LuciPHOr (Fermin et al. 2013) and phosphoRS (Taus et al. 2011, HCD). Output without
+  configured losses is unchanged (tested byte-for-byte on PXD000138 and PXD007058). With phospho
+  H3PO4 loss on the PXD000138 known sites, the single-phospho true FLR stays within nominal
+  (0.88% at 1%) but passing localizations fall from 3,672 to 3,289; PXD007058 phospho
+  localizations at 1% rise from 7,032 to 7,347. Localization time roughly doubles on PXD007058.
 
 ## [v0.1.0-beta.13] - 2026-09-27
 

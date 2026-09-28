@@ -14,17 +14,19 @@
 //!      the candidate sites (keeping all other modifications pinned in place),
 //!   3. re-score each arrangement against the experimental spectrum using only
 //!      *site-determining ions* — fragments whose mass differs between
-//!      arrangements,
+//!      arrangements, including the neutral-loss forms of fragments that carry
+//!      a modification with configured `neutral_losses`,
 //!   4. convert the per-arrangement scores into an **AScore**-style delta
 //!      between the two best arrangements and a per-site **localization
 //!      probability** (the Andromeda / MaxQuant convention).
 
 use itertools::Itertools;
 use serde::Serialize;
+use smallvec::{smallvec, SmallVec};
 
 use crate::ion_series::{IonSeries, Kind};
 use crate::mass::Tolerance;
-use crate::modification::{ModificationDefinition, ModificationSpecificity};
+use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
 use crate::peptide::Peptide;
 use crate::peptide::Site;
 use crate::spectrum::{select_most_intense_peak, ProcessedSpectrum};
@@ -448,9 +450,9 @@ fn localize_mass(
         sites: Vec<usize>,
         score: f64,
         matched: u32,
+        trials: u32,
     }
 
-    let mut total_trials = 0u32;
     let mut arrangements: Vec<Arrangement> = Vec::with_capacity(n_arrangements);
     for combo in candidates.iter().copied().combinations(k) {
         let variant = build_variant(peptide, mass, &candidates, &combo);
@@ -463,13 +465,17 @@ fn localize_mass(
             fragment_tol,
             max_charge,
         );
-        total_trials = trials; // identical across arrangements
+        // Without neutral losses the trial count is identical across
+        // arrangements. Loss forms exist only for fragments carrying the
+        // modification, so with losses each arrangement has its own count and
+        // the binomial model is evaluated against it.
         let pvalue = binomial_tail(matched, trials, p_random);
         let score = -10.0 * pvalue.log10();
         arrangements.push(Arrangement {
             sites: combo,
             score,
             matched,
+            trials,
         });
     }
 
@@ -502,6 +508,7 @@ fn localize_mass(
         }
     }
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
+    let total_trials = arrangements.first().map(|a| a.trials).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
     let best_decoy_score = decoy_candidates.as_ref().and_then(|decoys| {
@@ -756,8 +763,10 @@ fn build_variant(peptide: &Peptide, mass: f32, candidates: &[usize], chosen: &[u
     variant
 }
 
-/// Count matched site-determining ions for `variant` and the (arrangement
-/// independent) number of site-determining theoretical ion slots.
+/// Count matched site-determining ions for `variant` and the number of
+/// site-determining theoretical ion slots. The slot count is the same for every
+/// arrangement unless a modification defines neutral losses (see
+/// [`fragment_losses`]).
 fn score_arrangement(
     variant: &Peptide,
     spectrum: &ProcessedSpectrum,
@@ -796,24 +805,77 @@ fn score_arrangement(
             if !is_site_determining(c_in_region, total_c, k) {
                 continue;
             }
-            for charge in 1..max_charge {
-                trials += 1;
-                let mz = ion.monoisotopic_mass / charge as f32;
-                if select_most_intense_peak(
-                    &spectrum.masses,
-                    &spectrum.intensities,
-                    mz,
-                    fragment_tol,
-                    None,
-                )
-                .is_some()
-                {
-                    matched += 1;
+            for loss in fragment_losses(variant, *kind, idx) {
+                let mass = ion.monoisotopic_mass - loss;
+                if loss > 0.0 && mass <= 0.0 {
+                    continue;
+                }
+                for charge in 1..max_charge {
+                    trials += 1;
+                    let mz = mass / charge as f32;
+                    if select_most_intense_peak(
+                        &spectrum.masses,
+                        &spectrum.intensities,
+                        mz,
+                        fragment_tol,
+                        None,
+                    )
+                    .is_some()
+                    {
+                        matched += 1;
+                    }
                 }
             }
         }
     }
     (matched, trials)
+}
+
+/// Total neutral losses to consider for fragment `series_index` of `kind`:
+/// `0.0` for the retained form plus every combination of the configured
+/// `neutral_losses` of the modifications this fragment contains.
+///
+/// This mirrors the loss model of main scoring
+/// ([`crate::ion_series::IonGroupSeries`]) so localization and identification
+/// see the same theoretical ions. A loss applies only to fragments that
+/// contain the modified residue, which is what makes a loss ion
+/// site-determining (LuciPHOr, Fermin et al. 2013). `optional` losses keep the
+/// retained form; `required` losses replace it. Decoy arrangements carry the
+/// same definition on their impossible residues and so receive the same loss
+/// ions, as LuciPHOr's `DECOY_NL`. Without configured losses this returns
+/// `[0.0]` and scoring is unchanged.
+fn fragment_losses(peptide: &Peptide, kind: Kind, series_index: usize) -> SmallVec<[f32; 4]> {
+    let mut totals: SmallVec<[f32; 4]> = smallvec![0.0];
+    let contains = |site: Site| match (kind, site) {
+        (Kind::A | Kind::B | Kind::C, Site::Nterm) => true,
+        (Kind::A | Kind::B | Kind::C, Site::Cterm) => false,
+        (Kind::A | Kind::B | Kind::C, Site::Sequence(index)) => index as usize <= series_index,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Nterm) => false,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Cterm) => true,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Sequence(index)) => {
+            index as usize > series_index
+        }
+    };
+    for applied in peptide.applied_modifications() {
+        let modification = applied.modification;
+        if modification.neutral_losses.is_empty() || !contains(applied.site) {
+            continue;
+        }
+        let optional = modification.neutral_loss_mode == NeutralLossMode::Optional;
+        let mut next: SmallVec<[f32; 4]> = SmallVec::new();
+        for total in &totals {
+            if optional {
+                next.push(*total);
+            }
+            for loss in modification.neutral_losses.iter() {
+                next.push(total + loss);
+            }
+        }
+        next.sort_unstable_by(f32::total_cmp);
+        next.dedup_by(|a, b| (*a - *b).abs() < 1e-5);
+        totals = next;
+    }
+    totals
 }
 
 /// A fragment covering `c_in_region` of the `total_c` candidate sites is

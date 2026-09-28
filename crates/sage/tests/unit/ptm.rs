@@ -3,6 +3,7 @@
 use super::*;
 use crate::enzyme::Digest;
 use crate::mass::PROTON;
+use crate::modification::NeutralLossMode;
 use crate::peptide::CompactModifications;
 
 fn peptide(seq: &str) -> Peptide {
@@ -455,4 +456,213 @@ fn modification_type_identity_uses_name_and_mass() {
         ModificationType::new("+15.9949", 15.9949),
         ModificationType::new("+15.9949", 15.9990)
     );
+}
+
+const H3PO4: f32 = 97.976896;
+
+fn phospho_definition(losses: &[f32], mode: NeutralLossMode) -> Arc<ModificationDefinition> {
+    Arc::new(ModificationDefinition {
+        name: Some("Phospho".into()),
+        neutral_losses: Arc::from(losses),
+        neutral_loss_mode: mode,
+        ..ModificationDefinition::bare(PHOSPHO)
+    })
+}
+
+fn phospho_rules(
+    definition: &Arc<ModificationDefinition>,
+) -> [(ModificationSpecificity, Arc<ModificationDefinition>); 3] {
+    [
+        (ModificationSpecificity::Residue(b'S'), definition.clone()),
+        (ModificationSpecificity::Residue(b'T'), definition.clone()),
+        (ModificationSpecificity::Residue(b'Y'), definition.clone()),
+    ]
+}
+
+/// Spectrum from the fragments main scoring would predict (including loss
+/// forms), at charge 1, plus deterministic off-series noise peaks.
+fn spectrum_with_losses(peptide: &Peptide, noise: usize) -> ProcessedSpectrum {
+    let mut peaks: Vec<(f32, f32)> = Vec::new();
+    for kind in [Kind::B, Kind::Y] {
+        for group in crate::ion_series::IonGroupSeries::new(peptide, kind) {
+            peaks.extend(
+                group
+                    .variants
+                    .iter()
+                    .map(|variant| (variant.monoisotopic_mass, 1000.0)),
+            );
+        }
+    }
+    peaks.extend((0..noise).map(|i| (150.0 + i as f32 * 37.1234, 100.0)));
+    peaks.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let tic = peaks.iter().map(|p| p.1).sum();
+    let (masses, intensities) = peaks.into_iter().unzip();
+    ProcessedSpectrum {
+        level: 2,
+        masses,
+        intensities,
+        total_ion_current: tic,
+        ..Default::default()
+    }
+}
+
+/// Localization output without configured losses must be identical to the
+/// Beta 13 / per-mod-FLR base. The expected strings were recorded from the base
+/// commit (ad1b86f) before loss ions were added to localization.
+#[test]
+fn localization_without_losses_is_unchanged_from_base() {
+    let definition = phospho_definition(&[], NeutralLossMode::Optional);
+    let rules = phospho_rules(&definition);
+    let single = peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), &definition);
+    let double = single.with_mass_offset(Site::Sequence(8), &definition);
+    let mut observed = Vec::new();
+    for (truth, scored) in [(&single, &single), (&double, &double)] {
+        for noise in [0, 25] {
+            let loc = localize(
+                scored,
+                &spectrum_with_losses(truth, noise),
+                &[Kind::B, Kind::Y],
+                &rules,
+                Tolerance::Ppm(-20.0, 20.0),
+                None,
+                3,
+            );
+            observed.push(format!("{:?}", loc));
+        }
+    }
+    let mass_only = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    let mut legacy = peptide("AASAATAAGK");
+    legacy.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let loc = localize(
+        &legacy,
+        &spectrum_with_losses(&legacy, 10),
+        &[Kind::B, Kind::Y],
+        &mass_only,
+        Tolerance::Ppm(-20.0, 20.0),
+        None,
+        3,
+    );
+    observed.push(format!("{:?}", loc));
+    let observed = observed.join("\n");
+    println!("{observed}");
+    assert_eq!(observed, BASE_NO_LOSS_OUTPUT);
+}
+
+const BASE_NO_LOSS_OUTPUT: &str = r#"Localization { mods: [ModLocalization { mass: 79.96633, label: Some("Phospho"), site_count: 1, candidate_sites: 3, site_determining_ions: 36, site_determining_matched: 18, delta_score: 189.58427, target_decoy_score: 65.12185, decoy_winner: false, competition_eligible: true, localization_q_value: 1.0, best_sites: [SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }], all_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 1.1004576e-19 }, SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.1004576e-19 }] }] }
+Localization { mods: [ModLocalization { mass: 79.96633, label: Some("Phospho"), site_count: 1, candidate_sites: 3, site_determining_ions: 36, site_determining_matched: 18, delta_score: 169.79123, target_decoy_score: 58.524, decoy_winner: false, competition_eligible: true, localization_q_value: 1.0, best_sites: [SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }], all_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 1.0492452e-17 }, SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.0492452e-17 }] }] }
+Localization { mods: [ModLocalization { mass: 79.96633, label: Some("Phospho"), site_count: 2, candidate_sites: 3, site_determining_ions: 36, site_determining_matched: 18, delta_score: 189.80591, target_decoy_score: 189.80591, decoy_winner: false, competition_eligible: true, localization_q_value: 1.0, best_sites: [SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.0 }], all_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 1.0457052e-19 }, SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.0 }] }] }
+Localization { mods: [ModLocalization { mass: 79.96633, label: Some("Phospho"), site_count: 2, candidate_sites: 3, site_determining_ions: 36, site_determining_matched: 18, delta_score: 170.01297, target_decoy_score: 170.01297, decoy_winner: false, competition_eligible: true, localization_q_value: 1.0, best_sites: [SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.0 }], all_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 9.970164e-18 }, SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.0 }, SiteScore { attachment: Residue, position: 8, residue: 89, probability: 1.0 }] }] }
+Localization { mods: [ModLocalization { mass: 79.96633, label: None, site_count: 1, candidate_sites: 2, site_determining_ions: 24, site_determining_matched: 12, delta_score: 177.45218, target_decoy_score: 62.0985, decoy_winner: false, competition_eligible: true, localization_q_value: 1.0, best_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 1.0 }], all_sites: [SiteScore { attachment: Residue, position: 2, residue: 83, probability: 1.0 }, SiteScore { attachment: Residue, position: 5, residue: 84, probability: 1.7979707e-18 }] }] }"#;
+
+#[test]
+fn loss_ions_follow_mode_and_modified_fragments() {
+    let optional = phospho_definition(&[H3PO4], NeutralLossMode::Optional);
+    let required = phospho_definition(&[H3PO4], NeutralLossMode::Required);
+    let with = |definition: &Arc<ModificationDefinition>| {
+        peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), definition)
+    };
+    let pep = with(&optional);
+    // b5 covers residues 0..=4 and misses the phospho on T5; b6 contains it.
+    assert_eq!(fragment_losses(&pep, Kind::B, 4).as_slice(), &[0.0]);
+    assert_eq!(fragment_losses(&pep, Kind::B, 5).as_slice(), &[0.0, H3PO4]);
+    // y series index 4 covers residues 5.. and contains it; index 5 does not.
+    assert_eq!(fragment_losses(&pep, Kind::Y, 4).as_slice(), &[0.0, H3PO4]);
+    assert_eq!(fragment_losses(&pep, Kind::Y, 5).as_slice(), &[0.0]);
+    // Required: only the lost form exists for fragments with the residue.
+    let pep = with(&required);
+    assert_eq!(fragment_losses(&pep, Kind::B, 5).as_slice(), &[H3PO4]);
+    assert_eq!(fragment_losses(&pep, Kind::B, 4).as_slice(), &[0.0]);
+    // Two optional copies: zero, one or two losses.
+    let pep = with(&optional).with_mass_offset(Site::Sequence(8), &optional);
+    let losses = fragment_losses(&pep, Kind::B, 9);
+    assert_eq!(losses.len(), 3);
+    assert!((losses[2] - 2.0 * H3PO4).abs() < 1e-3);
+    // No configured losses: the retained form only, as before.
+    let bare = phospho_definition(&[], NeutralLossMode::Optional);
+    assert_eq!(fragment_losses(&with(&bare), Kind::B, 5).as_slice(), &[0.0]);
+}
+
+#[test]
+fn decoy_placements_receive_the_same_loss_ions() {
+    let definition = phospho_definition(&[H3PO4], NeutralLossMode::Optional);
+    let pep = peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), &definition);
+    let candidates = [2, 5, 8];
+    // Impossible-site decoy: phospho on G1.
+    let decoy = build_variant(&pep, PHOSPHO, &[2, 5, 8, 1], &[1]);
+    assert_eq!(decoy.modification_at(1), PHOSPHO);
+    assert_eq!(
+        fragment_losses(&decoy, Kind::B, 1).as_slice(),
+        &[0.0, H3PO4]
+    );
+    assert_eq!(fragment_losses(&decoy, Kind::B, 0).as_slice(), &[0.0]);
+    // The decoy arrangement is scored with the same kind of trials: a b ion
+    // containing the placed mass contributes both forms.
+    let target = build_variant(&pep, PHOSPHO, &candidates, &[2]);
+    assert_eq!(
+        fragment_losses(&target, Kind::B, 2).as_slice(),
+        &[0.0, H3PO4]
+    );
+}
+
+#[test]
+fn required_losses_localize_from_lost_fragment_forms() {
+    let lossy = phospho_definition(&[H3PO4], NeutralLossMode::Required);
+    let bare = phospho_definition(&[], NeutralLossMode::Optional);
+    let truth = peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), &lossy);
+    // The spectrum carries only the lost form of phospho-containing fragments.
+    let spectrum = spectrum_with_losses(&truth, 25);
+    let run = |definition: &Arc<ModificationDefinition>| {
+        let scored = peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), definition);
+        localize(
+            &scored,
+            &spectrum,
+            &[Kind::B, Kind::Y],
+            &phospho_rules(definition),
+            Tolerance::Ppm(-20.0, 20.0),
+            None,
+            3,
+        )
+        .mods
+        .remove(0)
+    };
+    let with_losses = run(&lossy);
+    let without = run(&bare);
+    assert_eq!(with_losses.best_sites[0].position, 5);
+    assert!(!with_losses.decoy_winner);
+    // Required mode keeps one form per fragment slot, so the trial count is
+    // unchanged, but the lost forms now match.
+    assert_eq!(
+        with_losses.site_determining_ions,
+        without.site_determining_ions
+    );
+    assert!(with_losses.site_determining_matched > without.site_determining_matched);
+    assert!(with_losses.delta_score > without.delta_score);
+}
+
+#[test]
+fn optional_losses_add_trials_for_modified_fragments() {
+    let lossy = phospho_definition(&[H3PO4], NeutralLossMode::Optional);
+    let bare = phospho_definition(&[], NeutralLossMode::Optional);
+    let run = |definition: &Arc<ModificationDefinition>| {
+        let truth = peptide("AGSAATAAYAKR").with_mass_offset(Site::Sequence(5), definition);
+        localize(
+            &truth,
+            &spectrum_with_losses(&truth, 25),
+            &[Kind::B, Kind::Y],
+            &phospho_rules(definition),
+            Tolerance::Ppm(-20.0, 20.0),
+            None,
+            3,
+        )
+        .mods
+        .remove(0)
+    };
+    let with_losses = run(&lossy);
+    let without = run(&bare);
+    assert_eq!(with_losses.best_sites[0].position, 5);
+    assert!(with_losses.site_determining_ions > without.site_determining_ions);
+    assert!(with_losses.site_determining_matched > without.site_determining_matched);
 }
