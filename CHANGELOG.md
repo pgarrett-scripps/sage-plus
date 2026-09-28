@@ -16,6 +16,12 @@ entries are retained below for provenance.
   0.1% on five datasets, and decoy loss matches fall more than target ones; 1+ is now the
   documented recommendation, not the default (`benchmarks/FRAGMENT_LOSSES.md`).
 
+### Documentation
+- `allow_modified: false` and labelled residues, analysed in `benchmarks/FRAGMENT_LOSSES.md`:
+  excluding TMT/iTRAQ-labelled K and 15N SILAC labels (K8, R10) from ammonia loss is correct
+  (acylated ε-amine; lost ammonia would be 15NH3, 18.0236 Da). 13C-only labels (K6, R6) are
+  excluded conservatively; `allow_modified: true` keeps them. No code change.
+
 ### Changed
 - Immonium modified-residue ions no longer depend on where the search placed the modification.
   An ion such as `Phospho@Y` is explained when the peptide carries the modification and has a

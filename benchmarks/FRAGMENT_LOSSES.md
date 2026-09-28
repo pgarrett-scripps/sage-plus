@@ -443,6 +443,33 @@ recommended configuration. It performs as well as all charges, matches Comet
 features. The default stays at all charges: the evidence shows parity, not a
 clear gain, and an absent key must keep reproducing Beta 14 results.
 
+## `allow_modified` and labelled residues (Beta 15 analysis)
+
+With `allow_modified: false` (the default) a residue that carries any
+modification, including a static label, is not a loss site. For the approved
+ammonia rule (R, K, N, Q on y ions) this matters because every tryptic y ion
+contains its C-terminal K or R. Isobaric tags such as TMT and iTRAQ acylate
+the lysine ε-amine (Thompson et al., Anal. Chem. 2003, 75:1895), so a labelled
+K has no free side-chain amine to lose as ammonia. Excluding it is correct,
+as it is for acetyl-K. R is not labelled by TMT and stays a site. For SILAC,
+what matters is the element that is labelled. In 13C-only labels (K6 and R6,
+Unimod `Label:13C(6)`) the lost ammonia is still 17.0265 Da, because the
+heavy carbons stay on the fragment, whose mass already includes them. So
+these residues are real ammonia sites that the default drops. Labels with
+15N (K8 `Label:13C(6)15N(2)`, R10 `Label:13C(6)15N(4)`) label every nitrogen
+of the residue. Ammonia lost from them is 15NH3, 18.0236 Da, so the
+configured 17.0265 Da would be wrong by 0.997 Da, and excluding them is
+correct (SILAC: Ong et al., Mol. Cell. Proteomics 2002, 1:376). The default
+is therefore right for isobaric tags, acylations and 15N labels, and
+conservative only for 13C-only SILAC labels. Users who want ammonia forms on
+K6/R6 residues can set `allow_modified: true` on the Ammonia entry, at the
+cost of also admitting other modified K and R. **Recommendation: no code
+change.** A per-modification exception list would be the principled fix, but
+loss features change identifications by 0.2% or less on every dataset
+here, so a narrower site rule on labelled residues cannot move results
+beyond noise. (The HEK SILAC benchmark searches K6R6 data without the label,
+so it does not exercise this case.)
+
 ## Reproducing
 
 ```bash

@@ -655,7 +655,12 @@ identifications and q-values are unchanged and the two loss columns of
   rejected). A fragment can carry the loss when it contains at least one site.
 - `ion_kinds` must be a subset of `database.ion_kinds`.
 - `allow_modified` (default false): whether a residue or terminus that carries
-  any modification still counts as a site.
+  any modification still counts as a site. Static labels count as
+  modifications: TMT-labelled K and 15N SILAC labels (K8, R10) are correctly
+  excluded from ammonia loss, while 13C-only labels (K6, R6), whose lost
+  ammonia keeps its unlabelled mass, are excluded too. Set `allow_modified:
+  true` on the ammonia entry to keep them (see
+  [`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)).
 - `max_fragment_losses` (default 1): the most generic losses stacked on one
   fragment. A loss is never used more often than the fragment has sites for it.
 - `max_fragment_loss_charge` (default: every fragment charge searched): the
