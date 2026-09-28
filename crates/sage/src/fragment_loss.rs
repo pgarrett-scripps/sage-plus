@@ -50,81 +50,6 @@ pub struct FragmentLosses {
     pub losses: Vec<FragmentLoss>,
     /// Most generic losses stacked on one fragment.
     pub max_losses: usize,
-    /// Experiment hook: how matched loss ions enter scoring.
-    pub scoring: LossScoring,
-}
-
-/// Where matched loss ions enter scoring (experiment hook).
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum LossMode {
-    /// Hyperscore ignores loss ions.
-    Features,
-    /// B: loss forms are alternatives of their cleavage (most intense wins).
-    Alternatives,
-    /// B-int: as B, but a cleavage matched only by a loss form adds its
-    /// intensity and no matched-ion count.
-    AlternativesIntensity,
-    /// B-intact: as B, but the intact form wins whenever it matched.
-    AlternativesIntactFirst,
-    /// Parent-supported: a loss peak counts only when its intact form
-    /// matched at the same cleavage and charge; it adds `weight` to the
-    /// hyperscore's matched-ion count and its intensity to the summed
-    /// intensity. `matched_peaks` and the other features are unchanged.
-    Parent,
-    /// Comet-like: every matched loss peak, with or without its intact
-    /// form, adds `weight` to the hyperscore's matched-ion count and
-    /// `weight` times its intensity to the summed intensity.
-    Weighted,
-}
-
-/// Experiment hook, selected with `SAGE_PLUS_FRAGMENT_LOSS_*` variables.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct LossScoring {
-    pub mode: LossMode,
-    /// Parent mode: matched-ion count weight of a supported loss peak.
-    pub weight: f64,
-    /// Weighted mode: matched-ion count weight of a loss peak (defaults to
-    /// `weight`; 0 makes the in-score contribution count-free).
-    pub count_weight: f64,
-    /// Parent mode: whether a supported loss peak adds its intensity.
-    pub intensity: bool,
-    /// Emit `matched_loss_peaks` and `loss_intensity_pct` LDA features.
-    pub features: bool,
-    /// Features count only loss peaks whose intact form matched.
-    pub feature_parent: bool,
-}
-
-impl LossScoring {
-    fn from_env() -> Self {
-        let var = |name: &str| std::env::var(name).ok();
-        let flag = |name: &str, default: bool| {
-            var(name).map_or(default, |value| value == "1" || value == "true")
-        };
-        let mode = match var("SAGE_PLUS_FRAGMENT_LOSS_SCORING").as_deref() {
-            Some("hyperscore") => LossMode::Alternatives,
-            Some("hyperscore_intensity") => LossMode::AlternativesIntensity,
-            Some("intact_first") => LossMode::AlternativesIntactFirst,
-            Some("parent") => LossMode::Parent,
-            Some("weighted") => LossMode::Weighted,
-            _ => LossMode::Features,
-        };
-        let weight = var("SAGE_PLUS_FRAGMENT_LOSS_WEIGHT")
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(1.0);
-        LossScoring {
-            mode,
-            weight,
-            count_weight: var("SAGE_PLUS_FRAGMENT_LOSS_COUNT_WEIGHT")
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(weight),
-            intensity: flag("SAGE_PLUS_FRAGMENT_LOSS_PARENT_INTENSITY", true),
-            features: flag(
-                "SAGE_PLUS_FRAGMENT_LOSS_FEATURES",
-                mode == LossMode::Features,
-            ),
-            feature_parent: flag("SAGE_PLUS_FRAGMENT_LOSS_FEATURE_PARENT", false),
-        }
-    }
 }
 
 /// Default for `database.max_fragment_losses`.
@@ -216,11 +141,7 @@ pub fn resolve(
             allow_modified: entry.allow_modified,
         });
     }
-    Ok(Some(FragmentLosses {
-        losses,
-        max_losses,
-        scoring: LossScoring::from_env(),
-    }))
+    Ok(Some(FragmentLosses { losses, max_losses }))
 }
 
 fn kind_name(kind: Kind) -> String {

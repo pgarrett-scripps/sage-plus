@@ -4,7 +4,8 @@
 Searches each dataset with a baseline executable (no fragment losses) and a
 candidate executable in several integration variants, then reports PSMs,
 peptides and proteins at 1% q-value, decoys at 1%, species-entrapment FDP
-(for human samples searched against human + yeast + E. coli), wall time and
+(for human samples searched against human + yeast + E. coli), PSMs and
+peptides at a fixed 1% entrapment FDP, the median delta_next, wall time and
 peak RSS.
 
 Variants (see FRAGMENT_LOSSES.md and VARIANTS below):
@@ -13,6 +14,8 @@ Variants (see FRAGMENT_LOSSES.md and VARIANTS below):
   C     candidate, losses as separate LDA features (the shipped behaviour)
   B, B-int, B-intact, B-narrow, B-max2, Cs, Cf, P0, P05, P1, P0-narrow,
   P0Cs, W02  experiment integrations, see VARIANTS
+  B-int+C, W01+C..W05+C, W02c+C  third round: an in-score contribution plus
+             the C features (experiment commit 3eb2310)
 The `-chimera` suffix runs a variant with `chimera: true` and `report_psms: 2`.
 
 Every variant except base, A and C is selected with the experiment hook
