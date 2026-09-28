@@ -818,6 +818,8 @@ fn digestion() {
         peptide_max_mass: 5000.0,
         ion_kinds: vec![Kind::B, Kind::Y],
         min_ion_index: 2,
+        fragment_losses: None,
+        max_fragment_losses: None,
         static_mods: HashMap::default(),
         variable_mods: [(
             ModificationSpecificity::ProteinN(None),

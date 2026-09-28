@@ -5,6 +5,7 @@ use crate::enzyme::{
     ProteinOccurrence,
 };
 use crate::fasta::Fasta;
+use crate::fragment_loss::{FragmentLossEntry, FragmentLosses};
 use crate::ion_series::{IonGroupSeries, Kind};
 use crate::mass::Tolerance;
 use crate::modification::{
@@ -24,7 +25,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -93,6 +94,16 @@ pub struct Builder {
     /// Minimum ion index to be generated: 1 will remove b1/y1 ions
     /// 2 will remove b1/b2/y1/y2 ions, etc
     pub min_ion_index: Option<usize>,
+    /// Generic fragment neutral losses, keyed by a label, for example
+    /// `{"Water": {"mass": 18.010565, "sites": ["S", "T", "E", "D"],
+    /// "ion_kinds": ["b", "y"]}}`. Loss ions are matched only when a
+    /// candidate is fully scored and enter rescoring as separate features.
+    /// Off unless present. Separate from modification `neutral_losses`.
+    pub fragment_losses: Option<BTreeMap<String, FragmentLossEntry>>,
+    /// Most generic fragment losses stacked on one fragment (default 1).
+    /// Requires `fragment_losses`.
+    #[schemars(range(min = 1))]
+    pub max_fragment_losses: Option<usize>,
     /// Named static definitions with mass and explicit sites.
     /// Upstream Sage symbol-keyed masses (`{"C": 57.021464}`) remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
@@ -186,6 +197,17 @@ impl Builder {
         Ok(())
     }
 
+    /// Validate `fragment_losses` and `max_fragment_losses`.
+    pub fn validate_fragment_losses(&self) -> Result<(), String> {
+        let ion_kinds = self.ion_kinds.clone().unwrap_or(vec![Kind::B, Kind::Y]);
+        crate::fragment_loss::resolve(
+            self.fragment_losses.as_ref(),
+            self.max_fragment_losses,
+            &ion_kinds,
+        )
+        .map(|_| ())
+    }
+
     pub fn make_parameters(self) -> Parameters {
         if self.prefilter_low_memory.is_some() {
             log::warn!("database.prefilter_low_memory is deprecated and ignored");
@@ -206,6 +228,11 @@ impl Builder {
             peptide_max_mass: self.peptide_max_mass.unwrap_or(5000.0),
             ion_kinds: self.ion_kinds.unwrap_or(vec![Kind::B, Kind::Y]),
             min_ion_index: self.min_ion_index.unwrap_or(2),
+            max_fragment_losses: self.fragment_losses.as_ref().map(|_| {
+                self.max_fragment_losses
+                    .unwrap_or(crate::fragment_loss::DEFAULT_MAX_FRAGMENT_LOSSES)
+            }),
+            fragment_losses: self.fragment_losses,
             decoy_tag: self.decoy_tag.unwrap_or_else(|| "rev_".into()),
             enzyme: self.enzyme.unwrap_or_default(),
             static_mods: validate_mods(self.static_mods),
@@ -242,6 +269,10 @@ pub struct Parameters {
     pub peptide_max_mass: f32,
     pub ion_kinds: Vec<Kind>,
     pub min_ion_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fragment_losses: Option<BTreeMap<String, FragmentLossEntry>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fragment_losses: Option<usize>,
     #[serde(serialize_with = "crate::modification::serialize_static_mods")]
     pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
     #[serde(serialize_with = "crate::modification::serialize_variable_mods")]
@@ -568,6 +599,18 @@ impl Parameters {
 
     /// Group search-time mass offsets by chemical definition. Each group keeps
     /// every configured specificity so placement and localization agree.
+    /// Validated generic fragment losses, or `None` when not configured.
+    /// Panics on an invalid configuration; the CLI validates it first with
+    /// [`Builder::validate_fragment_losses`].
+    pub fn fragment_losses(&self) -> Option<FragmentLosses> {
+        crate::fragment_loss::resolve(
+            self.fragment_losses.as_ref(),
+            self.max_fragment_losses,
+            &self.ion_kinds,
+        )
+        .unwrap_or_else(|error| panic!("{error}"))
+    }
+
     pub fn mass_offset_modifications(&self) -> Vec<MassOffset> {
         let mut groups: Vec<MassOffset> = Vec::new();
         let mut entries = self
@@ -1833,6 +1876,7 @@ impl Parameters {
             offset_library,
             fragments: compressed_fragments,
             min_value,
+            fragment_losses: self.fragment_losses().map(Arc::new),
             ion_kinds: self.ion_kinds,
             generate_decoys: self.generate_decoys,
             potential_mods,
@@ -2507,6 +2551,9 @@ pub struct IndexedDatabase {
     pub offset_library: Option<Arc<PtmLibrary>>,
     pub fragments: FragmentIndex,
     pub ion_kinds: Vec<Kind>,
+    /// Generic fragment losses matched during full candidate scoring. Never
+    /// part of the fragment index.
+    pub fragment_losses: Option<Arc<FragmentLosses>>,
     pub min_value: Vec<f32>,
     /// Variable modification candidates used by PTM localization.
     pub potential_mods: Vec<(ModificationSpecificity, f32)>,

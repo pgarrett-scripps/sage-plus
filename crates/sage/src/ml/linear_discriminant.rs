@@ -17,7 +17,9 @@ use crate::scoring::Feature;
 
 // Declare, so that we have compile time checking of matrix dimensions
 const FEATURES: usize = 20;
-const FEATURE_NAMES: [&str; FEATURES] = [
+/// Feature count with the generic fragment-loss features appended.
+const LOSS_FEATURES: usize = FEATURES + 2;
+const FEATURE_NAMES: [&str; LOSS_FEATURES] = [
     "rank",
     "charge",
     "ln1p(hyperscore)",
@@ -38,6 +40,8 @@ const FEATURE_NAMES: [&str; FEATURES] = [
     "ims",
     "sqrt(delta_rt_model)",
     "sqrt(delta_ims_model)",
+    "ln1p(matched_loss_peaks)",
+    "ln1p(loss_intensity_pct)",
 ];
 
 struct Features<'a>(&'a [f64]);
@@ -350,22 +354,22 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
         ]
     };
 
-    let lda = LinearDiscriminantAnalysis::train::<_, FEATURES>(scores, &decoys, &compute_features)
-        .inspect_err(|failure| {
-            if *failure == LdaFailure::NonFinite {
-                if let Some(row) = scores
-                    .iter()
-                    .map(&compute_features)
-                    .find(|row| row.iter().any(|f| !f.is_finite()))
-                {
-                    log::warn!("example feature vector with NaN: {:?}", Features(&row));
-                }
-            }
-        })?;
-    let discriminants: Vec<f64> = scores
-        .par_iter()
-        .map(|perc| lda.score(&compute_features(perc)))
-        .collect();
+    // Generic fragment-loss evidence is only present when
+    // `database.fragment_losses` is configured; without it the model is the
+    // unchanged 20-feature one.
+    let discriminants = if scores.iter().any(|perc| perc.fragment_loss.is_some()) {
+        fit_discriminants(scores, &decoys, |perc: &Feature| -> [f64; LOSS_FEATURES] {
+            let base = compute_features(perc);
+            let loss = perc.fragment_loss.unwrap_or_default();
+            std::array::from_fn(|j| match j {
+                j if j < FEATURES => base[j],
+                FEATURES => (loss.matched_peaks as f64).ln_1p(),
+                _ => (loss.intensity_pct as f64).ln_1p(),
+            })
+        })?
+    } else {
+        fit_discriminants(scores, &decoys, compute_features)?
+    };
     if discriminants.iter().any(|score| !score.is_finite()) {
         return Err(LdaFailure::NonFinite);
     }
@@ -395,6 +399,29 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
         });
 
     Ok(())
+}
+
+fn fit_discriminants<const D: usize>(
+    scores: &[Feature],
+    decoys: &[bool],
+    compute_features: impl Fn(&Feature) -> [f64; D] + Sync,
+) -> Result<Vec<f64>, LdaFailure> {
+    let lda = LinearDiscriminantAnalysis::train::<_, D>(scores, decoys, &compute_features)
+        .inspect_err(|failure| {
+            if *failure == LdaFailure::NonFinite {
+                if let Some(row) = scores
+                    .iter()
+                    .map(&compute_features)
+                    .find(|row| row.iter().any(|f| !f.is_finite()))
+                {
+                    log::warn!("example feature vector with NaN: {:?}", Features(&row));
+                }
+            }
+        })?;
+    Ok(scores
+        .par_iter()
+        .map(|perc| lda.score(&compute_features(perc)))
+        .collect())
 }
 
 /// Heuristic discriminant used when [`score_psms`] cannot fit a model:

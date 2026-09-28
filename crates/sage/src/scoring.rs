@@ -1,8 +1,9 @@
 use crate::database::{
     same_peptidoform, IndexedDatabase, MassOffset, MassOffsetAssignment, PeptideIx, Theoretical,
 };
+use crate::fragment_loss::LossScoring;
 use crate::heap::bounded_min_heapify;
-use crate::ion_series::{IonGroupSeries, Kind};
+use crate::ion_series::{IonGroupSeries, IonVariant, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::mass_recalibration::{FileMassCorrection, MassRecalibration};
 use crate::peptide::{Peptide, Site};
@@ -80,6 +81,10 @@ struct Score {
     raw_signed_ppm_difference: f32,
     /// Intensity-weighted sum (then mean) of squared raw signed errors.
     raw_squared_ppm_difference: f32,
+    /// Cleavages whose generic fragment-loss form matched a peak, when loss
+    /// ions are scored as separate features.
+    matched_loss: u16,
+    summed_loss: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -315,6 +320,11 @@ pub struct Feature {
 
     pub fragments: Option<Fragments>,
 
+    /// Generic fragment-loss evidence, when `database.fragment_losses` is
+    /// configured.
+    #[serde(skip_serializing)]
+    pub fragment_loss: Option<FragmentLossFeatures>,
+
     /// Sequence-ambiguity annotation: the peptide string with residues lacking
     /// flanking fragment-ion evidence wrapped in `(?...)`, plus any residual
     /// mass-shift placement.
@@ -334,6 +344,17 @@ pub struct Feature {
     /// peptidoform.
     #[serde(skip_serializing)]
     pub mass_offset: Option<MassOffsetAssignment>,
+}
+
+/// Matched generic fragment-loss ions (`database.fragment_losses`) of a PSM.
+/// They do not enter the hyperscore or `matched_peaks`; they are separate
+/// rescoring features.
+#[derive(Serialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct FragmentLossFeatures {
+    /// Cleavage and charge pairs whose loss form matched a peak.
+    pub matched_peaks: u32,
+    /// Percent of MS2 intensity matched by loss ions.
+    pub intensity_pct: f32,
 }
 
 /// A fully scored candidate peptidoform.
@@ -1239,6 +1260,10 @@ impl<'db> Scorer<'db> {
                 delta_rt_model: 0.999,
                 delta_ims_model: 0.999,
                 ms2_intensity: score.summed_b + score.summed_y,
+                fragment_loss: self.loss_features().then(|| FragmentLossFeatures {
+                    matched_peaks: score.matched_loss as u32,
+                    intensity_pct: 100.0 * score.summed_loss / query.total_ion_current,
+                }),
 
                 //Fragments
                 protein_groups: None,
@@ -1253,15 +1278,56 @@ impl<'db> Scorer<'db> {
         }
     }
 
+    /// The most intense peak matched by any of `variants` at `charge`.
+    fn select_variant<'v>(
+        &self,
+        query: &ProcessedSpectrum,
+        fragment_index: &FragmentMatchIndex,
+        variants: impl Iterator<Item = &'v IonVariant>,
+        charge: u8,
+    ) -> Option<(&'v IonVariant, usize)> {
+        variants
+            .filter_map(|variant| {
+                fragment_index
+                    .select_peak(query, variant.monoisotopic_mass, charge, self.fragment_tol)
+                    .map(|peak_idx| (variant, peak_idx))
+            })
+            .max_by(|a, b| query.intensities[a.1].total_cmp(&query.intensities[b.1]))
+    }
+
+    fn loss_scoring(&self) -> Option<LossScoring> {
+        self.db
+            .fragment_losses
+            .as_ref()
+            .map(|losses| losses.scoring)
+    }
+
+    /// Whether generic fragment-loss ions are scored as separate features
+    /// rather than inside the hyperscore.
+    fn loss_features(&self) -> bool {
+        matches!(
+            self.loss_scoring(),
+            Some(LossScoring::Features | LossScoring::FeaturesKeepPeaks)
+        )
+    }
+
     /// Remove peaks matching a PSM from a query spectrum
     fn remove_matched_peaks(&self, query: &mut ProcessedSpectrum, psm: &Feature) {
         let peptide = self.db.resolve_peptide(psm);
+        let keep_loss_peaks = self.loss_scoring() == Some(LossScoring::FeaturesKeepPeaks);
         let fragments = self
             .db
             .ion_kinds
             .iter()
-            .flat_map(|kind| IonGroupSeries::new(&peptide, *kind))
-            .flat_map(|group| group.variants);
+            .flat_map(|kind| {
+                IonGroupSeries::with_fragment_losses(
+                    &peptide,
+                    *kind,
+                    self.db.fragment_losses.as_deref(),
+                )
+            })
+            .flat_map(|group| group.variants)
+            .filter(|variant| !(keep_loss_peaks && variant.fragment_loss));
 
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, psm.charge);
         let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
@@ -1432,11 +1498,12 @@ impl<'db> Scorer<'db> {
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)
         // so we need to completely re-score this candidate
-        let fragment_groups = self
-            .db
-            .ion_kinds
-            .iter()
-            .flat_map(|kind| IonGroupSeries::new(peptide, *kind));
+        let fragment_groups = self.db.ion_kinds.iter().flat_map(|kind| {
+            IonGroupSeries::with_fragment_losses(peptide, *kind, self.db.fragment_losses.as_deref())
+        });
+        // Scored separately as features, loss forms are not alternatives of
+        // their cleavage in the hyperscore.
+        let separate_losses = self.loss_features();
 
         let mut b_run = Run::default();
         let mut y_run = Run::default();
@@ -1454,20 +1521,29 @@ impl<'db> Scorer<'db> {
                 // Neutral-loss forms are alternatives for the same cleavage
                 // and charge. Select at most one, so extra configured variants
                 // cannot inflate matched-ion counts or hyperscore factorials.
-                let best = group
-                    .variants
-                    .iter()
-                    .filter_map(|variant| {
-                        fragment_index
-                            .select_peak(
-                                query,
-                                variant.monoisotopic_mass,
-                                charge,
-                                self.fragment_tol,
-                            )
-                            .map(|peak_idx| (variant, peak_idx))
-                    })
-                    .max_by(|a, b| query.intensities[a.1].total_cmp(&query.intensities[b.1]));
+                let best = self.select_variant(
+                    query,
+                    fragment_index,
+                    group
+                        .variants
+                        .iter()
+                        .filter(|variant| !(separate_losses && variant.fragment_loss)),
+                    charge,
+                );
+                if separate_losses {
+                    if let Some((_, peak_idx)) = self.select_variant(
+                        query,
+                        fragment_index,
+                        group
+                            .variants
+                            .iter()
+                            .filter(|variant| variant.fragment_loss),
+                        charge,
+                    ) {
+                        score.matched_loss += 1;
+                        score.summed_loss += query.intensities[peak_idx];
+                    }
+                }
 
                 if let Some((frag, peak_idx)) = best {
                     let peak_mass = query.masses[peak_idx];
