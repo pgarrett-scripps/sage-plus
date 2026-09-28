@@ -37,6 +37,19 @@ entries are retained below for provenance.
   30,619 (window mode: 32,102). The control's foreign-species share at extraction q <= 1% fell
   from 3.2% to 2.9%. On the timsTOF E. coli replicates, precursors at 1% fell 4.4%.
 
+### Changed
+- With `recenter_on_apex`, integration bounds now follow the summed isotope dot product of the
+  aligned identified files down to 10% of the apex height, and only a valley whose minimum is
+  below 0.6 of the following rise ends the peak (FlashLFQ's discrimination factor, Millikin et
+  al. 2018); before, bounds stopped at half height or at the first rise of the isotope-gated
+  trace, so the median integration width was about 65% of the FWHM. The 10% floor and the
+  ungated trace are Sage Plus choices. On the ExclusionMS plasma set (ddaPASEF, 5 + 5 runs) the
+  median peptide CV fell from 22.2% to 15.5% (baseline) and 29.4% to 24.2% (exclusion), and
+  protein-group CV from 10.9% to 8.6% and 19.2% to 16.5%; window mode gives 17.1%/9.0% and
+  25.5%/14.0%. On PXD028735 HYE precursors and the control's foreign share at
+  `extraction_q_value` <= 0.01 are unchanged, replicate CVs drop slightly, and the E. coli
+  median absolute log2 ratio error rises from 0.334 to 0.367 (window mode 0.346).
+
 ### Known limitations
 - On the 15 min timsTOF E. coli replicates, `recenter_on_apex` (Beta 14 and now) raises the
   median replicate CV from 0.171 to 0.269 on the same precursors; mobility recentering does not

@@ -663,9 +663,24 @@ fn apex_climb_crosses_small_dips_but_not_valleys() {
 #[test]
 fn peak_bounds_stop_at_valleys_and_the_height_fraction() {
     let trace = [3.0, 2.5, 2.2, 6.0, 10.0, 7.0, 4.0, 1.5, 0.5];
-    // Left stops before the valley (bin 1 rises again), right at 20% of the apex.
-    assert_eq!(peak_bounds(&trace, 4, 0.2), (2, 7));
-    assert_eq!(peak_bounds(&trace, 4, 0.5), (3, 6));
+    // With `valley = 1.0` any rise ends the peak: left stops before bin 1
+    // rises again, right at 20% of the apex.
+    assert_eq!(peak_bounds(&trace, 4, 0.2, 1.0), (2, 7));
+    assert_eq!(peak_bounds(&trace, 4, 0.5, 1.0), (3, 6));
+    // A shallow dip (2.2 against 2.5 and 3.0) is not a valley at 0.6.
+    assert_eq!(peak_bounds(&trace, 4, 0.2, 0.6), (0, 7));
+}
+
+#[test]
+fn peak_bounds_cut_at_deep_valleys() {
+    // A neighbouring peak at bins 1-2 behind a deep valley (2.0 against 9.0)
+    // is cut at the valley; the right side runs down to the 10% floor.
+    let trace = [0.0, 8.0, 9.0, 2.0, 6.0, 10.0, 7.0, 4.0, 1.0, 0.0];
+    assert_eq!(peak_bounds(&trace, 5, 0.1, 0.6), (3, 9));
+    // A rise from 4.0 to 5.0 (ratio 0.8) is a wiggle, not a valley.
+    let wiggle = [0.0, 1.0, 5.0, 4.0, 8.0, 10.0, 6.0, 0.0];
+    assert_eq!(peak_bounds(&wiggle, 5, 0.1, 0.6), (1, 7));
+    assert_eq!(peak_bounds(&wiggle, 5, 0.1, 1.0), (3, 7));
 }
 
 #[test]
@@ -699,7 +714,8 @@ fn apex_mode_integrates_around_each_files_own_apex() {
     let (peak, _, evidence, window) = trace.pick(&settings, Some(&[Some(2), None])).unwrap();
     assert_eq!(peak.rt, 4);
     assert_eq!(window.shifts, vec![0, 1]);
-    assert_eq!((window.left, window.right), (3, 6));
+    // Bounds run down to 10% of the apex (bins 1..=7), the base of the peak.
+    assert_eq!((window.left, window.right), (1, 8));
     let file0 = evidence[0].as_ref().unwrap();
     assert_eq!(file0.apex_rt, 4.0);
     assert_eq!(evidence[1].as_ref().unwrap().apex_rt, 5.0);

@@ -1170,8 +1170,10 @@ impl Traces {
     ///   shifted so that its own apex lands on it.
     /// * Unseeded (transfer) rows get the usual warp search towards the sum of
     ///   the aligned seeded traces.
-    /// * Integration bounds follow the summed seeded trace down to a valley
-    ///   or [`APEX_BOUND_FRACTION`] of its apex, without fixed caps.
+    /// * Integration bounds follow the summed, aligned isotope dot product of
+    ///   the seeded rows (the transfer reference) down to a valley deeper than
+    ///   [`APEX_VALLEY_FACTOR`] or to [`APEX_BOUND_FRACTION`] of its apex,
+    ///   without fixed caps.
     #[allow(clippy::type_complexity)]
     pub fn integrate_apex(
         &mut self,
@@ -1200,16 +1202,13 @@ impl Traces {
 
         let mut shifts = vec![0isize; rows];
         let mut reference = vec![0.0; cols];
-        let mut bounds_trace = vec![0.0; cols];
         for (file, file_apex) in apexes.iter().enumerate() {
             if let Some(file_apex) = file_apex {
                 shifts[file] = *file_apex as isize - apex as isize;
-                let consistent = self.consistent(file, settings);
-                for (i, (r, b)) in reference.iter_mut().zip(&mut bounds_trace).enumerate() {
+                for (i, r) in reference.iter_mut().enumerate() {
                     let j = i as isize + shifts[file];
                     if j >= 0 && (j as usize) < cols {
                         *r += self.dot_product[(file, j as usize)];
-                        *b += consistent[j as usize];
                     }
                 }
             }
@@ -1223,7 +1222,10 @@ impl Traces {
         Self::apply_time_warps(&mut self.spectral_angle, &shifts);
         Self::apply_time_warps(&mut self.dot_product, &shifts);
 
-        let (left, right) = peak_bounds(&bounds_trace, apex, APEX_BOUND_FRACTION);
+        // Bounds come from the full isotope dot product rather than the
+        // angle-gated trace: gating zeroes the low, noisy flanks and stopped
+        // the bounds inside the FWHM on ddaPASEF plasma (PLASMA-EXCLUSION).
+        let (left, right) = peak_bounds(&reference, apex, APEX_BOUND_FRACTION, APEX_VALLEY_FACTOR);
 
         // Same form as the hybrid score, with retention-time proximity
         // measured from the identification RTs rather than the window center.
@@ -1769,9 +1771,19 @@ impl Grid {
 }
 
 /// Fraction of the summed apex height at which apex-mode integration stops,
-/// unless a valley comes first. Half height matches the window search; 20%
-/// took in more interference and worsened the E. coli ratio on PXD028735.
-const APEX_BOUND_FRACTION: f64 = 0.5;
+/// unless a valley comes first. Low, so that the bounds reach the base of the
+/// peak as in feature-based integration (MaxQuant, FlashLFQ, IonQuant); the
+/// valley rule, not the floor, separates neighbouring peaks. Half height left
+/// the median window narrower than the FWHM on ddaPASEF plasma. The trade-off:
+/// wider bounds take in more interference for faint peaks (the E. coli ratio
+/// error on PXD028735 HYE rose from 0.334 to 0.367).
+const APEX_BOUND_FRACTION: f64 = 0.1;
+
+/// A rise ends apex-mode integration only once the valley before it is below
+/// this fraction of the point after it: FlashLFQ's peak-cutting
+/// discrimination factor (0.6, Millikin et al. 2018, J. Proteome Res.). Small
+/// wiggles in a sparsely sampled peak do not split it.
+const APEX_VALLEY_FACTOR: f64 = 0.6;
 
 /// Climb from `seed` to the apex of the peak it sits on. The seed snaps to
 /// the nearest signal within [`APEX_SNAP_BINS`]; the climb then moves to the
@@ -1803,19 +1815,32 @@ fn climb_to_apex(trace: &[f64], seed: usize) -> Option<usize> {
 }
 
 /// Integration bounds `[left, right)` around `apex`: extend while the trace
-/// stays above `fraction` of the apex height and keeps falling (a valley ends
-/// the peak).
-fn peak_bounds(trace: &[f64], apex: usize, fraction: f64) -> (usize, usize) {
+/// stays at or above `fraction` of the apex height. A rise ends the peak once
+/// the lowest point passed since the apex is below `valley` times the rising
+/// point; the bound is then set at that lowest point. `valley = 1.0` stops at
+/// the first rise.
+fn peak_bounds(trace: &[f64], apex: usize, fraction: f64, valley: f64) -> (usize, usize) {
     let floor = trace[apex] * fraction;
-    let mut left = apex;
-    while left > 0 && trace[left - 1] >= floor && trace[left - 1] <= trace[left] {
-        left -= 1;
-    }
-    let mut right = apex;
-    while right + 1 < trace.len() && trace[right + 1] >= floor && trace[right + 1] <= trace[right] {
-        right += 1;
-    }
-    (left, right + 1)
+    let walk = |step: isize| -> usize {
+        let mut last = apex;
+        let mut lowest = apex;
+        let mut i = apex as isize + step;
+        while i >= 0 && (i as usize) < trace.len() {
+            let at = i as usize;
+            if trace[at] < floor {
+                break;
+            }
+            if trace[at] < trace[lowest] {
+                lowest = at;
+            } else if trace[lowest] < valley * trace[at] {
+                return lowest;
+            }
+            last = at;
+            i += step;
+        }
+        last
+    };
+    (walk(-1), walk(1) + 1)
 }
 
 /// Width, in (fractional) bins, of `trace` at half its height at `apex`.
