@@ -397,6 +397,33 @@ fn paired_decoy_evidence_searches_its_own_warp_at_the_target_peak() {
 }
 
 #[test]
+fn paired_decoy_row_whose_climb_fails_keeps_its_warp_search() {
+    // File 0 has no isotope-consistent signal, so a seeded climb fails; the
+    // decoy row must fall back to its warp search, as a target row does.
+    let decoy = Traces {
+        dot_product: Matrix::new([0.1; 14], 2, 7),
+        spectral_angle: Matrix::new([0.2; 14], 2, 7),
+        reference_file_id: 0,
+        geometry: GridGeometry::default(),
+    };
+    let settings = LfqSettings {
+        spectral_angle: 0.5,
+        ..Default::default()
+    };
+    let (_, _, _, window) = traces().integrate_window(&settings).unwrap();
+    let unseeded = decoy.clone().paired_evidence(&window, &settings, None);
+    for seed in [0, 6] {
+        let seeded = decoy
+            .clone()
+            .paired_evidence(&window, &settings, Some(&[Some(seed), None]));
+        assert_eq!(
+            seeded[0].as_ref().unwrap().rt_shift_bins,
+            unseeded[0].as_ref().unwrap().rt_shift_bins
+        );
+    }
+}
+
+#[test]
 fn file_evidence_does_not_invent_a_score_for_a_missing_trace() {
     let mut trace = traces();
     trace.dot_product.row_slice_mut(1).fill(0.0);

@@ -602,7 +602,7 @@ impl FeatureMap {
             }
         }
         // Report peak positions in each file's own RT units.
-        peaks.par_iter_mut().for_each(|((id, _), quantified)| {
+        peaks.par_iter_mut().for_each(|((id, decoy), quantified)| {
             for (file, evidence) in quantified.file_evidence.iter_mut().enumerate() {
                 let Some(evidence) = evidence else { continue };
                 let alignment = &alignments[file];
@@ -615,8 +615,11 @@ impl FeatureMap {
                 evidence.apex_rt = apex;
                 evidence.peak_start_rt = alignment.inverse(evidence.peak_start_rt);
                 evidence.peak_end_rt = alignment.inverse(evidence.peak_end_rt);
-                evidence.id_apex_offset =
-                    self.id_rts.get(&(*id, file)).map(|rt| rt.observed - apex);
+                // Decoys have no identification of their own.
+                evidence.id_apex_offset = (!*decoy)
+                    .then(|| self.id_rts.get(&(*id, file)))
+                    .flatten()
+                    .map(|rt| rt.observed - apex);
             }
         });
         peaks
@@ -1133,7 +1136,9 @@ impl Traces {
     ///
     /// With apex recentering (`seeds`), a seeded row instead climbs from the
     /// same identification bin as the target row and is shifted so that its
-    /// own apex lands on the target's apex, exactly as the target row was.
+    /// own apex lands on the target's apex, exactly as the target row was. A
+    /// row whose climb finds no signal keeps the warp search, as a target row
+    /// does in [`Traces::integrate_apex`].
     pub fn paired_evidence(
         &mut self,
         window: &PeakWindow,
@@ -1142,9 +1147,10 @@ impl Traces {
     ) -> Vec<Option<FileEvidence>> {
         let mut shifts = Self::time_warps_to(&window.reference, &self.dot_product, WARP_SLACK);
         for (file, seed) in seeds.unwrap_or_default().iter().enumerate() {
-            if let Some(seed) = seed {
-                let apex = climb_to_apex(&self.consistent(file, settings), *seed);
-                shifts[file] = apex.unwrap_or(*seed) as isize - window.rt as isize;
+            if let Some(apex) =
+                seed.and_then(|seed| climb_to_apex(&self.consistent(file, settings), seed))
+            {
+                shifts[file] = apex as isize - window.rt as isize;
             }
         }
         Self::apply_time_warps(&mut self.spectral_angle, &shifts);
