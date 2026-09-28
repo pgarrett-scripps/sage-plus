@@ -650,7 +650,7 @@ The same site syntax works for static, indexed variable, and mass-offset search.
         "mass": 79.966331,
         "sites": ["S", "T", "Y"],
         "max_count": 3,
-        "neutral_losses": [97.976896]
+        "neutral_losses": {"S": [97.976896], "T": [97.976896]}
       }
     },
     "max_variable_mods": 3
@@ -738,6 +738,37 @@ Optional `neutral_losses` contains positive fragment-loss masses.
 `neutral_loss_mode` is `optional` by default or `required` to omit the retained
 fragment form. Required mode needs at least one loss. Masses and channel offsets
 must be finite. Static definitions do not accept variable-only limits or policies.
+
+`neutral_losses` takes one of two forms:
+
+- A list, such as `[97.976896]`, applies the losses at every site of the definition.
+- A map from site to list applies losses only at the listed sites. Sites left out of
+  the map have no loss.
+
+Phosphoserine and phosphothreonine lose phosphoric acid (H3PO4, 97.976896 Da)
+readily in CID and HCD. Phosphotyrosine rarely does, and Unimod lists the loss for S
+and T only. The map form expresses this:
+
+```json
+"Phospho": {
+  "mass": 79.966331,
+  "sites": ["S", "T", "Y"],
+  "max_count": 3,
+  "neutral_losses": {"S": [97.976896], "T": [97.976896]}
+}
+```
+
+Map keys must repeat a site from `sites` exactly, positional and motif forms
+included (`"first_residue:K"`, not `"K"`). Any other key is a configuration error.
+The loss follows the placed site everywhere: fragment generation, scoring, and
+localization. Site-determining ions used by localization carry no losses in either
+form. If two sites can match the same residue, for example `"K"` and
+`"protein_last:K"`, they must list the same losses.
+
+With `neutral_loss_mode: "required"`, the map must list at least one loss in total.
+Fragments at a site without losses keep their retained form, since there is nothing
+to require. A mass offset with a per-site map shifts preliminary fragments by the
+smallest loss only when every site has a loss; otherwise it uses the full mass.
 
 #### Positional residue modifications
 
@@ -844,7 +875,8 @@ modifications can coexist at different unoccupied sites.
 
 Offsets follow explicit sites and typed library restrictions. They require nonzero
 mass, cannot use `channel_offsets`, and are limited to 254 distinct definitions.
-Fragments retain the offset mass, or mass minus the first required neutral loss.
+Fragments retain the offset mass, or mass minus the first required neutral loss
+(per-site maps: see neutral losses above).
 The placed peptidoform supplies mass error, FDR, quantification, localization, and
 output identity. The offset is not reported as precursor mass error. Prefiltering
 uses the same offset-aware retrieval.

@@ -19,6 +19,7 @@ fn peptide_with_loss(mode: NeutralLossMode) -> Peptide {
         mass: 20.0,
         name: Some(Arc::from("TestMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: mode,
         channel_offsets: Arc::default(),
     });
@@ -316,6 +317,7 @@ fn neutral_losses_combine_across_multiple_modified_sites() {
         mass: 20.0,
         name: Some(Arc::from("TestMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -350,6 +352,7 @@ fn terminal_required_losses_affect_only_containing_series() {
         mass: 20.0,
         name: Some(Arc::from("TerminalMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Required,
         channel_offsets: Arc::default(),
     });

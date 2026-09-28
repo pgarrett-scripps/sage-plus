@@ -26,6 +26,9 @@ pub fn generate_config_schema() -> String {
         value["$defs"][name]["properties"]["sites"]["items"]["pattern"] = explicit.into();
         value["$defs"][name]["additionalProperties"] = false.into();
     }
+    // Per-site neutral losses are keyed by the same explicit site strings.
+    value["$defs"]["NeutralLosses"]["anyOf"][1]["propertyNames"] =
+        serde_json::json!({"pattern": explicit});
 
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
     value["$defs"]["NamedVariableModification"]["properties"]["max_total_count"]["minimum"] =

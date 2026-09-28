@@ -66,10 +66,96 @@ fn is_optional(mode: &NeutralLossMode) -> bool {
     *mode == NeutralLossMode::Optional
 }
 
+/// Fragment neutral losses of a modification: one list for every site, or a
+/// list per site.
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
+#[serde(untagged)]
+pub enum NeutralLosses {
+    /// Losses applied wherever the modification is placed.
+    All(Vec<f32>),
+    /// Losses keyed by site strings from the modification's `sites`, applied
+    /// only where the modification is placed by that site. Sites that are not
+    /// listed have no loss.
+    PerSite(BTreeMap<String, Vec<f32>>),
+}
+
+impl Default for NeutralLosses {
+    fn default() -> Self {
+        Self::All(Vec::new())
+    }
+}
+
+impl From<Vec<f32>> for NeutralLosses {
+    fn from(losses: Vec<f32>) -> Self {
+        Self::All(losses)
+    }
+}
+
+impl PartialEq<Vec<f32>> for NeutralLosses {
+    fn eq(&self, other: &Vec<f32>) -> bool {
+        matches!(self, Self::All(losses) if losses == other)
+    }
+}
+
+impl NeutralLosses {
+    /// The empty list form, which serialization omits.
+    pub fn is_unset(&self) -> bool {
+        matches!(self, Self::All(losses) if losses.is_empty())
+    }
+
+    /// Every configured loss mass, over all sites.
+    pub fn masses(&self) -> Box<dyn Iterator<Item = f32> + '_> {
+        match self {
+            Self::All(losses) => Box::new(losses.iter().copied()),
+            Self::PerSite(sites) => Box::new(sites.values().flatten().copied()),
+        }
+    }
+
+    /// Losses applied where the modification is placed by `site`, an explicit
+    /// site string.
+    pub fn for_site(&self, site: &str) -> &[f32] {
+        match self {
+            Self::All(losses) => losses,
+            Self::PerSite(sites) => sites.get(site).map_or(&[], Vec::as_slice),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for NeutralLosses {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct NeutralLossesVisitor;
+
+        impl<'de> Visitor<'de> for NeutralLossesVisitor {
+            type Value = NeutralLosses;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(
+                    "a list of neutral loss masses, or a map from site to a list of neutral loss masses",
+                )
+            }
+
+            fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
+                Vec::<f32>::deserialize(de::value::SeqAccessDeserializer::new(seq))
+                    .map(NeutralLosses::All)
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                BTreeMap::<String, Vec<f32>>::deserialize(MapAccessDeserializer::new(map))
+                    .map(NeutralLosses::PerSite)
+            }
+        }
+
+        deserializer.deserialize_any(NeutralLossesVisitor)
+    }
+}
+
 fn validate_details<E: de::Error>(
     mass: f32,
     name: &Option<String>,
-    neutral_losses: &[f32],
+    neutral_losses: &NeutralLosses,
     neutral_loss_mode: NeutralLossMode,
     channel_offsets: &BTreeMap<String, f32>,
     immonium_ions: &SiteMap<f32>,
@@ -81,14 +167,32 @@ fn validate_details<E: de::Error>(
         return Err(E::custom("modification name must not be empty"));
     }
     if neutral_losses
-        .iter()
-        .any(|loss| !loss.is_finite() || *loss <= 0.0)
+        .masses()
+        .any(|loss| !loss.is_finite() || loss <= 0.0)
     {
         return Err(E::custom(
             "neutral loss masses must be finite and greater than zero",
         ));
     }
-    if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.is_empty() {
+    if let NeutralLosses::PerSite(sites) = neutral_losses {
+        for site in sites.keys() {
+            match site.parse::<ModificationSpecificity>() {
+                Ok(specificity) if specificity.explicit_name() == *site => {}
+                Ok(specificity) => {
+                    return Err(E::custom(format!(
+                        "neutral_losses key `{site}` must be written as explicit site `{}`",
+                        specificity.explicit_name()
+                    )))
+                }
+                Err(_) => {
+                    return Err(E::custom(format!(
+                        "neutral_losses key `{site}` is not a valid site"
+                    )))
+                }
+            }
+        }
+    }
+    if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.masses().next().is_none() {
         return Err(E::custom(
             "neutral_loss_mode `required` requires at least one neutral loss",
         ));
@@ -132,8 +236,8 @@ pub struct StaticModification {
     pub mass: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub neutral_losses: Vec<f32>,
+    #[serde(default, skip_serializing_if = "NeutralLosses::is_unset")]
+    pub neutral_losses: NeutralLosses,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -157,7 +261,7 @@ impl<'de> Deserialize<'de> for StaticModification {
             #[serde(default)]
             name: Option<String>,
             #[serde(default)]
-            neutral_losses: Vec<f32>,
+            neutral_losses: NeutralLosses,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
@@ -201,8 +305,8 @@ pub struct VariableModification {
     pub max_total_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub neutral_losses: Vec<f32>,
+    #[serde(default, skip_serializing_if = "NeutralLosses::is_unset")]
+    pub neutral_losses: NeutralLosses,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "is_exhaustive")]
@@ -242,7 +346,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             #[serde(default)]
             name: Option<String>,
             #[serde(default)]
-            neutral_losses: Vec<f32>,
+            neutral_losses: NeutralLosses,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
@@ -306,11 +410,19 @@ impl<'de> Deserialize<'de> for VariableModification {
     }
 }
 
+/// Per-site neutral losses: each site rule with the losses applied where the
+/// modification is placed by that rule. Rules without losses are omitted.
+pub type SiteLosses = Arc<[(ModificationSpecificity, Arc<[f32]>)]>;
+
 #[derive(Clone, Debug)]
 pub struct ModificationDefinition {
     pub mass: f32,
     pub name: Option<Arc<str>>,
+    /// Losses applied at every site (the list form). Empty when
+    /// `site_losses` is set.
     pub neutral_losses: Arc<[f32]>,
+    /// Losses per site rule (the map form). `None` for the list form.
+    pub site_losses: Option<SiteLosses>,
     pub neutral_loss_mode: NeutralLossMode,
     pub channel_offsets: Arc<BTreeMap<Arc<str>, f32>>,
 }
@@ -321,6 +433,7 @@ impl ModificationDefinition {
             mass,
             name: None,
             neutral_losses: Arc::from([]),
+            site_losses: None,
             neutral_loss_mode: NeutralLossMode::Optional,
             channel_offsets: Arc::default(),
         }
@@ -329,14 +442,32 @@ impl ModificationDefinition {
     fn detailed(
         mass: f32,
         name: &Option<String>,
-        neutral_losses: &[f32],
+        neutral_losses: &NeutralLosses,
         neutral_loss_mode: NeutralLossMode,
         channel_offsets: &BTreeMap<String, f32>,
     ) -> Self {
+        let (neutral_losses, site_losses) = match neutral_losses {
+            NeutralLosses::All(losses) => (Arc::from(losses.as_slice()), None),
+            NeutralLosses::PerSite(sites) => {
+                let mut rules = sites
+                    .iter()
+                    .filter(|(_, losses)| !losses.is_empty())
+                    .map(|(site, losses)| {
+                        let specificity = site
+                            .parse::<ModificationSpecificity>()
+                            .unwrap_or_else(|_| panic!("unvalidated neutral_losses site `{site}`"));
+                        (specificity, Arc::from(losses.as_slice()))
+                    })
+                    .collect::<Vec<_>>();
+                rules.sort_by_key(|(specificity, _)| *specificity);
+                (Arc::from([]), Some(SiteLosses::from(rules)))
+            }
+        };
         Self {
             mass,
             name: name.as_deref().map(Arc::from),
-            neutral_losses: Arc::from(neutral_losses),
+            neutral_losses,
+            site_losses,
             neutral_loss_mode,
             channel_offsets: Arc::new(
                 channel_offsets
@@ -352,9 +483,36 @@ impl ModificationDefinition {
             mass,
             name: self.name.clone(),
             neutral_losses: self.neutral_losses.clone(),
+            site_losses: self.site_losses.clone(),
             neutral_loss_mode: self.neutral_loss_mode,
             channel_offsets: self.channel_offsets.clone(),
         }
+    }
+
+    /// Neutral losses of this modification where it is placed at `site` of
+    /// `sequence`. The list form applies everywhere. The map form applies the
+    /// losses of the site rule that places the modification there, and none
+    /// if no listed rule does. Configuration validation guarantees that site
+    /// rules which can place the modification at the same position carry the
+    /// same losses, so the first matching rule decides.
+    #[inline]
+    pub fn losses_at(&self, sequence: &[u8], site: crate::peptide::Site) -> &[f32] {
+        match &self.site_losses {
+            None => &self.neutral_losses,
+            Some(rules) => rules
+                .iter()
+                .find(|(specificity, _)| specificity.may_place(sequence, site))
+                .map_or(&[], |(_, losses)| losses),
+        }
+    }
+
+    /// Does any site carry a neutral loss?
+    pub fn has_losses(&self) -> bool {
+        !self.neutral_losses.is_empty()
+            || self
+                .site_losses
+                .as_ref()
+                .is_some_and(|rules| !rules.is_empty())
     }
 }
 
@@ -382,6 +540,25 @@ impl Ord for ModificationDefinition {
                     .iter()
                     .map(|loss| loss.to_bits())
                     .cmp(other.neutral_losses.iter().map(|loss| loss.to_bits()))
+            })
+            .then_with(|| {
+                let rules = |definition: &Self| {
+                    definition.site_losses.as_ref().map(|rules| {
+                        rules
+                            .iter()
+                            .map(|(specificity, losses)| {
+                                (
+                                    *specificity,
+                                    losses.iter().map(|loss| loss.to_bits()).collect::<Vec<_>>(),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                };
+                match (&self.site_losses, &other.site_losses) {
+                    (None, None) => Ordering::Equal,
+                    _ => rules(self).cmp(&rules(other)),
+                }
             })
             .then_with(|| self.neutral_loss_mode.cmp(&other.neutral_loss_mode))
             .then_with(|| {
@@ -900,6 +1077,40 @@ impl ModificationSpecificity {
     pub fn is_internal(index: usize, len: usize) -> bool {
         index > 0 && index < len.saturating_sub(1)
     }
+
+    /// Could this rule have placed a modification at `site` of `sequence`?
+    ///
+    /// Only the residue and its peptide position are checked: protein
+    /// termini and motif context are assumed satisfied, since the placement
+    /// exists. Two rules that both pass for one placement therefore
+    /// [`overlap`](Self::overlaps).
+    pub fn may_place(self, sequence: &[u8], site: crate::peptide::Site) -> bool {
+        use crate::peptide::Site;
+        let Some(last) = sequence.len().checked_sub(1) else {
+            return false;
+        };
+        match (self, site) {
+            (Self::Residue(r), Site::Sequence(i)) => sequence.get(i as usize) == Some(&r),
+            (Self::Internal(r), Site::Sequence(i)) => {
+                sequence.get(i as usize) == Some(&r)
+                    && Self::is_internal(i as usize, sequence.len())
+            }
+            (Self::PeptideN(Some(r)) | Self::ProteinN(Some(r)), Site::Sequence(0)) => {
+                sequence[0] == r
+            }
+            (Self::PeptideC(Some(r)) | Self::ProteinC(Some(r)), Site::Sequence(i)) => {
+                i as usize == last && sequence[last] == r
+            }
+            (Self::PeptideN(None) | Self::ProteinN(None), Site::Nterm) => true,
+            (Self::PeptideC(None) | Self::ProteinC(None), Site::Cterm) => true,
+            (Self::PeptideNTerm(r) | Self::ProteinNTerm(r), Site::Nterm) => sequence[0] == r,
+            (Self::PeptideCTerm(r) | Self::ProteinCTerm(r), Site::Cterm) => sequence[last] == r,
+            (Self::Motif(motif), Site::Sequence(i)) => sequence
+                .get(i as usize)
+                .is_some_and(|residue| motif.site_residues().contains(residue)),
+            _ => false,
+        }
+    }
 }
 
 impl Display for ModificationSpecificity {
@@ -1194,6 +1405,7 @@ where
             }
         }
         object.insert("name".into(), serde_json::Value::String(id.clone()));
+        validate_site_losses(&id, &sites, object).map_err(de::Error::custom)?;
         if object.get("max_count").and_then(|v| v.as_u64()) == Some(0) {
             return Err(de::Error::custom("max_count must be positive"));
         }
@@ -1227,6 +1439,61 @@ where
         }
     }
     Ok(Some(result))
+}
+
+/// Check a per-site `neutral_losses` map against the definition's `sites`:
+/// every key must be one of the sites, spelled the same way, and two sites
+/// that can place the modification at the same position must carry the same
+/// losses, so that each placement has one loss list.
+fn validate_site_losses(
+    id: &str,
+    sites: &[String],
+    object: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let Some(serde_json::Value::Object(map)) = object.get("neutral_losses") else {
+        return Ok(());
+    };
+    for key in map.keys() {
+        if !sites.contains(key) {
+            return Err(format!(
+                "neutral_losses key `{key}` of modification `{id}` is not one of its sites ({}). \
+                 Keys must repeat a site from `sites` exactly",
+                sites
+                    .iter()
+                    .map(|site| format!("`{site}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    let losses: NeutralLosses = serde_json::from_value(serde_json::Value::Object(map.clone()))
+        .map_err(|e| e.to_string())?;
+    let parsed = sites
+        .iter()
+        .filter_map(|site| {
+            site.parse::<ModificationSpecificity>()
+                .ok()
+                .map(|specificity| (site, specificity))
+        })
+        .collect::<Vec<_>>();
+    let bits = |site: &str| {
+        losses
+            .for_site(site)
+            .iter()
+            .map(|loss| loss.to_bits())
+            .collect::<Vec<_>>()
+    };
+    for (index, (left, left_rule)) in parsed.iter().enumerate() {
+        for (right, right_rule) in &parsed[index + 1..] {
+            if bits(left) != bits(right) && left_rule.overlaps(*right_rule) {
+                return Err(format!(
+                    "sites `{left}` and `{right}` of modification `{id}` can place it on the same position \
+                     but have different neutral_losses. Give them the same losses or split the modification"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn named_modifications<'a>(
