@@ -261,10 +261,12 @@ impl Runner {
             features[idx].localization = Some(localization);
         }
 
-        // The false-localization-rate competition uses target PSMs only.
-        // Decoy PSMs read their q-value off the target curve at their own
-        // score, so a localization cutoff applies the same score threshold to
-        // target and decoy PSMs before site-level FDR is estimated.
+        // The false-localization-rate competition uses target PSMs only and
+        // runs separately for each modification type (see
+        // `target_decoy_q_values_by_type`). Decoy PSMs read their q-value off
+        // the target curve of their own type at their own score, so a
+        // localization cutoff applies the same score threshold to target and
+        // decoy PSMs before site-level FDR is estimated.
         let (target_indices, decoy_indices): (Vec<_>, Vec<_>) = features
             .iter()
             .enumerate()
@@ -279,21 +281,23 @@ impl Runner {
                 })
             })
             .partition(|&(feature_idx, _)| features[feature_idx].label == 1);
-        let modification = |features: &[Feature], (feature_idx, mod_idx): (usize, usize)| {
-            let modification = &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
-            (modification.target_decoy_score, modification.decoy_winner)
+        let evidence_of = |features: &[Feature], (feature_idx, mod_idx): (usize, usize)| {
+            let m = &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
+            (m.modification_type(), m.target_decoy_score, m.decoy_winner)
         };
         let evidence = target_indices
             .iter()
-            .map(|&index| modification(features, index))
+            .map(|&index| evidence_of(features, index))
             .collect::<Vec<_>>();
-        let q_values = sage_core::ptm::target_decoy_q_values(&evidence);
-        let decoy_scores = decoy_indices
+        let probes = decoy_indices
             .iter()
-            .map(|&index| modification(features, index).0)
+            .map(|&index| {
+                let (kind, score, _) = evidence_of(features, index);
+                (kind, score)
+            })
             .collect::<Vec<_>>();
-        let decoy_q_values =
-            sage_core::ptm::q_values_at_scores(&evidence, &q_values, &decoy_scores);
+        let (q_values, decoy_q_values) =
+            sage_core::ptm::target_decoy_q_values_by_type(&evidence, &probes);
         for ((feature_idx, mod_idx), q_value) in target_indices
             .into_iter()
             .zip(q_values)

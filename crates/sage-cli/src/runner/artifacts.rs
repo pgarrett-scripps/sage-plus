@@ -99,13 +99,21 @@ pub(super) fn aggregate_protein_sites(rows: &[SiteRow]) -> Vec<ProteinSite> {
             .then_with(|| a.modification.cmp(&b.modification))
             .then_with(|| a.attachment.as_str().cmp(b.attachment.as_str()))
     });
+    // Site FDR is estimated per modification type, like the localization
+    // FLR, so one type's decoy sites never set another type's q-values.
     let evidence = sites
         .iter()
-        .map(|site| (site.score, site.decoy))
+        .map(|site| {
+            (
+                sage_core::ptm::ModificationType::new(&site.modification, site.modification_mass),
+                site.score,
+                site.decoy,
+            )
+        })
         .collect::<Vec<_>>();
     for (site, q_value) in sites
         .iter_mut()
-        .zip(sage_core::fdr::site_q_values(&evidence))
+        .zip(sage_core::fdr::site_q_values_by_type(&evidence))
     {
         site.q_value = q_value;
     }
@@ -154,7 +162,7 @@ impl Runner {
                 {
                     continue;
                 }
-                let modification = m.label.clone().unwrap_or_else(|| format!("{:+}", m.mass));
+                let modification = m.reported_name();
                 let site_probabilities = m
                     .all_sites
                     .iter()

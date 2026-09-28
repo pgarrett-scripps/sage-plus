@@ -406,6 +406,30 @@ pub fn site_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
     q_values
 }
 
+/// Site-level q-values with a separate competition for each modification
+/// type. `evidence` holds `(modification type, score, decoy)` per site; each
+/// type's sites are passed to [`site_q_values`] on their own. Output is in
+/// caller order.
+pub fn site_q_values_by_type<K: Eq + std::hash::Hash + Clone>(
+    evidence: &[(K, f32, bool)],
+) -> Vec<f32> {
+    let mut groups: HashMap<K, Vec<usize>> = HashMap::new();
+    for (ix, (key, _, _)) in evidence.iter().enumerate() {
+        groups.entry(key.clone()).or_default().push(ix);
+    }
+    let mut q_values = vec![1.0f32; evidence.len()];
+    for indices in groups.into_values() {
+        let group = indices
+            .iter()
+            .map(|&ix| (evidence[ix].1, evidence[ix].2))
+            .collect::<Vec<_>>();
+        for (&ix, q) in indices.iter().zip(site_q_values(&group)) {
+            q_values[ix] = q;
+        }
+    }
+    q_values
+}
+
 pub fn picked_precursor(peaks: &mut FnvHashMap<(PrecursorId, bool), QuantifiedPeak>) -> usize {
     let mut scores = peaks
         .par_iter()
