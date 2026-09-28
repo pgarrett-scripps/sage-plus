@@ -268,8 +268,15 @@ impl Runner {
 
 impl Runner {
     pub(super) fn spectrum_fdr(&self, features: &mut [Feature]) -> usize {
-        use sage_core::ml::linear_discriminant::{score_psms, score_psms_fallback};
-        if let Err(failure) = score_psms(features, self.parameters.precursor_tol) {
+        use sage_core::ml::linear_discriminant::{score_psms_fallback, score_psms_with_immonium};
+        let immonium = self
+            .parameters
+            .immonium
+            .as_ref()
+            .is_some_and(|settings| settings.rescore);
+        if let Err(failure) =
+            score_psms_with_immonium(features, self.parameters.precursor_tol, immonium)
+        {
             let message = format!(
                 "linear discriminant model not used ({failure}); ranking PSMs by the heuristic score ln(1 - poisson) + longest_y_pct / 3"
             );
@@ -453,7 +460,13 @@ impl Runner {
                 x
             })
             .flat_map(|(spec, &occurrence)| {
-                let features = scorer.score(spec);
+                let mut features = scorer.score(spec);
+                if let Some(immonium) = &self.parameters.immonium {
+                    for feature in &mut features {
+                        let peptide = &scorer.db[feature.peptide_idx];
+                        feature.immonium = Some(immonium.evaluate(spec, peptide));
+                    }
+                }
                 if occurrence > 0 {
                     repeated
                         .lock()

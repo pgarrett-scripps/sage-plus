@@ -9,6 +9,25 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Opt-in per-PSM immonium-ion evidence (`immonium`, default off). For each PSM, the processed
+  spectrum is checked for the immonium ions of unmodified P, V, L/I, H, F, Y and W (Hohmann et
+  al. 2008; global switch `residue_ions`, default on) and for the modified-residue ions that
+  modifications declare. Each is counted as explained, missing or unexplained by the peptide.
+  The evidence goes into seven nullable `immonium_*` columns of `results.sage.parquet` (null when
+  off; results schema v3 unlabeled, v4 labeled) and, with `write_pin`, five `.pin` columns.
+  With the option on, `rescore` (default true) adds the counts to the linear discriminant;
+  `rescore: false` only reports them. The ions never enter the fragment index, the hyperscore or
+  localization. With the option off, scores, identifications and q-values are unchanged. On the
+  benchmarks `rescore` added 0.4-1.3% PSMs at 1% and moved the HYE entrapment FDP from 1.67% to
+  1.73%. See `benchmarks/IMMONIUM.md`.
+- Modifications accept `immonium_ions`: the singly charged m/z of their immonium ions, as a list
+  for every site or a map from declared site to list (`"Phospho": {..., "immonium_ions": {"Y":
+  [216.0420]}}`). Map keys must be declared sites. Ions are labeled `Name@Sites` (`Phospho@Y`) and
+  explained only when the peptide carries that modification on such a site. There are no
+  built-in modified ions; DOCS.md gives pY 216.0420 (Steen et al. 2001) and acK 126.0913 (Trelle &
+  Jensen 2008) as examples. The list-or-map form is the generic `SiteMap` type.
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR

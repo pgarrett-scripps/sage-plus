@@ -334,6 +334,10 @@ pub struct Feature {
     /// peptidoform.
     #[serde(skip_serializing)]
     pub mass_offset: Option<MassOffsetAssignment>,
+
+    /// Immonium-ion evidence; `None` unless `immonium` is enabled.
+    #[serde(skip_serializing)]
+    pub immonium: Option<crate::immonium::ImmoniumEvidence>,
 }
 
 /// A fully scored candidate peptidoform.
@@ -1248,6 +1252,7 @@ impl<'db> Scorer<'db> {
                 mass_shift: ambiguity.mass_shift,
                 protein_group_q: 1.0,
                 localization: None,
+                immonium: None,
                 mass_offset,
             })
         }

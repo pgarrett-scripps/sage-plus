@@ -639,6 +639,7 @@ mod mass_offsets {
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     }
 

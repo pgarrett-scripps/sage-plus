@@ -404,6 +404,7 @@ impl Runner {
             &self.database,
             output_psm_q_value,
             &self.parquet_provenance,
+            self.parameters.immonium.as_ref(),
         )?;
 
         let path = self.make_path("results.sage.parquet");

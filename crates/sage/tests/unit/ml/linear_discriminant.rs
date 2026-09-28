@@ -339,3 +339,52 @@ fn fallback_discriminant_hand_values() {
     // ln_1p(-poisson) for positive poisson > 1 is NaN, which also counts as zero.
     assert!((fallback_discriminant(&feature(2.0, 0.6)) - 0.2).abs() < 1e-6);
 }
+
+#[test]
+fn immonium_columns_only_change_scores_when_informative() {
+    use crate::immonium::ImmoniumEvidence;
+    let tol = Tolerance::Ppm(-10.0, 10.0);
+    let mut base = synthetic_psms(300, 300);
+    score_psms(&mut base, tol).expect("model fits");
+
+    // Off: the same fit as `score_psms`.
+    let mut off = synthetic_psms(300, 300);
+    score_psms_with_immonium(&mut off, tol, false).expect("model fits");
+    // On without evidence: the added columns are constant and get no weight.
+    let mut empty = synthetic_psms(300, 300);
+    score_psms_with_immonium(&mut empty, tol, true).expect("model fits");
+    for ((a, b), c) in base.iter().zip(&off).zip(&empty) {
+        assert_eq!(a.discriminant_score, b.discriminant_score);
+        assert_eq!(a.posterior_error, b.posterior_error);
+        assert!((a.discriminant_score - c.discriminant_score).abs() < 1e-5);
+    }
+
+    // Targets explain more immonium ions than decoys: separation improves.
+    let mut state = 7;
+    let mut informative = synthetic_psms(300, 300);
+    for feature in &mut informative {
+        let decoy = feature.label == -1;
+        let n = noise(&mut state);
+        feature.immonium = Some(ImmoniumEvidence {
+            explained: if decoy {
+                (1.0 + n).round() as u8
+            } else {
+                (3.0 + n).round() as u8
+            },
+            unexplained: if decoy { 2 } else { (n.abs()).round() as u8 },
+            ..Default::default()
+        });
+    }
+    score_psms_with_immonium(&mut informative, tol, true).expect("model fits");
+    let gap =
+        |scores: &[Feature]| mean_discriminant(scores, false) - mean_discriminant(scores, true);
+    let spread = |scores: &[Feature]| {
+        let values = scores
+            .iter()
+            .map(|f| f.discriminant_score as f64)
+            .collect::<Vec<_>>();
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt()
+    };
+    assert!(gap(&informative) / spread(&informative) > gap(&base) / spread(&base));
+}

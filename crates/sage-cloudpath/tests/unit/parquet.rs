@@ -258,6 +258,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         &database,
         1.0,
         &[],
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -266,7 +267,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -314,6 +315,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
         &database,
         1.0,
         &[],
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let rows = reader
@@ -331,6 +333,84 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
     };
     assert_eq!(column("database_peptide"), ["\"PEPXIDE\"", "null"]);
     assert_eq!(column("substitutions"), ["\"X4T\"", "\"\""]);
+    Ok(())
+}
+
+#[test]
+fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
+    use sage_core::immonium::{ImmoniumConfig, ImmoniumEvidence, ModifiedImmoniumIon};
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"PEPTYDE".as_slice().into(),
+        ..Peptide::default()
+    });
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        immonium: Some(ImmoniumEvidence {
+            explained: 2,
+            missing: 1,
+            unexplained: 1,
+            modified_explained: 1,
+            modified_unexplained: 0,
+            // P, Y and W observed.
+            residue_observed: 0b110_0001,
+            modified_observed: 0b1,
+        }),
+        ..Feature::default()
+    };
+    let settings = ImmoniumConfig::Enabled(true)
+        .resolve(
+            sage_core::mass::Tolerance::Ppm(-20.0, 20.0),
+            vec![ModifiedImmoniumIon {
+                label: "Phospho@Y".into(),
+                modification: "Phospho".into(),
+                mass: 79.96633,
+                residues: vec![b'Y'],
+                any_residue: false,
+                mz: 216.042,
+            }],
+        )
+        .unwrap();
+    let columns = [
+        "immonium_explained",
+        "immonium_missing",
+        "immonium_unexplained",
+        "immonium_residue_ions",
+        "immonium_modified_explained",
+        "immonium_modified_unexplained",
+        "immonium_modified_ions",
+    ];
+    let read = |settings: Option<&sage_core::immonium::ImmoniumSettings>| -> parquet::errors::Result<Vec<String>> {
+        let bytes = serialize_features(
+            &[&feature],
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            settings,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let values = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.clone(), field.to_string()))
+            .collect::<HashMap<_, _>>();
+        Ok(
+            columns
+                .iter()
+                .map(|column| values[*column].clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(read(None)?, vec!["null"; columns.len()]);
+    assert_eq!(
+        read(Some(&settings))?,
+        ["2", "1", "1", "\"P,Y,W\"", "1", "0", "\"Phospho@Y\""]
+    );
     Ok(())
 }
 
@@ -368,6 +448,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         &database,
         1.0,
         &[],
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -376,7 +457,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -738,6 +819,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         &database,
         1.0,
         &[],
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader
@@ -785,6 +867,7 @@ fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()
         &database,
         1.0,
         &[],
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader

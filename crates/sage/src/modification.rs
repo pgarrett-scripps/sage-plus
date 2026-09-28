@@ -11,6 +11,8 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 
+use crate::site_map::SiteMap;
+
 #[derive(
     Copy,
     Clone,
@@ -70,6 +72,7 @@ fn validate_details<E: de::Error>(
     neutral_losses: &[f32],
     neutral_loss_mode: NeutralLossMode,
     channel_offsets: &BTreeMap<String, f32>,
+    immonium_ions: &SiteMap<f32>,
 ) -> Result<(), E> {
     if !mass.is_finite() {
         return Err(E::custom("modification mass must be finite"));
@@ -88,6 +91,14 @@ fn validate_details<E: de::Error>(
     if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.is_empty() {
         return Err(E::custom(
             "neutral_loss_mode `required` requires at least one neutral loss",
+        ));
+    }
+    if immonium_ions
+        .values()
+        .any(|mz| !mz.is_finite() || *mz <= 0.0)
+    {
+        return Err(E::custom(
+            "immonium ion m/z values must be finite and greater than zero",
         ));
     }
     for (channel, offset) in channel_offsets {
@@ -127,6 +138,11 @@ pub struct StaticModification {
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channel_offsets: BTreeMap<String, f32>,
+    /// Singly charged m/z of this modification's immonium ions, reported
+    /// by the opt-in `immonium` evidence: a list for every site, or a map
+    /// from declared site to list.
+    #[serde(default, skip_serializing_if = "SiteMap::is_empty")]
+    pub immonium_ions: SiteMap<f32>,
 }
 
 impl<'de> Deserialize<'de> for StaticModification {
@@ -146,6 +162,8 @@ impl<'de> Deserialize<'de> for StaticModification {
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
             channel_offsets: BTreeMap<String, f32>,
+            #[serde(default)]
+            immonium_ions: SiteMap<f32>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -155,6 +173,7 @@ impl<'de> Deserialize<'de> for StaticModification {
             &raw.neutral_losses,
             raw.neutral_loss_mode,
             &raw.channel_offsets,
+            &raw.immonium_ions,
         )?;
         Ok(Self {
             mass: raw.mass,
@@ -162,6 +181,7 @@ impl<'de> Deserialize<'de> for StaticModification {
             neutral_losses: raw.neutral_losses,
             neutral_loss_mode: raw.neutral_loss_mode,
             channel_offsets: raw.channel_offsets,
+            immonium_ions: raw.immonium_ions,
         })
     }
 }
@@ -191,6 +211,11 @@ pub struct VariableModification {
     pub search_mode: SearchMode,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub channel_offsets: BTreeMap<String, f32>,
+    /// Singly charged m/z of this modification's immonium ions, reported
+    /// by the opt-in `immonium` evidence: a list for every site, or a map
+    /// from declared site to list.
+    #[serde(default, skip_serializing_if = "SiteMap::is_empty")]
+    pub immonium_ions: SiteMap<f32>,
 }
 
 fn is_exhaustive(mode: &SiteMode) -> bool {
@@ -226,6 +251,8 @@ impl<'de> Deserialize<'de> for VariableModification {
             search_mode: SearchMode,
             #[serde(default)]
             channel_offsets: BTreeMap<String, f32>,
+            #[serde(default)]
+            immonium_ions: SiteMap<f32>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
@@ -235,6 +262,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             &raw.neutral_losses,
             raw.neutral_loss_mode,
             &raw.channel_offsets,
+            &raw.immonium_ions,
         )?;
         if raw.max_total_count == Some(0) {
             return Err(de::Error::custom("max_total_count must be positive"));
@@ -257,6 +285,11 @@ impl<'de> Deserialize<'de> for VariableModification {
                     "search_mode `mass_offset` does not support channel_offsets",
                 ));
             }
+            if !raw.immonium_ions.is_empty() {
+                return Err(de::Error::custom(
+                    "search_mode `mass_offset` does not support immonium_ions: mass-offset PSMs are checked against the unmodified peptide",
+                ));
+            }
         }
         Ok(Self {
             mass: raw.mass,
@@ -268,6 +301,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             site_mode: raw.site_mode,
             search_mode: raw.search_mode,
             channel_offsets: raw.channel_offsets,
+            immonium_ions: raw.immonium_ions,
         })
     }
 }
@@ -566,7 +600,27 @@ impl VarModEntry {
     }
 }
 
+impl VarModEntry {
+    /// Immonium ions declared on this modification; empty for a bare mass.
+    pub fn immonium_ions(&self) -> &SiteMap<f32> {
+        static EMPTY: SiteMap<f32> = SiteMap::All(Vec::new());
+        match self {
+            VarModEntry::Mass(_) => &EMPTY,
+            VarModEntry::Detailed(modification) => &modification.immonium_ions,
+        }
+    }
+}
+
 impl StaticModEntry {
+    /// Immonium ions declared on this modification; empty for a bare mass.
+    pub fn immonium_ions(&self) -> &SiteMap<f32> {
+        static EMPTY: SiteMap<f32> = SiteMap::All(Vec::new());
+        match self {
+            StaticModEntry::Mass(_) => &EMPTY,
+            StaticModEntry::Detailed(modification) => &modification.immonium_ions,
+        }
+    }
+
     pub fn channel_offsets(&self) -> &BTreeMap<String, f32> {
         match self {
             StaticModEntry::Mass(_) => {
@@ -1123,6 +1177,14 @@ where
             return Err(de::Error::custom(format!(
                 "modification `{id}` has no sites"
             )));
+        }
+        if let Some(immonium_ions) = object.get("immonium_ions") {
+            // Shape and value errors are reported when the entry is parsed.
+            if let Ok(immonium_ions) = SiteMap::<f32>::deserialize(immonium_ions) {
+                immonium_ions
+                    .validate_sites("immonium_ions", &id, &sites)
+                    .map_err(de::Error::custom)?;
+            }
         }
         if let Some(name) = object.get("name") {
             if name.as_str() != Some(id.as_str()) {

@@ -402,6 +402,7 @@ fn chunked_modification_matches_a_single_pass_with_libraries() {
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     };
     let builder = Builder {
@@ -1091,6 +1092,7 @@ fn protein_site_library_adds_targeted_combinations() {
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Both,
                 channel_offsets: Default::default(),
+                immonium_ions: Default::default(),
             })],
         )])),
         ..Default::default()
@@ -1147,6 +1149,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Library,
                 channel_offsets: Default::default(),
+                immonium_ions: Default::default(),
             })],
         )])),
         ..Default::default()
@@ -1195,6 +1198,7 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })
     };
     let validate = |mods: Vec<(&str, VarModEntry)>, library: &PtmLibrary| {
@@ -1985,6 +1989,7 @@ fn ptm_validation_rejects_inconsistent_named_database_modifications() {
             site_mode: SiteMode::Exhaustive,
             search_mode: SearchMode::Database,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })
     };
     let validate = |k: VarModEntry, s: VarModEntry| {
