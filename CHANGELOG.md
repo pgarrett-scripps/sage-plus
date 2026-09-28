@@ -9,6 +9,26 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `lfq_settings.recenter_mobility` (default true) extends the experimental `recenter_on_apex`
+  to ion mobility. On timsTOF data, each file's 1/K0 window is moved from the most confident
+  PSM's 1/K0 onto the intensity-weighted 1/K0 of its integrated peak (identified files) or onto
+  the median of the identified files' centroids (transfers), keeping its width; the peak is
+  then re-traced and re-picked, and the shifted decoy gets the same steps. The grid traces ions
+  over twice `mobility_pct_tolerance` in half-tolerance sub-bins when it is on. Published 4D
+  label-free quantification also extracts in RT and 1/K0 (IonQuant, Yu et al. 2020, 2021;
+  MaxQuant 4D, Prianichnikov et al. 2020; DIA-NN, Demichev et al. 2020, 2022); the median
+  anchor for transfers is Sage Plus's own design. It has no effect without `recenter_on_apex`
+  or without ion mobility.
+- LFQ columns `apex_mobility` (intensity-weighted 1/K0 of the file's integrated peak) and
+  `id_mobility_offset` (best PSM 1/K0 minus `apex_mobility`), null unless mobility recentering
+  ran. LFQ schema v9 (unlabeled) and v10 (labeled).
+
+### Fixed
+- With `recenter_on_apex`, a precursor whose identified rows find no apex now falls back to
+  the identification-RT window search instead of going unquantified. Shifted decoys fall back
+  by the same rule.
+
 ## [v0.1.0-beta.14] - 2026-09-28
 
 ### Added

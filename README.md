@@ -85,7 +85,7 @@ Most useful for large databases, many modifications, or many files.
 Label-free and labeled MS1 quantification, and TMT reporter ions with unobserved channels written as null, not 0.
 - LFQ with nonlinear alignment, configurable match-between-runs tolerance, and per-file MS2 confirmation ([details](DOCS.md#label-free-quantification-output)).
 - A per-row LFQ `extraction_q_value` for MS2-backed and transferred rows, a diagnostic of wrong-peak quantification, not yet a calibrated transfer FDR ([details](DOCS.md#label-free-quantification-output)).
-- Peak geometry per LFQ row (`apex_rt`, bounds, `fwhm`, `id_apex_offset`) and opt-in apex recentering ([details](DOCS.md#label-free-quantification-output)).
+- Peak geometry per LFQ row (`apex_rt`, bounds, `fwhm`, `id_apex_offset`) and opt-in apex recentering in RT and ion mobility, with `apex_mobility` per row ([details](DOCS.md#label-free-quantification-output)).
 - SILAC, dimethyl, and custom label channels defined on modifications, with channel-aware LFQ ([details](DOCS.md#modification-channels)).
 - Optional timsTOF MS1 denoising with dnoise for LFQ (`bruker_config.denoise`, [details](DOCS.md#spectrum-paths)).
 

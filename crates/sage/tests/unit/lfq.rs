@@ -166,6 +166,7 @@ fn convolution_matches_same_mode_at_signal_boundaries() {
 fn precursor(rt: f32, mass_lo: f32, mass_hi: f32, mobility: (f32, f32)) -> PrecursorRange {
     PrecursorRange {
         rt,
+        mobility: (mobility.0 + mobility.1) / 2.0,
         mass_lo,
         mass_hi,
         mobility_lo: mobility.0,
@@ -702,4 +703,362 @@ fn apex_mode_integrates_around_each_files_own_apex() {
     let file0 = evidence[0].as_ref().unwrap();
     assert_eq!(file0.apex_rt, 4.0);
     assert_eq!(evidence[1].as_ref().unwrap().apex_rt, 5.0);
+}
+
+#[test]
+fn apex_mode_falls_back_to_the_window_search_without_an_apex() {
+    // The identified row (file 0) has no signal within APEX_SNAP_BINS of its
+    // identification bin, but both files share a clean peak at bin 20.
+    let peak = |row: &mut [f64]| {
+        for (bin, height) in [(18, 1.0), (19, 6.0), (20, 10.0), (21, 6.0), (22, 1.0)] {
+            row[bin] = height;
+        }
+    };
+    let mut dot_product = Matrix::new(vec![0.0; 60], 2, 30);
+    peak(dot_product.row_slice_mut(0));
+    peak(dot_product.row_slice_mut(1));
+    let traces = Traces {
+        spectral_angle: Matrix::new(vec![0.95; 60], 2, 30),
+        dot_product,
+        reference_file_id: 0,
+        geometry: GridGeometry {
+            rt_min: 0.0,
+            rt_step: 1.0,
+        },
+    };
+    let settings = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    let seeds = [Some(2), None];
+
+    let (window_peak, window_areas, _, _) = traces.clone().integrate_window(&settings).unwrap();
+    let (peak, areas, _, window) = traces.clone().pick(&settings, Some(&seeds)).unwrap();
+    assert!(!window.seeded);
+    assert_eq!(peak.rt, window_peak.rt);
+    assert_eq!(peak.score.to_bits(), window_peak.score.to_bits());
+    assert_eq!(areas, window_areas);
+
+    // A shifted decoy with the same traces takes the same branch, and its
+    // paired rows do not climb from the seeds once the target fell back.
+    let (decoy_peak, decoy_areas, _, decoy_window) =
+        traces.clone().pick(&settings, Some(&seeds)).unwrap();
+    assert!(!decoy_window.seeded);
+    assert_eq!(decoy_peak.score.to_bits(), peak.score.to_bits());
+    assert_eq!(decoy_areas, areas);
+    let mut decoy = traces.clone();
+    decoy.dot_product.row_slice_mut(0)[3] = 50.0;
+    let seeded = decoy
+        .clone()
+        .paired_evidence(&window, &settings, Some(&seeds));
+    let unseeded = decoy.clone().paired_evidence(&window, &settings, None);
+    for (a, b) in seeded.iter().zip(&unseeded) {
+        let (a, b) = (a.as_ref().unwrap(), b.as_ref().unwrap());
+        assert_eq!(a.rt_shift_bins, b.rt_shift_bins);
+        assert_eq!(a.score.to_bits(), b.score.to_bits());
+    }
+}
+
+#[test]
+fn seeded_paired_decoy_rows_climb_only_after_a_seeded_pick() {
+    let mut target = Traces {
+        dot_product: Matrix::new(
+            [
+                0.0, 1.0, 4.0, 8.0, 10.0, 8.0, 4.0, 1.0, 0.0, //
+                0.0, 0.0, 1.0, 4.0, 8.0, 10.0, 8.0, 4.0, 1.0,
+            ],
+            2,
+            9,
+        ),
+        spectral_angle: Matrix::new([1.0; 18], 2, 9),
+        reference_file_id: 0,
+        geometry: GridGeometry {
+            rt_min: 0.0,
+            rt_step: 1.0,
+        },
+    };
+    let settings = LfqSettings::default();
+    let seeds = [Some(2), None];
+    let (_, _, evidence, window) = target.clone().pick(&settings, Some(&seeds)).unwrap();
+    assert!(window.seeded);
+    // The same traces as their own paired decoy reproduce the target rows.
+    let paired = target.paired_evidence(&window, &settings, Some(&seeds));
+    for (a, b) in paired.iter().zip(&evidence) {
+        let (a, b) = (a.as_ref().unwrap(), b.as_ref().unwrap());
+        assert_eq!(a.rt_shift_bins, b.rt_shift_bins);
+        assert_eq!(a.score.to_bits(), b.score.to_bits());
+    }
+}
+
+fn mobility_range(anchor: f32, capture_pct: f32) -> PrecursorRange {
+    let (lo, hi) = Tolerance::Pct(-capture_pct, capture_pct).bounds(anchor);
+    PrecursorRange {
+        mobility: anchor,
+        ..precursor(0.5, 499.9, 500.1, (lo, hi))
+    }
+}
+
+#[test]
+fn mobility_window_weights_cover_the_tolerance_around_the_center() {
+    let grid = MobilityGrid::new(&mobility_range(1.0, 2.0), 0.01, 1, 4);
+    // The anchor window is exactly the middle four half-tolerance sub-bins.
+    assert_eq!(grid.weights(1.0), [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0]);
+    // Half a tolerance up moves the window by one sub-bin (the window
+    // scales with its center, so it is 0.5% wider and clips 1% slivers).
+    let up = grid.weights(1.005);
+    for (weight, expected) in up.iter().zip([0.0, 0.0, 0.01, 1.0, 1.0, 1.0, 1.0, 0.01]) {
+        assert!((weight - expected).abs() < 1e-3, "{up:?}");
+    }
+    // A quarter tolerance up covers edge sub-bins by half.
+    let quarter = grid.weights(1.0025);
+    assert!((quarter[2] - 0.5).abs() < 0.01 && (quarter[6] - 0.5).abs() < 0.01);
+    assert_eq!(grid.clamp(1.05), 1.01);
+    assert_eq!(grid.clamp(0.9), 0.99);
+}
+
+#[test]
+fn mobility_apex_moves_onto_the_ions_and_ignores_distant_interference() {
+    let mut grid = MobilityGrid::new(&mobility_range(1.0, 2.0), 0.01, 1, 4);
+    let geometry = GridGeometry {
+        rt_min: 0.0,
+        rt_step: 1.0,
+    };
+    // The precursor sits at 1.008 (inside the anchor window, off center);
+    // an interfering ion at 0.985 is inside the capture but only reachable
+    // by a window centered below the anchor.
+    for bin in 0..4 {
+        grid.add_entry(&geometry, bin as f32, 0, 0, 100.0, 1.008);
+        grid.add_entry(&geometry, bin as f32, 1, 0, 50.0, 1.0085);
+        grid.add_entry(&geometry, bin as f32, 0, 0, 80.0, 0.985);
+    }
+    let apex = grid.apex(0, 0..4).unwrap();
+    assert!((apex - 1.0082).abs() < 5e-4, "{apex}");
+    // Outside the integrated bins there is nothing to center on.
+    let empty = MobilityGrid::new(&mobility_range(1.0, 2.0), 0.01, 1, 4);
+    assert_eq!(empty.apex(0, 0..4), None);
+}
+
+#[test]
+fn mobility_capture_is_widened_only_with_mobility_recentering() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        peptide_q: 0.0,
+        label: 1,
+        aligned_rt: 0.5,
+        charge: 2,
+        ims: 1.0,
+        ..Feature::default()
+    };
+    let bounds = |settings: LfqSettings| {
+        let map = build_feature_map(settings, (2, 2), std::slice::from_ref(&feature), &db);
+        let range = map.ranges[0];
+        assert_eq!(range.mobility, 1.0);
+        (range.mobility_lo, range.mobility_hi)
+    };
+    let close =
+        |(lo, hi): (f32, f32), (a, b): (f32, f32)| (lo - a).abs() < 1e-6 && (hi - b).abs() < 1e-6;
+    assert!(close(bounds(LfqSettings::default()), (0.99, 1.01)));
+    let apex = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    assert!(close(bounds(apex), (0.98, 1.02)));
+    assert!(close(
+        bounds(LfqSettings {
+            recenter_mobility: false,
+            ..apex
+        }),
+        (0.99, 1.01)
+    ));
+}
+
+/// Two files: file 0 identified (best PSM 1/K0 1.0) with its ions at 1/K0
+/// `mobilities.0`, file 1 unidentified with its ions at `mobilities.1`.
+fn mobility_quantify(
+    settings: LfqSettings,
+    mobilities: (f32, f32),
+    with_mobility: bool,
+) -> Option<QuantifiedPeak> {
+    let builder: Builder = serde_json::from_value(serde_json::json!({})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let target = db.peptides.iter().position(|p| !p.decoy).unwrap();
+    let feature = Feature {
+        peptide_idx: PeptideIx(target as u32),
+        peptide_q: 0.0,
+        spectrum_q: 0.0,
+        label: 1,
+        file_id: 0,
+        aligned_rt: 0.4,
+        rt: 0.4,
+        charge: 2,
+        ims: 1.0,
+        ..Feature::default()
+    };
+    let map = build_feature_map(settings, (2, 2), &[feature], &db);
+    let mut spectra = eluting_ms1_spectra(&map, &db, &[(0, 0.4), (1, 0.4)]);
+    if with_mobility {
+        for spectrum in &mut spectra {
+            let mobility = [mobilities.0, mobilities.1][spectrum.file_id];
+            spectrum.mobilities = vec![mobility; spectrum.masses.len()];
+        }
+    }
+    let alignments = [0, 1].map(identity_alignment);
+    let mut peaks = map.quantify(&db, &spectra, &alignments);
+    peaks.remove(&(PrecursorId::Combined(PeptideIx(target as u32)), false))
+}
+
+#[test]
+fn mobility_recentering_follows_each_files_ions() {
+    let apex = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    // File 1 elutes 1.2% above the anchor PSM: outside the anchor window.
+    let fixed = mobility_quantify(LfqSettings::default(), (1.008, 1.012), true).unwrap();
+    assert!(fixed.intensities[0].is_some());
+    assert!(fixed.intensities[1].is_none());
+    let rt_only = mobility_quantify(
+        LfqSettings {
+            recenter_mobility: false,
+            ..apex
+        },
+        (1.008, 1.012),
+        true,
+    )
+    .unwrap();
+    assert!(rt_only.intensities[1].is_none());
+    for evidence in rt_only.file_evidence.iter().flatten() {
+        assert_eq!(evidence.apex_mobility, None);
+    }
+
+    let moved = mobility_quantify(apex, (1.008, 1.012), true).unwrap();
+    // Identified file 0 is centered on its own ions; the transfer file on
+    // the median of the identified files' apexes (1.008), whose window
+    // reaches its ions at 1.012.
+    let file0 = moved.file_evidence[0].as_ref().unwrap();
+    let file1 = moved.file_evidence[1].as_ref().unwrap();
+    assert!(
+        (file0.apex_mobility.unwrap() - 1.008).abs() < 1e-4,
+        "{file0:?}"
+    );
+    assert!((file0.id_mobility_offset.unwrap() + 0.008).abs() < 1e-4);
+    assert!(
+        (file1.apex_mobility.unwrap() - 1.012).abs() < 1e-4,
+        "{file1:?}"
+    );
+    assert_eq!(file1.id_mobility_offset, None);
+    let (a, b) = (moved.intensities[0].unwrap(), moved.intensities[1].unwrap());
+    assert!((a - b).abs() <= a * 1e-3, "{a} {b}");
+    assert!((a - rt_only.intensities[0].unwrap()).abs() <= a * 1e-3);
+    // The paired decoy has no signal and reports none.
+    assert!(moved.paired_decoy_evidence.iter().all(Option::is_none));
+}
+
+#[test]
+fn mobility_columns_are_null_without_ion_mobility() {
+    let apex = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    let with = mobility_quantify(apex, (1.0, 1.0), false).unwrap();
+    let without = mobility_quantify(
+        LfqSettings {
+            recenter_mobility: false,
+            ..apex
+        },
+        (1.0, 1.0),
+        false,
+    )
+    .unwrap();
+    assert_eq!(with.intensities, without.intensities);
+    for evidence in with.file_evidence.iter().flatten() {
+        assert_eq!(evidence.apex_mobility, None);
+        assert_eq!(evidence.id_mobility_offset, None);
+    }
+}
+
+#[test]
+fn shifted_decoy_grid_gets_the_same_mobility_recentering_as_its_target() {
+    // A decoy grid holding exactly the target's ions must be quantified
+    // exactly as the target: paired rows, and its own pick.
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let settings = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        peptide_q: 0.0,
+        spectrum_q: 0.0,
+        label: 1,
+        aligned_rt: 0.5,
+        charge: 2,
+        ims: 1.0,
+        ..Feature::default()
+    };
+    let map = build_feature_map(settings, (2, 2), &[feature], &db);
+    let entry = map.ranges.iter().find(|range| !range.decoy).unwrap();
+    let rt_tol = settings.rt_tolerance();
+    let mut target = Grid::new(entry, rt_tol, [0.8, 0.15, 0.05], 2, GRID_SIZE);
+    target.resolve_mobility(entry, 0.01);
+    let geometry = target.geometry();
+    let add = |grid: &mut Grid, file: usize, offset: f32, mobility: f32| {
+        for step in -30..=30 {
+            let rt = 0.5 + (offset + step as f32) * geometry.rt_step;
+            let height = (-0.5 * (step as f32 / 6.0).powi(2)).exp() * 1000.0;
+            for (isotope, abundance) in [0.78, 0.16, 0.06].into_iter().enumerate() {
+                grid.mobility.as_mut().unwrap().add_entry(
+                    &geometry,
+                    rt,
+                    isotope,
+                    file,
+                    abundance * height,
+                    mobility,
+                );
+            }
+        }
+    };
+    // File 0 (identified) peaks 4 bins after its ID at 1/K0 1.006; file 1
+    // peaks 7 bins after it at 1.011.
+    add(&mut target, 0, 4.0, 1.006);
+    add(&mut target, 1, 7.0, 1.011);
+    let mut decoy = Grid::new(entry, rt_tol, [0.8, 0.15, 0.05], 2, GRID_SIZE);
+    decoy.mobility = target.mobility.clone();
+    target.reset_mobility_centers();
+    decoy.reset_mobility_centers();
+
+    let id = PrecursorId::Combined(PeptideIx(0));
+    let out = map.quantify_pair(id, usize::MAX, Some(target), Some(decoy), 2);
+    assert_eq!(out.len(), 2);
+    let (target, decoy) = (&out[0].2, &out[1].2);
+    let file1 = target.file_evidence[1].as_ref().unwrap();
+    assert!(
+        (file1.apex_mobility.unwrap() - 1.011).abs() < 2e-4,
+        "{file1:?}"
+    );
+    for file in 0..2 {
+        let t = target.file_evidence[file].as_ref().unwrap();
+        for d in [
+            &target.paired_decoy_evidence[file],
+            &decoy.file_evidence[file],
+        ] {
+            let d = d.as_ref().unwrap();
+            assert_eq!(d.rt_shift_bins, t.rt_shift_bins);
+            assert_eq!(d.score.to_bits(), t.score.to_bits());
+            assert_eq!(d.apex_mobility, t.apex_mobility);
+        }
+    }
+    assert_eq!(decoy.intensities, target.intensities);
+    assert_eq!(decoy.peak.score.to_bits(), target.peak.score.to_bits());
 }

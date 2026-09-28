@@ -2,15 +2,15 @@ use super::*;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/lfq.v7.parquet.schema"
+        "../../../../schemas/lfq.v9.parquet.schema"
     ))
 }
 
 fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/lfq.v8.parquet.schema")
+        include_str!("../../../../schemas/lfq.v10.parquet.schema")
     } else {
-        include_str!("../../../../schemas/lfq.v7.parquet.schema")
+        include_str!("../../../../schemas/lfq.v9.parquet.schema")
     })
 }
 
@@ -83,7 +83,7 @@ pub fn serialize_lfq<H: BuildHasher>(
             KeyValue::new("sage.lfq.peak_center".into(), Some(peak_center.into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "8" } else { "7" }.into()),
+                Some(if has_labels { "10" } else { "9" }.into()),
             ),
         ],
         provenance,
@@ -416,7 +416,7 @@ pub fn serialize_lfq<H: BuildHasher>(
             .write_batch(&values, Some(&levels), None)?;
         col.close()?;
     }
-    for field in 0..5 {
+    for field in 0..7 {
         if let Some(mut col) = rg.next_column()? {
             let mut values = Vec::new();
             let mut levels = Vec::new();
@@ -426,7 +426,9 @@ pub fn serialize_lfq<H: BuildHasher>(
                     1 => Some(evidence.peak_start_rt),
                     2 => Some(evidence.peak_end_rt),
                     3 => evidence.fwhm,
-                    _ => evidence.id_apex_offset,
+                    4 => evidence.id_apex_offset,
+                    5 => evidence.apex_mobility,
+                    _ => evidence.id_mobility_offset,
                 });
                 match value.filter(|value| value.is_finite()) {
                     Some(value) => {

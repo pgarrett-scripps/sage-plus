@@ -32,6 +32,8 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
                 Some(sage_core::lfq::FileEvidence {
                     score: 0.75,
                     extraction_q_value: Some(0.004),
+                    apex_mobility: Some(0.875),
+                    id_mobility_offset: Some(-0.0025),
                     ..Default::default()
                 }),
                 None,
@@ -57,7 +59,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("9")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -80,6 +82,13 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     assert_eq!(values(&rows[1])["file_score"], &Field::Null);
     assert_eq!(values(&rows[0])["extraction_q_value"], &Field::Float(0.004));
     assert_eq!(values(&rows[1])["extraction_q_value"], &Field::Null);
+    assert_eq!(values(&rows[0])["apex_mobility"], &Field::Float(0.875));
+    assert_eq!(
+        values(&rows[0])["id_mobility_offset"],
+        &Field::Float(-0.0025)
+    );
+    assert_eq!(values(&rows[0])["id_apex_offset"], &Field::Null);
+    assert_eq!(values(&rows[1])["apex_mobility"], &Field::Null);
     assert!(metadata.iter().any(|entry| {
         entry.key == "sage.lfq.extraction_q_value_scope"
             && entry.value.as_deref() == Some("precursor_file_all_rows")
@@ -193,7 +202,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("8")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("10")
     }));
     let rows = reader
         .get_row_iter(None)?

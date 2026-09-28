@@ -258,6 +258,9 @@ pub struct LfqOptions {
     /// Center extraction on the MS1 elution apex rather than the MS2
     /// identification RT.
     pub recenter_on_apex: Option<bool>,
+    /// With `recenter_on_apex` and ion mobility data, also center each
+    /// file's mobility window on its peak's intensity-weighted 1/K0.
+    pub recenter_mobility: Option<bool>,
 }
 
 impl From<LfqOptions> for LfqSettings {
@@ -272,6 +275,7 @@ impl From<LfqOptions> for LfqSettings {
             peptide_q_value: value.peptide_q_value.unwrap_or(default.peptide_q_value),
             mbr: value.mbr.unwrap_or(default.mbr),
             recenter_on_apex: value.recenter_on_apex.unwrap_or(default.recenter_on_apex),
+            recenter_mobility: value.recenter_mobility.unwrap_or(default.recenter_mobility),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
                 .unwrap_or(default.mobility_pct_tolerance),

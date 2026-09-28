@@ -25,6 +25,15 @@ const N_ISOTOPES: usize = 3;
 const APEX_SNAP_BINS: usize = 10;
 /// Warp search range, in bins, for files without their own identification.
 const WARP_SLACK: isize = 75;
+/// With mobility recentering, ions are captured over this many times the
+/// mobility tolerance either side of the anchor PSM's 1/K0, so that a
+/// window of the configured width can move by up to one tolerance.
+const MOBILITY_CAPTURE: f32 = 2.0;
+/// Equal-width 1/K0 sub-bins over the captured mobility range: half a
+/// tolerance each, so the anchor window is exactly the middle four.
+const MOBILITY_SUB_BINS: usize = 8;
+/// Mean-shift iterations when centering a mobility window on a peak.
+const MOBILITY_ITERATIONS: usize = 5;
 
 fn default_rt_pct_tolerance() -> f32 {
     0.5
@@ -74,6 +83,12 @@ pub struct LfqSettings {
     /// apexes, and integration bounds follow the peak shape.
     #[serde(default = "default_recenter_on_apex")]
     pub recenter_on_apex: bool,
+    /// With `recenter_on_apex` and ion mobility data, also center each
+    /// file's mobility window on the intensity-weighted 1/K0 of its peak
+    /// (identified files) or on the median of those centers (transfers),
+    /// instead of on the most confident PSM's 1/K0. No effect otherwise.
+    #[serde(default = "default_true")]
+    pub recenter_mobility: bool,
 }
 
 fn default_recenter_on_apex() -> bool {
@@ -97,6 +112,7 @@ impl Default for LfqSettings {
             peptide_q_value: 0.01,
             mbr: true,
             recenter_on_apex: default_recenter_on_apex(),
+            recenter_mobility: true,
         }
     }
 }
@@ -104,6 +120,12 @@ impl Default for LfqSettings {
 impl LfqSettings {
     fn rt_tolerance(&self) -> f32 {
         self.rt_pct_tolerance / 100.0
+    }
+
+    /// Whether mobility windows are recentered on the peak (when the data
+    /// has ion mobility).
+    fn mobility_recentering(&self) -> bool {
+        self.recenter_on_apex && self.recenter_mobility
     }
 }
 
@@ -114,11 +136,16 @@ pub struct IdentificationRt {
     pub aligned: f32,
     /// RT in the file's own time units.
     pub observed: f32,
+    /// 1/K0 of that PSM; 0 without ion mobility.
+    pub mobility: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct PrecursorRange {
     pub rt: f32,
+    /// 1/K0 of the anchor PSM (0 without ion mobility); the mobility window
+    /// is built around it.
+    pub mobility: f32,
     pub mass_lo: f32,
     pub mass_hi: f32,
     pub mobility_lo: f32,
@@ -192,6 +219,23 @@ pub struct FileEvidence {
     pub fwhm: Option<f32>,
     /// Identification RT minus apex RT, for files with an accepted PSM.
     pub id_apex_offset: Option<f32>,
+    /// Intensity-weighted 1/K0 of the matched isotope peaks inside the
+    /// integration bounds and this file's mobility window. Only with
+    /// mobility recentering on ion mobility data.
+    pub apex_mobility: Option<f32>,
+    /// 1/K0 of this file's best accepted PSM minus `apex_mobility`.
+    pub id_mobility_offset: Option<f32>,
+}
+
+/// A picked and integrated peak of one grid.
+struct Picked {
+    peak: Peak,
+    areas: Vec<Option<f64>>,
+    evidence: Vec<Option<FileEvidence>>,
+    window: PeakWindow,
+    /// With mobility recentering, the peak picked in the anchor mobility
+    /// windows, from which the moved windows were derived.
+    anchor_window: Option<PeakWindow>,
 }
 
 pub fn build_feature_map(
@@ -248,6 +292,7 @@ pub fn build_feature_map(
             .or_insert(IdentificationRt {
                 aligned: feat.aligned_rt,
                 observed: feat.rt,
+                mobility: feat.ims,
             });
         peptide_rts
             .entry(feat.peptide_idx)
@@ -315,15 +360,18 @@ pub fn build_feature_map(
                 // } else {
                 //     feat.calcmass
                 // };
-                let (mobility_lo, mobility_hi) = Tolerance::Pct(
-                    -settings.mobility_pct_tolerance,
-                    settings.mobility_pct_tolerance,
-                )
-                .bounds(feat.ims);
+                // With mobility recentering, capture a wider range; the
+                // window is cut out of it once the peak is known.
+                let capture = match settings.mobility_recentering() {
+                    true => settings.mobility_pct_tolerance * MOBILITY_CAPTURE,
+                    false => settings.mobility_pct_tolerance,
+                };
+                let (mobility_lo, mobility_hi) = Tolerance::Pct(-capture, capture).bounds(feat.ims);
                 map.insert(
                     (*peptide_idx, map_file_id),
                     PrecursorRange {
                         rt: anchor_rt(feat),
+                        mobility: feat.ims,
                         mass_lo: db[*peptide_idx].monoisotopic,
                         mass_hi: 0.0,
                         peptide: *peptide_idx,
@@ -467,7 +515,7 @@ impl FeatureMap {
                 let rt = alignments[spectrum.file_id].transform(spectrum.scan_start_time);
                 let query = self.rt_slice(rt, rt_tol);
 
-                let add_entry = |entry: &PrecursorRange, intensity: f32| {
+                let add_entry = |entry: &PrecursorRange, intensity: f32, mobility: Option<f32>| {
                     if !self.settings.mbr && entry.file_id != spectrum.file_id {
                         return;
                     }
@@ -492,17 +540,40 @@ impl FeatureMap {
                             composition.carbon,
                             composition.sulfur,
                         );
-                        match self.settings.mbr {
+                        let mut grid = match self.settings.mbr {
                             true => Grid::new(entry, rt_tol, dist, n_files, GRID_SIZE),
                             false => {
                                 let mut grid = Grid::new(entry, rt_tol, dist, 1, GRID_SIZE);
                                 grid.reference_file_id = 0;
                                 grid
                             }
+                        };
+                        if self.settings.mobility_recentering()
+                            && entry.mobility > 0.0
+                            && mobility.is_some()
+                        {
+                            grid.resolve_mobility(
+                                entry,
+                                self.settings.mobility_pct_tolerance / 100.0,
+                            );
                         }
+                        grid
                     });
 
-                    grid.add_entry(rt, entry.isotope, row, intensity);
+                    let geometry = grid.geometry();
+                    if let Some(resolved) = grid.mobility.as_mut() {
+                        resolved.add_entry(
+                            &geometry,
+                            rt,
+                            entry.isotope,
+                            row,
+                            intensity,
+                            // Spectra without ion mobility count at the anchor.
+                            mobility.unwrap_or(entry.mobility),
+                        );
+                    } else {
+                        grid.add_entry(rt, entry.isotope, row, intensity);
+                    }
                 };
 
                 if spectrum.mobilities.is_empty() {
@@ -510,7 +581,7 @@ impl FeatureMap {
                         spectrum.masses.iter().zip(spectrum.intensities.iter())
                     {
                         for entry in query.mass_lookup(mass) {
-                            add_entry(entry, intensity);
+                            add_entry(entry, intensity, None);
                         }
                     }
                 } else {
@@ -521,7 +592,7 @@ impl FeatureMap {
                         .zip(spectrum.mobilities.iter())
                     {
                         for entry in query.mass_mobility_lookup(mass, mobility) {
-                            add_entry(entry, intensity);
+                            add_entry(entry, intensity, Some(mobility));
                         }
                     }
                 }
@@ -534,56 +605,16 @@ impl FeatureMap {
         // also be evaluated at the target's peak.
         let mut pairs: HashMap<(PrecursorId, usize), [Option<Grid>; 2], fnv::FnvBuildHasher> =
             HashMap::default();
-        for ((id, decoy, anchor), grid) in scores {
+        for ((id, decoy, anchor), mut grid) in scores {
+            // Mobility-resolved grids start in the anchor PSM's window.
+            grid.reset_mobility_centers();
             pairs.entry((id, anchor)).or_default()[usize::from(decoy)] = Some(grid);
         }
 
         let mut quantified = pairs
             .into_par_iter()
             .flat_map_iter(|((id, anchor), [target, decoy])| {
-                // Identification RTs as bins of the target grid. The shifted
-                // decoy grid has the same geometry, so it is seeded at the
-                // same bins and runs through exactly the same apex search.
-                let seeds = match (&target, self.settings.recenter_on_apex) {
-                    (Some(grid), true) => Some(self.seeds(grid, id, anchor, n_files)),
-                    _ => None,
-                };
-                let seeds = seeds.as_deref();
-                let mut decoy_traces = decoy.map(|mut grid| grid.summarize_traces());
-                let mut out = Vec::with_capacity(2);
-                if let Some(mut grid) = target {
-                    let mut traces = grid.summarize_traces();
-                    if let Some((peak, areas, evidence, window)) =
-                        traces.pick(&self.settings, seeds)
-                    {
-                        let paired = match &decoy_traces {
-                            Some(decoy) => {
-                                decoy
-                                    .clone()
-                                    .paired_evidence(&window, &self.settings, seeds)
-                            }
-                            None => vec![None; evidence.len()],
-                        };
-                        out.push(
-                            self.expand(n_files, id, false, anchor, peak, areas, evidence, paired),
-                        );
-                    }
-                }
-                if let Some(traces) = decoy_traces.as_mut() {
-                    if let Some((peak, areas, evidence, _)) = traces.pick(&self.settings, seeds) {
-                        out.push(self.expand(
-                            n_files,
-                            id,
-                            true,
-                            anchor,
-                            peak,
-                            areas,
-                            evidence,
-                            Vec::new(),
-                        ));
-                    }
-                }
-                out
+                self.quantify_pair(id, anchor, target, decoy, n_files)
             })
             .collect::<Vec<_>>();
 
@@ -620,9 +651,136 @@ impl FeatureMap {
                     .then(|| self.id_rts.get(&(*id, file)))
                     .flatten()
                     .map(|rt| rt.observed - apex);
+                evidence.id_mobility_offset = evidence
+                    .apex_mobility
+                    .filter(|_| !*decoy)
+                    .zip(self.id_rts.get(&(*id, file)))
+                    .filter(|(_, rt)| rt.mobility > 0.0)
+                    .map(|(apex, rt)| rt.mobility - apex);
             }
         });
         peaks
+    }
+
+    /// Pick and integrate a precursor's target grid, evaluate its shifted
+    /// decoy at the target's peak (the extraction q-value competitor), and
+    /// pick the decoy on its own (the precursor q-value competitor).
+    fn quantify_pair(
+        &self,
+        id: PrecursorId,
+        anchor: usize,
+        target: Option<Grid>,
+        decoy: Option<Grid>,
+        n_files: usize,
+    ) -> Vec<((PrecursorId, bool), usize, QuantifiedPeak)> {
+        // Identification RTs as bins of the target grid. The shifted decoy
+        // grid has the same geometry, so it is seeded at the same bins and
+        // runs through exactly the same apex search.
+        let seeds = match (&target, self.settings.recenter_on_apex) {
+            (Some(grid), true) => Some(self.seeds(grid, id, anchor, n_files)),
+            _ => None,
+        };
+        let seeds = seeds.as_deref();
+        let mut decoy = decoy;
+        let mut out = Vec::with_capacity(2);
+        if let Some(mut grid) = target {
+            if let Some(picked) = self.trace_and_pick(&mut grid, seeds) {
+                let paired = match decoy.as_mut() {
+                    Some(decoy) => self.paired_evidence(decoy, &picked, seeds),
+                    None => vec![None; picked.evidence.len()],
+                };
+                out.push(self.expand(
+                    n_files,
+                    id,
+                    false,
+                    anchor,
+                    picked.peak,
+                    picked.areas,
+                    picked.evidence,
+                    paired,
+                ));
+            }
+        }
+        if let Some(mut grid) = decoy {
+            if let Some(picked) = self.trace_and_pick(&mut grid, seeds) {
+                out.push(self.expand(
+                    n_files,
+                    id,
+                    true,
+                    anchor,
+                    picked.peak,
+                    picked.areas,
+                    picked.evidence,
+                    Vec::new(),
+                ));
+            }
+        }
+        out
+    }
+
+    /// Trace and pick one grid. With mobility recentering the peak is picked
+    /// in the anchor PSM's mobility window, each file's window is then moved
+    /// onto the peak's intensity-weighted 1/K0 ([`Grid::mobility_centers`]),
+    /// and the peak is traced and picked again in the moved windows.
+    fn trace_and_pick(&self, grid: &mut Grid, seeds: Option<&[Option<usize>]>) -> Option<Picked> {
+        let settings = &self.settings;
+        let (peak, areas, evidence, window) = grid.summarize_traces().pick(settings, seeds)?;
+        let mut picked = Picked {
+            peak,
+            areas,
+            evidence,
+            window,
+            anchor_window: None,
+        };
+        if grid.mobility.is_none() {
+            return Some(picked);
+        }
+        let centers = grid.mobility_centers(&picked.window, seeds);
+        grid.set_mobility_centers(&centers);
+        match grid.summarize_traces().pick(settings, seeds) {
+            Some((peak, areas, evidence, window)) => {
+                picked = Picked {
+                    peak,
+                    areas,
+                    evidence,
+                    window,
+                    anchor_window: Some(picked.window),
+                }
+            }
+            // Keep the anchor-window pick if the moved windows lose the peak.
+            None => grid.reset_mobility_centers(),
+        }
+        grid.attach_apex_mobility(&picked.window, &mut picked.evidence);
+        Some(picked)
+    }
+
+    /// Evaluate a target's shifted decoy at the target's peak. With mobility
+    /// recentering the decoy follows the target's steps
+    /// ([`FeatureMap::trace_and_pick`]): evaluated at the target's
+    /// anchor-window peak, its windows are moved by the same rule, and it is
+    /// evaluated again at the target's final peak.
+    fn paired_evidence(
+        &self,
+        decoy: &mut Grid,
+        target: &Picked,
+        seeds: Option<&[Option<usize>]>,
+    ) -> Vec<Option<FileEvidence>> {
+        let settings = &self.settings;
+        if let Some(anchor_window) = target.anchor_window.as_ref() {
+            let (paired, _) =
+                decoy
+                    .summarize_traces()
+                    .paired_window_evidence(anchor_window, settings, seeds);
+            let centers = decoy.mobility_centers(&paired, seeds);
+            decoy.set_mobility_centers(&centers);
+        }
+        let (paired, mut evidence) =
+            decoy
+                .summarize_traces()
+                .paired_window_evidence(&target.window, settings, seeds);
+        decoy.attach_apex_mobility(&paired, &mut evidence);
+        decoy.reset_mobility_centers();
+        evidence
     }
 
     /// Bin of the best identification in each grid row, if it is inside the
@@ -752,7 +910,165 @@ pub struct Grid {
     /// Isotopic summed intensities are arranged in consequtive rows, ordered by file. The first
     /// N_ISOTOPE rows correspond to file 0, then the following N_ISOTOPE rows correspond to file 1, etc.
     /// Indexing into the matrix is done by [(n_file * N_ISOTOPES + isotope, rt_window)]
+    ///
+    /// With mobility recentering the matrix is cut out of [`Grid::mobility`]
+    /// at each file's current mobility window.
     pub matrix: Matrix,
+    /// Mobility-resolved intensities, only with mobility recentering on ion
+    /// mobility data.
+    pub mobility: Option<MobilityGrid>,
+}
+
+/// Intensities of a [`Grid`] further split into 1/K0 sub-bins, so that each
+/// file's mobility window can be moved after the peak is found.
+///
+/// The captured range is the anchor PSM's 1/K0 ± [`MOBILITY_CAPTURE`]
+/// tolerances in [`MOBILITY_SUB_BINS`] equal sub-bins; a window is the
+/// tolerance either side of its center, with partly covered sub-bins
+/// weighted by their covered fraction.
+#[derive(Clone, Debug)]
+pub struct MobilityGrid {
+    /// 1/K0 of the anchor PSM.
+    anchor: f32,
+    /// Lower edge of the captured range and the sub-bin width, in 1/K0.
+    lo: f32,
+    width: f32,
+    /// Mobility tolerance as a fraction of 1/K0.
+    tol: f32,
+    files: usize,
+    cols: usize,
+    /// Window center of each file.
+    centers: Vec<f32>,
+    /// Intensity per (file * N_ISOTOPES + isotope, RT bin, sub-bin).
+    intensity: Vec<f32>,
+    /// Intensity times 1/K0 per (file, RT bin, sub-bin), over isotopes.
+    moment: Vec<f32>,
+}
+
+impl MobilityGrid {
+    fn new(entry: &PrecursorRange, tol: f32, files: usize, cols: usize) -> Self {
+        MobilityGrid {
+            anchor: entry.mobility,
+            lo: entry.mobility_lo,
+            width: (entry.mobility_hi - entry.mobility_lo) / MOBILITY_SUB_BINS as f32,
+            tol,
+            files,
+            cols,
+            centers: vec![entry.mobility; files],
+            intensity: vec![0.0; files * N_ISOTOPES * cols * MOBILITY_SUB_BINS],
+            moment: vec![0.0; files * cols * MOBILITY_SUB_BINS],
+        }
+    }
+
+    /// Add a data point, interpolated between RT bins as [`Grid::add_entry`].
+    fn add_entry(
+        &mut self,
+        geometry: &GridGeometry,
+        spectrum_rt: f32,
+        isotope: usize,
+        file_id: usize,
+        intensity: f32,
+        mobility: f32,
+    ) {
+        let bin_lo = ((spectrum_rt - geometry.rt_min) / geometry.rt_step).floor() as usize;
+        let bin_lo = bin_lo.min(self.cols - 1);
+        let bin_hi = (bin_lo + 1).min(self.cols - 1);
+        let bin_lo_rt = bin_lo as f32 * geometry.rt_step + geometry.rt_min;
+        let interp = (spectrum_rt - bin_lo_rt) / geometry.rt_step;
+        let sub = (((mobility - self.lo) / self.width).floor().max(0.0) as usize)
+            .min(MOBILITY_SUB_BINS - 1);
+        let row = file_id * N_ISOTOPES + isotope;
+        for (bin, weight) in [(bin_lo, 1.0 - interp), (bin_hi, interp)] {
+            let value = weight * intensity;
+            self.intensity[(row * self.cols + bin) * MOBILITY_SUB_BINS + sub] += value;
+            self.moment[(file_id * self.cols + bin) * MOBILITY_SUB_BINS + sub] += value * mobility;
+        }
+    }
+
+    /// Keep a window center inside the captured range's inner half, so that
+    /// the whole window stays captured.
+    fn clamp(&self, center: f32) -> f32 {
+        center.clamp(
+            self.anchor * (1.0 - self.tol),
+            self.anchor * (1.0 + self.tol),
+        )
+    }
+
+    /// Fraction of each sub-bin covered by the window around `center`. The
+    /// anchor window covers exactly the middle sub-bins; rounding slivers
+    /// are snapped so that it reproduces the unresolved window.
+    fn weights(&self, center: f32) -> [f32; MOBILITY_SUB_BINS] {
+        let (lo, hi) = (center * (1.0 - self.tol), center * (1.0 + self.tol));
+        std::array::from_fn(|sub| {
+            let start = self.lo + sub as f32 * self.width;
+            let covered = (hi.min(start + self.width) - lo.max(start)) / self.width;
+            match covered {
+                c if c < 1e-3 => 0.0,
+                c if c > 1.0 - 1e-3 => 1.0,
+                c => c,
+            }
+        })
+    }
+
+    /// Write each file's windowed intensities into `matrix`.
+    fn fill(&self, matrix: &mut Matrix) {
+        for file in 0..self.files {
+            let weights = self.weights(self.centers[file]);
+            for isotope in 0..N_ISOTOPES {
+                let row = file * N_ISOTOPES + isotope;
+                for col in 0..self.cols {
+                    let start = (row * self.cols + col) * MOBILITY_SUB_BINS;
+                    matrix[(row, col)] = self.intensity[start..start + MOBILITY_SUB_BINS]
+                        .iter()
+                        .zip(&weights)
+                        .map(|(&i, &w)| f64::from(i * w))
+                        .sum();
+                }
+            }
+        }
+    }
+
+    /// Intensity-weighted 1/K0 of a file's matched isotope peaks in RT bins
+    /// `bins`, inside the window around `center`.
+    fn centroid(&self, file: usize, bins: std::ops::Range<usize>, center: f32) -> Option<f32> {
+        let weights = self.weights(self.clamp(center));
+        let (mut moment, mut total) = (0.0f64, 0.0f64);
+        for col in bins {
+            for (sub, &weight) in weights.iter().enumerate() {
+                if weight == 0.0 {
+                    continue;
+                }
+                let weight = f64::from(weight);
+                moment += weight
+                    * f64::from(self.moment[(file * self.cols + col) * MOBILITY_SUB_BINS + sub]);
+                total += weight
+                    * (0..N_ISOTOPES)
+                        .map(|isotope| {
+                            let row = file * N_ISOTOPES + isotope;
+                            f64::from(
+                                self.intensity[(row * self.cols + col) * MOBILITY_SUB_BINS + sub],
+                            )
+                        })
+                        .sum::<f64>();
+            }
+        }
+        (total > 0.0).then(|| (moment / total) as f32)
+    }
+
+    /// Mobility apex of a file's peak: starting from the anchor window, move
+    /// the window onto its own intensity-weighted 1/K0 until it settles.
+    fn apex(&self, file: usize, bins: std::ops::Range<usize>) -> Option<f32> {
+        let mut center = self.anchor;
+        for _ in 0..MOBILITY_ITERATIONS {
+            let next = self.centroid(file, bins.clone(), center)?;
+            let settled = (next - center).abs() <= center * 1e-5;
+            center = next;
+            if settled {
+                break;
+            }
+        }
+        Some(center)
+    }
 }
 
 #[derive(Clone)]
@@ -817,11 +1133,17 @@ impl Traces {
         PeakWindow,
     )> {
         // Precursors without an identification inside the grid (e.g. label
-        // channels seeded by another channel) keep the window search.
-        match seeds.filter(|seeds| seeds.iter().any(Option::is_some)) {
-            Some(seeds) => self.integrate_apex(settings, seeds),
-            None => self.integrate_window(settings),
+        // channels seeded by another channel) keep the window search, and so
+        // do precursors whose identified rows find no apex near their
+        // identification. Targets and decoys take the same branch rule.
+        if let Some(seeds) = seeds.filter(|seeds| seeds.iter().any(Option::is_some)) {
+            let unwarped = self.clone();
+            if let Some(picked) = self.integrate_apex(settings, seeds) {
+                return Some(picked);
+            }
+            *self = unwarped;
         }
+        self.integrate_window(settings)
     }
 
     /// Isotope-consistent trace: signal where the isotope pattern matches.
@@ -942,6 +1264,7 @@ impl Traces {
             right,
             shifts,
             reference,
+            seeded: true,
         };
         let (areas, evidence) = self.window_evidence(&window, settings);
         Some((peak, areas, evidence, window))
@@ -1123,6 +1446,7 @@ impl Traces {
             right,
             shifts,
             reference: self.dot_product.row_slice(self.reference_file_id).to_vec(),
+            seeded: false,
         };
         let (areas, evidence) = self.window_evidence(&window, settings);
         Some((best, areas, evidence, window))
@@ -1134,19 +1458,33 @@ impl Traces {
     /// so a file row answers the same question as the target row it is paired
     /// with: can an isotope envelope be aligned to the expected elution?
     ///
-    /// With apex recentering (`seeds`), a seeded row instead climbs from the
-    /// same identification bin as the target row and is shifted so that its
-    /// own apex lands on the target's apex, exactly as the target row was. A
-    /// row whose climb finds no signal keeps the warp search, as a target row
-    /// does in [`Traces::integrate_apex`].
+    /// When the target's peak came from the apex search (`window.seeded`), a
+    /// seeded row instead climbs from the same identification bin as the
+    /// target row and is shifted so that its own apex lands on the target's
+    /// apex, exactly as the target row was. A row whose climb finds no signal
+    /// keeps the warp search, as a target row does in
+    /// [`Traces::integrate_apex`]. When the target fell back to the window
+    /// search, so do all decoy rows.
     pub fn paired_evidence(
         &mut self,
         window: &PeakWindow,
         settings: &LfqSettings,
         seeds: Option<&[Option<usize>]>,
     ) -> Vec<Option<FileEvidence>> {
+        self.paired_window_evidence(window, settings, seeds).1
+    }
+
+    /// [`Traces::paired_evidence`], also returning the window with these
+    /// traces' own shifts.
+    pub fn paired_window_evidence(
+        &mut self,
+        window: &PeakWindow,
+        settings: &LfqSettings,
+        seeds: Option<&[Option<usize>]>,
+    ) -> (PeakWindow, Vec<Option<FileEvidence>>) {
         let mut shifts = Self::time_warps_to(&window.reference, &self.dot_product, WARP_SLACK);
-        for (file, seed) in seeds.unwrap_or_default().iter().enumerate() {
+        let seeds = seeds.filter(|_| window.seeded).unwrap_or_default();
+        for (file, seed) in seeds.iter().enumerate() {
             if let Some(apex) =
                 seed.and_then(|seed| climb_to_apex(&self.consistent(file, settings), seed))
             {
@@ -1160,7 +1498,8 @@ impl Traces {
             reference: window.reference.clone(),
             ..*window
         };
-        self.window_evidence(&window, settings).1
+        let evidence = self.window_evidence(&window, settings).1;
+        (window, evidence)
     }
 
     fn window_evidence(
@@ -1216,6 +1555,8 @@ impl Traces {
                         peak_end_rt: self.geometry.rt(window.right as f64 - 1.0 + shift),
                         fwhm,
                         id_apex_offset: None,
+                        apex_mobility: None,
+                        id_mobility_offset: None,
                     }
                 })
             })
@@ -1233,6 +1574,19 @@ pub struct PeakWindow {
     pub right: usize,
     pub shifts: Vec<isize>,
     pub reference: Vec<f64>,
+    /// Whether the peak came from the identification-seeded apex search
+    /// ([`Traces::integrate_apex`]) rather than the window search.
+    pub seeded: bool,
+}
+
+impl PeakWindow {
+    /// Integration bounds in a file's own (unwarped) grid bins.
+    fn file_bins(&self, file: usize, cols: usize) -> Option<std::ops::Range<usize>> {
+        let shift = *self.shifts.get(file)?;
+        let lo = (self.left as isize + shift).clamp(0, cols as isize) as usize;
+        let hi = (self.right as isize + shift).clamp(0, cols as isize) as usize;
+        (lo < hi).then_some(lo..hi)
+    }
 }
 
 impl Grid {
@@ -1257,6 +1611,83 @@ impl Grid {
             matrix,
             files,
             reference_file_id: entry.file_id,
+            mobility: None,
+        }
+    }
+
+    fn geometry(&self) -> GridGeometry {
+        GridGeometry {
+            rt_min: self.rt_min,
+            rt_step: self.rt_step,
+        }
+    }
+
+    /// Resolve intensities by ion mobility (see [`MobilityGrid`]); `tol` is
+    /// the mobility tolerance as a fraction and `entry` carries the captured
+    /// range. Call before adding any data.
+    pub fn resolve_mobility(&mut self, entry: &PrecursorRange, tol: f32) {
+        self.mobility = Some(MobilityGrid::new(entry, tol, self.files, self.matrix.cols));
+    }
+
+    /// Move each file's mobility window to `centers` and cut the matrix out
+    /// again. No effect without mobility resolution.
+    fn set_mobility_centers(&mut self, centers: &[f32]) {
+        if let Some(mobility) = self.mobility.as_mut() {
+            mobility.centers.copy_from_slice(centers);
+            mobility.fill(&mut self.matrix);
+        }
+    }
+
+    /// Put every file's mobility window back on the anchor PSM's 1/K0.
+    fn reset_mobility_centers(&mut self) {
+        if let Some(anchor) = self.mobility.as_ref().map(|mobility| mobility.anchor) {
+            self.set_mobility_centers(&vec![anchor; self.files]);
+        }
+    }
+
+    /// Mobility window center of each file for a picked peak: identified
+    /// (seeded) files use the mobility apex of their own peak, inside the
+    /// integration bounds; the others, and identified files without signal,
+    /// use the median of those apexes. The anchor PSM's 1/K0 is kept when no
+    /// identified file has signal.
+    fn mobility_centers(&self, window: &PeakWindow, seeds: Option<&[Option<usize>]>) -> Vec<f32> {
+        let Some(mobility) = self.mobility.as_ref() else {
+            return Vec::new();
+        };
+        let apexes = (0..self.files)
+            .map(|file| {
+                seeds?.get(file).copied().flatten()?;
+                mobility.apex(file, window.file_bins(file, self.matrix.cols)?)
+            })
+            .collect::<Vec<_>>();
+        let mut found = apexes.iter().flatten().copied().collect::<Vec<_>>();
+        if found.is_empty() {
+            return vec![mobility.anchor; self.files];
+        }
+        found.sort_unstable_by(f32::total_cmp);
+        let n = found.len();
+        let median = match n % 2 {
+            1 => found[n / 2],
+            _ => (found[n / 2 - 1] + found[n / 2]) / 2.0,
+        };
+        apexes
+            .into_iter()
+            .map(|apex| mobility.clamp(apex.unwrap_or(median)))
+            .collect()
+    }
+
+    /// Report each file's intensity-weighted 1/K0 inside its current
+    /// mobility window and the integration bounds as `apex_mobility`.
+    fn attach_apex_mobility(&self, window: &PeakWindow, evidence: &mut [Option<FileEvidence>]) {
+        let Some(mobility) = self.mobility.as_ref() else {
+            return;
+        };
+        for (file, evidence) in evidence.iter_mut().enumerate() {
+            if let Some(evidence) = evidence {
+                evidence.apex_mobility = window
+                    .file_bins(file, self.matrix.cols)
+                    .and_then(|bins| mobility.centroid(file, bins, mobility.centers[file]));
+            }
         }
     }
 
@@ -1281,7 +1712,7 @@ impl Grid {
     /// * Perform gaussian smoothing on summed intensities
     /// * Calculate normalized spectral angle for observed isotopic distribution
     ///   relative to theoretical distribution
-    pub fn summarize_traces(&mut self) -> Traces {
+    pub fn summarize_traces(&self) -> Traces {
         let k = gaussian_kernel(0.5, K_WIDTH);
 
         let mut spectral_angle = Matrix::new(
@@ -1309,9 +1740,6 @@ impl Grid {
                     spectral_angle[(file, col)] += intensity * self.distribution[isotope] as f64;
                     summed_squared_intensities[col] += intensity.powi(2);
                 }
-                self.matrix
-                    .row_slice_mut(file * N_ISOTOPES + isotope)
-                    .copy_from_slice(&convolved);
             }
 
             for (col, ss) in summed_squared_intensities.iter().enumerate() {
