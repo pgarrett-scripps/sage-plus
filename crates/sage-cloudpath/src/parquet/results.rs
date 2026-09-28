@@ -343,6 +343,21 @@ pub fn serialize_features(
         write_col!(hyperscore, FloatType);
         write_col!(delta_next, FloatType);
         write_col!(delta_best, FloatType);
+        // Null when the peptidoform has no positional isomer or none was scored.
+        if let Some(mut column) = rg.next_column()? {
+            let values = features
+                .iter()
+                .filter_map(|f| f.isomer_delta.map(|delta| delta as f32))
+                .collect::<Vec<_>>();
+            let definition_levels = features
+                .iter()
+                .map(|f| i16::from(f.isomer_delta.is_some()))
+                .collect::<Vec<_>>();
+            column
+                .typed::<FloatType>()
+                .write_batch(&values, Some(&definition_levels), None)?;
+            column.close()?;
+        }
         write_col!(rt, FloatType);
         write_col!(aligned_rt, FloatType);
         write_col!(predicted_rt, FloatType);

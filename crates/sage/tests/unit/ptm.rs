@@ -456,3 +456,76 @@ fn modification_type_identity_uses_name_and_mass() {
         ModificationType::new("+15.9949", 15.9990)
     );
 }
+
+fn isomer_strings(isomers: PositionalIsomers) -> Vec<String> {
+    match isomers {
+        PositionalIsomers::Isomers(isomers) => {
+            let mut isomers = isomers.iter().map(|p| p.to_string()).collect::<Vec<_>>();
+            isomers.sort();
+            isomers
+        }
+        other => panic!("expected isomers, got {other:?}"),
+    }
+}
+
+#[test]
+fn positional_isomers_move_every_variable_modification() {
+    const OXIDATION: f32 = 15.994915;
+    let rules = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'M'), OXIDATION),
+    ];
+    let mut scored = peptide("MASTAMK");
+    scored.modifications = CompactModifications::from_sparse([(0, OXIDATION), (2, PHOSPHO)]);
+    let isomers = isomer_strings(positional_isomers(&scored, &rules, 16));
+    // 2 phospho sites x 2 oxidation sites, minus the scored placement.
+    assert_eq!(isomers.len(), 3);
+    assert!(isomers.contains(&"MAST[+79.96633]AM[+15.994915]K".to_string()), "{isomers:?}");
+    for isomer in &isomers {
+        assert_ne!(isomer, &scored.to_string());
+    }
+    assert!(matches!(
+        positional_isomers(&scored, &rules, 2),
+        PositionalIsomers::TooMany
+    ));
+}
+
+#[test]
+fn positional_isomers_are_absent_without_a_second_placement() {
+    let rules = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    assert!(matches!(
+        positional_isomers(&peptide("AASAATAA"), &rules, 16),
+        PositionalIsomers::Unmodified
+    ));
+
+    let mut single = peptide("AASAAAAA");
+    single.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    assert!(matches!(
+        positional_isomers(&single, &rules, 16),
+        PositionalIsomers::SinglePlacement
+    ));
+
+    // Every candidate is occupied: k = 2 of 2 sites.
+    let mut full = peptide("AASAATAA");
+    full.modifications = CompactModifications::from_sparse([(2, PHOSPHO), (5, PHOSPHO)]);
+    assert!(matches!(
+        positional_isomers(&full, &rules, 16),
+        PositionalIsomers::SinglePlacement
+    ));
+}
+
+#[test]
+fn positional_isomer_test_requires_the_same_composition() {
+    let mut a = peptide("AASAATAA");
+    a.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let mut b = peptide("AASAATAA");
+    b.modifications = CompactModifications::from_sparse([(5, PHOSPHO)]);
+    let unmodified = peptide("AASAATAA");
+    assert!(is_positional_isomer(&a, &b));
+    assert!(!is_positional_isomer(&a, &a.clone()));
+    assert!(!is_positional_isomer(&a, &unmodified));
+}

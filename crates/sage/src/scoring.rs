@@ -282,6 +282,10 @@ pub struct Feature {
     pub delta_next: f64,
     /// Difference between hyperscore of this candidate, and the best candidate
     pub delta_best: f64,
+    /// Hyperscore minus the best hyperscore among the positional isomers of
+    /// this peptidoform (Mascot Delta Score, Savitski et al. 2011). Null when
+    /// no isomer exists or none was scored (see DOCS.md).
+    pub isomer_delta: Option<f64>,
     /// Number of matched theoretical fragment ions
     pub matched_peaks: u32,
     /// Longest b-ion series
@@ -1122,6 +1126,7 @@ impl<'db> Scorer<'db> {
         };
 
         for idx in 0..report_psms.min(score_vector.len()) {
+            let isomer_delta = self.isomer_delta(query, &score_vector, idx, &fragment_index);
             let score = score_vector[idx].score;
             let fragments: Option<Fragments> = score_vector[idx].fragments.take();
             let coverage = std::mem::take(&mut score_vector[idx].coverage);
@@ -1212,6 +1217,7 @@ impl<'db> Scorer<'db> {
                 hyperscore: score.hyperscore,
                 delta_next: score.hyperscore - next,
                 delta_best: best - score.hyperscore,
+                isomer_delta,
                 matched_peaks: k as u32,
                 matched_intensity_pct: 100.0 * (score.summed_b + score.summed_y)
                     / query.total_ion_current,
@@ -1251,6 +1257,67 @@ impl<'db> Scorer<'db> {
                 mass_offset,
             })
         }
+    }
+
+    /// Hyperscore of `candidates[idx]` minus the best hyperscore among its
+    /// positional isomers: the Mascot Delta Score of Savitski et al. (2011)
+    /// with Sage's search score in place of the Mascot ion score.
+    ///
+    /// Isomers are enumerated from the search's variable modifications and
+    /// scored here, so an isomer that fell outside the preliminary top-N is
+    /// still found. Placements of a search-time mass offset that were scored
+    /// with the other candidates of this spectrum also count. The result is
+    /// negative when an unscored isomer outscores the reported placement.
+    ///
+    /// `None` when the peptidoform has no variable modification, when its
+    /// modifications have a single possible placement, or when it has more
+    /// than [`crate::ptm::MAX_POSITIONAL_ISOMERS`] placements (not scored).
+    fn isomer_delta(
+        &self,
+        query: &ProcessedSpectrum,
+        candidates: &[Candidate<'_>],
+        idx: usize,
+        fragment_index: &FragmentMatchIndex,
+    ) -> Option<f64> {
+        use crate::ptm::{is_positional_isomer, positional_isomers, PositionalIsomers};
+
+        let winner = &candidates[idx];
+        let pre_score = PreScore {
+            peptide: winner.score.peptide,
+            precursor_charge: winner.score.precursor_charge,
+            isotope_error: winner.score.isotope_error,
+            ..Default::default()
+        };
+        let mut best: Option<f64> = None;
+        match positional_isomers(
+            &winner.peptide,
+            &self.db.localization_mods,
+            crate::ptm::MAX_POSITIONAL_ISOMERS,
+        ) {
+            PositionalIsomers::TooMany => return None,
+            PositionalIsomers::Unmodified | PositionalIsomers::SinglePlacement => {}
+            PositionalIsomers::Isomers(isomers) => {
+                for isomer in &isomers {
+                    let (score, _, _) =
+                        self.score_peptide(query, isomer, &pre_score, false, fragment_index);
+                    best = Some(best.map_or(score.hyperscore, |b| b.max(score.hyperscore)));
+                }
+            }
+        }
+        // Offset placements are not variable-modification rules; the search
+        // already scored each of them as its own candidate.
+        if !self.db.mass_offsets.is_empty() {
+            for (other_idx, other) in candidates.iter().enumerate() {
+                if other_idx != idx
+                    && other.score.precursor_charge == winner.score.precursor_charge
+                    && is_positional_isomer(&winner.peptide, &other.peptide)
+                {
+                    let score = other.score.hyperscore;
+                    best = Some(best.map_or(score, |b| b.max(score)));
+                }
+            }
+        }
+        best.map(|isomer| winner.score.hyperscore - isomer)
     }
 
     /// Remove peaks matching a PSM from a query spectrum

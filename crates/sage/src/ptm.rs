@@ -202,6 +202,174 @@ pub fn has_localizable_modification<R: LocalizationRule>(
         })
 }
 
+/// Maximum number of positional isomers scored for one PSM's `isomer_delta`.
+/// Beyond it the isomers are not scored and the delta is null.
+pub const MAX_POSITIONAL_ISOMERS: usize = MAX_ARRANGEMENTS;
+
+/// The positional isomers of a peptidoform: the same sequence and
+/// modification composition with the variable modifications at other sites.
+#[derive(Debug)]
+pub enum PositionalIsomers {
+    /// The peptidoform carries no variable modification from the rules.
+    Unmodified,
+    /// Its variable modifications have exactly one possible placement.
+    SinglePlacement,
+    /// More than [`MAX_POSITIONAL_ISOMERS`] placements; none were built.
+    TooMany,
+    /// Every other placement, excluding `peptide` itself.
+    Isomers(Vec<Peptide>),
+}
+
+/// Enumerate every positional isomer of `peptide` under `potential_mods`.
+///
+/// All variable modifications move jointly: each modification type keeps its
+/// copy count and may occupy any site its rules allow that no other
+/// modification holds. Modifications not described by `potential_mods`
+/// (static modifications, search-time mass offsets) stay pinned.
+pub fn positional_isomers<R: LocalizationRule>(
+    peptide: &Peptide,
+    potential_mods: &[R],
+    max_isomers: usize,
+) -> PositionalIsomers {
+    use crate::peptide::AppliedModification;
+
+    let length = peptide.sequence.len();
+    let groups = modification_groups(potential_mods, peptide)
+        .into_iter()
+        .filter_map(|group| {
+            let mut sites = group
+                .sites
+                .iter()
+                .map(|&site| encode_site(site, length))
+                .collect::<Vec<_>>();
+            sites.sort_unstable();
+            sites.dedup();
+            let placed = sites
+                .iter()
+                .copied()
+                .filter(|&index| group.is_placed(peptide, index))
+                .collect::<Vec<_>>();
+            (!placed.is_empty()).then_some((group, sites, placed))
+        })
+        .collect::<Vec<_>>();
+    if groups.is_empty() {
+        return PositionalIsomers::Unmodified;
+    }
+
+    // Split the applied modifications into movable placements and pinned ones.
+    let mut pinned = Vec::new();
+    let mut templates: Vec<Option<AppliedModification>> = vec![None; groups.len()];
+    for applied in peptide.applied_modifications() {
+        let index = encode_site(applied.site, length);
+        let owner = groups.iter().position(|(group, _, placed)| {
+            placed.contains(&index)
+                && (applied.modification.mass - group.mass).abs() < MASS_EPS
+                && group
+                    .definition
+                    .as_ref()
+                    .is_none_or(|definition| applied.modification == definition.as_ref())
+        });
+        let owned = AppliedModification {
+            site: applied.site,
+            modification: Arc::new(applied.modification.clone()),
+            kind: applied.kind,
+        };
+        match owner {
+            Some(group) if templates[group].is_none() => templates[group] = Some(owned),
+            Some(_) => {}
+            None => pinned.push(owned),
+        }
+    }
+    let pinned_sites = pinned
+        .iter()
+        .map(|applied| encode_site(applied.site, length))
+        .collect::<Vec<_>>();
+
+    let mut total = 1usize;
+    let mut choices = Vec::with_capacity(groups.len());
+    for (_, sites, placed) in &groups {
+        let available = sites
+            .iter()
+            .copied()
+            .filter(|index| !pinned_sites.contains(index) || placed.contains(index))
+            .collect::<Vec<_>>();
+        total = total.saturating_mul(num_combinations(available.len(), placed.len()));
+        choices.push(available);
+    }
+    if total > max_isomers {
+        return PositionalIsomers::TooMany;
+    }
+
+    let mut isomers = Vec::new();
+    for arrangement in groups
+        .iter()
+        .zip(&choices)
+        .map(|((_, _, placed), available)| {
+            available.iter().copied().combinations(placed.len())
+        })
+        .multi_cartesian_product()
+    {
+        if arrangement
+            .iter()
+            .zip(&groups)
+            .all(|(chosen, (_, _, placed))| chosen == placed)
+        {
+            continue;
+        }
+        let mut occupied = arrangement.iter().flatten().copied().collect::<Vec<_>>();
+        let count = occupied.len();
+        occupied.sort_unstable();
+        occupied.dedup();
+        if occupied.len() != count {
+            continue;
+        }
+        let mut applied = pinned.clone();
+        for (chosen, template) in arrangement.iter().zip(&templates) {
+            let template = template.as_ref().expect("every group has a placement");
+            applied.extend(chosen.iter().map(|&index| AppliedModification {
+                site: decode_site(index, length),
+                modification: template.modification.clone(),
+                kind: template.kind,
+            }));
+        }
+        isomers.push(peptide.with_applied_modifications(applied));
+    }
+    if isomers.is_empty() {
+        PositionalIsomers::SinglePlacement
+    } else {
+        PositionalIsomers::Isomers(isomers)
+    }
+}
+
+/// Whether `a` and `b` are distinct placements of the same sequence and
+/// modification composition.
+pub fn is_positional_isomer(a: &Peptide, b: &Peptide) -> bool {
+    if a.decoy != b.decoy || a.sequence != b.sequence || a.label_channel != b.label_channel {
+        return false;
+    }
+    let mut left = a.applied_modifications().collect::<Vec<_>>();
+    let mut right = b.applied_modifications().collect::<Vec<_>>();
+    if left.len() != right.len() {
+        return false;
+    }
+    left.sort_unstable();
+    right.sort_unstable();
+    if left == right {
+        return false;
+    }
+    let mut left = left
+        .iter()
+        .map(|applied| (applied.modification, applied.kind))
+        .collect::<Vec<_>>();
+    let mut right = right
+        .iter()
+        .map(|applied| (applied.modification, applied.kind))
+        .collect::<Vec<_>>();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
+}
+
 /// Full definitions preserve identity. Mass-only rules remain supported for callers
 /// that do not retain modification metadata.
 pub trait LocalizationRule {

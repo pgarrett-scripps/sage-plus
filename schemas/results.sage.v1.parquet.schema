@@ -40,6 +40,7 @@ message schema {
     required float hyperscore;
     required float delta_next;
     required float delta_best;
+    optional float isomer_delta;
     required float rt;
     required float aligned_rt;
     required float predicted_rt;

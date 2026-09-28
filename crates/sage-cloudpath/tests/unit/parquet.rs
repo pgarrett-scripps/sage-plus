@@ -291,6 +291,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
     }
     let features = [0, 1].map(|index| Feature {
         peptide_idx: PeptideIx(index),
+        isomer_delta: (index == 0).then_some(2.5),
         ..Feature::default()
     });
 
@@ -319,6 +320,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
     };
     assert_eq!(column("database_peptide"), ["\"PEPXIDE\"", "null"]);
     assert_eq!(column("substitutions"), ["\"X4T\"", "\"\""]);
+    assert_eq!(column("isomer_delta"), ["2.5", "null"]);
     Ok(())
 }
 

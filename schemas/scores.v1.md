@@ -8,6 +8,7 @@ DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
 - `hyperscore`: X!Tandem-style fragment-match score for the candidate PSM; larger is better.
 - `delta_next`: hyperscore minus the next-ranked candidate's hyperscore; larger is better.
 - `delta_best`: best candidate's hyperscore minus this candidate's, 0 for rank 1; smaller is better.
+- `isomer_delta`: hyperscore minus the best hyperscore among the positional isomers of the PSM's peptidoform (same sequence and modification composition, other sites); larger is better. An adaptation of the Mascot Delta Score (Savitski et al. 2011). Null when the peptidoform has no variable modification, has a single possible placement, or has more than 4,096 placements (not scored). Negative when an isomer outscores the reported placement.
 - `matched_peaks`, `longest_b`, `longest_y`, `longest_y_pct`, `matched_intensity_pct`, `ms2_intensity`: fragment-match evidence; larger is better. `longest_y_pct` is a fraction from 0 to 1. `ms2_intensity` is the summed intensity of matched fragments.
 - `precursor_ppm`, `fragment_ppm`, `calibrated_precursor_ppm`, `calibrated_fragment_ppm`: mass errors; closer to zero is better.
 - `delta_rt_model`, `delta_mobility`: absolute differences from the predicted value; smaller is better.

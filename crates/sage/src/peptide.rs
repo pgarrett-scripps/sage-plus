@@ -723,6 +723,30 @@ impl Peptide {
             .expect("localized modifications fit compact lookup");
     }
 
+    /// Return a copy carrying exactly `applied`. The caller keeps the
+    /// modification composition, so `monoisotopic` is unchanged.
+    pub(crate) fn with_applied_modifications(&self, applied: Vec<AppliedModification>) -> Peptide {
+        let mut peptide = self.clone();
+        peptide.nterm = None;
+        peptide.cterm = None;
+        for modification in &applied {
+            match modification.site {
+                Site::Nterm => {
+                    peptide.nterm =
+                        Some(peptide.nterm.unwrap_or_default() + modification.modification.mass)
+                }
+                Site::Cterm => {
+                    peptide.cterm =
+                        Some(peptide.cterm.unwrap_or_default() + modification.modification.mass)
+                }
+                Site::Sequence(_) => (),
+            }
+        }
+        peptide.modifications = CompactModifications::from_applied(applied)
+            .expect("rearranged modifications fit compact lookup");
+        peptide
+    }
+
     /// Append every site compatible with `specificity`, ignoring occupancy.
     pub fn compatible_sites(&self, specificity: ModificationSpecificity, sites: &mut Vec<Site>) {
         sites.extend(self.rule_sites(specificity));

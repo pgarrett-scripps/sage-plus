@@ -1276,4 +1276,86 @@ mod mass_offsets {
         let json = serde_json::to_value(fragments).unwrap();
         assert!(json.get("peak_indices").is_none());
     }
+
+    /// Scored placements of `features[0]`'s modification among `features`.
+    fn reported_isomer_scores(database: &IndexedDatabase, features: &[Feature]) -> Vec<f64> {
+        let top = database.resolve_peptide(&features[0]).into_owned();
+        features[1..]
+            .iter()
+            .filter(|feature| {
+                crate::ptm::is_positional_isomer(&top, &database.resolve_peptide(feature))
+            })
+            .map(|feature| feature.hyperscore)
+            .collect()
+    }
+
+    #[test]
+    fn isomer_delta_is_positive_when_site_ions_favour_the_placement() {
+        let expanded = database(SearchMode::Database);
+        let query = spectrum(&expanded_target(&expanded));
+        let mut scorer = scorer(&expanded, false);
+        scorer.report_psms = 50;
+        let features = scorer.score(&query);
+        assert_eq!(
+            expanded[features[0].peptide_idx].to_string(),
+            "MAGSPEPTS[Phospho]IDEK"
+        );
+        let delta = features[0].isomer_delta.expect("S4 and T8 are isomers");
+        assert!(delta > 0.0, "isomer_delta was {delta}");
+
+        // The best isomer is the best other placement the search reported.
+        let isomers = reported_isomer_scores(&expanded, &features);
+        assert_eq!(isomers.len(), 2);
+        let best = isomers.iter().copied().fold(f64::MIN, f64::max);
+        assert_eq!(delta, features[0].hyperscore - best);
+        // delta_next can point at the same peptide, but isomer_delta is
+        // defined by placement alone.
+        assert!(delta >= features[0].delta_next);
+        // The rescored isomers do not depend on the preliminary top-N.
+        scorer.report_psms = 1;
+        assert_eq!(scorer.score(&query)[0].isomer_delta, Some(delta));
+    }
+
+    #[test]
+    fn isomer_delta_matches_between_expanded_and_offset_searches() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let expanded_hits = scorer(&expanded, false).score(&query);
+        let offset_hits = scorer(&offset, false).score(&query);
+        assert!(expanded_hits[0].isomer_delta.unwrap() > 0.0);
+        assert_eq!(offset_hits[0].isomer_delta, expanded_hits[0].isomer_delta);
+    }
+
+    #[test]
+    fn isomer_delta_is_null_for_an_unmodified_peptide() {
+        let expanded = database(SearchMode::Database);
+        let target = expanded
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "GGSTVLAPEDK")
+            .unwrap()
+            .clone();
+        let hits = scorer(&expanded, false).score(&spectrum(&target));
+        assert_eq!(expanded[hits[0].peptide_idx].to_string(), "GGSTVLAPEDK");
+        assert_eq!(hits[0].isomer_delta, None);
+    }
+
+    #[test]
+    fn isomer_delta_is_null_for_a_single_site_peptide() {
+        let fasta = Fasta::parse(">P1\nMAGSPEPAIDEKGGAVLAPEDK\n".into(), "rev_", true).unwrap();
+        let database = parameters(SearchMode::Database, SiteMode::Exhaustive).build(fasta);
+        let target = database
+            .peptides
+            .iter()
+            .find(|peptide| peptide.to_string() == "MAGS[Phospho]PEPAIDEK")
+            .expect("the single-site phosphopeptide is indexed")
+            .clone();
+        let hits = scorer(&database, false).score(&spectrum(&target));
+        assert_eq!(
+            database[hits[0].peptide_idx].to_string(),
+            "MAGS[Phospho]PEPAIDEK"
+        );
+        assert_eq!(hits[0].isomer_delta, None);
+    }
 }
