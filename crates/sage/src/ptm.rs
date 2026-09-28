@@ -101,23 +101,57 @@ impl ModLocalization {
     }
 }
 
-/// Identity of a modification type for the false-localization-rate
-/// competition: the reported name (Unimod label, configured name, or signed
-/// mass) and the delta mass on a 0.001 Da grid, the tolerance at which two
-/// localized masses are treated as the same modification.
+/// Largest gap between the delta masses of two unnamed modifications that
+/// belong to one modification type.
+pub const TYPE_MASS_TOLERANCE: f32 = 2e-3;
+
+/// Identity of a modification type for the false-localization-rate and
+/// site-level FDR competitions.
+///
+/// A named modification (configured name or Unimod label) is its name,
+/// whatever its delta mass. Unnamed, mass-only modifications are grouped by
+/// [`modification_types`], which clusters their masses so that masses closer
+/// than [`TYPE_MASS_TOLERANCE`] always share a type: there is no fixed grid
+/// whose boundaries could split one modification in two.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModificationType {
-    pub name: String,
-    mass_milli_da: i64,
+pub enum ModificationType {
+    Named(String),
+    /// Index of the mass cluster among the population's unnamed masses.
+    Unnamed(usize),
 }
 
-impl ModificationType {
-    pub fn new(name: &str, mass: f32) -> Self {
-        Self {
-            name: name.to_owned(),
-            mass_milli_da: (mass as f64 / MASS_EPS as f64).round() as i64,
+/// Modification types for a population of `(name, delta mass)` identities,
+/// in caller order. Every localization or site that competes together must
+/// be passed in one call, so that targets and decoys get the same keys.
+///
+/// Named identities are keyed by name. Unnamed masses are sorted and split
+/// wherever two neighbours are more than [`TYPE_MASS_TOLERANCE`] apart
+/// (single linkage), so the grouping depends only on the gaps between the
+/// masses present.
+pub fn modification_types(identities: &[(Option<&str>, f32)]) -> Vec<ModificationType> {
+    let mut unnamed = identities
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, _))| name.is_none())
+        .map(|(ix, &(_, mass))| (mass, ix))
+        .collect::<Vec<_>>();
+    unnamed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut cluster = vec![0usize; identities.len()];
+    let mut current = 0usize;
+    for (position, &(mass, ix)) in unnamed.iter().enumerate() {
+        if position > 0 && mass - unnamed[position - 1].0 > TYPE_MASS_TOLERANCE {
+            current += 1;
         }
+        cluster[ix] = current;
     }
+    identities
+        .iter()
+        .enumerate()
+        .map(|(ix, (name, _))| match name {
+            Some(name) => ModificationType::Named((*name).to_owned()),
+            None => ModificationType::Unnamed(cluster[ix]),
+        })
+        .collect()
 }
 
 impl ModLocalization {
@@ -128,9 +162,10 @@ impl ModLocalization {
             .unwrap_or_else(|| format!("{:+}", self.mass))
     }
 
-    /// Modification type whose competition this localization belongs to.
-    pub fn modification_type(&self) -> ModificationType {
-        ModificationType::new(&self.reported_name(), self.mass)
+    /// Input to [`modification_types`]: the label (`None` when unnamed) and
+    /// the delta mass.
+    pub fn type_identity(&self) -> (Option<&str>, f32) {
+        (self.label.as_deref(), self.mass)
     }
 }
 

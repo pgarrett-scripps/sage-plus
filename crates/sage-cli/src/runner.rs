@@ -637,6 +637,8 @@ struct SiteRow {
     spectrum_q: f32,
     peptide_q: f32,
     modification: String,
+    /// `modification` is a name, not a signed mass.
+    named: bool,
     modification_mass: f32,
     /// 1-based position within the peptide.
     position: usize,

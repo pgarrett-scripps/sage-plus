@@ -281,20 +281,29 @@ impl Runner {
                 })
             })
             .partition(|&(feature_idx, _)| features[feature_idx].label == 1);
-        let evidence_of = |features: &[Feature], (feature_idx, mod_idx): (usize, usize)| {
-            let m = &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx];
-            (m.modification_type(), m.target_decoy_score, m.decoy_winner)
+        let localization_of = |(feature_idx, mod_idx): (usize, usize)| {
+            &features[feature_idx].localization.as_ref().unwrap().mods[mod_idx]
         };
+        // Types are assigned over targets and decoys together, so both sides
+        // of one modification share a key.
+        let identities = target_indices
+            .iter()
+            .chain(&decoy_indices)
+            .map(|&index| localization_of(index).type_identity())
+            .collect::<Vec<_>>();
+        let mut types = sage_core::ptm::modification_types(&identities).into_iter();
         let evidence = target_indices
             .iter()
-            .map(|&index| evidence_of(features, index))
+            .zip(types.by_ref())
+            .map(|(&index, kind)| {
+                let m = localization_of(index);
+                (kind, m.target_decoy_score, m.decoy_winner)
+            })
             .collect::<Vec<_>>();
         let probes = decoy_indices
             .iter()
-            .map(|&index| {
-                let (kind, score, _) = evidence_of(features, index);
-                (kind, score)
-            })
+            .zip(types)
+            .map(|(&index, kind)| (kind, localization_of(index).target_decoy_score))
             .collect::<Vec<_>>();
         let (q_values, decoy_q_values) =
             sage_core::ptm::target_decoy_q_values_by_type(&evidence, &probes);

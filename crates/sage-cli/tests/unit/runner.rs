@@ -162,6 +162,7 @@ fn site_row(peptide: &str, proteins: &str, score: f32, decoy: bool) -> super::Si
         spectrum_q: 0.001,
         peptide_q: 0.001,
         modification: "Phospho".into(),
+        named: true,
         modification_mass: 79.96633,
         position: 2,
         residue: b'S',

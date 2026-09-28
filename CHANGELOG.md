@@ -18,6 +18,10 @@ entries are retained below for provenance.
   used it. An immonium ion shows a modified residue is present, not where it is (Steen et al.
   2001; Olsen et al. 2007). `immonium_modified_explained`, `immonium_modified_unexplained` and,
   with `rescore`, scores change for such PSMs; with `immonium` off nothing changes.
+- Per-modification FLR and site FDR group named modifications by name alone, and cluster unnamed
+  mass-only modifications by delta mass within 0.002 Da without a fixed grid. Before, a type was
+  the name plus the delta mass rounded to 0.001 Da, so two spellings of one modification, or two
+  masses on either side of a rounding boundary, could fall into separate competitions.
 
 ## [v0.1.0-beta.14] - 2026-09-28
 
@@ -94,7 +98,6 @@ entries are retained below for provenance.
   identification is not quantified; it does not fall back to the window search.
 - `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
   SILAC), and loss ions are matched at every fragment charge.
-- The per-modification FLR groups types by name and delta mass rounded to 0.001 Da.
 
 ## [v0.1.0-beta.13] - 2026-09-27
 

@@ -13,6 +13,8 @@ pub(super) struct ProteinSite {
     /// 1-based position within the peptide.
     pub(super) position: usize,
     pub(super) modification: String,
+    /// `modification` is a name, not a signed mass.
+    pub(super) named: bool,
     pub(super) modification_mass: f32,
     pub(super) n_psms: u32,
     pub(super) best_probability: f32,
@@ -69,6 +71,7 @@ pub(super) fn aggregate_protein_sites(rows: &[SiteRow]) -> Vec<ProteinSite> {
                     residue: row.residue,
                     position: row.position,
                     modification: row.modification.clone(),
+                    named: row.named,
                     modification_mass: row.modification_mass,
                     n_psms: 0,
                     best_probability: 0.0,
@@ -101,15 +104,19 @@ pub(super) fn aggregate_protein_sites(rows: &[SiteRow]) -> Vec<ProteinSite> {
     });
     // Site FDR is estimated per modification type, like the localization
     // FLR, so one type's decoy sites never set another type's q-values.
-    let evidence = sites
+    let identities = sites
         .iter()
         .map(|site| {
             (
-                sage_core::ptm::ModificationType::new(&site.modification, site.modification_mass),
-                site.score,
-                site.decoy,
+                site.named.then_some(site.modification.as_str()),
+                site.modification_mass,
             )
         })
+        .collect::<Vec<_>>();
+    let evidence = sage_core::ptm::modification_types(&identities)
+        .into_iter()
+        .zip(&sites)
+        .map(|(kind, site)| (kind, site.score, site.decoy))
         .collect::<Vec<_>>();
     for (site, q_value) in sites
         .iter_mut()
@@ -196,6 +203,7 @@ impl Runner {
                         spectrum_q: feature.spectrum_q,
                         peptide_q: feature.peptide_q,
                         modification: modification.clone(),
+                        named: m.label.is_some(),
                         modification_mass: m.mass,
                         position: site.position + 1,
                         residue: site.residue,

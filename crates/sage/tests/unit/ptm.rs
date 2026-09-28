@@ -391,8 +391,8 @@ fn terminal_localization_is_typed_and_boundary_ambiguity_is_not_promoted() {
 
 #[test]
 fn oxidation_rows_do_not_change_phospho_q_values() {
-    let phospho = ModificationType::new("Phospho", PHOSPHO);
-    let oxidation = ModificationType::new("Oxidation", 15.994915);
+    let phospho = ModificationType::Named("Phospho".into());
+    let oxidation = ModificationType::Named("Oxidation".into());
     // Phospho: 200 target wins scored 300..101, one decoy win at 150.
     let mut targets = (0..200)
         .map(|i| (phospho.clone(), 300.0 - i as f32, false))
@@ -426,7 +426,7 @@ fn oxidation_rows_do_not_change_phospho_q_values() {
 
 #[test]
 fn per_type_q_values_match_single_type_competition() {
-    let key = ModificationType::new("Phospho", PHOSPHO);
+    let key = ModificationType::Named("Phospho".into());
     let evidence = [(100.0, false), (90.0, false), (80.0, true), (70.0, false)];
     let keyed = evidence
         .iter()
@@ -436,23 +436,52 @@ fn per_type_q_values_match_single_type_competition() {
     assert_eq!(q, target_decoy_q_values(&evidence));
     assert_eq!(probes, vec![2.0 / 3.0]);
     // A probe of a type without a target population cannot be accepted.
-    let other = ModificationType::new("Oxidation", 15.994915);
+    let other = ModificationType::Named("Oxidation".into());
     let (_, probes) = target_decoy_q_values_by_type(&keyed, &[(other, 500.0)]);
     assert_eq!(probes, vec![1.0]);
 }
 
 #[test]
-fn modification_type_identity_uses_name_and_mass() {
-    assert_eq!(
-        ModificationType::new("Phospho", 79.96633),
-        ModificationType::new("Phospho", 79.9665)
-    );
-    assert_ne!(
-        ModificationType::new("Phospho", PHOSPHO),
-        ModificationType::new("Sulfo", 79.95682)
-    );
-    assert_ne!(
-        ModificationType::new("+15.9949", 15.9949),
-        ModificationType::new("+15.9949", 15.9990)
-    );
+fn named_modification_types_ignore_mass() {
+    // Masses either side of a 0.001 Da rounding boundary (79.96633 rounds to
+    // 79.966, 79.9667 to 79.967) stay one type when named.
+    let types = modification_types(&[
+        (Some("Phospho"), 79.96633),
+        (Some("Phospho"), 79.9667),
+        (Some("Sulfo"), 79.95682),
+    ]);
+    assert_eq!(types[0], ModificationType::Named("Phospho".into()));
+    assert_eq!(types[0], types[1]);
+    assert_ne!(types[0], types[2]);
+}
+
+#[test]
+fn unnamed_modification_types_cluster_without_a_grid() {
+    // 15.9945 and 15.9955 rounded to different cells of the old 0.001 Da
+    // grid (15.994 and 15.996) and split; 0.001 Da apart, they now share a
+    // type. 15.9990 is 0.0035 Da from its neighbour and is a separate type.
+    let types = modification_types(&[
+        (None, 15.9955),
+        (None, 15.9990),
+        (None, 15.9945),
+        (Some("Oxidation"), 15.994915),
+    ]);
+    assert_eq!(types[0], types[2]);
+    assert_ne!(types[0], types[1]);
+    assert!(matches!(types[1], ModificationType::Unnamed(_)));
+    // A named type never merges with an unnamed one of the same mass.
+    assert_eq!(types[3], ModificationType::Named("Oxidation".into()));
+
+    // Clusters depend only on the gaps between the masses present: a chain
+    // of masses 0.0015 Da apart is one type, whatever grid it spans.
+    let chain = (0..5)
+        .map(|i| (None, 42.0100 + 0.0015 * i as f32))
+        .collect::<Vec<_>>();
+    let types = modification_types(&chain);
+    assert!(types.iter().all(|kind| *kind == types[0]));
+
+    // Targets and decoys passed together get the same key for one mass.
+    let types = modification_types(&[(None, 79.9663), (None, 79.9664), (None, 14.0157)]);
+    assert_eq!(types[0], types[1]);
+    assert_ne!(types[0], types[2]);
 }
