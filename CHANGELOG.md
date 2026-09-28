@@ -27,13 +27,25 @@ entries are retained below for provenance.
   explained only when the peptide carries that modification on such a site. There are no
   built-in modified ions; DOCS.md gives pY 216.0420 (Steen et al. 2001) and acK 126.0913 (Trelle &
   Jensen 2008) as examples. The list-or-map form is the generic `SiteMap` type.
-- `neutral_losses` now also accepts a map from site to loss list, such as
-  `{"S": [97.976896], "T": [97.976896]}` for Phospho on S, T and Y. Sites left out of the map
-  get no loss; keys must repeat a site from `sites` exactly and unknown keys are rejected. The
-  list form is unchanged and gives byte-identical output. With `neutral_loss_mode: "required"`,
+- `neutral_losses` now also accepts a map from site to loss list (the same `SiteMap` form as
+  `immonium_ions`), such as `{"S": [97.976896], "T": [97.976896]}` for Phospho on S, T and Y.
+  Sites left out of the map get no loss; keys must repeat a site from `sites` exactly and
+  unknown keys are rejected. The list form is unchanged and gives byte-identical output. With `neutral_loss_mode: "required"`,
   a site without losses keeps its retained fragment form. On PXD000138 the S/T map gives 4,142
   phospho localizations at `localization_q_value` <= 0.01, against 3,883 with the loss on S, T
   and Y and 3,841 without losses; single-phospho known-site true FLR is 1.05% (estimate 0.99%).
+- `lfq.parquet` reports peak geometry per precursor and file: `apex_rt`, `peak_start_rt`,
+  `peak_end_rt`, `fwhm` and `id_apex_offset` (best PSM RT minus apex), in each file's own RT
+  units, via the inverse of its RT alignment. New schemas `lfq.v7` (unlabeled) and `lfq.v8`
+  (labeled); metadata key `sage.lfq.peak_center`. On PXD028735 the median MS2-confirmed row was
+  identified about 4 s before its apex (median FWHM about 16 s).
+- Experimental `lfq_settings.recenter_on_apex` (default false) centers LFQ on the MS1 elution
+  apex: the MBR window is centered on the median identification RT across files, each
+  identified file climbs to its own isotope-consistent apex, and bounds follow the peak down to
+  a valley or half height without fixed caps. On PXD028735 HYE it halves non-apex picks (12% to
+  6% of MS2-confirmed rows more than half a FWHM off), adds 2% precursors at 1% and 10% rows at
+  `extraction_q_value` <= 0.01 with unchanged ratio accuracy, but the human-only control's
+  foreign rate at that cutoff rises from 2.6% to 3.2%, so it stays opt-in.
 
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
@@ -47,20 +59,6 @@ entries are retained below for provenance.
   localization to each type's competition; decoy PSMs read their q-value off their own type's
   curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
   change; `localization_q_value` and `site_q_value` values change.
-
-### Added
-- `lfq.parquet` reports peak geometry per precursor and file: `apex_rt`, `peak_start_rt`,
-  `peak_end_rt`, `fwhm` and `id_apex_offset` (best PSM RT minus apex), in each file's own RT
-  units, via the inverse of its RT alignment. New schemas `lfq.v7` (unlabeled) and `lfq.v8`
-  (labeled); metadata key `sage.lfq.peak_center`. On PXD028735 the median MS2-confirmed row was
-  identified about 4 s before its apex (median FWHM about 16 s).
-- Experimental `lfq_settings.recenter_on_apex` (default false) centers LFQ on the MS1 elution
-  apex: the MBR window is centered on the median identification RT across files, each
-  identified file climbs to its own isotope-consistent apex, and bounds follow the peak down to
-  a valley or half height without fixed caps. On PXD028735 HYE it halves non-apex picks (12% to
-  6% of MS2-confirmed rows more than half a FWHM off), adds 2% precursors at 1% and 10% rows at
-  `extraction_q_value` <= 0.01 with unchanged ratio accuracy, but the human-only control's
-  foreign rate at that cutoff rises from 2.6% to 3.2%, so it stays opt-in.
 
 ## [v0.1.0-beta.13] - 2026-09-27
 
