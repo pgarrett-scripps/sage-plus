@@ -34,6 +34,12 @@ impl<T> Default for SiteMap<T> {
     }
 }
 
+impl<T> From<Vec<T>> for SiteMap<T> {
+    fn from(values: Vec<T>) -> Self {
+        Self::All(values)
+    }
+}
+
 impl<T> SiteMap<T> {
     /// True when no site gets a value.
     pub fn is_empty(&self) -> bool {

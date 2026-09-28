@@ -925,7 +925,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "$ref": "#/$defs/NeutralLosses"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "sites": {
           "items": {
@@ -989,7 +990,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "$ref": "#/$defs/NeutralLosses"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"
@@ -1018,33 +1020,6 @@
         "required"
       ],
       "type": "string"
-    },
-    "NeutralLosses": {
-      "anyOf": [
-        {
-          "description": "Losses applied wherever the modification is placed.",
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "items": {
-              "format": "float",
-              "type": "number"
-            },
-            "type": "array"
-          },
-          "description": "Losses keyed by site strings from the modification's `sites`, applied\nonly where the modification is placed by that site. Sites that are not\nlisted have no loss.",
-          "propertyNames": {
-            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])"
-          },
-          "type": "object"
-        }
-      ],
-      "description": "Fragment neutral losses of a modification: one list for every site, or a\nlist per site."
     },
     "OutputFilter": {
       "additionalProperties": false,
@@ -1236,6 +1211,9 @@
             "type": "array"
           },
           "description": "Applies to the listed sites only; keys are sites from `sites`.",
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])"
+          },
           "type": "object"
         }
       ],
@@ -1413,7 +1391,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "$ref": "#/$defs/NeutralLosses"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         }
       },
       "required": [
@@ -1611,7 +1590,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "$ref": "#/$defs/NeutralLosses"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"

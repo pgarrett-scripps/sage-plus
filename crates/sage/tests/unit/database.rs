@@ -3019,7 +3019,7 @@ mod site_losses {
 
     use super::*;
     use crate::ion_series::{IonGroupSeries, Kind};
-    use crate::modification::NeutralLosses;
+    use crate::site_map::SiteMap;
 
     const H3PO4: f32 = 97.976896;
 
@@ -3132,7 +3132,7 @@ mod site_losses {
         };
         assert_eq!(
             entry.neutral_losses,
-            NeutralLosses::PerSite([("S".to_string(), vec![2.0])].into())
+            SiteMap::Sites([("S".to_string(), vec![2.0])].into())
         );
     }
 

@@ -66,96 +66,10 @@ fn is_optional(mode: &NeutralLossMode) -> bool {
     *mode == NeutralLossMode::Optional
 }
 
-/// Fragment neutral losses of a modification: one list for every site, or a
-/// list per site.
-#[derive(Clone, Debug, Serialize, schemars::JsonSchema, PartialEq)]
-#[serde(untagged)]
-pub enum NeutralLosses {
-    /// Losses applied wherever the modification is placed.
-    All(Vec<f32>),
-    /// Losses keyed by site strings from the modification's `sites`, applied
-    /// only where the modification is placed by that site. Sites that are not
-    /// listed have no loss.
-    PerSite(BTreeMap<String, Vec<f32>>),
-}
-
-impl Default for NeutralLosses {
-    fn default() -> Self {
-        Self::All(Vec::new())
-    }
-}
-
-impl From<Vec<f32>> for NeutralLosses {
-    fn from(losses: Vec<f32>) -> Self {
-        Self::All(losses)
-    }
-}
-
-impl PartialEq<Vec<f32>> for NeutralLosses {
-    fn eq(&self, other: &Vec<f32>) -> bool {
-        matches!(self, Self::All(losses) if losses == other)
-    }
-}
-
-impl NeutralLosses {
-    /// The empty list form, which serialization omits.
-    pub fn is_unset(&self) -> bool {
-        matches!(self, Self::All(losses) if losses.is_empty())
-    }
-
-    /// Every configured loss mass, over all sites.
-    pub fn masses(&self) -> Box<dyn Iterator<Item = f32> + '_> {
-        match self {
-            Self::All(losses) => Box::new(losses.iter().copied()),
-            Self::PerSite(sites) => Box::new(sites.values().flatten().copied()),
-        }
-    }
-
-    /// Losses applied where the modification is placed by `site`, an explicit
-    /// site string.
-    pub fn for_site(&self, site: &str) -> &[f32] {
-        match self {
-            Self::All(losses) => losses,
-            Self::PerSite(sites) => sites.get(site).map_or(&[], Vec::as_slice),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for NeutralLosses {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct NeutralLossesVisitor;
-
-        impl<'de> Visitor<'de> for NeutralLossesVisitor {
-            type Value = NeutralLosses;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(
-                    "a list of neutral loss masses, or a map from site to a list of neutral loss masses",
-                )
-            }
-
-            fn visit_seq<A: de::SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
-                Vec::<f32>::deserialize(de::value::SeqAccessDeserializer::new(seq))
-                    .map(NeutralLosses::All)
-            }
-
-            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-                BTreeMap::<String, Vec<f32>>::deserialize(MapAccessDeserializer::new(map))
-                    .map(NeutralLosses::PerSite)
-            }
-        }
-
-        deserializer.deserialize_any(NeutralLossesVisitor)
-    }
-}
-
 fn validate_details<E: de::Error>(
     mass: f32,
     name: &Option<String>,
-    neutral_losses: &NeutralLosses,
+    neutral_losses: &SiteMap<f32>,
     neutral_loss_mode: NeutralLossMode,
     channel_offsets: &BTreeMap<String, f32>,
     immonium_ions: &SiteMap<f32>,
@@ -167,14 +81,14 @@ fn validate_details<E: de::Error>(
         return Err(E::custom("modification name must not be empty"));
     }
     if neutral_losses
-        .masses()
-        .any(|loss| !loss.is_finite() || loss <= 0.0)
+        .values()
+        .any(|loss| !loss.is_finite() || *loss <= 0.0)
     {
         return Err(E::custom(
             "neutral loss masses must be finite and greater than zero",
         ));
     }
-    if let NeutralLosses::PerSite(sites) = neutral_losses {
+    if let SiteMap::Sites(sites) = neutral_losses {
         for site in sites.keys() {
             match site.parse::<ModificationSpecificity>() {
                 Ok(specificity) if specificity.explicit_name() == *site => {}
@@ -192,7 +106,7 @@ fn validate_details<E: de::Error>(
             }
         }
     }
-    if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.masses().next().is_none() {
+    if neutral_loss_mode == NeutralLossMode::Required && neutral_losses.is_empty() {
         return Err(E::custom(
             "neutral_loss_mode `required` requires at least one neutral loss",
         ));
@@ -236,8 +150,10 @@ pub struct StaticModification {
     pub mass: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "NeutralLosses::is_unset")]
-    pub neutral_losses: NeutralLosses,
+    /// Fragment neutral-loss masses: a list for every site, or a map from
+    /// declared site to list. Sites left out of the map have no loss.
+    #[serde(default, skip_serializing_if = "SiteMap::is_empty")]
+    pub neutral_losses: SiteMap<f32>,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -261,7 +177,7 @@ impl<'de> Deserialize<'de> for StaticModification {
             #[serde(default)]
             name: Option<String>,
             #[serde(default)]
-            neutral_losses: NeutralLosses,
+            neutral_losses: SiteMap<f32>,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
@@ -305,8 +221,10 @@ pub struct VariableModification {
     pub max_total_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "NeutralLosses::is_unset")]
-    pub neutral_losses: NeutralLosses,
+    /// Fragment neutral-loss masses: a list for every site, or a map from
+    /// declared site to list. Sites left out of the map have no loss.
+    #[serde(default, skip_serializing_if = "SiteMap::is_empty")]
+    pub neutral_losses: SiteMap<f32>,
     #[serde(default, skip_serializing_if = "is_optional")]
     pub neutral_loss_mode: NeutralLossMode,
     #[serde(default, skip_serializing_if = "is_exhaustive")]
@@ -346,7 +264,7 @@ impl<'de> Deserialize<'de> for VariableModification {
             #[serde(default)]
             name: Option<String>,
             #[serde(default)]
-            neutral_losses: NeutralLosses,
+            neutral_losses: SiteMap<f32>,
             #[serde(default)]
             neutral_loss_mode: NeutralLossMode,
             #[serde(default)]
@@ -442,13 +360,13 @@ impl ModificationDefinition {
     fn detailed(
         mass: f32,
         name: &Option<String>,
-        neutral_losses: &NeutralLosses,
+        neutral_losses: &SiteMap<f32>,
         neutral_loss_mode: NeutralLossMode,
         channel_offsets: &BTreeMap<String, f32>,
     ) -> Self {
         let (neutral_losses, site_losses) = match neutral_losses {
-            NeutralLosses::All(losses) => (Arc::from(losses.as_slice()), None),
-            NeutralLosses::PerSite(sites) => {
+            SiteMap::All(losses) => (Arc::from(losses.as_slice()), None),
+            SiteMap::Sites(sites) => {
                 let mut rules = sites
                     .iter()
                     .filter(|(_, losses)| !losses.is_empty())
@@ -504,15 +422,6 @@ impl ModificationDefinition {
                 .find(|(specificity, _)| specificity.may_place(sequence, site))
                 .map_or(&[], |(_, losses)| losses),
         }
-    }
-
-    /// Does any site carry a neutral loss?
-    pub fn has_losses(&self) -> bool {
-        !self.neutral_losses.is_empty()
-            || self
-                .site_losses
-                .as_ref()
-                .is_some_and(|rules| !rules.is_empty())
     }
 }
 
@@ -1466,7 +1375,7 @@ fn validate_site_losses(
             ));
         }
     }
-    let losses: NeutralLosses = serde_json::from_value(serde_json::Value::Object(map.clone()))
+    let losses: SiteMap<f32> = serde_json::from_value(serde_json::Value::Object(map.clone()))
         .map_err(|e| e.to_string())?;
     let parsed = sites
         .iter()

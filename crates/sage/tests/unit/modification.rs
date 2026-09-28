@@ -88,7 +88,7 @@ fn deserialize_named_neutral_loss_modifications() {
         panic!("expected structured modification")
     };
     assert_eq!(entry.name.as_deref(), Some("Phospho"));
-    assert_eq!(entry.neutral_losses, vec![97.9769]);
+    assert_eq!(entry.neutral_losses, SiteMap::from(vec![97.9769]));
     assert_eq!(entry.neutral_loss_mode, NeutralLossMode::Required);
     assert_eq!(entry.site_mode, SiteMode::Both);
 
