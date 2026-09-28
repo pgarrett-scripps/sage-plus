@@ -195,7 +195,7 @@ impl Runner {
                         .filter_map(|idx| {
                             let feature = &features[idx];
                             let peptide = &self.database[feature.peptide_idx];
-                            let localization = sage_core::ptm::localize(
+                            let localization = sage_core::ptm::localize_with_rollup(
                                 peptide,
                                 matched.as_ref(),
                                 &self.database.ion_kinds,
@@ -203,6 +203,7 @@ impl Runner {
                                 self.parameters.fragment_tol,
                                 self.parameters.max_fragment_charge,
                                 feature.charge,
+                                self.parameters.ptm_localization.loss_rollup,
                             );
                             (!localization.mods.is_empty()).then_some((idx, localization))
                         })

@@ -376,6 +376,31 @@ pub fn serialize_features(
             }
         }
 
+        // Null unless PTM localization ran with a neutral-loss roll-up.
+        if let Some(mut column) = rg.next_column()? {
+            let counts = features
+                .iter()
+                .map(|f| {
+                    f.localization
+                        .as_ref()
+                        .and_then(|localization| localization.loss_rollup_peaks)
+                })
+                .collect::<Vec<_>>();
+            let definition_levels = counts
+                .iter()
+                .map(|count| i16::from(count.is_some()))
+                .collect::<Vec<_>>();
+            let values = counts
+                .into_iter()
+                .flatten()
+                .map(|count| count as i32)
+                .collect::<Vec<_>>();
+            column
+                .typed::<Int32Type>()
+                .write_batch(&values, Some(&definition_levels), None)?;
+            column.close()?;
+        }
+
         rg.close()?;
     }
     writer.into_inner()

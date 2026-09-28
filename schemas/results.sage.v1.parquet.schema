@@ -68,4 +68,5 @@ message schema {
             optional float element;
         }
     }
+    optional int32 localization_loss_rollup_peaks;
 }

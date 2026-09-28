@@ -822,6 +822,15 @@
       },
       "type": "object"
     },
+    "LossRollup": {
+      "description": "Neutral-loss roll-up before site-determining ions are scored. This is our\nown design, not a published localization method.\n\nGeneric losses are water and ammonia; modification losses are the\n`neutral_losses` of the modifications on the peptide. A phosphorylated\nfragment minus H3PO4 has the mass of the unmodified fragment minus water\n(79.966 + 18.011 = 97.977 Da), so the same peak can be the loss of either\nplacement. The modes treat that collision differently:\n\n* `Observed` folds a peak into whichever parent (+H2O, +NH3 or +loss mass)\n  is present in the spectrum, choosing the most intense parent. The folded\n  peak is removed and its intensity added to the parent. Loss peaks never\n  become matches, so a collision peak cannot credit either placement; it\n  only leaves the spectrum, which lowers the random-match rate.\n* `Placement` scores each arrangement against its own fragments: a\n  site-determining ion slot matches if the intact ion or one of its loss\n  forms is observed. A loss form that has the mass of any form of the same\n  fragment with a different modification count (for phospho, the -H3PO4\n  form of the phospho fragment and the -H2O form of the unmodified one) is\n  dropped from both, so a collision peak credits neither placement. Each\n  slot's chance probability grows with its number of forms, and the score\n  uses the Poisson-binomial tail.",
+      "enum": [
+        "off",
+        "observed",
+        "placement"
+      ],
+      "type": "string"
+    },
     "MassRecalibrationMode": {
       "description": "How much search-time mass recalibration a run may apply.",
       "oneOf": [
@@ -1024,6 +1033,11 @@
           "maximum": 1.0,
           "minimum": 0.0,
           "type": "number"
+        },
+        "loss_rollup": {
+          "$ref": "#/$defs/LossRollup",
+          "default": "off",
+          "description": "Experimental: fold neutral-loss peaks (water, ammonia and the\nmodifications' `neutral_losses`) into their parent fragments before\nsite-determining ions are scored. `off` (default), `observed`\n(placement-independent) or `placement` (per arrangement)."
         },
         "psm_q_value": {
           "default": 0.009999999776482582,

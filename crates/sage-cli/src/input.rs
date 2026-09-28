@@ -32,6 +32,11 @@ pub struct PtmLocalizationSettings {
     /// Arrangement-level false-localization-rate q-value cutoff.
     #[schemars(range(min = 0.0, max = 1.0))]
     pub localization_q_value: f32,
+    /// Experimental: fold neutral-loss peaks (water, ammonia and the
+    /// modifications' `neutral_losses`) into their parent fragments before
+    /// site-determining ions are scored. `off` (default), `observed`
+    /// (placement-independent) or `placement` (per arrangement).
+    pub loss_rollup: sage_core::ptm::LossRollup,
 }
 
 impl Default for PtmLocalizationSettings {
@@ -40,6 +45,7 @@ impl Default for PtmLocalizationSettings {
             enabled: false,
             psm_q_value: 0.01,
             localization_q_value: 0.01,
+            loss_rollup: sage_core::ptm::LossRollup::Off,
         }
     }
 }

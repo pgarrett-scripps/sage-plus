@@ -18,13 +18,18 @@
 //!   4. convert the per-arrangement scores into an **AScore**-style delta
 //!      between the two best arrangements and a per-site **localization
 //!      probability** (the Andromeda / MaxQuant convention).
+//!
+//! Optionally, [`LossRollup`] folds neutral-loss peaks into their parent
+//! fragments before step 3 (our own design, off by default; see
+//! [`LossRollup`] for how each mode handles the phospho/water collision).
 
 use itertools::Itertools;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use smallvec::{smallvec, SmallVec};
 
 use crate::ion_series::{IonSeries, Kind};
-use crate::mass::Tolerance;
-use crate::modification::{ModificationDefinition, ModificationSpecificity};
+use crate::mass::{Tolerance, H2O, NH3};
+use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
 use crate::peptide::Peptide;
 use crate::peptide::Site;
 use crate::spectrum::{select_most_intense_peak, ProcessedSpectrum};
@@ -138,7 +143,49 @@ impl ModLocalization {
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct Localization {
     pub mods: Vec<ModLocalization>,
+    /// Neutral-loss roll-up evidence, `None` when roll-up is off.
+    /// [`LossRollup::Observed`]: peaks folded into an observed parent.
+    /// [`LossRollup::Placement`]: site-determining ion slots of the best
+    /// arrangements matched only through a loss form, summed over modifications.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loss_rollup_peaks: Option<u32>,
 }
+
+/// Neutral-loss roll-up before site-determining ions are scored. This is our
+/// own design, not a published localization method.
+///
+/// Generic losses are water and ammonia; modification losses are the
+/// `neutral_losses` of the modifications on the peptide. A phosphorylated
+/// fragment minus H3PO4 has the mass of the unmodified fragment minus water
+/// (79.966 + 18.011 = 97.977 Da), so the same peak can be the loss of either
+/// placement. The modes treat that collision differently:
+///
+/// * `Observed` folds a peak into whichever parent (+H2O, +NH3 or +loss mass)
+///   is present in the spectrum, choosing the most intense parent. The folded
+///   peak is removed and its intensity added to the parent. Loss peaks never
+///   become matches, so a collision peak cannot credit either placement; it
+///   only leaves the spectrum, which lowers the random-match rate.
+/// * `Placement` scores each arrangement against its own fragments: a
+///   site-determining ion slot matches if the intact ion or one of its loss
+///   forms is observed. A loss form that has the mass of any form of the same
+///   fragment with a different modification count (for phospho, the -H3PO4
+///   form of the phospho fragment and the -H2O form of the unmodified one) is
+///   dropped from both, so a collision peak credits neither placement. Each
+///   slot's chance probability grows with its number of forms, and the score
+///   uses the Poisson-binomial tail.
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum LossRollup {
+    #[default]
+    Off,
+    Observed,
+    Placement,
+}
+
+/// Generic neutral losses rolled up for every fragment.
+const GENERIC_LOSSES: [f32; 2] = [H2O, NH3];
 
 /// Mirror of [`crate::scoring`]'s private `max_fragment_charge`, so the
 /// localization search considers the same fragment charge range as scoring.
@@ -167,23 +214,145 @@ pub fn localize<R: LocalizationRule>(
     user_max_fragment_charge: Option<u8>,
     precursor_charge: u8,
 ) -> Localization {
+    localize_with_rollup(
+        peptide,
+        spectrum,
+        ion_kinds,
+        potential_mods,
+        fragment_tol,
+        user_max_fragment_charge,
+        precursor_charge,
+        LossRollup::Off,
+    )
+}
+
+/// [`localize`] with an optional neutral-loss roll-up ([`LossRollup`]).
+#[allow(clippy::too_many_arguments)]
+pub fn localize_with_rollup<R: LocalizationRule>(
+    peptide: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    potential_mods: &[R],
+    fragment_tol: Tolerance,
+    user_max_fragment_charge: Option<u8>,
+    precursor_charge: u8,
+    rollup: LossRollup,
+) -> Localization {
     let max_charge = max_fragment_charge(user_max_fragment_charge, precursor_charge);
+    let groups = modification_groups(potential_mods, peptide);
+
+    let mut rolled = None;
+    if rollup == LossRollup::Observed && !groups.is_empty() {
+        let mut losses: Vec<f32> = GENERIC_LOSSES.to_vec();
+        for applied in peptide.applied_modifications() {
+            losses.extend(applied.modification.neutral_losses.iter().copied());
+        }
+        losses.sort_unstable_by(f32::total_cmp);
+        losses.dedup_by(|a, b| (*a - *b).abs() < MASS_EPS);
+        rolled = Some(roll_up_observed_losses(
+            spectrum,
+            &losses,
+            fragment_tol,
+            max_charge,
+        ));
+    }
+    let (scored_spectrum, folded) = match &rolled {
+        Some((rolled, folded)) => (rolled, Some(*folded)),
+        None => (spectrum, None),
+    };
 
     // Group physical attachment sites by modification identity.
     let mut mods = Vec::new();
-    for group in modification_groups(potential_mods, peptide) {
-        if let Some(loc) = localize_mass(
+    let mut loss_only = 0u32;
+    for group in groups {
+        if let Some((loc, loss_matches)) = localize_mass(
             peptide,
-            spectrum,
+            scored_spectrum,
             ion_kinds,
             &group,
             fragment_tol,
             max_charge,
+            rollup,
         ) {
+            loss_only += loss_matches;
             mods.push(loc);
         }
     }
-    Localization { mods }
+    let loss_rollup_peaks = match rollup {
+        LossRollup::Off => None,
+        LossRollup::Observed => folded.filter(|_| !mods.is_empty()),
+        LossRollup::Placement => (!mods.is_empty()).then_some(loss_only),
+    };
+    Localization {
+        mods,
+        loss_rollup_peaks,
+    }
+}
+
+/// Placement-independent roll-up ([`LossRollup::Observed`]). Peaks are visited
+/// from the highest mass down, so a parent is resolved before its losses. A
+/// peak whose mass plus a loss (at fragment charge 1..`max_charge`, in sage's
+/// peak convention) lands on an observed, heavier peak is folded into that
+/// peak's root parent; when several parents are observed the most intense one
+/// wins. Returns the simplified spectrum and the number of folded peaks.
+fn roll_up_observed_losses(
+    spectrum: &ProcessedSpectrum,
+    losses: &[f32],
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> (ProcessedSpectrum, u32) {
+    let masses = &spectrum.masses;
+    let intensities = &spectrum.intensities;
+    let n = masses.len();
+    let mut root: Vec<usize> = (0..n).collect();
+    let mut summed: Vec<f32> = intensities.clone();
+    let mut folded = 0u32;
+    for i in (0..n).rev() {
+        let mut best: Option<usize> = None;
+        for &loss in losses {
+            for charge in 1..max_charge {
+                let target = masses[i] + loss / charge as f32;
+                if let Some(j) =
+                    select_most_intense_peak(masses, intensities, target, fragment_tol, None)
+                {
+                    if j > i && best.is_none_or(|b| intensities[j] > intensities[b]) {
+                        best = Some(j);
+                    }
+                }
+            }
+        }
+        if let Some(parent) = best {
+            let r = root[parent];
+            root[i] = r;
+            summed[r] += summed[i];
+            folded += 1;
+        }
+    }
+    let kept = |values: &[f32]| -> Vec<f32> {
+        (0..n)
+            .filter(|&idx| root[idx] == idx)
+            .map(|idx| values[idx])
+            .collect()
+    };
+    let mut rolled = spectrum.clone();
+    rolled.masses = kept(masses);
+    rolled.intensities = kept(&summed);
+    if spectrum.mobilities.len() == n {
+        rolled.mobilities = kept(&spectrum.mobilities);
+    }
+    if spectrum.charges.len() == n {
+        rolled.charges = (0..n)
+            .filter(|&idx| root[idx] == idx)
+            .map(|idx| spectrum.charges[idx])
+            .collect();
+    }
+    if spectrum.charge_is_known.len() == n {
+        rolled.charge_is_known = (0..n)
+            .filter(|&idx| root[idx] == idx)
+            .map(|idx| spectrum.charge_is_known[idx])
+            .collect();
+    }
+    (rolled, folded)
 }
 
 /// Return whether a peptide carries at least one residue-specific variable
@@ -384,7 +553,8 @@ fn localize_mass(
     group: &ModificationGroup,
     fragment_tol: Tolerance,
     max_charge: u8,
-) -> Option<ModLocalization> {
+    rollup: LossRollup,
+) -> Option<(ModLocalization, u32)> {
     let mass = group.mass;
     let candidates = group.candidates(peptide);
     let k = candidates
@@ -406,27 +576,30 @@ fn localize_mass(
             .copied()
             .filter(|&idx| group.is_placed(peptide, idx))
             .collect();
-        return Some(ModLocalization {
-            mass,
-            label: group.label(),
-            site_count: k,
-            candidate_sites: total_c,
-            site_determining_ions: 0,
-            site_determining_matched: 0,
-            delta_score: 0.0,
-            target_decoy_score: 0.0,
-            decoy_winner: true,
-            competition_eligible: false,
-            localization_q_value: 1.0,
-            best_sites: placed
-                .iter()
-                .map(|&p| site_score(p, peptide, f32::NAN))
-                .collect(),
-            all_sites: candidates
-                .iter()
-                .map(|&p| site_score(p, peptide, f32::NAN))
-                .collect(),
-        });
+        return Some((
+            ModLocalization {
+                mass,
+                label: group.label(),
+                site_count: k,
+                candidate_sites: total_c,
+                site_determining_ions: 0,
+                site_determining_matched: 0,
+                delta_score: 0.0,
+                target_decoy_score: 0.0,
+                decoy_winner: true,
+                competition_eligible: false,
+                localization_q_value: 1.0,
+                best_sites: placed
+                    .iter()
+                    .map(|&p| site_score(p, peptide, f32::NAN))
+                    .collect(),
+                all_sites: candidates
+                    .iter()
+                    .map(|&p| site_score(p, peptide, f32::NAN))
+                    .collect(),
+            },
+            0,
+        ));
     }
 
     // Estimate the per-ion random match probability from the spectrum, used as
@@ -448,28 +621,61 @@ fn localize_mass(
         sites: Vec<usize>,
         score: f64,
         matched: u32,
+        loss_only: u32,
     }
+
+    // (score, matched, trials, slots matched only through a loss form)
+    let score_variant = |variant: &Peptide| -> (f64, u32, u32, u32) {
+        if rollup == LossRollup::Placement {
+            let slots = score_arrangement_with_losses(
+                variant,
+                spectrum,
+                ion_kinds,
+                &scoring_candidates,
+                k,
+                group,
+                fragment_tol,
+                max_charge,
+            );
+            let probabilities = slots
+                .iter()
+                .map(|slot| 1.0 - (1.0 - p_random).powi(slot.forms as i32))
+                .collect::<Vec<_>>();
+            let matched = slots.iter().filter(|slot| slot.matched).count() as u32;
+            let loss_only = slots.iter().filter(|slot| slot.loss_only).count() as u32;
+            let pvalue = poisson_binomial_tail(matched, &probabilities);
+            (
+                -10.0 * pvalue.log10(),
+                matched,
+                slots.len() as u32,
+                loss_only,
+            )
+        } else {
+            let (matched, trials) = score_arrangement(
+                variant,
+                spectrum,
+                ion_kinds,
+                &scoring_candidates,
+                k,
+                fragment_tol,
+                max_charge,
+            );
+            let pvalue = binomial_tail(matched, trials, p_random);
+            (-10.0 * pvalue.log10(), matched, trials, 0)
+        }
+    };
 
     let mut total_trials = 0u32;
     let mut arrangements: Vec<Arrangement> = Vec::with_capacity(n_arrangements);
     for combo in candidates.iter().copied().combinations(k) {
         let variant = build_variant(peptide, mass, &candidates, &combo);
-        let (matched, trials) = score_arrangement(
-            &variant,
-            spectrum,
-            ion_kinds,
-            &scoring_candidates,
-            k,
-            fragment_tol,
-            max_charge,
-        );
+        let (score, matched, trials, loss_only) = score_variant(&variant);
         total_trials = trials; // identical across arrangements
-        let pvalue = binomial_tail(matched, trials, p_random);
-        let score = -10.0 * pvalue.log10();
         arrangements.push(Arrangement {
             sites: combo,
             score,
             matched,
+            loss_only,
         });
     }
 
@@ -502,6 +708,7 @@ fn localize_mass(
         }
     }
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
+    let best_loss_only = arrangements.first().map(|a| a.loss_only).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
     let best_decoy_score = decoy_candidates.as_ref().and_then(|decoys| {
@@ -511,17 +718,7 @@ fn localize_mass(
             .combinations(k)
             .map(|combo| {
                 let variant = build_variant(peptide, mass, &candidates, &combo);
-                let (matched, trials) = score_arrangement(
-                    &variant,
-                    spectrum,
-                    ion_kinds,
-                    &scoring_candidates,
-                    k,
-                    fragment_tol,
-                    max_charge,
-                );
-                let pvalue = binomial_tail(matched, trials, p_random);
-                -10.0 * pvalue.log10()
+                score_variant(&variant).0
             })
             .max_by(|a, b| a.total_cmp(b))
     });
@@ -577,21 +774,24 @@ fn localize_mass(
         .collect();
     best_sites.sort_by_key(|s| s.position);
 
-    Some(ModLocalization {
-        mass,
-        label: group.label(),
-        site_count: k,
-        candidate_sites: total_c,
-        site_determining_ions: total_trials,
-        site_determining_matched: best_matched,
-        delta_score,
-        target_decoy_score,
-        decoy_winner,
-        competition_eligible: decoy_candidates.is_some(),
-        localization_q_value: 1.0,
-        best_sites,
-        all_sites,
-    })
+    Some((
+        ModLocalization {
+            mass,
+            label: group.label(),
+            site_count: k,
+            candidate_sites: total_c,
+            site_determining_ions: total_trials,
+            site_determining_matched: best_matched,
+            delta_score,
+            target_decoy_score,
+            decoy_winner,
+            competition_eligible: decoy_candidates.is_some(),
+            localization_q_value: 1.0,
+            best_sites,
+            all_sites,
+        },
+        best_loss_only,
+    ))
 }
 
 /// Select evenly distributed, unmodified residues that are impossible target
@@ -814,6 +1014,205 @@ fn score_arrangement(
         }
     }
     (matched, trials)
+}
+
+/// One site-determining ion slot (fragment and charge) under
+/// [`LossRollup::Placement`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RollupSlot {
+    /// Intact form plus the loss forms kept after collision removal.
+    forms: u32,
+    /// Any form is observed.
+    matched: bool,
+    /// Only a loss form is observed.
+    loss_only: bool,
+}
+
+/// Whether fragment `series_index` of `kind` contains `site`.
+fn fragment_contains(kind: Kind, series_index: usize, site: Site) -> bool {
+    match (kind, site) {
+        (Kind::A | Kind::B | Kind::C, Site::Nterm) => true,
+        (Kind::A | Kind::B | Kind::C, Site::Cterm) => false,
+        (Kind::A | Kind::B | Kind::C, Site::Sequence(index)) => index as usize <= series_index,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Nterm) => false,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Cterm) => true,
+        (Kind::X | Kind::Y | Kind::Z | Kind::ZDot, Site::Sequence(index)) => {
+            index as usize > series_index
+        }
+    }
+}
+
+/// Every total neutral loss from `copies` modifications, each given by its
+/// loss masses and whether the retained form is kept (`optional`). Always
+/// includes 0.0.
+fn combine_losses<'a>(copies: impl Iterator<Item = (&'a [f32], bool)>) -> SmallVec<[f32; 8]> {
+    let mut totals: SmallVec<[f32; 8]> = smallvec![0.0];
+    for (losses, optional) in copies {
+        if losses.is_empty() {
+            continue;
+        }
+        let mut next: SmallVec<[f32; 8]> = SmallVec::new();
+        for total in &totals {
+            if optional {
+                next.push(*total);
+            }
+            for loss in losses {
+                next.push(total + loss);
+            }
+        }
+        next.sort_unstable_by(f32::total_cmp);
+        next.dedup_by(|a, b| (*a - *b).abs() < MASS_EPS);
+        totals = next;
+    }
+    if !totals.contains(&0.0) {
+        totals.insert(0, 0.0);
+    }
+    totals
+}
+
+/// Placement-aware roll-up ([`LossRollup::Placement`]): score `variant`'s own
+/// site-determining fragments, counting a slot as matched when the intact ion
+/// or one of its loss forms is observed. Loss forms are the generic water and
+/// ammonia losses plus the fragment's modification losses. A loss form whose
+/// mass equals any form of the same fragment carrying a different number of
+/// the localized modification is dropped, so that peak credits no placement.
+#[allow(clippy::too_many_arguments)]
+fn score_arrangement_with_losses(
+    variant: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    candidates: &[usize],
+    k: usize,
+    group: &ModificationGroup,
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> Vec<RollupSlot> {
+    let total_c = candidates.len();
+    let group_mass = group.mass;
+    let is_group =
+        |modification: &ModificationDefinition| (modification.mass - group_mass).abs() < MASS_EPS;
+    let loss_spec = |modification: &ModificationDefinition| {
+        (
+            modification.neutral_losses.to_vec(),
+            modification.neutral_loss_mode == NeutralLossMode::Optional,
+        )
+    };
+    let group_losses = variant
+        .applied_modifications()
+        .find(|applied| is_group(applied.modification))
+        .map(|applied| loss_spec(applied.modification))
+        .unwrap_or_else(|| (Vec::new(), true));
+
+    let mut slots = Vec::new();
+    for kind in ion_kinds {
+        for (idx, ion) in IonSeries::new(variant, *kind).enumerate() {
+            let c_in_region = match kind {
+                Kind::A | Kind::B | Kind::C => candidates
+                    .iter()
+                    .filter(|&&p| p <= idx || p == variant.sequence.len())
+                    .count(),
+                Kind::X | Kind::Y | Kind::Z | Kind::ZDot => candidates
+                    .iter()
+                    .filter(|&&p| {
+                        (p > idx && p < variant.sequence.len()) || p == variant.sequence.len() + 1
+                    })
+                    .count(),
+            };
+            if !is_site_determining(c_in_region, total_c, k) {
+                continue;
+            }
+            let min_count = k.saturating_sub(total_c - c_in_region);
+            let max_count = k.min(c_in_region);
+
+            let mut copies = 0usize;
+            let mut pinned: Vec<(Vec<f32>, bool)> = Vec::new();
+            for applied in variant.applied_modifications() {
+                if !fragment_contains(*kind, idx, applied.site) {
+                    continue;
+                }
+                if is_group(applied.modification) {
+                    copies += 1;
+                } else if !applied.modification.neutral_losses.is_empty() {
+                    pinned.push(loss_spec(applied.modification));
+                }
+            }
+            // Loss masses (0.0 = intact) of this fragment with `count` copies.
+            let losses_with =
+                |count: usize| -> SmallVec<[f32; 8]> {
+                    let mut losses =
+                        combine_losses(pinned.iter().map(|(l, o)| (l.as_slice(), *o)).chain(
+                            (0..count).map(|_| (group_losses.0.as_slice(), group_losses.1)),
+                        ));
+                    losses.extend(GENERIC_LOSSES);
+                    losses.sort_unstable_by(f32::total_cmp);
+                    losses.dedup_by(|a, b| (*a - *b).abs() < MASS_EPS);
+                    losses
+                };
+            let other_masses = (min_count..=max_count)
+                .filter(|&count| count != copies)
+                .flat_map(|count| {
+                    let shift = (count as f32 - copies as f32) * group_mass;
+                    losses_with(count)
+                        .into_iter()
+                        .map(move |loss| ion.monoisotopic_mass + shift - loss)
+                })
+                .collect::<Vec<_>>();
+            let forms = losses_with(copies)
+                .into_iter()
+                .map(|loss| ion.monoisotopic_mass - loss)
+                .enumerate()
+                .filter(|&(form, form_mass)| {
+                    form == 0
+                        || (form_mass > 0.0
+                            && !other_masses.iter().any(|&other| {
+                                let (lo, hi) = fragment_tol.bounds(form_mass);
+                                other >= lo && other <= hi
+                            }))
+                })
+                .map(|(_, form_mass)| form_mass)
+                .collect::<SmallVec<[f32; 8]>>();
+
+            for charge in 1..max_charge {
+                let observed = |mass: f32| {
+                    select_most_intense_peak(
+                        &spectrum.masses,
+                        &spectrum.intensities,
+                        mass / charge as f32,
+                        fragment_tol,
+                        None,
+                    )
+                    .is_some()
+                };
+                let intact = observed(forms[0]);
+                let matched = intact || forms[1..].iter().any(|&mass| observed(mass));
+                slots.push(RollupSlot {
+                    forms: forms.len() as u32,
+                    matched,
+                    loss_only: matched && !intact,
+                });
+            }
+        }
+    }
+    slots
+}
+
+/// Poisson-binomial upper tail: P(X >= `successes`) for independent trials
+/// with the given success probabilities.
+fn poisson_binomial_tail(successes: u32, probabilities: &[f64]) -> f64 {
+    if probabilities.is_empty() || successes == 0 {
+        return 1.0;
+    }
+    let mut dist = vec![0.0f64; probabilities.len() + 1];
+    dist[0] = 1.0;
+    for (n, &p) in probabilities.iter().enumerate() {
+        for x in (0..=n + 1).rev() {
+            let stay = dist[x] * (1.0 - p);
+            let step = if x > 0 { dist[x - 1] * p } else { 0.0 };
+            dist[x] = stay + step;
+        }
+    }
+    let s = (successes as usize).min(probabilities.len());
+    dist[s..].iter().sum::<f64>().clamp(1e-300, 1.0)
 }
 
 /// A fragment covering `c_in_region` of the `total_c` candidate sites is
