@@ -9,6 +9,19 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- PTM localization FLR is now estimated per modification type. Each type (reported name plus
+  delta mass) gets its own target/decoy competition, following the per-modification decoy FLR
+  of LuciPHOr (Fermin et al. 2013), LuciPHOr2 (Fermin et al. 2015) and Ramsbottom et al. 2022.
+  Before, every type was pooled into one competition. Decoy wins of single-Met oxidation rows,
+  which have nothing to localize, then set the phospho q-values: on PXD007058 phospho
+  localizations at `localization_q_value` <= 0.01 go from 303 to 6,973. On the PXD000138
+  known-site libraries the single-phospho true FLR stays at 0.96% against an estimate of 0.96%
+  at the 1% cutoff. A PSM with several types contributes one
+  localization to each type's competition; decoy PSMs read their q-value off their own type's
+  curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
+  change; `localization_q_value` and `site_q_value` values change.
+
 ## [v0.1.0-beta.13] - 2026-09-27
 
 ### Fixed

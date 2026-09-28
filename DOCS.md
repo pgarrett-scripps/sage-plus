@@ -1374,8 +1374,10 @@ For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), 
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
 4. scores a balanced set of impossible-site decoy arrangements alongside the valid target arrangements,
-5. converts target/decoy competition scores across the dataset into monotonic localization q-values, and
+5. converts target/decoy competition scores across the dataset into monotonic localization q-values, with a separate competition for each modification type, and
 6. reports target arrangements at or below `ptm_localization.localization_q_value`, together with an AScore-style delta and per-site localization probabilities.
+
+The false localization rate (FLR) is estimated per modification type. A type is the reported `modification` name together with its delta mass (to 0.001 Da). Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 
@@ -1391,7 +1393,7 @@ Two Parquet site reports are written:
 1. Decoy PSMs pass through the same gates as target PSMs: spectrum q-value ≤ `ptm_localization.psm_q_value`, localization, no impossible-site decoy win, and localization q-value ≤ `ptm_localization.localization_q_value`. Decoy PSMs never enter the false-localization-rate competition. Each takes the localization q-value of the target competition at its own score, so the localization cutoff is the same score threshold for both.
 2. Target and decoy site rows are collapsed with the same key: protein, modified peptide, position in the peptide, modification and attachment. Decoy sites sit on decoy proteins.
 3. Each site is scored by the best discriminant score of its supporting PSMs, the same score used for PSM, peptide and protein FDR.
-4. Target and decoy sites compete without pairing. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
+4. Target and decoy sites compete without pairing, separately for each modification type, as for the localization FLR. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
 
 Site FDR is about identity: is this modified site on this protein real? Localization confidence is a separate question and stays in `best_localization_probability` and `best_localization_q_value`.
 
