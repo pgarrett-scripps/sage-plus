@@ -20,7 +20,9 @@ entries are retained below for provenance.
   modification `neutral_losses` are unchanged. Off unless the key is present, and then every
   output is identical to before. On five HCD, ion-trap CID and ETciD datasets the separate
   features changed identifications at 1% FDR by under 1% with no entrapment FDP inflation,
-  while scoring losses in the hyperscore lost 1-12% of PSMs; see
+  while scoring losses in the hyperscore lost 1-12% of PSMs (loss-only matches raise the
+  matched-ion count, which favours wrong candidates; count-free, parent-supported and
+  Comet-weighted in-score variants were only neutral); see
   `benchmarks/FRAGMENT_LOSSES.md`. The setting is not enabled by default.
 
 ### Changed

@@ -661,7 +661,10 @@ when a candidate is fully scored. They do not change the hyperscore,
 rescoring features, `matched_loss_peaks` and `loss_intensity_pct`, which the
 linear discriminant uses and which are written as the last two columns of
 `results.sage.parquet` and before `Peptide` in `results.sage.pin`. Scoring loss
-ions inside the hyperscore lost 1-12% of PSMs in our benchmarks, and the
+ions inside the hyperscore lost 1-12% of PSMs in our benchmarks, because a
+loss-only match raises the matched-ion count and wrong candidates collect more
+of them than the correct peptide; count-free, parent-supported and
+Comet-style down-weighted variants only reached parity. The
 separate features changed identifications by less than 1% at 1% FDR on HCD,
 ion-trap CID and ETciD data, with no entrapment FDP inflation (see
 [`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)). The
