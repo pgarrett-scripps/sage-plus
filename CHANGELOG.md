@@ -9,6 +9,15 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `neutral_losses` now also accepts a map from site to loss list, such as
+  `{"S": [97.976896], "T": [97.976896]}` for Phospho on S, T and Y. Sites left out of the map
+  get no loss; keys must repeat a site from `sites` exactly and unknown keys are rejected. The
+  list form is unchanged and gives byte-identical output. With `neutral_loss_mode: "required"`,
+  a site without losses keeps its retained fragment form. On PXD000138 the S/T map gives 4,142
+  phospho localizations at `localization_q_value` <= 0.01, against 3,883 with the loss on S, T
+  and Y and 3,841 without losses; single-phospho known-site true FLR is 1.05% (estimate 0.99%).
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR
