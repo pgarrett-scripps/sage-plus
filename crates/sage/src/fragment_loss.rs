@@ -50,17 +50,28 @@ pub struct FragmentLosses {
     pub losses: Vec<FragmentLoss>,
     /// Most generic losses stacked on one fragment.
     pub max_losses: usize,
+    /// Highest fragment charge at which loss ions are matched; `None` matches
+    /// them at every fragment charge the intact ions are matched at.
+    pub max_charge: Option<u8>,
+}
+
+impl FragmentLosses {
+    /// Whether loss ions are matched at fragment charge `charge`.
+    pub fn matches_charge(&self, charge: u8) -> bool {
+        self.max_charge.is_none_or(|max| charge <= max)
+    }
 }
 
 /// Default for `database.max_fragment_losses`.
 pub const DEFAULT_MAX_FRAGMENT_LOSSES: usize = 1;
 
-/// Validate the `database.fragment_losses` and `database.max_fragment_losses`
-/// settings against the searched `ion_kinds`. Returns `None` when fragment
-/// losses are not configured.
+/// Validate the `database.fragment_losses`, `database.max_fragment_losses`
+/// and `database.max_fragment_loss_charge` settings against the searched
+/// `ion_kinds`. Returns `None` when fragment losses are not configured.
 pub fn resolve(
     entries: Option<&BTreeMap<String, FragmentLossEntry>>,
     max_losses: Option<usize>,
+    max_charge: Option<u8>,
     ion_kinds: &[Kind],
 ) -> Result<Option<FragmentLosses>, String> {
     let Some(entries) = entries else {
@@ -69,8 +80,16 @@ pub fn resolve(
                 "`database.max_fragment_losses` requires `database.fragment_losses`".into(),
             );
         }
+        if max_charge.is_some() {
+            return Err(
+                "`database.max_fragment_loss_charge` requires `database.fragment_losses`".into(),
+            );
+        }
         return Ok(None);
     };
+    if max_charge == Some(0) {
+        return Err("`database.max_fragment_loss_charge` must be at least 1".into());
+    }
     if entries.is_empty() {
         return Err(
             "`database.fragment_losses` must define at least one loss; remove the key to disable fragment losses"
@@ -141,7 +160,11 @@ pub fn resolve(
             allow_modified: entry.allow_modified,
         });
     }
-    Ok(Some(FragmentLosses { losses, max_losses }))
+    Ok(Some(FragmentLosses {
+        losses,
+        max_losses,
+        max_charge,
+    }))
 }
 
 fn kind_name(kind: Kind) -> String {

@@ -104,6 +104,11 @@ pub struct Builder {
     /// Requires `fragment_losses`.
     #[schemars(range(min = 1))]
     pub max_fragment_losses: Option<usize>,
+    /// Highest fragment charge at which generic fragment-loss ions are
+    /// matched (default: every fragment charge searched). `1` matches loss
+    /// ions at 1+ only, as Comet does. Requires `fragment_losses`.
+    #[schemars(range(min = 1))]
+    pub max_fragment_loss_charge: Option<u8>,
     /// Named static definitions with mass and explicit sites.
     /// Upstream Sage symbol-keyed masses (`{"C": 57.021464}`) remain readable.
     #[serde(default, deserialize_with = "crate::modification::deserialize_mod_map")]
@@ -197,12 +202,14 @@ impl Builder {
         Ok(())
     }
 
-    /// Validate `fragment_losses` and `max_fragment_losses`.
+    /// Validate `fragment_losses`, `max_fragment_losses` and
+    /// `max_fragment_loss_charge`.
     pub fn validate_fragment_losses(&self) -> Result<(), String> {
         let ion_kinds = self.ion_kinds.clone().unwrap_or(vec![Kind::B, Kind::Y]);
         crate::fragment_loss::resolve(
             self.fragment_losses.as_ref(),
             self.max_fragment_losses,
+            self.max_fragment_loss_charge,
             &ion_kinds,
         )
         .map(|_| ())
@@ -232,6 +239,10 @@ impl Builder {
                 self.max_fragment_losses
                     .unwrap_or(crate::fragment_loss::DEFAULT_MAX_FRAGMENT_LOSSES)
             }),
+            max_fragment_loss_charge: self
+                .fragment_losses
+                .as_ref()
+                .and(self.max_fragment_loss_charge),
             fragment_losses: self.fragment_losses,
             decoy_tag: self.decoy_tag.unwrap_or_else(|| "rev_".into()),
             enzyme: self.enzyme.unwrap_or_default(),
@@ -273,6 +284,8 @@ pub struct Parameters {
     pub fragment_losses: Option<BTreeMap<String, FragmentLossEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_fragment_losses: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_fragment_loss_charge: Option<u8>,
     #[serde(serialize_with = "crate::modification::serialize_static_mods")]
     pub static_mods: HashMap<ModificationSpecificity, StaticModEntry>,
     #[serde(serialize_with = "crate::modification::serialize_variable_mods")]
@@ -604,6 +617,7 @@ impl Parameters {
         crate::fragment_loss::resolve(
             self.fragment_losses.as_ref(),
             self.max_fragment_losses,
+            self.max_fragment_loss_charge,
             &self.ion_kinds,
         )
         .unwrap_or_else(|error| panic!("{error}"))

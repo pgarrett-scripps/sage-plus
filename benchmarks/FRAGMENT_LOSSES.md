@@ -1,4 +1,4 @@
-# Generic fragment losses (Beta 14)
+# Generic fragment losses (Beta 14, loss charge Beta 15)
 
 `database.fragment_losses` adds residue-dependent loss ions (b-H2O, y-NH3 and
 so on) to full candidate scoring. This page records how the integration was
@@ -391,6 +391,58 @@ to expect; the effect here is none on CID, HCD or ETciD.
 - It remains available for users who want the loss evidence in their PSM
   tables or Percolator/mokapot features.
 
+## Loss-ion charge (Beta 15)
+
+Beta 14 matches loss ions at every fragment charge that the intact ions are
+matched at. Comet matches them at 1+ only, and Andromeda reportedly does the
+same (table above). `database.max_fragment_loss_charge` caps the fragment charge
+of loss ions only; the intact ions are unchanged. It is absent by default, so
+Beta 14 configurations reproduce. **C-1+** is C with
+`"max_fragment_loss_charge": 1`, run with the Beta 15 binary (`b15/limits`). C
+from the same binary reproduces the Beta 14 C row for row on every dataset.
+
+At 1% q-value:
+
+| Dataset | Variant | PSMs | Peptides | Proteins | Decoy PSMs | FDP PSM | FDP pep | FDP prot |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| HEK SILAC | base | 2,217 | 1,429 | 631 | 21 | - | - | - |
+|  | C | 2,219 | 1,427 | 632 | 21 | - | - | - |
+|  | C-1+ | 2,218 | 1,428 | 631 | 21 | - | - | - |
+| PXD028735 Human_01 | base | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% |
+|  | C | 65,748 | 37,913 | 4,314 | 656 | 1.29% | 1.40% | 1.92% |
+|  | C-1+ | 65,741 | 37,903 | 4,323 | 656 | 1.26% | 1.39% | 1.98% |
+| PXD001468 HEK293T | base | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% |
+|  | C | 42,758 | 23,464 | 6,202 | 426 | 2.56% | 2.87% | 3.43% |
+|  | C-1+ | 42,750 | 23,466 | 6,202 | 426 | 2.56% | 2.87% | 3.43% |
+| PXD011070 ion-trap CID | base | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% |
+|  | C | 7,127 | 5,920 | 1,111 | 70 | 1.36% | 1.51% | 2.92% |
+|  | C-1+ | 7,127 | 5,926 | 1,114 | 70 | 1.31% | 1.57% | 3.18% |
+| PXD004447 ETciD | C and C-1+ | 13,114 | 11,774 | 2,192 | 130 | 0.82% | 0.85% | 1.62% |
+
+On PXD004447 every precursor is 2+, so fragments are searched at 1+ only and
+the two variants are identical. Mean matched loss peaks per PSM, for
+confident targets (spectrum q ≤ 1%) and for decoys:
+
+| Dataset | C targets / decoys | C-1+ targets / decoys |
+| --- | ---: | ---: |
+| HEK SILAC | 5.18 / 2.02 | 4.26 / 1.09 |
+| PXD028735 Human_01 | 4.09 / 2.28 | 3.47 / 1.91 |
+| PXD001468 HEK293T | 5.88 / 2.49 | 5.54 / 2.22 |
+| PXD011070 ion-trap CID | 11.27 / 7.57 | 7.77 / 4.39 |
+
+Capping at 1+ removes proportionally more decoy loss matches than target
+ones: 46% against 18% on HEK SILAC, and 42% against 31% on CID. So 2+ loss
+peaks are largely random. But the identifications do not move: every change
+is within 0.1% of C, and so are the PSM and peptide FDP (C-1+ is 0.03-0.05
+point lower at PSM level on Human_01 and CID). Protein FDP moves by a few
+entrapment proteins either way, as for every variant above.
+
+**Recommendation:** document `"max_fragment_loss_charge": 1` in the
+recommended configuration. It performs as well as all charges, matches Comet
+(and reportedly Andromeda), and puts less random evidence into the
+features. The default stays at all charges: the evidence shows parity, not a
+clear gain, and an absent key must keep reproducing Beta 14 results.
+
 ## Reproducing
 
 ```bash
@@ -404,6 +456,9 @@ python benchmarks/run_fragment_losses.py ... \
 python benchmarks/run_fragment_losses.py --base <base sage> --candidate <8761c3d sage> \
   --output exp --variants base A B B-int B-intact B-narrow B-max2 C Cs Cf \
   P0 P05 P1 P0-narrow P0Cs W02
+# Beta 15 loss-ion charge, both engines built from b15/limits
+python benchmarks/run_fragment_losses.py --base <b15 sage> --candidate <b15 sage> \
+  --output b15 --variants base C C-1+
 ```
 
 D (first round, chimeric keep-peaks) was selectable only in `6aa89ff`. The

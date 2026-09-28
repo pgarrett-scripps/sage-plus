@@ -821,6 +821,7 @@ fn digestion() {
         min_ion_index: 2,
         fragment_losses: None,
         max_fragment_losses: None,
+        max_fragment_loss_charge: None,
         static_mods: HashMap::default(),
         variable_mods: [(
             ModificationSpecificity::ProteinN(None),

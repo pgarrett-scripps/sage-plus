@@ -1266,6 +1266,73 @@ fn approved_fragment_losses() -> serde_json::Value {
     })
 }
 
+/// `max_fragment_loss_charge` caps the fragment charge of loss ions only:
+/// capped at 1+, a search that also matches 2+ fragments finds the same loss
+/// evidence as a 1+ search, and the search scores do not change.
+#[test]
+fn fragment_loss_charge_cap_limits_loss_ions_only() -> anyhow::Result<()> {
+    let fasta = sage_cloudpath::util::read_fasta(
+        &sage_cloudpath::to_url("../../tests/Q99536.fasta").expect("valid url"),
+        "rev_",
+        true,
+    )?;
+    let spectra = sage_cloudpath::util::read_mzml(
+        &sage_cloudpath::to_url("../../tests/LQSRPAAPPAPGPGQLTLR.mzML").expect("valid url"),
+        0,
+        None,
+    )?;
+    let processed = SpectrumProcessor::new(100, true, 0.0).process(spectra[0].clone());
+
+    let search = |loss_charge: Option<u8>,
+                  fragment_charge: u8|
+     -> anyhow::Result<sage_core::scoring::Feature> {
+        let mut builder = Builder::default();
+        builder.update_fasta("foo".into());
+        builder.fragment_losses = Some(serde_json::from_value(approved_fragment_losses())?);
+        builder.max_fragment_loss_charge = loss_charge;
+        builder
+            .validate_fragment_losses()
+            .map_err(anyhow::Error::msg)?;
+        let database = builder.make_parameters().build(fasta.clone());
+        let scorer = Scorer {
+            db: &database,
+            precursor_tol: Tolerance::Ppm(-50.0, 50.0),
+            fragment_tol: Tolerance::Ppm(-10.0, 10.0),
+            min_matched_peaks: 4,
+            min_isotope_err: -1,
+            max_isotope_err: 3,
+            min_precursor_charge: 2,
+            max_precursor_charge: 4,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(fragment_charge),
+            chimera: false,
+            report_psms: 1,
+            wide_window: false,
+            annotate_matches: true,
+            mass_shift_ppm: 50.0,
+            score_type: ScoreType::SageHyperScore,
+            mass_recalibration: None,
+        };
+        let psms = scorer.score(&processed);
+        assert_eq!(psms.len(), 1);
+        Ok(psms.into_iter().next().unwrap())
+    };
+    let all = search(None, 2)?;
+    let capped = search(Some(1), 2)?;
+    let singly = search(None, 1)?;
+    let (all_loss, capped_loss) = (all.fragment_loss.unwrap(), capped.fragment_loss.unwrap());
+    let singly_loss = singly.fragment_loss.unwrap();
+    assert_eq!(capped_loss.matched_peaks, singly_loss.matched_peaks);
+    assert_eq!(capped_loss.intensity_pct, singly_loss.intensity_pct);
+    assert!(
+        all_loss.matched_peaks > capped_loss.matched_peaks,
+        "{all_loss:?}"
+    );
+    assert_eq!(all.hyperscore, capped.hyperscore);
+    assert_eq!(all.matched_peaks, capped.matched_peaks);
+    Ok(())
+}
+
 /// Generic fragment losses are separate rescoring features: with them
 /// configured, every search score of the PSM (hyperscore, matched peaks,
 /// intensities, ranks) is unchanged, and without them the loss evidence is

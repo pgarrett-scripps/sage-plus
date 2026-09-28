@@ -643,7 +643,8 @@ identifications and q-values are unchanged and the two loss columns of
     "Water":   {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"], "allow_modified": false},
     "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
   },
-  "max_fragment_losses": 1
+  "max_fragment_losses": 1,
+  "max_fragment_loss_charge": 1
 }
 ```
 
@@ -657,6 +658,11 @@ identifications and q-values are unchanged and the two loss columns of
   any modification still counts as a site.
 - `max_fragment_losses` (default 1): the most generic losses stacked on one
   fragment. A loss is never used more often than the fragment has sites for it.
+- `max_fragment_loss_charge` (default: every fragment charge searched): the
+  highest fragment charge at which loss ions are matched; intact ions are not
+  affected. The example uses 1, as Comet does: it identified as many PSMs and
+  peptides as all charges on every benchmark dataset, and 2+ loss matches were
+  mostly random.
 
 Loss ions are never in the preliminary fragment index; they are matched only
 when a candidate is fully scored. They do not change the hyperscore,

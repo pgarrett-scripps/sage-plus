@@ -31,7 +31,7 @@ fn approved() -> BTreeMap<String, FragmentLossEntry> {
 }
 
 fn losses(entries: BTreeMap<String, FragmentLossEntry>, max: Option<usize>) -> FragmentLosses {
-    resolve(Some(&entries), max, &[Kind::B, Kind::Y])
+    resolve(Some(&entries), max, None, &[Kind::B, Kind::Y])
         .unwrap()
         .unwrap()
 }
@@ -64,8 +64,20 @@ fn approved_config_resolves() {
 }
 
 #[test]
+fn loss_charge_cap_limits_matched_charges() {
+    let all = losses(approved(), None);
+    assert_eq!(all.max_charge, None);
+    assert!((1..=4).all(|charge| all.matches_charge(charge)));
+    let capped = resolve(Some(&approved()), None, Some(1), &[Kind::B, Kind::Y])
+        .unwrap()
+        .unwrap();
+    assert!(capped.matches_charge(1));
+    assert!(!capped.matches_charge(2));
+}
+
+#[test]
 fn absent_key_is_off() {
-    assert_eq!(resolve(None, None, &[Kind::B, Kind::Y]), Ok(None));
+    assert_eq!(resolve(None, None, None, &[Kind::B, Kind::Y]), Ok(None));
 }
 
 #[test]
@@ -73,12 +85,18 @@ fn invalid_configurations_are_rejected() {
     let kinds = [Kind::B, Kind::Y];
     let one = |e: FragmentLossEntry| BTreeMap::from([("Loss".to_string(), e)]);
     let error = |map: BTreeMap<String, FragmentLossEntry>, max: Option<usize>| {
-        resolve(Some(&map), max, &kinds).unwrap_err()
+        resolve(Some(&map), max, None, &kinds).unwrap_err()
     };
 
-    assert!(resolve(None, Some(1), &kinds)
+    assert!(resolve(None, Some(1), None, &kinds)
         .unwrap_err()
         .contains("requires `database.fragment_losses`"));
+    assert!(resolve(None, None, Some(1), &kinds)
+        .unwrap_err()
+        .contains("`database.max_fragment_loss_charge` requires"));
+    assert!(resolve(Some(&approved()), None, Some(0), &kinds)
+        .unwrap_err()
+        .contains("must be at least 1"));
     assert!(error(BTreeMap::new(), None).contains("at least one loss"));
     assert!(error(one(entry(0.0, &["S"], &[Kind::B])), None).contains("positive, finite"));
     assert!(error(one(entry(-18.0, &["S"], &[Kind::B])), None).contains("positive, finite"));

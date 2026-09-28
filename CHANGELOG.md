@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `database.max_fragment_loss_charge` (requires `fragment_losses`) caps the fragment charge at
+  which generic loss ions are matched; intact ions are unaffected. Absent, loss ions are matched
+  at every fragment charge as before. At 1+ (as Comet) identifications equal all charges within
+  0.1% on five datasets, and decoy loss matches fall more than target ones; 1+ is now the
+  documented recommendation, not the default (`benchmarks/FRAGMENT_LOSSES.md`).
+
 ### Changed
 - Immonium modified-residue ions no longer depend on where the search placed the modification.
   An ion such as `Phospho@Y` is explained when the peptide carries the modification and has a
@@ -97,7 +104,7 @@ entries are retained below for provenance.
 - With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
   identification is not quantified; it does not fall back to the window search.
 - `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
-  SILAC), and loss ions are matched at every fragment charge.
+  SILAC).
 
 ## [v0.1.0-beta.13] - 2026-09-27
 
