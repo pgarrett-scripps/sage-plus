@@ -1,2 +1,5 @@
 # Generated schemas must match the generator on every checkout platform.
 schemas/*.json text eol=lf
+# Provenance tests hash these fixtures; keep their bytes identical on Windows checkouts.
+tests/*.fasta -text
+tests/*.mzML -text
