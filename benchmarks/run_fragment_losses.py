@@ -156,6 +156,18 @@ VARIANTS = {
     # P0Cs: P0 in the score plus the Cs features.
     "P0Cs": ("candidate", LOSSES, {**PARENT, S + "WEIGHT": "0", S + "FEATURES": "1",
                                    S + "FEATURE_PARENT": "1"}, False),
+    # Beta 15 combinations: an in-score contribution plus the C features.
+    # B-int+C: B-int in the hyperscore, C features for the discriminant.
+    "B-int+C": ("candidate", LOSSES, {S + "SCORING": "hyperscore_intensity",
+                                      S + "FEATURES": "1"}, False),
+    # W02+C: Comet use_NL_ions analogue, count-free: every matched loss peak
+    # adds 0.2 of its intensity to its series; matched-ion count unchanged.
+    **{f"W0{w}+C": ("candidate", LOSSES, {S + "SCORING": "weighted", S + "WEIGHT": f"0.{w}",
+                                         S + "COUNT_WEIGHT": "0", S + "FEATURES": "1"}, False)
+       for w in ("1", "2", "3", "5")},
+    # W02c+C: the first-round W02 (0.2 count and 0.2 intensity) plus C.
+    "W02c+C": ("candidate", LOSSES, {S + "SCORING": "weighted", S + "WEIGHT": "0.2",
+                                     S + "FEATURES": "1"}, False),
     "base-chimera": ("base", None, {}, True),
     "C-chimera": ("candidate", LOSSES, {S + "SCORING": "features"}, True),
 }
@@ -219,7 +231,28 @@ def metrics(parquet: Path, fasta: str, entrapment: bool, r: dict | None) -> dict
             f"select count(distinct proteins) from t where not is_decoy and num_proteins = 1 "
             f"and protein_q <= {q}").fetchone()[0],
     }
+    out["median_delta_next"] = con.execute(
+        f"select median(delta_next) from t where not is_decoy and spectrum_q <= {q}"
+    ).fetchone()[0]
     if entrapment:
+        # Identifications at a fixed 1% combined entrapment FDP: targets
+        # ranked by the discriminant, the longest prefix whose FDP is <= 1%.
+        def at_fixed_fdp(rows, ratio):
+            n = n_e = best = 0
+            for proteins in rows:
+                n += 1
+                n_e += not is_target_list(proteins)
+                if n_e * (1 + 1 / ratio) / n <= 0.01:
+                    best = n
+            return best
+        out["psms_at_1pct_fdp"] = at_fixed_fdp([p for (p,) in con.execute(
+            "select proteins from t where not is_decoy and rank = 1 "
+            "order by sage_discriminant_score desc").fetchall()], r["peptide_r"])
+        out["peptides_at_1pct_fdp"] = at_fixed_fdp([p for (p,) in con.execute(
+            "select any_value(proteins) from t where not is_decoy and rank = 1 "
+            "group by peptide order by max(sage_discriminant_score) desc").fetchall()],
+            r["peptide_r"])
+
         def fdp(rows, ratio):
             n = len(rows)
             n_e = n - sum(is_target_list(p) for p in rows)

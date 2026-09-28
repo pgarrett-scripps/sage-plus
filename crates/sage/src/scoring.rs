@@ -1,6 +1,7 @@
 use crate::database::{
     same_peptidoform, IndexedDatabase, MassOffset, MassOffsetAssignment, PeptideIx, Theoretical,
 };
+use crate::fragment_loss::{LossMode, LossScoring};
 use crate::heap::bounded_min_heapify;
 use crate::ion_series::{IonGroupSeries, IonVariant, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
@@ -84,6 +85,11 @@ struct Score {
     /// ions are scored as separate features.
     matched_loss: u16,
     summed_loss: f32,
+    /// Experiment: parent-supported loss peaks and their intensity.
+    parent_b: u16,
+    parent_y: u16,
+    parent_summed_b: f32,
+    parent_summed_y: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -442,6 +448,15 @@ thread_local! {
 
 fn increment_psm_counter() -> usize {
     PSM_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// [`lnfact`] of a weighted, fractional count (experiment hook).
+fn lnfact_f(n: f64) -> f64 {
+    if n == 0.0 {
+        1.0
+    } else {
+        n * n.ln() - n + 0.5 * n.ln() + 0.5 * (std::f64::consts::PI * 2.0 * n).ln()
+    }
 }
 
 /// Stirling's approximation for log factorial
@@ -1303,7 +1318,14 @@ impl<'db> Scorer<'db> {
     /// features (never inside the hyperscore; see
     /// `benchmarks/FRAGMENT_LOSSES.md`).
     fn loss_features(&self) -> bool {
-        self.db.fragment_losses.is_some()
+        self.loss_scoring().is_some_and(|scoring| scoring.features)
+    }
+
+    fn loss_scoring(&self) -> Option<LossScoring> {
+        self.db
+            .fragment_losses
+            .as_ref()
+            .map(|losses| losses.scoring)
     }
 
     /// Remove peaks matching a PSM from a query spectrum
@@ -1495,9 +1517,8 @@ impl<'db> Scorer<'db> {
         let fragment_groups = self.db.ion_kinds.iter().flat_map(|kind| {
             IonGroupSeries::with_fragment_losses(peptide, *kind, self.db.fragment_losses.as_deref())
         });
-        // Generic loss forms are scored separately as features, not as
-        // alternatives of their cleavage in the hyperscore.
-        let score_losses = self.loss_features();
+        let loss_scoring = self.loss_scoring();
+        let mode = loss_scoring.map(|scoring| scoring.mode);
 
         let mut b_run = Run::default();
         let mut y_run = Run::default();
@@ -1515,7 +1536,7 @@ impl<'db> Scorer<'db> {
                 // Neutral-loss forms are alternatives for the same cleavage
                 // and charge. Select at most one, so extra configured variants
                 // cannot inflate matched-ion counts or hyperscore factorials.
-                let best = self.select_variant(
+                let intact = self.select_variant(
                     query,
                     fragment_index,
                     group
@@ -1524,8 +1545,8 @@ impl<'db> Scorer<'db> {
                         .filter(|variant| !variant.fragment_loss),
                     charge,
                 );
-                if score_losses {
-                    if let Some((_, peak_idx)) = self.select_variant(
+                let loss = match mode {
+                    Some(_) => self.select_variant(
                         query,
                         fragment_index,
                         group
@@ -1533,11 +1554,73 @@ impl<'db> Scorer<'db> {
                             .iter()
                             .filter(|variant| variant.fragment_loss),
                         charge,
-                    ) {
+                    ),
+                    None => None,
+                };
+                if let (Some(scoring), Some((_, peak_idx))) = (loss_scoring, loss) {
+                    if scoring.features && (!scoring.feature_parent || intact.is_some()) {
                         score.matched_loss += 1;
                         score.summed_loss += query.intensities[peak_idx];
                     }
                 }
+                let best = match mode {
+                    Some(LossMode::Alternatives) => match (intact, loss) {
+                        (Some(x), Some(y)) => {
+                            Some(if query.intensities[y.1] > query.intensities[x.1] {
+                                y
+                            } else {
+                                x
+                            })
+                        }
+                        (x, y) => x.or(y),
+                    },
+                    Some(LossMode::AlternativesIntactFirst) => intact.or(loss),
+                    Some(LossMode::AlternativesIntensity) => {
+                        if intact.is_none() {
+                            if let Some((frag, peak_idx)) = loss {
+                                match frag.kind {
+                                    Kind::A | Kind::B | Kind::C => {
+                                        score.parent_summed_b += query.intensities[peak_idx]
+                                    }
+                                    _ => score.parent_summed_y += query.intensities[peak_idx],
+                                }
+                            }
+                        }
+                        intact
+                    }
+                    Some(LossMode::Parent) => {
+                        if let (Some(_), Some((frag, peak_idx))) = (intact, loss) {
+                            match frag.kind {
+                                Kind::A | Kind::B | Kind::C => {
+                                    score.parent_b += 1;
+                                    score.parent_summed_b += query.intensities[peak_idx];
+                                }
+                                _ => {
+                                    score.parent_y += 1;
+                                    score.parent_summed_y += query.intensities[peak_idx];
+                                }
+                            }
+                        }
+                        intact
+                    }
+                    Some(LossMode::Weighted) => {
+                        if let Some((frag, peak_idx)) = loss {
+                            let weight = loss_scoring.map_or(0.0, |scoring| scoring.weight) as f32;
+                            match frag.kind {
+                                Kind::A | Kind::B | Kind::C => {
+                                    score.parent_b += 1;
+                                    score.parent_summed_b += weight * query.intensities[peak_idx];
+                                }
+                                _ => {
+                                    score.parent_y += 1;
+                                    score.parent_summed_y += weight * query.intensities[peak_idx];
+                                }
+                            }
+                        }
+                        intact
+                    }
+                    _ => intact,
+                };
 
                 if let Some((frag, peak_idx)) = best {
                     let peak_mass = query.masses[peak_idx];
@@ -1619,7 +1702,45 @@ impl<'db> Scorer<'db> {
             }
         }
 
-        score.hyperscore = score.hyperscore(self.score_type);
+        score.hyperscore = match loss_scoring {
+            Some(scoring)
+                if matches!(
+                    scoring.mode,
+                    LossMode::Parent | LossMode::AlternativesIntensity | LossMode::Weighted
+                ) =>
+            {
+                let (weight, intensity) = match scoring.mode {
+                    LossMode::Parent => (scoring.weight, scoring.intensity),
+                    LossMode::Weighted => (scoring.count_weight, true),
+                    _ => (0.0, true),
+                };
+                let (extra_b, extra_y) = if intensity {
+                    (score.parent_summed_b, score.parent_summed_y)
+                } else {
+                    (0.0, 0.0)
+                };
+                let matched_b = score.matched_b as f64 + weight * score.parent_b as f64;
+                let matched_y = score.matched_y as f64 + weight * score.parent_y as f64;
+                let summed_b = (score.summed_b + extra_b) as f64;
+                let summed_y = (score.summed_y + extra_y) as f64;
+                let value = match self.score_type {
+                    ScoreType::SageHyperScore => {
+                        ((summed_b + 1.0) * (summed_y + 1.0)).ln()
+                            + lnfact_f(matched_b)
+                            + lnfact_f(matched_y)
+                    }
+                    ScoreType::OpenMSHyperScore => {
+                        (summed_b + summed_y).ln_1p() + lnfact_f(matched_b) + lnfact_f(matched_y)
+                    }
+                };
+                if value.is_finite() {
+                    value
+                } else {
+                    255.0
+                }
+            }
+            _ => score.hyperscore(self.score_type),
+        };
         score.longest_b = b_run.longest;
         score.longest_y = y_run.longest;
         score.ppm_difference /= score.summed_b + score.summed_y;
