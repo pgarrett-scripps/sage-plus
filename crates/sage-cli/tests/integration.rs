@@ -946,6 +946,159 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// With `immonium` absent or `false` the outputs are byte-identical and the
+/// parquet immonium columns are null. On with `rescore: false` only fills
+/// those columns and adds the PIN columns; scores and q-values are unchanged.
+#[test]
+fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-immonium-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["write_pin"] = true.into();
+    config["report_psms"] = 5.into();
+
+    let run =
+        |name: &str, immonium: Option<serde_json::Value>| -> anyhow::Result<std::path::PathBuf> {
+            let run_root = root.join(name);
+            std::fs::create_dir_all(&run_root)?;
+            let mut config = config.clone();
+            if let Some(value) = immonium {
+                config["immonium"] = value;
+            }
+            let path = run_root.join("config.json");
+            std::fs::write(&path, serde_json::to_vec(&config)?)?;
+            run_sage_with_events(&workspace, &path, &run_root)?;
+            Ok(run_root.join("output"))
+        };
+    let base = run("absent", None)?;
+    let off = run("off", Some(false.into()))?;
+    let report = run("report", Some(serde_json::json!({"rescore": false})))?;
+    let on = run("on", Some(true.into()))?;
+
+    for file in [
+        "results.sage.pin",
+        "results.sage.parquet",
+        "matched_fragments.sage.parquet",
+    ] {
+        assert_eq!(
+            std::fs::read(base.join(file))?,
+            std::fs::read(off.join(file))?,
+            "{file} differs with immonium off"
+        );
+    }
+    for dir in [&base, &off, &report, &on] {
+        assert!(!dir.join("immonium.tsv").exists());
+    }
+    for dir in [&base, &off] {
+        let results: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("results.json"))?)?;
+        assert!(results.get("immonium").is_none());
+    }
+
+    // Parquet rows split into the immonium columns and everything else.
+    let rows = |dir: &std::path::Path| -> anyhow::Result<(Vec<String>, Vec<String>)> {
+        use parquet::file::reader::{FileReader, SerializedFileReader};
+        let reader =
+            SerializedFileReader::new(std::fs::File::open(dir.join("results.sage.parquet"))?)?;
+        let (mut other, mut immonium) = (Vec::new(), Vec::new());
+        for row in reader.get_row_iter(None)? {
+            let row = row?;
+            let (mut rest, mut evidence) = (Vec::new(), Vec::new());
+            for (name, field) in row.get_column_iter() {
+                if name.starts_with("immonium_") {
+                    evidence.push(format!("{name}={field}"));
+                } else {
+                    rest.push(format!("{name}={field}"));
+                }
+            }
+            assert_eq!(evidence.len(), 7, "{evidence:?}");
+            other.push(rest.join("|"));
+            immonium.push(evidence.join("|"));
+        }
+        Ok((other, immonium))
+    };
+    let (base_rows, base_immonium) = rows(&base)?;
+    assert!(!base_rows.is_empty());
+    assert!(base_immonium
+        .iter()
+        .all(|row| row.split('|').all(|value| value.ends_with("=null"))));
+    let (report_rows, report_immonium) = rows(&report)?;
+    assert_eq!(
+        base_rows, report_rows,
+        "report-only immonium changed results"
+    );
+    assert!(report_immonium
+        .iter()
+        .all(|row| row.split('|').all(|value| !value.ends_with("=null"))));
+
+    // Report only: the PIN gains the immonium columns before `Peptide` and is
+    // otherwise unchanged.
+    let columns = sage_immonium_pin_columns();
+    let strip = |pin: String| {
+        let rows = pin
+            .lines()
+            .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let drop = rows[0]
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| columns.contains(&name.as_str()))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let kept = rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| !drop.contains(index))
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        (drop.len(), kept)
+    };
+    let (none, base_pin) = strip(std::fs::read_to_string(base.join("results.sage.pin"))?);
+    assert_eq!(none, 0);
+    let report_pin = std::fs::read_to_string(report.join("results.sage.pin"))?;
+    let header = report_pin
+        .lines()
+        .next()
+        .unwrap()
+        .split('\t')
+        .collect::<Vec<_>>();
+    let peptide = header.iter().position(|name| *name == "Peptide").unwrap();
+    assert_eq!(header[peptide - columns.len()..peptide], columns);
+    let (added, report_pin) = strip(report_pin);
+    assert_eq!(added, columns.len());
+    assert_eq!(base_pin, report_pin);
+
+    // `true` rescores by default.
+    for (dir, rescore) in [(&report, false), (&on, true)] {
+        let results: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("results.json"))?)?;
+        assert_eq!(results["immonium"]["rescore"], rescore);
+        assert_eq!(results["immonium"]["residue_ions"], true);
+        assert_matches_published_schemas(&workspace, dir)?;
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+fn sage_immonium_pin_columns() -> [&'static str; 5] {
+    [
+        "immonium_explained",
+        "immonium_missing",
+        "immonium_unexplained",
+        "immonium_modified_explained",
+        "immonium_modified_unexplained",
+    ]
+}
+
 #[test]
 fn parquet_footers_and_run_summary_record_provenance() -> anyhow::Result<()> {
     use parquet::file::reader::{FileReader, SerializedFileReader};
@@ -1068,10 +1221,17 @@ fn assert_matches_published_schemas(
     broken["execution"]["rayon_threads"] = serde_json::json!("two");
     assert!(compiled.validate(&broken, index).is_err());
 
-    for (file, schema) in [
-        ("digestion.tsv", "digestion.v1.tsv.schema.json"),
-        ("diagnostic_ions.tsv", "diagnostic_ions.v1.tsv.schema.json"),
+    for (file, schema, required) in [
+        ("digestion.tsv", "digestion.v1.tsv.schema.json", true),
+        (
+            "diagnostic_ions.tsv",
+            "diagnostic_ions.v1.tsv.schema.json",
+            false,
+        ),
     ] {
+        if !required && !output.join(file).exists() {
+            continue;
+        }
         let table: serde_json::Value =
             serde_json::from_slice(&std::fs::read(schemas.join(schema))?)?;
         let columns = table["fields"]
@@ -1096,5 +1256,203 @@ fn assert_matches_published_schemas(
             }
         }
     }
+    Ok(())
+}
+
+fn approved_fragment_losses() -> serde_json::Value {
+    serde_json::json!({
+        "Water": {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"]},
+        "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
+    })
+}
+
+/// Generic fragment losses are separate rescoring features: with them
+/// configured, every search score of the PSM (hyperscore, matched peaks,
+/// intensities, ranks) is unchanged, and without them the loss evidence is
+/// absent.
+#[test]
+fn fragment_losses_add_evidence_without_changing_search_scores() -> anyhow::Result<()> {
+    let fasta = sage_cloudpath::util::read_fasta(
+        &sage_cloudpath::to_url("../../tests/Q99536.fasta").expect("valid url"),
+        "rev_",
+        true,
+    )?;
+    let spectra = sage_cloudpath::util::read_mzml(
+        &sage_cloudpath::to_url("../../tests/LQSRPAAPPAPGPGQLTLR.mzML").expect("valid url"),
+        0,
+        None,
+    )?;
+    let processed = SpectrumProcessor::new(100, true, 0.0).process(spectra[0].clone());
+
+    let mut features = Vec::new();
+    for losses in [None, Some(approved_fragment_losses())] {
+        let mut builder = Builder::default();
+        builder.update_fasta("foo".into());
+        builder.fragment_losses = losses.map(serde_json::from_value).transpose()?;
+        builder
+            .validate_fragment_losses()
+            .map_err(anyhow::Error::msg)?;
+        let database = builder.make_parameters().build(fasta.clone());
+        let scorer = Scorer {
+            db: &database,
+            precursor_tol: Tolerance::Ppm(-50.0, 50.0),
+            fragment_tol: Tolerance::Ppm(-10.0, 10.0),
+            min_matched_peaks: 4,
+            min_isotope_err: -1,
+            max_isotope_err: 3,
+            min_precursor_charge: 2,
+            max_precursor_charge: 4,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera: false,
+            report_psms: 1,
+            wide_window: false,
+            annotate_matches: true,
+            mass_shift_ppm: 50.0,
+            score_type: ScoreType::SageHyperScore,
+            mass_recalibration: None,
+        };
+        let psms = scorer.score(&processed);
+        assert_eq!(psms.len(), 1);
+        features.push(psms.into_iter().next().unwrap());
+    }
+    let (off, on) = (&features[0], &features[1]);
+    assert!(off.fragment_loss.is_none());
+    let loss = on.fragment_loss.expect("loss evidence when configured");
+    // LQSRPAAPPAPGPGQLTLR carries S, T, Q and R loss sites.
+    assert!(loss.matched_peaks > 0, "{loss:?}");
+    assert!(loss.intensity_pct > 0.0 && loss.intensity_pct < 100.0);
+    // `fragment_loss` is not serialized: every other field but the
+    // process-wide `psm_id` counter is identical, including the annotated
+    // fragments.
+    let fields = |feature| -> anyhow::Result<serde_json::Value> {
+        let mut value = serde_json::to_value(feature)?;
+        value["psm_id"] = serde_json::Value::Null;
+        Ok(value)
+    };
+    assert_eq!(fields(off)?, fields(on)?);
+    assert_eq!(off.matched_peaks, 20);
+    assert_eq!(
+        off.fragments.as_ref().map(|f| f.mz_experimental.clone()),
+        on.fragments.as_ref().map(|f| f.mz_experimental.clone())
+    );
+    Ok(())
+}
+
+/// `results.sage.parquet` always has the published v3 columns; the two loss
+/// columns are null without `database.fragment_losses` and filled with it.
+/// The pin gains the loss features before `Peptide`, and before the immonium
+/// columns when both options are on.
+#[test]
+fn fragment_loss_columns_are_filled_only_when_configured() -> anyhow::Result<()> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-fragment-losses-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let published = sage_cloudpath::parquet::build_schema()?
+        .get_fields()
+        .iter()
+        .map(|field| field.name().to_string())
+        .collect::<Vec<_>>();
+    let loss_columns = ["matched_loss_peaks", "loss_intensity_pct"];
+
+    let mut outputs = Vec::new();
+    for (losses, immonium) in [(false, false), (true, false), (true, true)] {
+        let mut config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+        config["write_pin"] = true.into();
+        if losses {
+            config["database"]["fragment_losses"] = approved_fragment_losses();
+        }
+        if immonium {
+            config["immonium"] = true.into();
+        }
+        let run = root.join(format!("losses-{losses}-immonium-{immonium}"));
+        std::fs::create_dir_all(&run)?;
+        std::fs::write(run.join("config.json"), serde_json::to_vec(&config)?)?;
+        let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+            .current_dir(&workspace)
+            .arg(run.join("config.json"))
+            .arg("--output_directory")
+            .arg(run.join("output"))
+            .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+            .args(["--threads", "2"])
+            .output()?;
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let pin = std::fs::read_to_string(run.join("output/results.sage.pin"))?;
+        let pin_header = pin.lines().next().expect("pin header").to_string();
+        let reader = SerializedFileReader::new(std::fs::File::open(
+            run.join("output/results.sage.parquet"),
+        )?)?;
+        let columns = reader
+            .metadata()
+            .file_metadata()
+            .schema()
+            .get_fields()
+            .iter()
+            .map(|field| field.name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(columns, published);
+        // Loss and immonium values of every row, as strings.
+        let mut values = Vec::new();
+        for row in reader.get_row_iter(None)? {
+            let row = row?;
+            let fields = row
+                .get_column_iter()
+                .filter(|(name, _)| {
+                    loss_columns.contains(&name.as_str()) || name.starts_with("immonium_")
+                })
+                .map(|(name, field)| (name.clone(), field.to_string()))
+                .collect::<Vec<_>>();
+            values.push(fields);
+        }
+        assert!(!values.is_empty());
+        for fields in &values {
+            for (name, value) in fields {
+                let filled = if name.starts_with("immonium_") {
+                    immonium
+                } else {
+                    losses
+                };
+                assert_eq!(value != "null", filled, "{name} = {value}");
+            }
+        }
+        if losses {
+            // The loss features are informative on the test file.
+            assert!(values.iter().any(|fields| fields
+                .iter()
+                .any(|(name, value)| name == "matched_loss_peaks" && value != "0")));
+        }
+        outputs.push(pin_header);
+    }
+
+    let (off_pin, on_pin, both_pin) = (&outputs[0], &outputs[1], &outputs[2]);
+    assert!(!off_pin.contains("loss"), "{off_pin}");
+    assert_eq!(
+        on_pin.as_str(),
+        off_pin.replace(
+            "posterior_error\tPeptide",
+            "posterior_error\tmatched_loss_peaks\tln(loss_intensity_pct)\tPeptide"
+        )
+    );
+    assert_eq!(
+        both_pin.as_str(),
+        on_pin.replace(
+            "ln(loss_intensity_pct)\tPeptide",
+            &format!(
+                "ln(loss_intensity_pct)\t{}\tPeptide",
+                sage_immonium_pin_columns().join("\t")
+            )
+        )
+    );
+    std::fs::remove_dir_all(root)?;
     Ok(())
 }

@@ -7,12 +7,18 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 
 - `results.sage.v1.parquet.schema` describes unlabeled `results.sage.parquet`, including typed protein occurrence coordinates.
 - `results.sage.v2.parquet.schema` adds precursor label channel and group identity.
+- `results.sage.v3.parquet.schema` (unlabeled) and `results.sage.v4.parquet.schema` (labeled) are
+  v1 and v2 plus nine nullable columns at the end: `matched_loss_peaks` and `loss_intensity_pct`,
+  filled when `database.fragment_losses` is configured (see `scores.v1.md`), then seven
+  `immonium_*` columns, filled when `immonium` is on. Current Sage writes v3 or v4.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.
 - `lfq.v4.parquet.schema` adds those diagnostics to labeled LFQ.
 - `lfq.v5.parquet.schema` adds the per-row `extraction_q_value` to unlabeled LFQ.
 - `lfq.v6.parquet.schema` adds it to labeled LFQ.
+- `lfq.v7.parquet.schema` adds peak geometry (`apex_rt`, `peak_start_rt`, `peak_end_rt`, `fwhm`, `id_apex_offset`) to unlabeled LFQ.
+- `lfq.v8.parquet.schema` adds it to labeled LFQ.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.

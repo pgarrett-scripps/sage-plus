@@ -760,3 +760,82 @@ fn diagnostic_ions_config() -> anyhow::Result<()> {
     assert!(serde_json::from_value::<Input>(config).is_err());
     Ok(())
 }
+
+#[test]
+fn immonium_config() -> anyhow::Result<()> {
+    let fixture = serde_json::json!({
+        "database": {"fasta": "tests/Q99536.fasta"},
+        "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"],
+        "precursor_tol": {"ppm": [-10, 10]},
+        "fragment_tol": {"ppm": [-20, 20]}
+    });
+    let parse = |value: Option<serde_json::Value>, mods: Option<serde_json::Value>| {
+        let mut config = fixture.clone();
+        if let Some(value) = value {
+            config["immonium"] = value;
+        }
+        if let Some(mods) = mods {
+            config["database"]["variable_mods"] = mods;
+        }
+        serde_json::from_value::<Input>(config)
+    };
+    let fragment_tol = sage_core::mass::Tolerance::Ppm(-20.0, 20.0);
+    let resolve = |input: Input| {
+        input
+            .immonium
+            .and_then(|config| config.resolve(fragment_tol, Vec::new()))
+    };
+
+    assert!(parse(None, None)?.immonium.is_none());
+    assert!(resolve(parse(Some(false.into()), None)?).is_none());
+    // On means rescore on and the residue ions on; no implicit modified ions.
+    let on = resolve(parse(Some(true.into()), None)?).unwrap();
+    assert!(on.rescore && on.residue_ions);
+    assert!(on.modified.is_empty());
+    assert_eq!(on.tolerance, fragment_tol);
+    let report_only = resolve(parse(Some(serde_json::json!({"rescore": false})), None)?).unwrap();
+    assert!(!report_only.rescore);
+
+    // Modified ions come from the modifications.
+    let phospho = serde_json::json!({
+        "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "immonium_ions": {"Y": [216.0420]}}
+    });
+    parse(Some(true.into()), Some(phospho))?.validate()?;
+    let acetyl_list = serde_json::json!({
+        "Acetyl": {"mass": 42.010565, "sites": ["K"], "immonium_ions": [126.0913]}
+    });
+    parse(Some(true.into()), Some(acetyl_list))?.validate()?;
+
+    // A key that is not a declared site is rejected with a clear message.
+    let bad_key = serde_json::json!({
+        "Phospho": {"mass": 79.966331, "sites": ["S", "T"], "immonium_ions": {"Y": [216.0420]}}
+    });
+    let error = match parse(Some(true.into()), Some(bad_key)) {
+        Ok(_) => panic!("a key that is not a declared site must be rejected"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        error.contains("`Y`") && error.contains("Phospho"),
+        "{error}"
+    );
+
+    // No ions at all is an error; so is a tolerance without zero error.
+    for invalid in [
+        serde_json::json!({"residue_ions": false}),
+        serde_json::json!({"tolerance": {"ppm": [5, 10]}}),
+    ] {
+        assert!(
+            parse(Some(invalid.clone()), None)?.validate().is_err(),
+            "{invalid}"
+        );
+    }
+    // The old keys and unknown keys are rejected.
+    for unknown in [
+        serde_json::json!({"residues": true}),
+        serde_json::json!({"modified": []}),
+        serde_json::json!({"loss": "H2O"}),
+    ] {
+        assert!(parse(Some(unknown.clone()), None).is_err(), "{unknown}");
+    }
+    Ok(())
+}

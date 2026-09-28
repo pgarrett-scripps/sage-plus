@@ -398,10 +398,11 @@ fn chunked_modification_matches_a_single_pass_with_libraries() {
             max_count: Some(2),
             max_total_count: Some(3),
             name: Some("Phospho".into()),
-            neutral_losses: vec![],
+            neutral_losses: vec![].into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     };
     let builder = Builder {
@@ -818,6 +819,8 @@ fn digestion() {
         peptide_max_mass: 5000.0,
         ion_kinds: vec![Kind::B, Kind::Y],
         min_ion_index: 2,
+        fragment_losses: None,
+        max_fragment_losses: None,
         static_mods: HashMap::default(),
         variable_mods: [(
             ModificationSpecificity::ProteinN(None),
@@ -1087,10 +1090,11 @@ fn protein_site_library_adds_targeted_combinations() {
                 max_count: Some(2),
                 max_total_count: None,
                 name: Some("Phospho".into()),
-                neutral_losses: vec![97.9769],
+                neutral_losses: vec![97.9769].into(),
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Both,
                 channel_offsets: Default::default(),
+                immonium_ions: Default::default(),
             })],
         )])),
         ..Default::default()
@@ -1143,10 +1147,11 @@ fn library_sites_from_different_proteins_are_not_combined() {
                 max_count: Some(2),
                 max_total_count: None,
                 name: Some("Phospho".into()),
-                neutral_losses: vec![],
+                neutral_losses: vec![].into(),
                 neutral_loss_mode: NeutralLossMode::Optional,
                 site_mode: SiteMode::Library,
                 channel_offsets: Default::default(),
+                immonium_ions: Default::default(),
             })],
         )])),
         ..Default::default()
@@ -1190,11 +1195,12 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
             max_count: Some(1),
             max_total_count: None,
             name: name.map(str::to_string),
-            neutral_losses: Vec::new(),
+            neutral_losses: Vec::new().into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })
     };
     let validate = |mods: Vec<(&str, VarModEntry)>, library: &PtmLibrary| {
@@ -1647,6 +1653,7 @@ fn required_neutral_loss_fragment_shift_matches_preliminary_index() {
             mass: 79.96633,
             name: Some("Phospho".into()),
             neutral_losses: Arc::from(losses.as_slice()),
+            site_losses: None,
             neutral_loss_mode: crate::modification::NeutralLossMode::Required,
             channel_offsets: Arc::default(),
         });
@@ -1980,11 +1987,12 @@ fn ptm_validation_rejects_inconsistent_named_database_modifications() {
             max_count,
             max_total_count: None,
             name: Some("Acetyl".into()),
-            neutral_losses: Vec::new(),
+            neutral_losses: Vec::new().into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode: SiteMode::Exhaustive,
             search_mode: SearchMode::Database,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })
     };
     let validate = |k: VarModEntry, s: VarModEntry| {
@@ -3006,4 +3014,286 @@ fn ambiguous_peptide_tsv_rows_expand_with_substitutions() {
             .count(),
         4
     );
+}
+
+mod site_losses {
+    #![allow(clippy::excessive_precision)]
+
+    use super::*;
+    use crate::ion_series::{IonGroupSeries, Kind};
+    use crate::site_map::SiteMap;
+
+    const H3PO4: f32 = 97.976896;
+
+    fn builder(neutral_losses: serde_json::Value, mode: &str) -> Result<Builder, String> {
+        serde_json::from_value(serde_json::json!({
+            "enzyme": {"min_len": 1, "max_len": 30},
+            "peptide_min_mass": 0.0,
+            "generate_decoys": false,
+            "max_variable_mods": 1,
+            "variable_mods": {
+                "Phospho": {
+                    "mass": 79.966331,
+                    "sites": ["S", "T", "Y"],
+                    "neutral_losses": neutral_losses,
+                    "neutral_loss_mode": mode
+                }
+            }
+        }))
+        .map_err(|error| error.to_string())
+    }
+
+    fn rejected(result: Result<Builder, String>) -> String {
+        match result {
+            Ok(_) => panic!("configuration was accepted"),
+            Err(error) => error,
+        }
+    }
+
+    fn peptides(neutral_losses: serde_json::Value, mode: &str) -> Vec<Peptide> {
+        let parameters = builder(neutral_losses, mode).unwrap().make_parameters();
+        let fasta = Fasta::parse(">P1\nASAYAK\n".into(), "rev_", false).unwrap();
+        parameters.digest(&fasta)
+    }
+
+    /// Every b and y group of `peptide`, as (series, index, losses).
+    fn groups(peptide: &Peptide) -> Vec<(char, usize, Vec<Option<u32>>)> {
+        [Kind::B, Kind::Y]
+            .into_iter()
+            .flat_map(|kind| {
+                IonGroupSeries::new(peptide, kind).map(move |group| {
+                    (
+                        if kind == Kind::B { 'b' } else { 'y' },
+                        group.series_index,
+                        group
+                            .variants
+                            .iter()
+                            .map(|variant| variant.neutral_loss.map(f32::to_bits))
+                            .collect(),
+                    )
+                })
+            })
+            .collect()
+    }
+
+    fn modified_at(peptides: &[Peptide], position: usize) -> &Peptide {
+        peptides
+            .iter()
+            .find(|peptide| {
+                peptide.sequence.as_ref() == b"ASAYAK" && peptide.modification_at(position) != 0.0
+            })
+            .expect("modified peptide is generated")
+    }
+
+    fn has_loss(peptide: &Peptide) -> bool {
+        groups(peptide)
+            .iter()
+            .any(|(_, _, variants)| variants.iter().any(Option::is_some))
+    }
+
+    #[test]
+    fn both_forms_parse() {
+        let list = builder(serde_json::json!([H3PO4]), "optional").unwrap();
+        let map = builder(serde_json::json!({"S": [H3PO4], "T": [H3PO4]}), "optional").unwrap();
+        let list = list.make_parameters();
+        let map = map.make_parameters();
+        for rule in list.variable_modifications() {
+            assert_eq!(&*rule.modification.neutral_losses, &[H3PO4]);
+            assert!(rule.modification.site_losses.is_none());
+        }
+        for rule in map.variable_modifications() {
+            assert!(rule.modification.neutral_losses.is_empty());
+            let rules = rule.modification.site_losses.as_ref().unwrap();
+            assert_eq!(
+                rules.iter().map(|(site, _)| *site).collect::<Vec<_>>(),
+                vec![
+                    ModificationSpecificity::Residue(b'S'),
+                    ModificationSpecificity::Residue(b'T')
+                ]
+            );
+        }
+
+        // The map survives serialization for provenance and re-reads the same.
+        let serialized = serde_json::to_value(&map).unwrap();
+        assert_eq!(
+            serialized["variable_mods"]["Phospho"]["neutral_losses"],
+            serde_json::json!({"S": [H3PO4], "T": [H3PO4]})
+        );
+        let serialized = serde_json::to_value(&list).unwrap();
+        assert_eq!(
+            serialized["variable_mods"]["Phospho"]["neutral_losses"],
+            serde_json::json!([H3PO4])
+        );
+
+        let entry: VarModEntry = serde_json::from_value(
+            serde_json::json!({"mass": 1.0, "neutral_losses": {"S": [2.0]}}),
+        )
+        .unwrap();
+        let VarModEntry::Detailed(entry) = entry else {
+            panic!("expected structured entry")
+        };
+        assert_eq!(
+            entry.neutral_losses,
+            SiteMap::Sites([("S".to_string(), vec![2.0])].into())
+        );
+    }
+
+    #[test]
+    fn positional_site_keys_are_accepted() {
+        let builder: Builder = serde_json::from_value(serde_json::json!({
+            "variable_mods": {
+                "Acetyl": {
+                    "mass": 42.010565,
+                    "sites": ["internal_residue:K", "first_residue:K"],
+                    "neutral_losses": {"first_residue:K": [17.026549]}
+                }
+            }
+        }))
+        .unwrap();
+        let parameters = builder.make_parameters();
+        let rules = parameters.variable_modifications();
+        let losses = rules[0].modification.site_losses.as_ref().unwrap();
+        assert_eq!(losses[0].0, ModificationSpecificity::PeptideN(Some(b'K')));
+        let sequence = b"KAKAK";
+        let definition = &rules[0].modification;
+        assert_eq!(
+            definition.losses_at(sequence, crate::peptide::Site::Sequence(0)),
+            &[17.026549]
+        );
+        assert!(definition
+            .losses_at(sequence, crate::peptide::Site::Sequence(2))
+            .is_empty());
+    }
+
+    #[test]
+    fn bad_site_keys_are_rejected() {
+        let unknown = rejected(builder(serde_json::json!({"Q": [H3PO4]}), "optional"));
+        assert!(unknown.contains("neutral_losses key `Q`"), "{unknown}");
+        assert!(unknown.contains("not one of its sites"), "{unknown}");
+
+        // Keys use the same vocabulary as `sites`, not another spelling of it.
+        let spelled = rejected(builder(serde_json::json!({"^S": [H3PO4]}), "optional"));
+        assert!(spelled.contains("neutral_losses key `^S`"), "{spelled}");
+
+        let invalid = serde_json::from_value::<VarModEntry>(
+            serde_json::json!({"mass": 1.0, "neutral_losses": {"not a site": [2.0]}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(invalid.contains("not a valid site"), "{invalid}");
+
+        let negative = rejected(builder(serde_json::json!({"S": [-1.0]}), "optional"));
+        assert!(negative.contains("greater than zero"), "{negative}");
+
+        let empty = rejected(builder(serde_json::json!({"S": []}), "required"));
+        assert!(empty.contains("at least one neutral loss"), "{empty}");
+
+        // Overlapping sites must agree, so each placement has one loss list.
+        let overlap = rejected(
+            serde_json::from_value::<Builder>(serde_json::json!({
+                "variable_mods": {
+                    "Acetyl": {
+                        "mass": 42.010565,
+                        "sites": ["K", "first_residue:K"],
+                        "neutral_losses": {"K": [17.026549]}
+                    }
+                }
+            }))
+            .map_err(|error| error.to_string()),
+        );
+        assert!(overlap.contains("different neutral_losses"), "{overlap}");
+    }
+
+    #[test]
+    fn serine_gets_the_loss_and_tyrosine_does_not() {
+        let peptides = peptides(serde_json::json!({"S": [H3PO4], "T": [H3PO4]}), "optional");
+        let ps = modified_at(&peptides, 1);
+        let py = modified_at(&peptides, 3);
+        assert!(has_loss(ps));
+        assert!(!has_loss(py));
+
+        // b2 onward carries pS; its groups hold the retained and lost forms.
+        let ps_groups = groups(ps);
+        let b2 = ps_groups
+            .iter()
+            .find(|(kind, index, _)| *kind == 'b' && *index == 1)
+            .unwrap();
+        assert_eq!(b2.2, vec![None, Some(H3PO4.to_bits())]);
+
+        // The list form gives pY the loss too.
+        let peptides = super::site_losses::peptides(serde_json::json!([H3PO4]), "optional");
+        assert!(has_loss(modified_at(&peptides, 3)));
+    }
+
+    #[test]
+    fn required_mode_keeps_the_retained_form_at_sites_without_losses() {
+        let peptides = peptides(serde_json::json!({"S": [H3PO4]}), "required");
+        let ps_groups = groups(modified_at(&peptides, 1));
+        let b2 = ps_groups
+            .iter()
+            .find(|(kind, index, _)| *kind == 'b' && *index == 1)
+            .unwrap();
+        assert_eq!(b2.2, vec![Some(H3PO4.to_bits())]);
+
+        let py = modified_at(&peptides, 3);
+        assert!(groups(py)
+            .iter()
+            .all(|(_, _, variants)| variants == &vec![None]));
+    }
+
+    #[test]
+    fn a_map_with_every_site_matches_the_list_form() {
+        for mode in ["optional", "required"] {
+            let list = peptides(serde_json::json!([H3PO4, 18.010565]), mode);
+            let map = peptides(
+                serde_json::json!({
+                    "S": [H3PO4, 18.010565],
+                    "T": [H3PO4, 18.010565],
+                    "Y": [H3PO4, 18.010565]
+                }),
+                mode,
+            );
+            assert_eq!(list.len(), map.len());
+            for (list, map) in list.iter().zip(&map) {
+                assert_eq!(list.to_string(), map.to_string());
+                assert_eq!(groups(list), groups(map), "{list}");
+                let masses = |peptide: &Peptide| {
+                    [Kind::B, Kind::Y]
+                        .into_iter()
+                        .flat_map(|kind| IonGroupSeries::new(peptide, kind))
+                        .flat_map(|group| group.variants)
+                        .map(|variant| variant.monoisotopic_mass.to_bits())
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(masses(list), masses(map));
+            }
+        }
+    }
+
+    #[test]
+    fn mass_offset_shift_keeps_the_retained_form_unless_every_site_loses() {
+        let offset = |losses: serde_json::Value| {
+            let entry: VarModEntry = serde_json::from_value(serde_json::json!({
+                "mass": 79.966331,
+                "neutral_losses": losses,
+                "neutral_loss_mode": "required"
+            }))
+            .unwrap();
+            MassOffset {
+                definition: Arc::new(entry.definition()),
+                specificities: vec![
+                    ModificationSpecificity::Residue(b'S'),
+                    ModificationSpecificity::Residue(b'Y'),
+                ],
+                site_mode: crate::modification::SiteMode::Exhaustive,
+            }
+            .fragment_shift()
+        };
+        assert_eq!(offset(serde_json::json!([H3PO4])), 79.966331 - H3PO4);
+        assert_eq!(offset(serde_json::json!({"S": [H3PO4]})), 79.966331);
+        assert_eq!(
+            offset(serde_json::json!({"S": [H3PO4], "Y": [18.010565]})),
+            79.966331 - 18.010565
+        );
+    }
 }

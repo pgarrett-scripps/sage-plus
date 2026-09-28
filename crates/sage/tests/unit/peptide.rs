@@ -166,6 +166,7 @@ fn detailed_mod(
         mass,
         name: Some(Arc::from(name)),
         neutral_losses: Arc::from(neutral_losses),
+        site_losses: None,
         neutral_loss_mode,
         channel_offsets: Arc::default(),
     })
@@ -765,6 +766,7 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
         mass: 79.96633,
         name: Some(Arc::from("Phospho")),
         neutral_losses: Arc::from([]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -772,6 +774,7 @@ fn library_and_exhaustive_candidates_are_enumerated_together() {
         mass: 15.9949,
         name: Some(Arc::from("Oxidation")),
         neutral_losses: Arc::from([]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -836,6 +839,7 @@ fn named_max_count_is_shared_across_residue_rules() {
         mass: 79.96633,
         name: Some(Arc::from("Phospho")),
         neutral_losses: Arc::from([]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });

@@ -370,6 +370,7 @@ fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         mass: 20.0,
         name: Some(Arc::from("TestMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -634,11 +635,12 @@ mod mass_offsets {
             max_count: Some(1),
             max_total_count: None,
             name: Some("Phospho".into()),
-            neutral_losses: Vec::new(),
+            neutral_losses: Vec::new().into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     }
 

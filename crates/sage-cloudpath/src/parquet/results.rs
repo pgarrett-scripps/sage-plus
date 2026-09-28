@@ -1,17 +1,44 @@
 use super::*;
+use sage_core::immonium::ImmoniumSettings;
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/results.sage.v1.parquet.schema"
-    ))
+    build_results_schema(false)
+}
+
+/// Schema version of `results.sage.parquet`: 3 without precursor labels, 4
+/// with them. Both add the nullable fragment-loss and immonium columns to
+/// versions 1 and 2.
+fn results_schema_version(has_labels: bool) -> &'static str {
+    if has_labels {
+        "4"
+    } else {
+        "3"
+    }
 }
 
 fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/results.sage.v2.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v4.parquet.schema")
     } else {
-        include_str!("../../../../schemas/results.sage.v1.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v3.parquet.schema")
     })
+}
+
+/// Write an optional column: `None` rows are null.
+fn write_optional_column<T: DataType>(
+    mut column: SerializedColumnWriter,
+    values: impl Iterator<Item = Option<T::T>>,
+) -> parquet::errors::Result<()> {
+    let mut present = Vec::new();
+    let mut levels = Vec::new();
+    for value in values {
+        levels.push(i16::from(value.is_some()));
+        present.extend(value);
+    }
+    column
+        .typed::<T>()
+        .write_batch(&present, Some(&levels), None)?;
+    column.close()
 }
 
 struct OutputProteinSite {
@@ -119,6 +146,9 @@ fn write_null_column(
 
 /// `spectrum_occurrences` maps `psm_id` to the zero-based occurrence of a
 /// repeated spectrum ID; PSMs that are absent are the first occurrence.
+/// `immonium` is the search's immonium settings; without them the immonium
+/// columns are null.
+#[allow(clippy::too_many_arguments)]
 pub fn serialize_features(
     features: &[&Feature],
     reporter_ions: &[TmtQuant],
@@ -127,8 +157,10 @@ pub fn serialize_features(
     database: &IndexedDatabase,
     output_psm_q_value: f32,
     provenance: &[(String, String)],
+    immonium: Option<&ImmoniumSettings>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
+    let has_fragment_losses = database.fragment_losses.is_some();
     let schema = build_results_schema(has_labels)?;
 
     let options = writer_properties(
@@ -136,7 +168,7 @@ pub fn serialize_features(
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "2" } else { "1" }.into()),
+                Some(results_schema_version(has_labels).into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
@@ -374,6 +406,67 @@ pub fn serialize_features(
             } else {
                 write_reporter_ions(col, features, reporter_ions, spectrum_occurrences)?;
             }
+        }
+
+        // Generic fragment-loss evidence: null for every row when
+        // `database.fragment_losses` is not configured.
+        let loss = features
+            .iter()
+            .map(|f| has_fragment_losses.then(|| f.fragment_loss.unwrap_or_default()))
+            .collect::<Vec<_>>();
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<Int32Type>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.matched_peaks as i32)),
+            )?;
+        }
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<FloatType>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.intensity_pct)),
+            )?;
+        }
+
+        // Immonium evidence: null for every row when `immonium` is off.
+        let evidence = features
+            .iter()
+            .map(|f| immonium.and(f.immonium))
+            .collect::<Vec<_>>();
+        macro_rules! write_immonium_count {
+            ($field:ident) => {
+                if let Some(column) = rg.next_column()? {
+                    write_optional_column::<Int32Type>(
+                        column,
+                        evidence.iter().map(|e| e.map(|e| e.$field as i32)),
+                    )?;
+                }
+            };
+        }
+        write_immonium_count!(explained);
+        write_immonium_count!(missing);
+        write_immonium_count!(unexplained);
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                evidence
+                    .iter()
+                    .map(|e| e.map(|e| e.residue_names().into_bytes().into())),
+            )?;
+        }
+        write_immonium_count!(modified_explained);
+        write_immonium_count!(modified_unexplained);
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                evidence.iter().map(|e| {
+                    e.zip(immonium).map(|(e, settings)| {
+                        settings
+                            .modified_names(e.modified_observed)
+                            .into_bytes()
+                            .into()
+                    })
+                }),
+            )?;
         }
 
         rg.close()?;

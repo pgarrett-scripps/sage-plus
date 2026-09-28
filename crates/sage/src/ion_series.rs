@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
 
+use crate::fragment_loss::{loss_totals, FragmentLosses, LossSites};
 use crate::mass::monoisotopic;
 use crate::modification::NeutralLossMode;
 use crate::peptide::{Peptide, Site};
@@ -47,6 +48,9 @@ pub struct IonVariant {
     /// Total neutral loss represented by this fragment variant. `None` is the
     /// retained (no-loss) form.
     pub neutral_loss: Option<f32>,
+    /// Whether this form carries a generic fragment loss
+    /// (`database.fragment_losses`), such as water or ammonia.
+    pub fragment_loss: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -62,19 +66,71 @@ pub struct IonGroup {
 /// modification has optional loss behavior, plus the configured neutral-loss
 /// combinations. Required losses remove the retained option for fragments
 /// containing that modification.
+///
+/// Losses are those of the site each modification is placed on (see
+/// [`ModificationDefinition::losses_at`](crate::modification::ModificationDefinition::losses_at)).
+/// A placement without losses keeps its retained form, also under required
+/// mode.
+///
+/// With generic fragment losses configured, each group also carries the forms
+/// with water, ammonia or other configured losses, flagged by
+/// [`IonVariant::fragment_loss`], after the modification-loss forms.
 pub struct IonGroupSeries<'p> {
-    peptide: &'p Peptide,
     base: IonSeries<'p>,
     series_index: usize,
+    /// Placements that carry at least one loss, in applied order.
+    lossy: SmallVec<[(Site, &'p [f32], NeutralLossMode); 4]>,
+    fragment_losses: Option<(Vec<LossSites>, usize)>,
 }
 
 impl<'p> IonGroupSeries<'p> {
     pub fn new(peptide: &'p Peptide, kind: Kind) -> Self {
+        let lossy = peptide
+            .applied_modifications()
+            .filter_map(|applied| {
+                let losses = applied
+                    .modification
+                    .losses_at(&peptide.sequence, applied.site);
+                (!losses.is_empty()).then_some((
+                    applied.site,
+                    losses,
+                    applied.modification.neutral_loss_mode,
+                ))
+            })
+            .collect();
         Self {
-            peptide,
             base: IonSeries::new(peptide, kind),
             series_index: 0,
+            lossy,
+            fragment_losses: None,
         }
+    }
+
+    /// Like [`IonGroupSeries::new`], adding generic fragment-loss forms.
+    pub fn with_fragment_losses(
+        peptide: &'p Peptide,
+        kind: Kind,
+        losses: Option<&FragmentLosses>,
+    ) -> Self {
+        let mut series = Self::new(peptide, kind);
+        series.fragment_losses = losses
+            .filter(|losses| {
+                losses
+                    .losses
+                    .iter()
+                    .any(|loss| loss.ion_kinds.contains(&kind))
+            })
+            .map(|losses| {
+                (
+                    losses
+                        .losses
+                        .iter()
+                        .map(|loss| LossSites::new(loss, peptide, kind))
+                        .collect(),
+                    losses.max_losses,
+                )
+            });
+        series
     }
 
     fn contains_site(&self, site: Site, series_index: usize) -> bool {
@@ -92,19 +148,19 @@ impl<'p> IonGroupSeries<'p> {
 
     fn losses(&self, series_index: usize) -> SmallVec<[f32; 4]> {
         let mut totals = smallvec![0.0f32];
-        for applied in self.peptide.applied_modifications().filter(|applied| {
-            self.contains_site(applied.site, series_index)
-                && !applied.modification.neutral_losses.is_empty()
-        }) {
-            let option_count = applied.modification.neutral_losses.len()
-                + usize::from(applied.modification.neutral_loss_mode == NeutralLossMode::Optional);
+        for (_, losses, mode) in self
+            .lossy
+            .iter()
+            .filter(|(site, _, _)| self.contains_site(*site, series_index))
+        {
+            let option_count = losses.len() + usize::from(*mode == NeutralLossMode::Optional);
             let mut next: SmallVec<[f32; 4]> =
                 SmallVec::with_capacity(totals.len().saturating_mul(option_count));
             for total in &totals {
-                if applied.modification.neutral_loss_mode == NeutralLossMode::Optional {
+                if *mode == NeutralLossMode::Optional {
                     next.push(*total);
                 }
-                for loss in applied.modification.neutral_losses.iter() {
+                for loss in losses.iter() {
                     next.push(total + loss);
                 }
             }
@@ -124,18 +180,43 @@ impl Iterator for IonGroupSeries<'_> {
         let series_index = self.series_index;
         self.series_index += 1;
 
-        let variants = self
-            .losses(series_index)
-            .into_iter()
-            .filter_map(|loss| {
+        let modification_losses = self.losses(series_index);
+        let mut variants = modification_losses
+            .iter()
+            .filter_map(|&loss| {
                 let mass = ion.monoisotopic_mass - loss;
                 (mass > 0.0).then_some(IonVariant {
                     kind: ion.kind,
                     monoisotopic_mass: mass,
                     neutral_loss: (loss > 0.0).then_some(loss),
+                    fragment_loss: false,
                 })
             })
             .collect::<SmallVec<[_; 2]>>();
+
+        if let Some((sites, max_losses)) = &self.fragment_losses {
+            let counts = sites
+                .iter()
+                .map(|site| (site.mass, site.count(ion.kind, series_index)))
+                .filter(|(_, count)| *count > 0)
+                .collect::<SmallVec<[_; 4]>>();
+            if !counts.is_empty() {
+                for generic in loss_totals(&counts, *max_losses) {
+                    for &loss in &modification_losses {
+                        let total = loss + generic;
+                        let mass = ion.monoisotopic_mass - total;
+                        if mass > 0.0 {
+                            variants.push(IonVariant {
+                                kind: ion.kind,
+                                monoisotopic_mass: mass,
+                                neutral_loss: Some(total),
+                                fragment_loss: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         Some(IonGroup {
             kind: ion.kind,

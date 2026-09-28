@@ -41,7 +41,7 @@ fn parameters(offset: bool) -> Parameters {
         max_count: Some(1),
         max_total_count: None,
         name: Some("Phospho".into()),
-        neutral_losses: vec![97.976_9],
+        neutral_losses: vec![97.976_9].into(),
         neutral_loss_mode: NeutralLossMode::Required,
         site_mode: SiteMode::Exhaustive,
         search_mode: if offset {
@@ -50,6 +50,7 @@ fn parameters(offset: bool) -> Parameters {
             SearchMode::Database
         },
         channel_offsets: Default::default(),
+        immonium_ions: Default::default(),
     });
     let mut variable_mods = HashMap::new();
     for residue in ["S", "T", "Y"] {

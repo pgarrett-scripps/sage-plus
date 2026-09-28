@@ -9,6 +9,85 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.14] - 2026-09-28
+
+### Added
+- Opt-in per-PSM immonium-ion evidence (`immonium`, default off). For each PSM, the processed
+  spectrum is checked for the immonium ions of unmodified P, V, L/I, H, F, Y and W (Hohmann et
+  al. 2008; global switch `residue_ions`, default on) and for the modified-residue ions that
+  modifications declare. Each is counted as explained, missing or unexplained by the peptide.
+  The evidence goes into seven nullable `immonium_*` columns of `results.sage.parquet` (null when
+  off; results schema v3 unlabeled, v4 labeled) and, with `write_pin`, five `.pin` columns.
+  With the option on, `rescore` (default true) adds the counts to the linear discriminant;
+  `rescore: false` only reports them. The ions never enter the fragment index, the hyperscore or
+  localization. With the option off, scores, identifications and q-values are unchanged. On the
+  benchmarks `rescore` added 0.4-1.3% PSMs at 1% and moved the HYE entrapment FDP from 1.67% to
+  1.73%. See `benchmarks/IMMONIUM.md`.
+- Modifications accept `immonium_ions`: the singly charged m/z of their immonium ions, as a list
+  for every site or a map from declared site to list (`"Phospho": {..., "immonium_ions": {"Y":
+  [216.0420]}}`). Map keys must be declared sites. Ions are labeled `Name@Sites` (`Phospho@Y`) and
+  explained only when the peptide carries that modification on such a site. There are no
+  built-in modified ions; DOCS.md gives pY 216.0420 (Steen et al. 2001) and acK 126.0913 (Trelle &
+  Jensen 2008) as examples. The list-or-map form is the generic `SiteMap` type.
+- `neutral_losses` now also accepts a map from site to loss list (the same `SiteMap` form as
+  `immonium_ions`), such as `{"S": [97.976896], "T": [97.976896]}` for Phospho on S, T and Y.
+  Sites left out of the map get no loss; keys must repeat a site from `sites` exactly and
+  unknown keys are rejected. The list form is unchanged and gives byte-identical output. With `neutral_loss_mode: "required"`,
+  a site without losses keeps its retained fragment form. On PXD000138 the S/T map gives 4,142
+  phospho localizations at `localization_q_value` <= 0.01, against 3,883 with the loss on S, T
+  and Y and 3,841 without losses; single-phospho known-site true FLR is 1.05% (estimate 0.99%).
+- `lfq.parquet` reports peak geometry per precursor and file: `apex_rt`, `peak_start_rt`,
+  `peak_end_rt`, `fwhm` and `id_apex_offset` (best PSM RT minus apex), in each file's own RT
+  units, via the inverse of its RT alignment. New schemas `lfq.v7` (unlabeled) and `lfq.v8`
+  (labeled); metadata key `sage.lfq.peak_center`. On PXD028735 the median MS2-confirmed row was
+  identified about 4 s before its apex (median FWHM about 16 s).
+- Experimental `lfq_settings.recenter_on_apex` (default false) centers LFQ on the MS1 elution
+  apex: the MBR window is centered on the median identification RT across files, each
+  identified file climbs to its own isotope-consistent apex, and bounds follow the peak down to
+  a valley or half height without fixed caps. On PXD028735 HYE it halves non-apex picks (12% to
+  6% of MS2-confirmed rows more than half a FWHM off), adds 2% precursors at 1% and 10% rows at
+  `extraction_q_value` <= 0.01 with unchanged ratio accuracy, but the human-only control's
+  foreign rate at that cutoff rises from 2.6% to 3.2%, so it stays opt-in.
+- Generic fragment losses: `database.fragment_losses` configures water- and ammonia-style
+  losses by label, `mass`, `sites` (the modification site vocabulary), `ion_kinds` (a subset
+  of `database.ion_kinds`) and `allow_modified` (default false); `database.max_fragment_losses`
+  (default 1) caps stacking. Loss ions are matched only in full candidate scoring, never in
+  the preliminary fragment index, and enter the linear discriminant as two separate features,
+  `matched_loss_peaks` and `loss_intensity_pct`. Both are nullable columns of
+  `results.sage.parquet` (null when off; the same schema v3/v4 as the immonium columns, placed
+  before them) and, with `write_pin`, `.pin` columns before the immonium ones. With both
+  options on, the discriminant row is the base features, then the loss features, then the
+  immonium features. The hyperscore, `matched_peaks` and modification `neutral_losses` are
+  unchanged. Off unless the key is present, and then scores, identifications and q-values are
+  unchanged. On five HCD, ion-trap CID and ETciD datasets the separate
+  features changed identifications at 1% FDR by under 1% with no entrapment FDP inflation,
+  while scoring losses in the hyperscore lost 1-12% of PSMs (loss-only matches raise the
+  matched-ion count, which favours wrong candidates; count-free, parent-supported and
+  Comet-weighted in-score variants were only neutral); see
+  `benchmarks/FRAGMENT_LOSSES.md`. The setting is not enabled by default.
+
+### Changed
+- PTM localization FLR is now estimated per modification type. Each type (reported name plus
+  delta mass) gets its own target/decoy competition, following the per-modification decoy FLR
+  of LuciPHOr (Fermin et al. 2013), LuciPHOr2 (Fermin et al. 2015) and Ramsbottom et al. 2022.
+  Before, every type was pooled into one competition. Decoy wins of single-Met oxidation rows,
+  which have nothing to localize, then set the phospho q-values: on PXD007058 phospho
+  localizations at `localization_q_value` <= 0.01 go from 303 to 6,973. On the PXD000138
+  known-site libraries the single-phospho true FLR stays at 0.96% against an estimate of 0.96%
+  at the 1% cutoff. A PSM with several types contributes one
+  localization to each type's competition; decoy PSMs read their q-value off their own type's
+  curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
+  change; `localization_q_value` and `site_q_value` values change.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- Immonium `modified_explained` counts use the modification sites before PTM localization
+  relocates them.
+- `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
+  SILAC), and loss ions are matched at every fragment charge.
+- The per-modification FLR groups types by name and delta mass rounded to 0.001 Da.
+
 ## [v0.1.0-beta.13] - 2026-09-27
 
 ### Fixed

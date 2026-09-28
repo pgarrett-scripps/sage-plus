@@ -23,6 +23,7 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
             mass: 10.0,
             name: None,
             neutral_losses: Arc::from([5.0]),
+            site_losses: None,
             neutral_loss_mode: NeutralLossMode::Optional,
             channel_offsets: Arc::default(),
         }),
@@ -36,6 +37,7 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
             mass: 10.0,
             name: None,
             neutral_losses: Arc::from([6.0]),
+            site_losses: None,
             neutral_loss_mode: NeutralLossMode::Optional,
             channel_offsets: Arc::default(),
         }),
@@ -691,4 +693,26 @@ fn extraction_q_values_do_not_depend_on_insertion_order() {
             );
         }
     }
+}
+
+#[test]
+fn site_q_values_by_type_keep_each_modification_separate() {
+    // Phospho sites alone, then with oxidation sites whose decoys outscore
+    // every phospho site. Phospho q-values must not move.
+    let mut evidence = (1..=10)
+        .rev()
+        .map(|score| ("Phospho", score as f32, false))
+        .collect::<Vec<_>>();
+    evidence.push(("Phospho", 5.5, true));
+    let alone = site_q_values_by_type(&evidence);
+    let phospho = evidence.len();
+    evidence.extend((0..6).map(|i| ("Oxidation", 20.0 - i as f32, i % 2 == 0)));
+    let q = site_q_values_by_type(&evidence);
+    assert_eq!(&q[..phospho], &alone[..]);
+    let plain = evidence[..phospho]
+        .iter()
+        .map(|&(_, score, decoy)| (score, decoy))
+        .collect::<Vec<_>>();
+    assert_eq!(alone, site_q_values(&plain));
+    assert!(q[phospho..].iter().all(|&value| value > 0.5));
 }

@@ -388,3 +388,71 @@ fn terminal_localization_is_typed_and_boundary_ambiguity_is_not_promoted() {
             .any(|s| s.attachment == attachment));
     }
 }
+
+#[test]
+fn oxidation_rows_do_not_change_phospho_q_values() {
+    let phospho = ModificationType::new("Phospho", PHOSPHO);
+    let oxidation = ModificationType::new("Oxidation", 15.994915);
+    // Phospho: 200 target wins scored 300..101, one decoy win at 150.
+    let mut targets = (0..200)
+        .map(|i| (phospho.clone(), 300.0 - i as f32, false))
+        .collect::<Vec<_>>();
+    targets.push((phospho.clone(), 150.0, true));
+    let phospho_only = targets.clone();
+    let probes = vec![(phospho.clone(), 250.0), (oxidation.clone(), 250.0)];
+    let (alone, alone_probes) = target_decoy_q_values_by_type(&phospho_only, &probes[..1]);
+
+    // Oxidation: coin-flip competition whose decoy wins outscore every
+    // phospho row. Pooled, they would dominate the top of the ranking.
+    targets.extend((0..100).map(|i| (oxidation.clone(), 1000.0 - i as f32, i % 2 == 0)));
+    let (q, probe_q) = target_decoy_q_values_by_type(&targets, &probes);
+
+    assert_eq!(&q[..phospho_only.len()], &alone[..]);
+    assert_eq!(probe_q[0], alone_probes[0]);
+    // Best phospho q: (0 + 1) / 150 targets above the decoy.
+    assert!((q[0] - 1.0 / 150.0).abs() < 1e-6, "{}", q[0]);
+    // Oxidation gets its own, much higher, q-values.
+    assert!(q[phospho_only.len()..].iter().all(|&value| value > 0.5));
+    assert!(probe_q[1] > 0.5);
+
+    // The pooled competition would have let oxidation decoys set phospho q.
+    let pooled = targets
+        .iter()
+        .map(|(_, score, decoy)| (*score, *decoy))
+        .collect::<Vec<_>>();
+    let pooled_q = target_decoy_q_values(&pooled);
+    assert!(pooled_q[0] > 0.1, "{}", pooled_q[0]);
+}
+
+#[test]
+fn per_type_q_values_match_single_type_competition() {
+    let key = ModificationType::new("Phospho", PHOSPHO);
+    let evidence = [(100.0, false), (90.0, false), (80.0, true), (70.0, false)];
+    let keyed = evidence
+        .iter()
+        .map(|&(score, decoy)| (key.clone(), score, decoy))
+        .collect::<Vec<_>>();
+    let (q, probes) = target_decoy_q_values_by_type(&keyed, &[(key.clone(), 85.0)]);
+    assert_eq!(q, target_decoy_q_values(&evidence));
+    assert_eq!(probes, vec![2.0 / 3.0]);
+    // A probe of a type without a target population cannot be accepted.
+    let other = ModificationType::new("Oxidation", 15.994915);
+    let (_, probes) = target_decoy_q_values_by_type(&keyed, &[(other, 500.0)]);
+    assert_eq!(probes, vec![1.0]);
+}
+
+#[test]
+fn modification_type_identity_uses_name_and_mass() {
+    assert_eq!(
+        ModificationType::new("Phospho", 79.96633),
+        ModificationType::new("Phospho", 79.9665)
+    );
+    assert_ne!(
+        ModificationType::new("Phospho", PHOSPHO),
+        ModificationType::new("Sulfo", 79.95682)
+    );
+    assert_ne!(
+        ModificationType::new("+15.9949", 15.9949),
+        ModificationType::new("+15.9949", 15.9990)
+    );
+}

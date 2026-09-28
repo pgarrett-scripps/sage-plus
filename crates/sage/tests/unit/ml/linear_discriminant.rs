@@ -339,3 +339,133 @@ fn fallback_discriminant_hand_values() {
     // ln_1p(-poisson) for positive poisson > 1 is NaN, which also counts as zero.
     assert!((fallback_discriminant(&feature(2.0, 0.6)) - 0.2).abs() < 1e-6);
 }
+
+#[test]
+fn immonium_columns_only_change_scores_when_informative() {
+    use crate::immonium::ImmoniumEvidence;
+    let tol = Tolerance::Ppm(-10.0, 10.0);
+    let mut base = synthetic_psms(300, 300);
+    score_psms(&mut base, tol).expect("model fits");
+
+    // Off: the same fit as `score_psms`.
+    let mut off = synthetic_psms(300, 300);
+    score_psms_with_immonium(&mut off, tol, false).expect("model fits");
+    // On without evidence: the added columns are constant and get no weight.
+    let mut empty = synthetic_psms(300, 300);
+    score_psms_with_immonium(&mut empty, tol, true).expect("model fits");
+    for ((a, b), c) in base.iter().zip(&off).zip(&empty) {
+        assert_eq!(a.discriminant_score, b.discriminant_score);
+        assert_eq!(a.posterior_error, b.posterior_error);
+        assert!((a.discriminant_score - c.discriminant_score).abs() < 1e-5);
+    }
+
+    // Targets explain more immonium ions than decoys: separation improves.
+    let mut state = 7;
+    let mut informative = synthetic_psms(300, 300);
+    for feature in &mut informative {
+        let decoy = feature.label == -1;
+        let n = noise(&mut state);
+        feature.immonium = Some(ImmoniumEvidence {
+            explained: if decoy {
+                (1.0 + n).round() as u8
+            } else {
+                (3.0 + n).round() as u8
+            },
+            unexplained: if decoy { 2 } else { (n.abs()).round() as u8 },
+            ..Default::default()
+        });
+    }
+    score_psms_with_immonium(&mut informative, tol, true).expect("model fits");
+    let gap =
+        |scores: &[Feature]| mean_discriminant(scores, false) - mean_discriminant(scores, true);
+    let spread = |scores: &[Feature]| {
+        let values = scores
+            .iter()
+            .map(|f| f.discriminant_score as f64)
+            .collect::<Vec<_>>();
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt()
+    };
+    assert!(gap(&informative) / spread(&informative) > gap(&base) / spread(&base));
+}
+
+#[test]
+fn loss_and_immonium_features_combine_in_one_row() {
+    use crate::immonium::ImmoniumEvidence;
+    use crate::scoring::FragmentLossFeatures;
+    let tol = Tolerance::Ppm(-10.0, 10.0);
+    let mut base = synthetic_psms(300, 300);
+    score_psms(&mut base, tol).expect("model fits");
+
+    // Targets match more loss ions and more immonium ions than decoys.
+    let with_evidence = |losses: bool, immonium: bool| {
+        let mut state = 11;
+        let mut scores = synthetic_psms(300, 300);
+        for feature in &mut scores {
+            let decoy = feature.label == -1;
+            let shift = if decoy { 0.0 } else { 2.0 };
+            // Independent noise per column keeps the scatter matrix regular.
+            let mut n = || (noise(&mut state) + 3.0).max(0.0);
+            if losses {
+                feature.fragment_loss = Some(FragmentLossFeatures {
+                    matched_peaks: (shift + n()).round() as u32,
+                    intensity_pct: (shift + n()) as f32,
+                });
+            }
+            if immonium {
+                feature.immonium = Some(ImmoniumEvidence {
+                    explained: (shift + n()).round() as u8,
+                    unexplained: n().round() as u8,
+                    ..Default::default()
+                });
+            }
+        }
+        scores
+    };
+    let gap = |scores: &[Feature]| {
+        let values = scores
+            .iter()
+            .map(|f| f.discriminant_score as f64)
+            .collect::<Vec<_>>();
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let spread =
+            (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt();
+        (mean_discriminant(scores, false) - mean_discriminant(scores, true)) / spread
+    };
+
+    let mut losses = with_evidence(true, false);
+    score_psms_with_immonium(&mut losses, tol, false).expect("losses only fits");
+    let mut immonium = with_evidence(false, true);
+    score_psms_with_immonium(&mut immonium, tol, true).expect("immonium only fits");
+    let mut both = with_evidence(true, true);
+    score_psms_with_immonium(&mut both, tol, true).expect("both fit");
+    for scores in [&losses, &immonium, &both] {
+        assert!(gap(scores) > gap(&base));
+    }
+
+    // Immonium rescoring on without immonium evidence adds constant columns:
+    // the loss-only model is unchanged.
+    let mut losses_empty_immonium = with_evidence(true, false);
+    score_psms_with_immonium(&mut losses_empty_immonium, tol, true).expect("model fits");
+    for (a, b) in losses.iter().zip(&losses_empty_immonium) {
+        assert!((a.discriminant_score - b.discriminant_score).abs() < 1e-5);
+    }
+}
+
+#[test]
+fn feature_rows_debug_print_names_for_each_layout() {
+    for (width, last) in [
+        (20, "sqrt(delta_ims_model)"),
+        (22, "ln1p(loss_intensity_pct)"),
+        (25, "immonium_modified_unexplained"),
+        (27, "immonium_modified_unexplained"),
+    ] {
+        let row = vec![0.0; width];
+        let text = format!("{:?}", Features(&row));
+        assert_eq!(text.matches(": ").count(), width, "{text}");
+        assert!(text.ends_with(&format!("\"{last}\": 0.0}}")), "{text}");
+    }
+    let row = [0.0; 27];
+    let text = format!("{:?}", Features(&row));
+    assert!(text.contains("\"ln1p(loss_intensity_pct)\": 0.0, \"immonium_explained\""));
+}

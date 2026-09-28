@@ -20,6 +20,11 @@ const K_WIDTH: usize = 10;
 const GRID_SIZE: usize = 100;
 /// Number of isotopes to search for
 const N_ISOTOPES: usize = 3;
+/// Bins either side of an identification RT searched for isotope-consistent
+/// signal before climbing to the apex.
+const APEX_SNAP_BINS: usize = 10;
+/// Warp search range, in bins, for files without their own identification.
+const WARP_SLACK: isize = 75;
 
 fn default_rt_pct_tolerance() -> f32 {
     0.5
@@ -62,6 +67,17 @@ pub struct LfqSettings {
     /// Trace identified precursors into files without direct MS2 evidence.
     #[serde(default = "default_true")]
     pub mbr: bool,
+    /// Center extraction on the MS1 elution apex instead of the MS2
+    /// identification RT: with MBR the traced window is centered on the median
+    /// identification RT across files, each identified file's apex is refined
+    /// from its own isotope trace, the cross-run apex is the median of those
+    /// apexes, and integration bounds follow the peak shape.
+    #[serde(default = "default_recenter_on_apex")]
+    pub recenter_on_apex: bool,
+}
+
+fn default_recenter_on_apex() -> bool {
+    false
 }
 
 fn default_true() -> bool {
@@ -80,6 +96,7 @@ impl Default for LfqSettings {
             combine_charge_states: true,
             peptide_q_value: 0.01,
             mbr: true,
+            recenter_on_apex: default_recenter_on_apex(),
         }
     }
 }
@@ -88,6 +105,15 @@ impl LfqSettings {
     fn rt_tolerance(&self) -> f32 {
         self.rt_pct_tolerance / 100.0
     }
+}
+
+/// Retention time of the best identification of a precursor in one file.
+#[derive(Copy, Clone, Debug)]
+pub struct IdentificationRt {
+    /// Consensus (aligned) RT.
+    pub aligned: f32,
+    /// RT in the file's own time units.
+    pub observed: f32,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -119,6 +145,8 @@ pub struct FeatureMap {
     /// observed in the file itself.
     ms2_confirmed: FnvHashSet<(PrecursorId, usize)>,
     ms2_confirmed_strict: FnvHashSet<(PrecursorId, usize)>,
+    /// RT of the most confident accepted PSM of each precursor in each file.
+    id_rts: fnv::FnvHashMap<(PrecursorId, usize), IdentificationRt>,
 }
 
 /// A quantified LFQ precursor across all acquisition files.
@@ -153,6 +181,17 @@ pub struct FileEvidence {
     /// Target-decoy q-value of this target (precursor, file) extraction; see
     /// [`crate::fdr::extraction_q_values`]. `None` for decoys and until assigned.
     pub extraction_q_value: Option<f32>,
+    /// Apex of the integrated peak in this file, in the file's RT units.
+    pub apex_rt: f32,
+    /// Integration bounds in this file, in the file's RT units.
+    pub peak_start_rt: f32,
+    pub peak_end_rt: f32,
+    /// Full width at half maximum of this file's trace around the apex, in
+    /// the file's RT units; `None` when the trace does not fall to half
+    /// height inside the traced window.
+    pub fwhm: Option<f32>,
+    /// Identification RT minus apex RT, for files with an accepted PSM.
+    pub id_apex_offset: Option<f32>,
 }
 
 pub fn build_feature_map(
@@ -190,6 +229,49 @@ pub fn build_feature_map(
             (id, feat.file_id)
         })
         .collect();
+    // `features` is sorted by confidence, so the first accepted PSM of a
+    // precursor in a file is its best identification there.
+    let mut id_rts = fnv::FnvHashMap::default();
+    let mut peptide_rts: fnv::FnvHashMap<PeptideIx, fnv::FnvHashMap<usize, f32>> =
+        fnv::FnvHashMap::default();
+    for feat in features
+        .iter()
+        .filter(|feat| feat.peptide_q <= settings.peptide_q_value && feat.label == 1)
+    {
+        let id = if settings.combine_charge_states {
+            PrecursorId::Combined(feat.peptide_idx)
+        } else {
+            PrecursorId::Charged((feat.peptide_idx, feat.charge))
+        };
+        id_rts
+            .entry((id, feat.file_id))
+            .or_insert(IdentificationRt {
+                aligned: feat.aligned_rt,
+                observed: feat.rt,
+            });
+        peptide_rts
+            .entry(feat.peptide_idx)
+            .or_default()
+            .entry(feat.file_id)
+            .or_insert(feat.aligned_rt);
+    }
+    // With apex recentering and MBR, the traced window is centered on the
+    // median identification RT across files rather than on the single most
+    // confident PSM; the apexes themselves are refined from the traces.
+    let anchor_rt = |feat: &Feature| -> f32 {
+        if !(settings.recenter_on_apex && settings.mbr) {
+            return feat.aligned_rt;
+        }
+        let mut rts = peptide_rts
+            .get(&feat.peptide_idx)
+            .map(|files| files.values().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if rts.is_empty() {
+            return feat.aligned_rt;
+        }
+        rts.sort_unstable_by(f32::total_cmp);
+        rts[(rts.len() - 1) / 2]
+    };
     let map: DashMap<(PeptideIx, usize), PrecursorRange, fnv::FnvBuildHasher> = DashMap::default();
     let label_groups = db
         .peptides
@@ -241,7 +323,7 @@ pub fn build_feature_map(
                 map.insert(
                     (*peptide_idx, map_file_id),
                     PrecursorRange {
-                        rt: feat.aligned_rt,
+                        rt: anchor_rt(feat),
                         mass_lo: db[*peptide_idx].monoisotopic,
                         mass_hi: 0.0,
                         peptide: *peptide_idx,
@@ -280,6 +362,8 @@ pub fn build_feature_map(
                         Tolerance::Ppm(-settings.ppm_tolerance, settings.ppm_tolerance)
                             .bounds(mass + 11.06);
 
+                    // Shift the decoy by a full traced window, so that its
+                    // window does not overlap the target's.
                     let rev = PrecursorRange {
                         rt: (fwd.rt - rt_tol * 2.0).max(0.0),
                         mass_lo,
@@ -322,6 +406,7 @@ pub fn build_feature_map(
         mass_search_margin,
         ms2_confirmed,
         ms2_confirmed_strict,
+        id_rts,
     }
 }
 
@@ -456,15 +541,27 @@ impl FeatureMap {
         let mut quantified = pairs
             .into_par_iter()
             .flat_map_iter(|((id, anchor), [target, decoy])| {
+                // Identification RTs as bins of the target grid. The shifted
+                // decoy grid has the same geometry, so it is seeded at the
+                // same bins and runs through exactly the same apex search.
+                let seeds = match (&target, self.settings.recenter_on_apex) {
+                    (Some(grid), true) => Some(self.seeds(grid, id, anchor, n_files)),
+                    _ => None,
+                };
+                let seeds = seeds.as_deref();
                 let mut decoy_traces = decoy.map(|mut grid| grid.summarize_traces());
                 let mut out = Vec::with_capacity(2);
                 if let Some(mut grid) = target {
                     let mut traces = grid.summarize_traces();
                     if let Some((peak, areas, evidence, window)) =
-                        traces.integrate_window(&self.settings)
+                        traces.pick(&self.settings, seeds)
                     {
                         let paired = match &decoy_traces {
-                            Some(decoy) => decoy.clone().paired_evidence(&window, &self.settings),
+                            Some(decoy) => {
+                                decoy
+                                    .clone()
+                                    .paired_evidence(&window, &self.settings, seeds)
+                            }
                             None => vec![None; evidence.len()],
                         };
                         out.push(
@@ -473,9 +570,7 @@ impl FeatureMap {
                     }
                 }
                 if let Some(traces) = decoy_traces.as_mut() {
-                    if let Some((peak, areas, evidence)) =
-                        traces.integrate_with_evidence(&self.settings)
-                    {
+                    if let Some((peak, areas, evidence, _)) = traces.pick(&self.settings, seeds) {
                         out.push(self.expand(
                             n_files,
                             id,
@@ -506,7 +601,51 @@ impl FeatureMap {
                 }
             }
         }
+        // Report peak positions in each file's own RT units.
+        peaks.par_iter_mut().for_each(|((id, decoy), quantified)| {
+            for (file, evidence) in quantified.file_evidence.iter_mut().enumerate() {
+                let Some(evidence) = evidence else { continue };
+                let alignment = &alignments[file];
+                let apex = alignment.inverse(evidence.apex_rt);
+                evidence.fwhm = evidence.fwhm.map(|width| {
+                    let half = width / 2.0;
+                    alignment.inverse(evidence.apex_rt + half)
+                        - alignment.inverse(evidence.apex_rt - half)
+                });
+                evidence.apex_rt = apex;
+                evidence.peak_start_rt = alignment.inverse(evidence.peak_start_rt);
+                evidence.peak_end_rt = alignment.inverse(evidence.peak_end_rt);
+                // Decoys have no identification of their own.
+                evidence.id_apex_offset = (!*decoy)
+                    .then(|| self.id_rts.get(&(*id, file)))
+                    .flatten()
+                    .map(|rt| rt.observed - apex);
+            }
+        });
         peaks
+    }
+
+    /// Bin of the best identification in each grid row, if it is inside the
+    /// grid. Row `r` is file `r` with MBR, or the anchor file without.
+    fn seeds(
+        &self,
+        grid: &Grid,
+        id: PrecursorId,
+        anchor: usize,
+        n_files: usize,
+    ) -> Vec<Option<usize>> {
+        let files = match anchor {
+            usize::MAX => (0..n_files).collect::<Vec<_>>(),
+            anchor => vec![anchor],
+        };
+        files
+            .into_iter()
+            .map(|file| {
+                let rt = self.id_rts.get(&(id, file))?.aligned;
+                let bin = ((rt - grid.rt_min) / grid.rt_step).round();
+                (bin >= 0.0 && (bin as usize) < grid.matrix.cols).then_some(bin as usize)
+            })
+            .collect()
     }
 }
 
@@ -625,6 +764,21 @@ pub struct Traces {
     pub spectral_angle: Matrix,
     /// File with the most confident PSM
     reference_file_id: usize,
+    /// Consensus RT of bin 0 and the bin width.
+    pub geometry: GridGeometry,
+}
+
+/// Position of a trace grid on the consensus RT axis.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct GridGeometry {
+    pub rt_min: f32,
+    pub rt_step: f32,
+}
+
+impl GridGeometry {
+    fn rt(&self, bin: f64) -> f32 {
+        self.rt_min + (bin as f32) * self.rt_step
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -642,10 +796,155 @@ pub struct Peak {
 impl Traces {
     /// Calculate and apply time warping factors
     fn warp(&mut self) -> Vec<isize> {
-        let time_warps = self.find_time_warps(&self.dot_product, 75);
+        let time_warps = self.find_time_warps(&self.dot_product, WARP_SLACK);
         Self::apply_time_warps(&mut self.spectral_angle, &time_warps);
         Self::apply_time_warps(&mut self.dot_product, &time_warps);
         time_warps
+    }
+
+    /// Choose, align and integrate the peak: around the identification RTs'
+    /// apexes when `seeds` are given (apex recentering), otherwise the
+    /// best-scoring bin of the traced window.
+    #[allow(clippy::type_complexity)]
+    pub fn pick(
+        &mut self,
+        settings: &LfqSettings,
+        seeds: Option<&[Option<usize>]>,
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
+        // Precursors without an identification inside the grid (e.g. label
+        // channels seeded by another channel) keep the window search.
+        match seeds.filter(|seeds| seeds.iter().any(Option::is_some)) {
+            Some(seeds) => self.integrate_apex(settings, seeds),
+            None => self.integrate_window(settings),
+        }
+    }
+
+    /// Isotope-consistent trace: signal where the isotope pattern matches.
+    fn consistent(&self, file: usize, settings: &LfqSettings) -> Vec<f64> {
+        self.dot_product
+            .row_slice(file)
+            .iter()
+            .zip(self.spectral_angle.row_slice(file))
+            .map(|(&dot, &angle)| {
+                if angle >= settings.spectral_angle {
+                    dot
+                } else {
+                    0.0
+                }
+            })
+            .collect()
+    }
+
+    /// Integrate the peak whose apex is nearest the identification RTs.
+    ///
+    /// * Each seeded (identified) row climbs from its identification bin to
+    ///   the apex of the isotope-consistent trace it sits on.
+    /// * The consensus apex is the median of those apexes; each seeded row is
+    ///   shifted so that its own apex lands on it.
+    /// * Unseeded (transfer) rows get the usual warp search towards the sum of
+    ///   the aligned seeded traces.
+    /// * Integration bounds follow the summed seeded trace down to a valley
+    ///   or [`APEX_BOUND_FRACTION`] of its apex, without fixed caps.
+    #[allow(clippy::type_complexity)]
+    pub fn integrate_apex(
+        &mut self,
+        settings: &LfqSettings,
+        seeds: &[Option<usize>],
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
+        let rows = self.dot_product.rows;
+        let cols = self.dot_product.cols;
+        let apexes = (0..rows)
+            .map(|file| {
+                let seed = (*seeds.get(file)?)?;
+                climb_to_apex(&self.consistent(file, settings), seed)
+            })
+            .collect::<Vec<_>>();
+        let mut found = apexes.iter().flatten().copied().collect::<Vec<_>>();
+        if found.is_empty() {
+            return None;
+        }
+        found.sort_unstable();
+        let apex = found[(found.len() - 1) / 2];
+
+        let mut shifts = vec![0isize; rows];
+        let mut reference = vec![0.0; cols];
+        let mut bounds_trace = vec![0.0; cols];
+        for (file, file_apex) in apexes.iter().enumerate() {
+            if let Some(file_apex) = file_apex {
+                shifts[file] = *file_apex as isize - apex as isize;
+                let consistent = self.consistent(file, settings);
+                for (i, (r, b)) in reference.iter_mut().zip(&mut bounds_trace).enumerate() {
+                    let j = i as isize + shifts[file];
+                    if j >= 0 && (j as usize) < cols {
+                        *r += self.dot_product[(file, j as usize)];
+                        *b += consistent[j as usize];
+                    }
+                }
+            }
+        }
+        for (file, file_apex) in apexes.iter().enumerate() {
+            if file_apex.is_none() {
+                shifts[file] =
+                    Self::best_shift(&reference, self.dot_product.row_slice(file), WARP_SLACK);
+            }
+        }
+        Self::apply_time_warps(&mut self.spectral_angle, &shifts);
+        Self::apply_time_warps(&mut self.dot_product, &shifts);
+
+        let (left, right) = peak_bounds(&bounds_trace, apex, APEX_BOUND_FRACTION);
+
+        // Same form as the hybrid score, with retention-time proximity
+        // measured from the identification RTs rather than the window center.
+        let mut max = 0.0f64;
+        let mut at_apex = (0.0, 1.0);
+        for col in 0..cols {
+            let mut summed_int = 1.0;
+            let mut weighted = 0.0;
+            for (sa, dotp) in self.spectral_angle.col(col).zip(self.dot_product.col(col)) {
+                weighted += sa * dotp;
+                summed_int += dotp;
+            }
+            max = max.max(summed_int);
+            if col == apex {
+                at_apex = (weighted / summed_int, summed_int);
+            }
+        }
+        let mut seeded = seeds.iter().flatten().copied().collect::<Vec<_>>();
+        seeded.sort_unstable();
+        let center = seeded[(seeded.len() - 1) / 2];
+        let half = (cols / 2).max(1) as f64;
+        let proximity = (1.0 - (apex as f64 - center as f64).abs() / half).max(0.0);
+        let (spectral_angle, intensity) = at_apex;
+        let score =
+            spectral_angle.max(0.0).powi(3) * proximity.powf(0.33) * (intensity / max).sqrt();
+        if score <= 0.0 || !score.is_finite() {
+            return None;
+        }
+        let peak = Peak {
+            rt: apex,
+            spectral_angle,
+            score,
+            q_value: 0.0,
+        };
+        let window = PeakWindow {
+            rt: apex,
+            left,
+            right,
+            shifts,
+            reference,
+        };
+        let (areas, evidence) = self.window_evidence(&window, settings);
+        Some((peak, areas, evidence, window))
     }
 
     /// Find time warping offsets for each file that maximize the dot product
@@ -661,28 +960,28 @@ impl Traces {
     /// Time warping offsets for each row of `matrix` that maximize the dot
     /// product with `reference`
     fn time_warps_to(reference: &[f64], matrix: &Matrix, slack: isize) -> Vec<isize> {
-        let mut offsets = vec![0; matrix.rows];
+        (0..matrix.rows)
+            .map(|row| Self::best_shift(reference, matrix.row_slice(row), slack))
+            .collect()
+    }
 
-        for (row, offset) in offsets.iter_mut().enumerate() {
-            let run = matrix.row_slice(row);
-
-            let mut best_offset = (0, 0.0);
-            for offset in -slack..=slack {
-                let mut dot = 0.0;
-                for (i, ref_int) in reference.iter().enumerate() {
-                    let j = i as isize + offset;
-                    if j >= 0 && j < run.len() as isize {
-                        dot += ref_int * run[j as usize];
-                    }
-                }
-
-                if dot >= best_offset.1 {
-                    best_offset = (offset, dot);
+    /// Offset of `run` that maximizes its dot product with `reference`.
+    fn best_shift(reference: &[f64], run: &[f64], slack: isize) -> isize {
+        let mut best_offset = (0, 0.0);
+        for offset in -slack..=slack {
+            let mut dot = 0.0;
+            for (i, ref_int) in reference.iter().enumerate() {
+                let j = i as isize + offset;
+                if j >= 0 && j < run.len() as isize {
+                    dot += ref_int * run[j as usize];
                 }
             }
-            *offset = best_offset.0;
+
+            if dot >= best_offset.1 {
+                best_offset = (offset, dot);
+            }
         }
-        offsets
+        best_offset.0
     }
 
     /// Perform local Correlation Optimization Warping
@@ -834,12 +1133,26 @@ impl Traces {
     /// same local warp search the target files got (towards that reference),
     /// so a file row answers the same question as the target row it is paired
     /// with: can an isotope envelope be aligned to the expected elution?
+    ///
+    /// With apex recentering (`seeds`), a seeded row instead climbs from the
+    /// same identification bin as the target row and is shifted so that its
+    /// own apex lands on the target's apex, exactly as the target row was. A
+    /// row whose climb finds no signal keeps the warp search, as a target row
+    /// does in [`Traces::integrate_apex`].
     pub fn paired_evidence(
         &mut self,
         window: &PeakWindow,
         settings: &LfqSettings,
+        seeds: Option<&[Option<usize>]>,
     ) -> Vec<Option<FileEvidence>> {
-        let shifts = Self::time_warps_to(&window.reference, &self.dot_product, 75);
+        let mut shifts = Self::time_warps_to(&window.reference, &self.dot_product, WARP_SLACK);
+        for (file, seed) in seeds.unwrap_or_default().iter().enumerate() {
+            if let Some(apex) =
+                seed.and_then(|seed| climb_to_apex(&self.consistent(file, settings), seed))
+            {
+                shifts[file] = apex as isize - window.rt as isize;
+            }
+        }
         Self::apply_time_warps(&mut self.spectral_angle, &shifts);
         Self::apply_time_warps(&mut self.dot_product, &shifts);
         let window = PeakWindow {
@@ -887,6 +1200,10 @@ impl Traces {
                     let proximity = (1.0
                         - window.shifts[file].unsigned_abs() as f64 / self.dot_product.cols as f64)
                         .max(0.0);
+                    // Positions in the unwarped grid of this file, as consensus RT.
+                    let shift = window.shifts[file] as f64;
+                    let fwhm = half_maximum_width(trace, window.rt)
+                        .map(|bins| bins as f32 * self.geometry.rt_step);
                     FileEvidence {
                         transfer_candidate: false,
                         spectral_angle,
@@ -894,6 +1211,11 @@ impl Traces {
                         rt_shift_bins: window.shifts[file] as i32,
                         score: spectral_angle.powi(3) * trace_cosine * proximity,
                         extraction_q_value: None,
+                        apex_rt: self.geometry.rt(window.rt as f64 + shift),
+                        peak_start_rt: self.geometry.rt(window.left as f64 + shift),
+                        peak_end_rt: self.geometry.rt(window.right as f64 - 1.0 + shift),
+                        fwhm,
+                        id_apex_offset: None,
                     }
                 })
             })
@@ -1010,8 +1332,86 @@ impl Grid {
             dot_product,
             spectral_angle,
             reference_file_id: self.reference_file_id,
+            geometry: GridGeometry {
+                rt_min: self.rt_min,
+                rt_step: self.rt_step,
+            },
         }
     }
+}
+
+/// Fraction of the summed apex height at which apex-mode integration stops,
+/// unless a valley comes first. Half height matches the window search; 20%
+/// took in more interference and worsened the E. coli ratio on PXD028735.
+const APEX_BOUND_FRACTION: f64 = 0.5;
+
+/// Climb from `seed` to the apex of the peak it sits on. The seed snaps to
+/// the nearest signal within [`APEX_SNAP_BINS`]; the climb then moves to the
+/// highest point reachable without the trace falling below half of the
+/// current apex, so that small dips in a smoothed peak do not stop it early.
+fn climb_to_apex(trace: &[f64], seed: usize) -> Option<usize> {
+    let n = trace.len();
+    let mut apex = (0..=APEX_SNAP_BINS)
+        .flat_map(|d| [seed.checked_sub(d), Some(seed + d).filter(|&i| i < n)])
+        .flatten()
+        .find(|&i| trace[i] > 0.0)?;
+    loop {
+        let height = trace[apex];
+        let mut next = None;
+        for dir in [-1isize, 1] {
+            let mut i = apex as isize + dir;
+            while i >= 0 && (i as usize) < n && trace[i as usize] >= 0.5 * height {
+                if trace[i as usize] > trace[next.unwrap_or(apex)] {
+                    next = Some(i as usize);
+                }
+                i += dir;
+            }
+        }
+        match next {
+            Some(higher) => apex = higher,
+            None => return Some(apex),
+        }
+    }
+}
+
+/// Integration bounds `[left, right)` around `apex`: extend while the trace
+/// stays above `fraction` of the apex height and keeps falling (a valley ends
+/// the peak).
+fn peak_bounds(trace: &[f64], apex: usize, fraction: f64) -> (usize, usize) {
+    let floor = trace[apex] * fraction;
+    let mut left = apex;
+    while left > 0 && trace[left - 1] >= floor && trace[left - 1] <= trace[left] {
+        left -= 1;
+    }
+    let mut right = apex;
+    while right + 1 < trace.len() && trace[right + 1] >= floor && trace[right + 1] <= trace[right] {
+        right += 1;
+    }
+    (left, right + 1)
+}
+
+/// Width, in (fractional) bins, of `trace` at half its height at `apex`.
+fn half_maximum_width(trace: &[f64], apex: usize) -> Option<f64> {
+    let half = trace[apex] / 2.0;
+    if half <= 0.0 {
+        return None;
+    }
+    let crossing = |mut i: usize, step: isize| -> Option<f64> {
+        loop {
+            let j = i as isize + step;
+            if j < 0 || j as usize >= trace.len() {
+                return None;
+            }
+            let j = j as usize;
+            if trace[j] < half {
+                // Interpolate between i (above) and j (below).
+                let frac = (trace[i] - half) / (trace[i] - trace[j]);
+                return Some(i as f64 + step as f64 * frac);
+            }
+            i = j;
+        }
+    };
+    Some(crossing(apex, 1)? - crossing(apex, -1)?)
 }
 
 /// Create a symmetrical gaussian kernel of given standard deviation and length

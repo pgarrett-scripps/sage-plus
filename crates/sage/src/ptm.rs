@@ -101,6 +101,39 @@ impl ModLocalization {
     }
 }
 
+/// Identity of a modification type for the false-localization-rate
+/// competition: the reported name (Unimod label, configured name, or signed
+/// mass) and the delta mass on a 0.001 Da grid, the tolerance at which two
+/// localized masses are treated as the same modification.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModificationType {
+    pub name: String,
+    mass_milli_da: i64,
+}
+
+impl ModificationType {
+    pub fn new(name: &str, mass: f32) -> Self {
+        Self {
+            name: name.to_owned(),
+            mass_milli_da: (mass as f64 / MASS_EPS as f64).round() as i64,
+        }
+    }
+}
+
+impl ModLocalization {
+    /// Name written to the `modification` column of the site reports.
+    pub fn reported_name(&self) -> String {
+        self.label
+            .clone()
+            .unwrap_or_else(|| format!("{:+}", self.mass))
+    }
+
+    /// Modification type whose competition this localization belongs to.
+    pub fn modification_type(&self) -> ModificationType {
+        ModificationType::new(&self.reported_name(), self.mass)
+    }
+}
+
 /// All per-modification localization results for a single PSM.
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct Localization {
@@ -627,6 +660,60 @@ pub fn target_decoy_q_values(evidence: &[(f32, bool)]) -> Vec<f32> {
         q_values[original] = prefix_fdr[rank];
     }
     q_values
+}
+
+/// Localization q-values with a separate target/decoy competition for each
+/// modification type.
+///
+/// `targets` holds `(modification type, competition_score, decoy_winner)` for
+/// every target-PSM localization in the population; `probes` holds
+/// `(modification type, competition_score)` for decoy-PSM localizations, which
+/// read their q-value off the curve of their own type (1.0 when that type has
+/// no target population). Both outputs are in caller order.
+///
+/// A false localization rate is specific to a modification: residue
+/// specificity, the number of candidate sites and the chance that the PSM
+/// itself is a wrong peptidoform all differ between, for example, phospho
+/// S/T/Y and oxidation of a single Met. Pooling them lets one type's decoy
+/// wins set another type's q-values. Following LuciPHOr (Fermin et al. 2013,
+/// Mol Cell Proteomics; LuciPHOr2, Fermin et al. 2015, Bioinformatics) and the
+/// decoy-amino-acid FLR of Ramsbottom et al. 2022 (J Proteome Res), the FLR is
+/// estimated per modification type.
+///
+/// A PSM carrying several modification types (phospho plus oxidation, say)
+/// contributes one localization per type, each to its own competition. Each
+/// was scored with the other types held at their placed sites, so the rows are
+/// the same as in a pooled competition; only who they compete with changes.
+pub fn target_decoy_q_values_by_type<K: Eq + std::hash::Hash + Clone>(
+    targets: &[(K, f32, bool)],
+    probes: &[(K, f32)],
+) -> (Vec<f32>, Vec<f32>) {
+    let mut groups: std::collections::HashMap<K, (Vec<usize>, Vec<usize>)> =
+        std::collections::HashMap::new();
+    for (ix, (key, _, _)) in targets.iter().enumerate() {
+        groups.entry(key.clone()).or_default().0.push(ix);
+    }
+    for (ix, (key, _)) in probes.iter().enumerate() {
+        groups.entry(key.clone()).or_default().1.push(ix);
+    }
+    let mut target_q = vec![1.0f32; targets.len()];
+    let mut probe_q = vec![1.0f32; probes.len()];
+    for (target_ix, probe_ix) in groups.into_values() {
+        let evidence = target_ix
+            .iter()
+            .map(|&ix| (targets[ix].1, targets[ix].2))
+            .collect::<Vec<_>>();
+        let q_values = target_decoy_q_values(&evidence);
+        let scores = probe_ix.iter().map(|&ix| probes[ix].1).collect::<Vec<_>>();
+        let probe_values = q_values_at_scores(&evidence, &q_values, &scores);
+        for (&ix, q) in target_ix.iter().zip(q_values) {
+            target_q[ix] = q;
+        }
+        for (&ix, q) in probe_ix.iter().zip(probe_values) {
+            probe_q[ix] = q;
+        }
+    }
+    (target_q, probe_q)
 }
 
 /// Read q-values for new competition scores off an existing q-value curve.

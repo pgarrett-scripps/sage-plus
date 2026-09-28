@@ -251,6 +251,7 @@ fn traces() -> Traces {
             7,
         ),
         reference_file_id: 0,
+        geometry: GridGeometry::default(),
     }
 }
 
@@ -261,6 +262,7 @@ fn time_warp_finds_and_applies_a_shifted_trace() {
         dot_product: matrix.clone(),
         spectral_angle: matrix,
         reference_file_id: 0,
+        geometry: GridGeometry::default(),
     };
     let warps = trace.find_time_warps(&trace.dot_product, 2);
 
@@ -373,6 +375,7 @@ fn paired_decoy_evidence_searches_its_own_warp_at_the_target_peak() {
             7,
         ),
         reference_file_id: 0,
+        geometry: GridGeometry::default(),
     };
     let settings = LfqSettings {
         spectral_angle: 0.5,
@@ -383,7 +386,7 @@ fn paired_decoy_evidence_searches_its_own_warp_at_the_target_peak() {
     let (_, _, _, window) = target.integrate_window(&settings).unwrap();
     assert_eq!(window.rt, 3);
     assert_eq!(window.shifts, vec![0, 0]);
-    let paired = decoy.clone().paired_evidence(&window, &settings);
+    let paired = decoy.clone().paired_evidence(&window, &settings, None);
 
     let noise = paired[0].as_ref().unwrap();
     assert!(noise.score < 0.05, "{noise:?}");
@@ -391,6 +394,33 @@ fn paired_decoy_evidence_searches_its_own_warp_at_the_target_peak() {
     assert_eq!(aligned.rt_shift_bins, -2);
     assert!(aligned.score > 0.5, "{aligned:?}");
     assert_eq!(aligned.extraction_q_value, None);
+}
+
+#[test]
+fn paired_decoy_row_whose_climb_fails_keeps_its_warp_search() {
+    // File 0 has no isotope-consistent signal, so a seeded climb fails; the
+    // decoy row must fall back to its warp search, as a target row does.
+    let decoy = Traces {
+        dot_product: Matrix::new([0.1; 14], 2, 7),
+        spectral_angle: Matrix::new([0.2; 14], 2, 7),
+        reference_file_id: 0,
+        geometry: GridGeometry::default(),
+    };
+    let settings = LfqSettings {
+        spectral_angle: 0.5,
+        ..Default::default()
+    };
+    let (_, _, _, window) = traces().integrate_window(&settings).unwrap();
+    let unseeded = decoy.clone().paired_evidence(&window, &settings, None);
+    for seed in [0, 6] {
+        let seeded = decoy
+            .clone()
+            .paired_evidence(&window, &settings, Some(&[Some(seed), None]));
+        assert_eq!(
+            seeded[0].as_ref().unwrap().rt_shift_bins,
+            unseeded[0].as_ref().unwrap().rt_shift_bins
+        );
+    }
 }
 
 #[test]
@@ -614,4 +644,62 @@ fn mbr_traces_one_anchor_across_files_deterministically() {
         assert_eq!(repeat.intensities, peak.intensities);
         assert_eq!(repeat.peak.score.to_bits(), peak.peak.score.to_bits());
     }
+}
+
+#[test]
+fn apex_climb_crosses_small_dips_but_not_valleys() {
+    // Rising edge, a shallow dip, the true apex, then a valley and a taller
+    // neighbouring peak that must not be reached.
+    let trace = [0.0, 2.0, 5.0, 4.0, 9.0, 6.0, 1.0, 0.0, 20.0, 5.0];
+    assert_eq!(climb_to_apex(&trace, 1), Some(4));
+    assert_eq!(climb_to_apex(&trace, 5), Some(4));
+    // A seed on empty signal snaps to the nearest non-zero bin (bin 6 here,
+    // on the tail of the first peak) and climbs from there.
+    assert_eq!(climb_to_apex(&trace, 7), Some(4));
+    assert_eq!(climb_to_apex(&[0.0; 30], 15), None);
+}
+
+#[test]
+fn peak_bounds_stop_at_valleys_and_the_height_fraction() {
+    let trace = [3.0, 2.5, 2.2, 6.0, 10.0, 7.0, 4.0, 1.5, 0.5];
+    // Left stops before the valley (bin 1 rises again), right at 20% of the apex.
+    assert_eq!(peak_bounds(&trace, 4, 0.2), (2, 7));
+    assert_eq!(peak_bounds(&trace, 4, 0.5), (3, 6));
+}
+
+#[test]
+fn half_maximum_width_interpolates_crossings() {
+    let trace = [0.0, 5.0, 10.0, 5.0, 0.0];
+    assert!((half_maximum_width(&trace, 2).unwrap() - 2.0).abs() < 1e-9);
+    assert!(half_maximum_width(&[1.0, 2.0, 3.0], 2).is_none());
+}
+
+#[test]
+fn apex_mode_integrates_around_each_files_own_apex() {
+    // File 0 was identified on the rising edge (bin 2) of a peak whose apex
+    // is at bin 4; file 1 has the same peak one bin later and no ID.
+    let mut trace = Traces {
+        dot_product: Matrix::new(
+            [
+                0.0, 1.0, 4.0, 8.0, 10.0, 8.0, 4.0, 1.0, 0.0, //
+                0.0, 0.0, 1.0, 4.0, 8.0, 10.0, 8.0, 4.0, 1.0,
+            ],
+            2,
+            9,
+        ),
+        spectral_angle: Matrix::new([1.0; 18], 2, 9),
+        reference_file_id: 0,
+        geometry: GridGeometry {
+            rt_min: 0.0,
+            rt_step: 1.0,
+        },
+    };
+    let settings = LfqSettings::default();
+    let (peak, _, evidence, window) = trace.pick(&settings, Some(&[Some(2), None])).unwrap();
+    assert_eq!(peak.rt, 4);
+    assert_eq!(window.shifts, vec![0, 1]);
+    assert_eq!((window.left, window.right), (3, 6));
+    let file0 = evidence[0].as_ref().unwrap();
+    assert_eq!(file0.apex_rt, 4.0);
+    assert_eq!(evidence[1].as_ref().unwrap().apex_rt, 5.0);
 }

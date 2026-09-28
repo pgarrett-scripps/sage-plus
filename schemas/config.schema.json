@@ -628,6 +628,85 @@
       },
       "type": "object"
     },
+    "FragmentLossEntry": {
+      "additionalProperties": false,
+      "description": "One configured fragment loss. The map key is a label only.",
+      "properties": {
+        "allow_modified": {
+          "description": "Whether a residue or terminus carrying any modification still counts\nas a loss site (default false).",
+          "type": "boolean"
+        },
+        "ion_kinds": {
+          "description": "Ion kinds that can carry the loss. A subset of `database.ion_kinds`.",
+          "items": {
+            "$ref": "#/$defs/Kind"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "mass": {
+          "description": "Neutral mass removed from the fragment, in daltons. Positive and finite.",
+          "format": "float",
+          "type": "number"
+        },
+        "sites": {
+          "description": "Where the loss can occur, in the modification site vocabulary (for\nexample `\"S\"`, `\"first_residue:E\"` or `\"peptide_c_term\"`). A fragment\nis eligible when it contains at least one listed site.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mass",
+        "sites",
+        "ion_kinds"
+      ],
+      "type": "object"
+    },
+    "ImmoniumConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ImmoniumOptions"
+        }
+      ],
+      "description": "`immonium` configuration: `true` for the defaults, or an object."
+    },
+    "ImmoniumOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "rescore": {
+          "description": "Add the immonium counts to the linear discriminant (default true);\nfalse only reports them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "residue_ions": {
+          "description": "Global switch for the unmodified-residue ions of P, V, L/I, H, F, Y\nand W (default true). Modified-residue ions come from each\nmodification's `immonium_ions`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Matching tolerance; the search's `fragment_tol` when omitted."
+        }
+      },
+      "type": "object"
+    },
     "IntegrationStrategy": {
       "enum": [
         "Apex",
@@ -802,6 +881,13 @@
             "null"
           ]
         },
+        "recenter_on_apex": {
+          "description": "Center extraction on the MS1 elution apex rather than the MS2\nidentification RT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rt_pct_tolerance": {
           "format": "float",
           "minimum": 0.0,
@@ -858,6 +944,10 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
@@ -872,11 +962,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "sites": {
           "items": {
@@ -903,6 +990,10 @@
             "type": "number"
           },
           "type": "object"
+        },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
         },
         "mass": {
           "format": "float",
@@ -936,11 +1027,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"
@@ -1141,6 +1229,33 @@
         }
       ]
     },
+    "SiteMap": {
+      "anyOf": [
+        {
+          "description": "Applies to every site of the modification.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Applies to the listed sites only; keys are sites from `sites`.",
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])"
+          },
+          "type": "object"
+        }
+      ],
+      "description": "A list for every site, or a map from declared site to list."
+    },
     "SiteMode": {
       "description": "Controls where candidates for a variable modification are generated.",
       "oneOf": [
@@ -1295,6 +1410,10 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
@@ -1309,11 +1428,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         }
       },
       "required": [
@@ -1475,6 +1591,10 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
@@ -1507,11 +1627,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"
@@ -1619,6 +1736,16 @@
             "null"
           ]
         },
+        "fragment_losses": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FragmentLossEntry"
+          },
+          "description": "Generic fragment neutral losses, keyed by a label, for example\n`{\"Water\": {\"mass\": 18.010565, \"sites\": [\"S\", \"T\", \"E\", \"D\"],\n\"ion_kinds\": [\"b\", \"y\"]}}`. Loss ions are matched only when a\ncandidate is fully scored and enter rescoring as separate features.\nOff unless present. Separate from modification `neutral_losses`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "generate_decoys": {
           "type": [
             "boolean",
@@ -1648,6 +1775,15 @@
           "description": "Hard cap on the total peptide variants generated per input peptide,\nincluding its unmodified form. Values below 1 are normalized to 1.\nVariants with fewer PTMs are preferred (generated first).",
           "format": "uint",
           "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_fragment_losses": {
+          "description": "Most generic fragment losses stacked on one fragment (default 1).\nRequires `fragment_losses`.",
+          "format": "uint",
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -1826,6 +1962,17 @@
     },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"
+    },
+    "immonium": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImmoniumConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Per-PSM immonium-ion evidence, written to `results.sage.parquet` and\nthe PIN file and added to the linear discriminant. `true` looks for the\nunmodified P, V, L/I, H, F, Y and W ions and for the modified-residue\nions that modifications declare in `immonium_ions`. An object sets\n`rescore` (default true; false only reports the counts),\n`residue_ions` (the global switch for the unmodified-residue ions,\ndefault true) and `tolerance` (default `fragment_tol`). Default off."
     },
     "ion_mobility_model": {
       "anyOf": [

@@ -142,7 +142,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row; a channel that was not observed is null. With TMT on, `run-summary.json` adds `quantification.tmt_channels`: per channel, the number of quantified spectra where it was observed or missing and the median observed intensity (missing channels are skipped, not counted as 0).
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
-- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs). Per-PSM immonium-ion evidence fills seven `immonium_*` columns of `results.sage.parquet` when `immonium` is enabled; see [Immonium ions](#immonium-ions).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -190,7 +190,7 @@ keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage
 | Key | Value |
 | --- | --- |
 | `sage.provenance.version` | Version of this key set, currently `1`. |
-| `sage.version` | Sage Plus version, such as `0.1.0-beta.13`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.14`. |
 | `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
 | `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
 | `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
@@ -499,6 +499,7 @@ For additional information about configuration options and output file formats, 
       "ppm_tolerance": 5.0,    // Optional[float] {default = 5.0}, tolerance (in p.p.m.) for DICE window around calculated precursor mass
       "rt_pct_tolerance": 0.5, // Optional[float] {default = 0.5}, symmetric match-between-runs RT tolerance as percent of total gradient length
       "mbr": true,             // Optional[bool] {default = true}, trace precursors into runs without direct MS2 evidence
+      "recenter_on_apex": false, // Optional[bool] {default = false}, center each peak on its MS1 elution apex instead of the MS2 identification RT
       // Optional[bool] {default = true}. Combine all charge states for quantification. Setting this to false
       // quantifies each peptide-charge precursor in `precursor_charge` range (see below) separately
       "combine_charge_states": true
@@ -529,6 +530,7 @@ For additional information about configuration options and output file formats, 
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
   "diagnostic_ions": false, // Optional[bool|list] {default=false}: scan MS2 for diagnostic ions into diagnostic_ions.tsv
+  "immonium": false,        // Optional[bool|object] {default=false}: per-PSM immonium-ion evidence in results.sage.parquet, the PIN file and the LDA
   "ion_mobility_model": {
     "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
   },
@@ -557,8 +559,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.13
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.13 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -626,6 +628,54 @@ Example:
 }
 ```
 
+#### Generic fragment losses
+
+`fragment_losses` adds water- and ammonia-style loss ions (for example b-H2O
+or y-NH3) that depend on the residues a fragment contains, not on a
+modification. It is off unless the key is present; without it scores,
+identifications and q-values are unchanged and the two loss columns of
+`results.sage.parquet` are null. It is separate from a modification's
+`neutral_losses`, which keeps its own behaviour.
+
+```json
+"database": {
+  "fragment_losses": {
+    "Water":   {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"], "allow_modified": false},
+    "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
+  },
+  "max_fragment_losses": 1
+}
+```
+
+- The key (`Water`, `Ammonia`) is a label only. Formulas are not parsed:
+  `mass` is the neutral mass lost, in daltons, and must be positive and finite.
+- `sites` uses the modification site vocabulary (residues such as `"S"`,
+  `"first_residue:E"`, `"peptide_n_term"`, `"peptide_c_term"`; motif sites are
+  rejected). A fragment can carry the loss when it contains at least one site.
+- `ion_kinds` must be a subset of `database.ion_kinds`.
+- `allow_modified` (default false): whether a residue or terminus that carries
+  any modification still counts as a site.
+- `max_fragment_losses` (default 1): the most generic losses stacked on one
+  fragment. A loss is never used more often than the fragment has sites for it.
+
+Loss ions are never in the preliminary fragment index; they are matched only
+when a candidate is fully scored. They do not change the hyperscore,
+`matched_peaks` or `matched_intensity_pct`. Instead each PSM gets two
+rescoring features, `matched_loss_peaks` and `loss_intensity_pct`, which the
+linear discriminant uses (after the base features and before any immonium
+features) and which are written to the nullable `matched_loss_peaks` and
+`loss_intensity_pct` columns of `results.sage.parquet` and, as
+`matched_loss_peaks` and `ln(loss_intensity_pct)`, to `results.sage.pin`
+before the immonium columns and `Peptide`. Scoring loss
+ions inside the hyperscore lost 1-12% of PSMs in our benchmarks, because a
+loss-only match raises the matched-ion count and wrong candidates collect more
+of them than the correct peptide; count-free, parent-supported and
+Comet-style down-weighted variants only reached parity. The
+separate features changed identifications by less than 1% at 1% FDR on HCD,
+ion-trap CID and ETciD data, with no entrapment FDP inflation (see
+[`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)). The
+setting is therefore optional and not part of the default configuration.
+
 ### Modifications
 
 Define each modification once under its stable name in `static_mods` or
@@ -648,7 +698,7 @@ The same site syntax works for static, indexed variable, and mass-offset search.
         "mass": 79.966331,
         "sites": ["S", "T", "Y"],
         "max_count": 3,
-        "neutral_losses": [97.976896]
+        "neutral_losses": {"S": [97.976896], "T": [97.976896]}
       }
     },
     "max_variable_mods": 3
@@ -713,10 +763,60 @@ only one new one. The pair mirrors the global limits: `max_variable_mods` limits
 and defaults to `max_variable_mods`. `max_combinations` caps generated variants,
 including the unmodified form. Existing mass-offset limitations are described below.
 
+Optional `immonium_ions` gives the singly charged m/z of the modification's
+immonium ions, used only by the opt-in [`immonium`](#immonium-ions) evidence. It takes
+a list, which applies to every site of the modification, or a map from site to list,
+which applies to the listed sites only. Map keys must be sites from `sites`, spelled
+the same way (`"Y"`, `"internal_residue:K"`); any other key is rejected. Values must
+be finite and positive. Static and variable modifications both accept it; mass-offset
+modifications do not. For example:
+
+```json
+"Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "immonium_ions": {"Y": [216.0420]}},
+"Acetyl":  {"mass": 42.010565, "sites": ["K"], "immonium_ions": [126.0913]}
+```
+
+The phosphotyrosine immonium ion at 216.0420 is a sensitive, specific marker of pY
+(Steen et al. 2001, *Anal. Chem.* 73:1440); pS and pT give no comparable ion, so the
+map lists only Y. The acetyl-lysine immonium ion at 126.0913 is 98% specific for acK
+(Trelle & Jensen 2008, *Anal. Chem.* 80:3422); its precursor at 143.118 is not
+specific and is left out.
+
 Optional `neutral_losses` contains positive fragment-loss masses.
 `neutral_loss_mode` is `optional` by default or `required` to omit the retained
 fragment form. Required mode needs at least one loss. Masses and channel offsets
 must be finite. Static definitions do not accept variable-only limits or policies.
+
+`neutral_losses` takes one of two forms:
+
+- A list, such as `[97.976896]`, applies the losses at every site of the definition.
+- A map from site to list applies losses only at the listed sites. Sites left out of
+  the map have no loss.
+
+Phosphoserine and phosphothreonine lose phosphoric acid (H3PO4, 97.976896 Da)
+readily in CID and HCD. Phosphotyrosine rarely does, and Unimod lists the loss for S
+and T only. The map form expresses this:
+
+```json
+"Phospho": {
+  "mass": 79.966331,
+  "sites": ["S", "T", "Y"],
+  "max_count": 3,
+  "neutral_losses": {"S": [97.976896], "T": [97.976896]}
+}
+```
+
+Map keys must repeat a site from `sites` exactly, positional and motif forms
+included (`"first_residue:K"`, not `"K"`). Any other key is a configuration error.
+The loss follows the placed site everywhere: fragment generation, scoring, and
+localization. Site-determining ions used by localization carry no losses in either
+form. If two sites can match the same residue, for example `"K"` and
+`"protein_last:K"`, they must list the same losses.
+
+With `neutral_loss_mode: "required"`, the map must list at least one loss in total.
+Fragments at a site without losses keep their retained form, since there is nothing
+to require. A mass offset with a per-site map shifts preliminary fragments by the
+smallest loss only when every site has a loss; otherwise it uses the full mass.
 
 #### Positional residue modifications
 
@@ -823,7 +923,8 @@ modifications can coexist at different unoccupied sites.
 
 Offsets follow explicit sites and typed library restrictions. They require nonzero
 mass, cannot use `channel_offsets`, and are limited to 254 distinct definitions.
-Fragments retain the offset mass, or mass minus the first required neutral loss.
+Fragments retain the offset mass, or mass minus the first required neutral loss
+(per-site maps: see neutral losses above).
 The placed peptidoform supplies mass error, FDR, quantification, localization, and
 output identity. The offset is not reported as precursor mass error. Prefiltering
 uses the same offset-aware retrieval.
@@ -1080,6 +1181,7 @@ channel-aware when these offsets are configured.
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
   - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
   - **mbr**: Boolean. Trace identified precursors into runs without direct MS2 evidence. Set this to `false` to quantify a precursor only in runs where it was identified (default: true).
+  - **recenter_on_apex**: Boolean. Experimental. Center each LFQ peak on its MS1 elution apex rather than on the MS2 identification RT (default: false). With MBR, the traced window is centered on the median aligned identification RT across files instead of the single most confident PSM. In each identified file, Sage climbs from the identification bin to the apex of the isotope-consistent trace; the cross-run apex is the median of those apexes, each identified file is aligned on its own apex, and files without an identification get the usual warp search towards the aligned identified traces. Integration bounds follow the summed trace down to a valley or half the apex height, with no fixed bin caps. Shifted decoys are picked from the same identification bins. On the PXD028735 HYE benchmark it picked a point more than half a peak width from the true apex for 6% of MS2-confirmed rows (12% by default), gave 2% more precursors at 1% and similar ratio accuracy, but slightly more foreign-species rows in the human-only control at `extraction_q_value` <= 0.01 (3.2% vs 2.6%), so it stays off by default.
 
 Example: 
 ```json
@@ -1175,6 +1277,15 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
       {"name": "HexNAc", "mz": 204.0867},
       {"name": "HexHexNAc", "mz": 366.1395, "tolerance": {"da": [-0.01, 0.01]}}
     ]
+    ```
+- **immonium**: Boolean or object. Record, for every PSM, which immonium ions its peptide explains, in seven `immonium_*` columns of `results.sage.parquet` and five `.pin` columns, and add the counts to the linear discriminant (default: false). `true` uses the defaults below. See [Immonium ions](#immonium-ions).
+  - `rescore`: Boolean. Add the five immonium counts to the linear discriminant (default: true). `false` only reports them; scores and q-values are then those of a search without `immonium`.
+  - `residue_ions`: Boolean. Global switch for the unmodified-residue ions of P, V, L/I, H, F, Y and W (default: true). With `false`, only the modified-residue ions are used, and at least one modification must declare `immonium_ions`.
+  - `tolerance`: Same form as `fragment_tol`, which it defaults to.
+  - Modified-residue ions are declared on the modification with `immonium_ions` (see [Modifications](#static-and-variable-behavior)); there are none by default.
+  - Example:
+    ```json
+    "immonium": {"rescore": true, "residue_ions": true}
     ```
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
@@ -1374,8 +1485,10 @@ For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), 
 2. enumerates every way to distribute the modification(s) across those candidate sites, keeping all other modifications pinned,
 3. re-scores each arrangement against the experimental spectrum using only *site-determining ions* (fragments whose mass differs between arrangements), and
 4. scores a balanced set of impossible-site decoy arrangements alongside the valid target arrangements,
-5. converts target/decoy competition scores across the dataset into monotonic localization q-values, and
+5. converts target/decoy competition scores across the dataset into monotonic localization q-values, with a separate competition for each modification type, and
 6. reports target arrangements at or below `ptm_localization.localization_q_value`, together with an AScore-style delta and per-site localization probabilities.
+
+The false localization rate (FLR) is estimated per modification type. A type is the reported `modification` name together with its delta mass (to 0.001 Da). Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 
@@ -1391,7 +1504,7 @@ Two Parquet site reports are written:
 1. Decoy PSMs pass through the same gates as target PSMs: spectrum q-value ≤ `ptm_localization.psm_q_value`, localization, no impossible-site decoy win, and localization q-value ≤ `ptm_localization.localization_q_value`. Decoy PSMs never enter the false-localization-rate competition. Each takes the localization q-value of the target competition at its own score, so the localization cutoff is the same score threshold for both.
 2. Target and decoy site rows are collapsed with the same key: protein, modified peptide, position in the peptide, modification and attachment. Decoy sites sit on decoy proteins.
 3. Each site is scored by the best discriminant score of its supporting PSMs, the same score used for PSM, peptide and protein FDR.
-4. Target and decoy sites compete without pairing. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
+4. Target and decoy sites compete without pairing, separately for each modification type, as for the localization FLR. Q-values are `(decoys + 1) / targets` at complete score thresholds, the estimator used for the peptide and protein levels. Tied site scores share the most conservative q-value in the tie.
 
 Site FDR is about identity: is this modified site on this protein real? Localization confidence is a separate question and stays in `best_localization_probability` and `best_localization_q_value`.
 
@@ -1444,7 +1557,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, and `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)), and, with `immonium` enabled, the `immonium_*` columns of `results.sage.parquet` are filled. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
   - `recommended_tolerances` suggests precursor and fragment tolerances from the rank-1 target PSMs at 1% spectrum q-value, pooled over all files. For each, `bias_ppm` is the median signed error (observed − theoretical), `sigma_ppm` is 1.4826 × the median absolute deviation around it, `required_ppm` is `|bias_ppm| + 4 × sigma_ppm`, and `recommended_ppm` is the smallest of ±5, 10, 20, 50 and 100 ppm that covers `required_ppm` (`null` when even 100 ppm does not). Precursor errors are `precursor_ppm`. Fragment errors start from each PSM's signed, intensity-weighted mean fragment error; the spread of those means understates how far single ions stray, so the median within-PSM standard deviation of the ion errors is added in quadrature to `sigma_ppm`. All errors are raw, before any `mass_recalibration`. Fewer than 100 such PSMs leave both estimates `null` and set `skipped`. The log prints the same result, for example `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`. Only PSMs inside the configured windows are measured, so a recommendation at or above a configured half-width means the window may be clipping real errors: widen it and search again.
   - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
@@ -1491,8 +1604,10 @@ The `results.sage.parquet` file contains the following columns:
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
 Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
-scores; columns without one are descriptive. `results.sage.v1.parquet.schema` and
-`results.sage.v2.parquet.schema` in [`schemas/`](schemas/) are the exact contract.
+scores; columns without one are descriptive. `results.sage.v3.parquet.schema` (unlabeled) and
+`results.sage.v4.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
+They are v1 and v2 plus nine nullable columns at the end: the two fragment-loss columns, then
+the seven `immonium_*` columns.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1502,7 +1617,7 @@ scores; columns without one are descriptive. `results.sage.v1.parquet.schema` an
 - `stripped_peptide`: Peptide sequence without modifications.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
-- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 2).
+- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 4).
 - `proteins`: Proteins containing the peptide sequence, joined by `;`.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
 - `protein_groups`: Protein groups for the peptide, joined by `;`. With `protein_grouping` on, these are the IDPicker groups; with it off, the peptide's proteins. See [Protein inference](#protein-inference).
@@ -1546,6 +1661,8 @@ scores; columns without one are descriptive. `results.sage.v1.parquet.schema` an
 - `protein_q`: Protein-level q-value from picked-protein FDR over peptides unique to one protein; 1 for shared peptides. Lower is better.
 - `protein_group_q`: Protein-group q-value from picked group FDR over peptides in exactly one group; 1 for peptides shared between groups. Lower is better.
 - `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
+- `matched_loss_peaks`, `loss_intensity_pct`: Generic fragment-loss evidence (cleavage and charge pairs whose loss form matched, and the percent of MS2 intensity those loss peaks carry); see [Generic fragment losses](#generic-fragment-losses). They do not count toward `matched_peaks` or the hyperscore. Null when `database.fragment_losses` is not configured. Higher is better.
+- `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
@@ -1596,6 +1713,9 @@ grouping off) and the grouping peptide q-value.
 - `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
 - `ms2_confirmed_strict`, `file_score`, `file_spectral_angle`, `file_trace_cosine`, `file_rt_shift_bins`, `transfer_candidate`: per-file evidence diagnostics, defined in [`schemas/scores.v1.md`](schemas/scores.v1.md).
+- `apex_rt`, `peak_start_rt`, `peak_end_rt`: Retention time, in the file's own RT units (minutes), of the selected peak apex and of the first and last integrated points in this file. Null when intensity is null.
+- `fwhm`: Full width at half maximum of the file's traced peak, in minutes. Null when the trace does not fall to half height inside the traced window.
+- `id_apex_offset`: Retention time of this file's best accepted PSM minus `apex_rt`, in minutes. Negative means the precursor was sampled before its apex (the usual DDA case). Null when the file has no accepted PSM of this precursor.
 - `extraction_q_value`: Per-row (precursor and file) extraction q-value, given for every target row with a signal, MS2-backed and transferred alike. Each target's shifted decoy is evaluated at the target's own peak, and these paired decoy rows compete with all target rows by `file_score`. Null for decoy precursors and for rows without a signal. It is a diagnostic: it does not filter output, does not replace the precursor `q_value`, and on a pure-human control roughly a fifth of transfers passing 1% were still foreign-species, so it is not a calibrated transfer FDR. `lfq_settings.mbr` defaults are unchanged.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
@@ -1639,3 +1759,22 @@ With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configur
 In DIA pseudo mode the scan runs on the raw wide-window MS2 spectra before they are converted to pseudo-spectra, by design: diagnostic ions are fragments of whatever co-isolated in the window, so `scannr` names the raw window scan, not a pseudo-spectrum. timsTOF diaPASEF pseudo-spectra are built straight from the frames, so their raw window spectra are read, and scanned, only with `quant.lfq`; without it a diaPASEF file has no QC entry.
 
 A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).
+
+### Immonium ions
+
+An immonium ion is the single-residue internal fragment of a peptide, at the residue mass minus CO plus a proton. With `immonium` enabled, every scored PSM is checked against its processed spectrum (after deisotoping and peak trimming, the peaks the search scored) for:
+
+- **Residue ions** of unmodified P (70.0651), V (72.0808), L/I (86.0964), H (110.0713), F (120.0808), Y (136.0757) and W (159.0917), unless `residue_ions` is false. Their intensity tracks the presence of the residue in the peptide (Hohmann et al. 2008, *Anal. Chem.* 80:5596).
+- **Modified-residue ions** that the search's modifications declare in `immonium_ions`, for example phosphotyrosine at 216.0420 and acetyl-lysine at 126.0913 (see [Static and variable behavior](#static-and-variable-behavior)). None are used by default. Each ion is labeled `Name@Sites`, for example `Phospho@Y` or `Acetyl@K`.
+
+A peak counts when it is within `tolerance` and singly charged (or its charge is unknown). A residue counts as present only where it is unmodified, so the Y ion is unexplained for a peptide whose only Y is phosphorylated. A modified ion is explained only when the peptide carries that modification on a site the ion was declared for: `Phospho@Y` is explained by a phosphorylated Y, not by a phosphorylated S or T. The evidence fills seven columns of `results.sage.parquet`, null when `immonium` is off:
+
+- `immonium_explained`: residue ions observed whose unmodified residue is in the peptide.
+- `immonium_missing`: residue ions of the peptide that are not observed. An ion below the lowest retained peak is not counted, since it may be outside the scan range.
+- `immonium_unexplained`: residue ions observed whose residue is not in the peptide.
+- `immonium_residue_ions`: labels of the residue ions observed, comma-separated.
+- `immonium_modified_explained` / `immonium_modified_unexplained` / `immonium_modified_ions`: the same for the modified-residue ions.
+
+With `write_pin`, the five counts are added to `results.sage.pin` before `Peptide` for external rescoring. With `rescore` (the default when `immonium` is on) they are also appended to the linear discriminant's features; with `rescore: false` scores, identifications and q-values are those of a search without the option. The ions never enter the fragment index, the hyperscore or PTM localization. Mass-offset PSMs are checked against the unmodified peptide, and peaks are matched at their observed m/z, without `mass_recalibration` corrections. DIA pseudo-spectra are checked like DDA spectra, although an immonium ion in a wide window may come from any co-isolated peptide. With `immonium` off or absent, scores, identifications and q-values are unchanged and the `immonium_*` columns are null.
+
+The counts are evidence, not a site call: a pY ion supports a phosphotyrosine somewhere in the spectrum's peptides (co-isolated peptides included), not a particular site. See [`benchmarks/IMMONIUM.md`](benchmarks/IMMONIUM.md) for the literature and benchmark results.

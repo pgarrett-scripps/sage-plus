@@ -2,15 +2,15 @@ use super::*;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/lfq.v5.parquet.schema"
+        "../../../../schemas/lfq.v7.parquet.schema"
     ))
 }
 
 fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/lfq.v6.parquet.schema")
+        include_str!("../../../../schemas/lfq.v8.parquet.schema")
     } else {
-        include_str!("../../../../schemas/lfq.v5.parquet.schema")
+        include_str!("../../../../schemas/lfq.v7.parquet.schema")
     })
 }
 
@@ -19,6 +19,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     filenames: &[String],
     database: &IndexedDatabase,
     provenance: &[(String, String)],
+    peak_center: &str,
 ) -> parquet::errors::Result<Vec<u8>> {
     if let Some((_, quantified)) = areas.iter().find(|(_, quantified)| {
         quantified.intensities.len() != filenames.len()
@@ -79,9 +80,10 @@ pub fn serialize_lfq<H: BuildHasher>(
                 "sage.lfq.extraction_q_value_scope".into(),
                 Some("precursor_file_all_rows".into()),
             ),
+            KeyValue::new("sage.lfq.peak_center".into(), Some(peak_center.into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "6" } else { "5" }.into()),
+                Some(if has_labels { "8" } else { "7" }.into()),
             ),
         ],
         provenance,
@@ -413,6 +415,31 @@ pub fn serialize_lfq<H: BuildHasher>(
         col.typed::<FloatType>()
             .write_batch(&values, Some(&levels), None)?;
         col.close()?;
+    }
+    for field in 0..5 {
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut levels = Vec::new();
+            for evidence in rows.iter().flat_map(|(_, peak)| &peak.file_evidence) {
+                let value = evidence.as_ref().and_then(|evidence| match field {
+                    0 => Some(evidence.apex_rt),
+                    1 => Some(evidence.peak_start_rt),
+                    2 => Some(evidence.peak_end_rt),
+                    3 => evidence.fwhm,
+                    _ => evidence.id_apex_offset,
+                });
+                match value.filter(|value| value.is_finite()) {
+                    Some(value) => {
+                        values.push(value);
+                        levels.push(1);
+                    }
+                    None => levels.push(0),
+                }
+            }
+            col.typed::<FloatType>()
+                .write_batch(&values, Some(&levels), None)?;
+            col.close()?;
+        }
     }
     rg.close()?;
     writer.into_inner()
