@@ -7,6 +7,7 @@ use sage_core::scoring::ScoreType;
 use sage_core::{
     database::{Builder, Parameters},
     diagnostic::{DiagnosticIon, DiagnosticIonsConfig},
+    immonium::{ImmoniumConfig, ImmoniumSettings},
     lfq::LfqSettings,
     mass::Tolerance,
     mass_recalibration::MassRecalibrationMode,
@@ -96,6 +97,10 @@ pub struct Search {
     /// Diagnostic ions searched in raw MS2 spectra; omitted when off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diagnostic_ions: Option<Vec<DiagnosticIon>>,
+
+    /// Per-PSM immonium-ion evidence; omitted when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub immonium: Option<ImmoniumSettings>,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -195,6 +200,14 @@ pub struct Input {
     /// phosphotyrosine immonium ions; a list of `{name, mz, tolerance}`
     /// replaces them (tolerance defaults to 20 ppm). Default off.
     pub diagnostic_ions: Option<DiagnosticIonsConfig>,
+    /// Per-PSM immonium-ion evidence, written to `immonium.tsv` and the PIN
+    /// file. `true` looks for the unmodified F, Y, W, P, H, V and L/I ions
+    /// and the phosphotyrosine (216.0420) and acetyl-lysine (126.0913) ions.
+    /// An object sets `rescore` (add the counts to the linear discriminant,
+    /// default false), `residues` (default true), `modified` (a list of
+    /// `{name, residue, modification, mz}`) and `tolerance` (default
+    /// `fragment_tol`). Default off.
+    pub immonium: Option<ImmoniumConfig>,
 
     pub annotate_matches: Option<bool>,
     /// Record the SHA-256 of every local spectrum file in the Parquet footers
@@ -678,6 +691,11 @@ impl Input {
                 );
             }
         }
+        if let Some(config) = &self.immonium {
+            if let Some(settings) = config.clone().resolve(self.fragment_tol) {
+                settings.validate().map_err(anyhow::Error::msg)?;
+            }
+        }
         Ok(())
     }
 
@@ -766,6 +784,9 @@ impl Input {
         }
 
         let diagnostic_ions = self.diagnostic_ions.and_then(DiagnosticIonsConfig::resolve);
+        let immonium = self
+            .immonium
+            .and_then(|config| config.resolve(self.fragment_tol));
 
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
@@ -819,6 +840,7 @@ impl Input {
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             diagnostic_ions,
+            immonium,
             score_type,
             dia,
             prefilter_budgets: None,

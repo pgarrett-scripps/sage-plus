@@ -40,12 +40,27 @@ const FEATURE_NAMES: [&str; FEATURES] = [
     "sqrt(delta_ims_model)",
 ];
 
+/// Feature-row width with the immonium-ion columns appended.
+const IMMONIUM_FEATURES: usize = FEATURES + crate::immonium::LDA_FEATURES;
+const IMMONIUM_FEATURE_NAMES: [&str; crate::immonium::LDA_FEATURES] = [
+    "immonium_explained",
+    "immonium_missing",
+    "immonium_unexplained",
+    "immonium_modified_explained",
+    "immonium_modified_unexplained",
+];
+
 struct Features<'a>(&'a [f64]);
 
 impl std::fmt::Debug for Features<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_map()
-            .entries(FEATURE_NAMES.iter().zip(self.0))
+            .entries(
+                FEATURE_NAMES
+                    .iter()
+                    .chain(&IMMONIUM_FEATURE_NAMES)
+                    .zip(self.0),
+            )
             .finish()
     }
 }
@@ -281,6 +296,18 @@ impl LinearDiscriminantAnalysis {
 /// On failure `scores` are left untouched and the reason is returned; callers
 /// then rank PSMs with [`score_psms_fallback`].
 pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<(), LdaFailure> {
+    score_psms_with_immonium(scores, precursor_tol, false)
+}
+
+/// [`score_psms`], with the immonium-ion counts of
+/// [`crate::immonium::ImmoniumEvidence::lda_row`] appended to the feature
+/// row when `immonium` is true. PSMs without immonium evidence contribute
+/// zeros; a column that is zero for every PSM is ignored by the fit.
+pub fn score_psms_with_immonium(
+    scores: &mut [Feature],
+    precursor_tol: Tolerance,
+    immonium: bool,
+) -> Result<(), LdaFailure> {
     log::trace!("fitting linear discriminant model...");
     let decoys = scores
         .par_iter()
@@ -350,22 +377,22 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
         ]
     };
 
-    let lda = LinearDiscriminantAnalysis::train::<_, FEATURES>(scores, &decoys, &compute_features)
-        .inspect_err(|failure| {
-            if *failure == LdaFailure::NonFinite {
-                if let Some(row) = scores
-                    .iter()
-                    .map(&compute_features)
-                    .find(|row| row.iter().any(|f| !f.is_finite()))
-                {
-                    log::warn!("example feature vector with NaN: {:?}", Features(&row));
+    let discriminants = if immonium {
+        let extended = |perc: &Feature| -> [f64; IMMONIUM_FEATURES] {
+            let base = compute_features(perc);
+            let extra = perc.immonium.unwrap_or_default().lda_row();
+            std::array::from_fn(|j| {
+                if j < FEATURES {
+                    base[j]
+                } else {
+                    extra[j - FEATURES]
                 }
-            }
-        })?;
-    let discriminants: Vec<f64> = scores
-        .par_iter()
-        .map(|perc| lda.score(&compute_features(perc)))
-        .collect();
+            })
+        };
+        fit_discriminants(scores, &decoys, extended)?
+    } else {
+        fit_discriminants(scores, &decoys, compute_features)?
+    };
     if discriminants.iter().any(|score| !score.is_finite()) {
         return Err(LdaFailure::NonFinite);
     }
@@ -395,6 +422,31 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
         });
 
     Ok(())
+}
+
+/// Fit a linear discriminant on the rows `compute_features` gives and return
+/// each PSM's projection.
+fn fit_discriminants<const D: usize>(
+    scores: &[Feature],
+    decoys: &[bool],
+    compute_features: impl Fn(&Feature) -> [f64; D] + Sync,
+) -> Result<Vec<f64>, LdaFailure> {
+    let lda = LinearDiscriminantAnalysis::train::<_, D>(scores, decoys, &compute_features)
+        .inspect_err(|failure| {
+            if *failure == LdaFailure::NonFinite {
+                if let Some(row) = scores
+                    .iter()
+                    .map(&compute_features)
+                    .find(|row| row.iter().any(|f| !f.is_finite()))
+                {
+                    log::warn!("example feature vector with NaN: {:?}", Features(&row));
+                }
+            }
+        })?;
+    Ok(scores
+        .par_iter()
+        .map(|perc| lda.score(&compute_features(perc)))
+        .collect())
 }
 
 /// Heuristic discriminant used when [`score_psms`] cannot fit a model:

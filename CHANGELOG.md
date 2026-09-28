@@ -9,6 +9,20 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Opt-in per-PSM immonium-ion evidence (`immonium`, default off). For each PSM, the processed
+  spectrum is checked for the immonium ions of unmodified P, V, L/I, H, F, Y and W (Hohmann et
+  al. 2008) and for configured modified-residue ions, by default phosphotyrosine 216.0420
+  (Steen et al. 2001) and acetyl-lysine 126.0913 (Trelle & Jensen 2008). Each is counted as
+  explained, missing or unexplained by the peptide and written to `immonium.tsv`
+  (`schemas/immonium.v1.tsv.schema.json`) and, with `write_pin`, to five `.pin` columns.
+  Modified ions are configured as `{name, residue, modification, mz}`. `rescore: true` also adds
+  the counts to the linear discriminant (default false). The ions never enter the fragment
+  index, the hyperscore or localization. With the option off, outputs are byte-identical; with it
+  on and `rescore` off, results and site tables are identical on SILAC, PXD028735, PXD007058
+  and PXD000138. `rescore` added 0.4-1.3% PSMs at 1% but raised the HYE entrapment FDP from
+  1.67% to 1.73%, so it stays off. See `benchmarks/IMMONIUM.md`.
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR

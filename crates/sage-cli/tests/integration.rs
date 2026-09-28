@@ -946,6 +946,129 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// With `immonium` absent or `false` the outputs are byte-identical; turned
+/// on without `rescore` only `immonium.tsv` and the PIN columns are added.
+#[test]
+fn immonium_off_is_identical_and_on_adds_outputs() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-immonium-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["write_pin"] = true.into();
+    config["report_psms"] = 5.into();
+
+    let run =
+        |name: &str, immonium: Option<serde_json::Value>| -> anyhow::Result<std::path::PathBuf> {
+            let run_root = root.join(name);
+            std::fs::create_dir_all(&run_root)?;
+            let mut config = config.clone();
+            if let Some(value) = immonium {
+                config["immonium"] = value;
+            }
+            let path = run_root.join("config.json");
+            std::fs::write(&path, serde_json::to_vec(&config)?)?;
+            run_sage_with_events(&workspace, &path, &run_root)?;
+            Ok(run_root.join("output"))
+        };
+    let base = run("absent", None)?;
+    let off = run("off", Some(false.into()))?;
+    let on = run("on", Some(true.into()))?;
+    let rescore = run("rescore", Some(serde_json::json!({"rescore": true})))?;
+
+    for file in [
+        "results.sage.pin",
+        "results.sage.parquet",
+        "matched_fragments.sage.parquet",
+    ] {
+        assert_eq!(
+            std::fs::read(base.join(file))?,
+            std::fs::read(off.join(file))?,
+            "{file} differs with immonium off"
+        );
+    }
+    assert!(!base.join("immonium.tsv").exists());
+    assert!(!off.join("immonium.tsv").exists());
+    for dir in [&base, &off] {
+        let results: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("results.json"))?)?;
+        assert!(results.get("immonium").is_none());
+    }
+
+    // On without rescoring: the PIN gains the immonium columns before
+    // `Peptide` and is otherwise unchanged.
+    let columns = sage_immonium_pin_columns();
+    let strip = |pin: String| {
+        let rows = pin
+            .lines()
+            .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        let drop = rows[0]
+            .iter()
+            .enumerate()
+            .filter(|(_, name)| columns.contains(&name.as_str()))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let kept = rows
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .enumerate()
+                    .filter(|(index, _)| !drop.contains(index))
+                    .map(|(_, value)| value)
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        (drop.len(), kept)
+    };
+    let (none, base_pin) = strip(std::fs::read_to_string(base.join("results.sage.pin"))?);
+    assert_eq!(none, 0);
+    let on_pin = std::fs::read_to_string(on.join("results.sage.pin"))?;
+    let header = on_pin
+        .lines()
+        .next()
+        .unwrap()
+        .split('\t')
+        .collect::<Vec<_>>();
+    let peptide = header.iter().position(|name| *name == "Peptide").unwrap();
+    assert_eq!(header[peptide - columns.len()..peptide], columns);
+    let (added, on_pin) = strip(on_pin);
+    assert_eq!(added, columns.len());
+    assert_eq!(base_pin, on_pin);
+
+    let results: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(on.join("results.json"))?)?;
+    assert_eq!(results["immonium"]["rescore"], false);
+    assert_eq!(results["immonium"]["modified"][0]["name"], "pY");
+    for dir in [&on, &rescore] {
+        assert_matches_published_schemas(&workspace, dir)?;
+        let table = std::fs::read_to_string(dir.join("immonium.tsv"))?;
+        assert_eq!(table.lines().count(), base_pin.len(), "{table}");
+        let summary: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("run-summary.json"))?)?;
+        assert!(summary["output_paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path.as_str().unwrap().ends_with("immonium.tsv")));
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+fn sage_immonium_pin_columns() -> [&'static str; 5] {
+    [
+        "immonium_explained",
+        "immonium_missing",
+        "immonium_unexplained",
+        "immonium_modified_explained",
+        "immonium_modified_unexplained",
+    ]
+}
+
 #[test]
 fn parquet_footers_and_run_summary_record_provenance() -> anyhow::Result<()> {
     use parquet::file::reader::{FileReader, SerializedFileReader};
@@ -1068,10 +1191,18 @@ fn assert_matches_published_schemas(
     broken["execution"]["rayon_threads"] = serde_json::json!("two");
     assert!(compiled.validate(&broken, index).is_err());
 
-    for (file, schema) in [
-        ("digestion.tsv", "digestion.v1.tsv.schema.json"),
-        ("diagnostic_ions.tsv", "diagnostic_ions.v1.tsv.schema.json"),
+    for (file, schema, required) in [
+        ("digestion.tsv", "digestion.v1.tsv.schema.json", true),
+        (
+            "diagnostic_ions.tsv",
+            "diagnostic_ions.v1.tsv.schema.json",
+            false,
+        ),
+        ("immonium.tsv", "immonium.v1.tsv.schema.json", false),
     ] {
+        if !required && !output.join(file).exists() {
+            continue;
+        }
         let table: serde_json::Value =
             serde_json::from_slice(&std::fs::read(schemas.join(schema))?)?;
         let columns = table["fields"]

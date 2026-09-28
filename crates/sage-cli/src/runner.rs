@@ -1074,6 +1074,7 @@ impl Runner {
 mod artifacts;
 pub mod estimate;
 mod execution;
+mod immonium;
 mod postprocess;
 pub(crate) mod prefilter;
 pub mod qc;

@@ -142,7 +142,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row; a channel that was not observed is null. With TMT on, `run-summary.json` adds `quantification.tmt_channels`: per channel, the number of quantified spectra where it was observed or missing and the median observed intensity (missing channels are skipped, not counted as 0).
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
-- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs).
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs). Per-PSM immonium-ion evidence goes to `immonium.tsv` when `immonium` is enabled; see [Immonium ions](#immonium-ions-immoniumtsv).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -174,7 +174,7 @@ The versioned physical schemas and score definitions are published in [`schemas/
 The non-Parquet reports have published schemas in the same directory:
 
 - [`run-summary.v9.schema.json`](schemas/run-summary.v9.schema.json): JSON Schema (draft 2020-12) for `run-summary.json` with `schema_version` 9. Objects allow additional properties, since optional fields are added without a version bump; readers should ignore unknown keys.
-- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json) and [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv` and `diagnostic_ions.tsv`.
+- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json), [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json) and [`immonium.v1.tsv.schema.json`](schemas/immonium.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv`, `diagnostic_ions.tsv` and `immonium.tsv`.
 
 The integration tests validate a real run's outputs against these files. `results.json` echoes the effective configuration (see [`config.schema.json`](schemas/config.schema.json)) and is not a versioned contract.
 
@@ -529,6 +529,7 @@ For additional information about configuration options and output file formats, 
   "wide_window": false,     // Optional[bool] {default=false}: _ignore_ `precursor_tol` and search in wide-window/DIA mode
   "predict_rt": false,    // Optional[bool] {default=true}: use retention time prediction model as a feature for LDA
   "diagnostic_ions": false, // Optional[bool|list] {default=false}: scan MS2 for diagnostic ions into diagnostic_ions.tsv
+  "immonium": false,        // Optional[bool|object] {default=false}: per-PSM immonium-ion evidence into immonium.tsv and the PIN file
   "ion_mobility_model": {
     "enabled": false       // Optional[bool] {default=true}: retain observed mobility without fitting a prediction model
   },
@@ -1176,6 +1177,21 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
       {"name": "HexHexNAc", "mz": 366.1395, "tolerance": {"da": [-0.01, 0.01]}}
     ]
     ```
+- **immonium**: Boolean or object. Record, for every PSM, which immonium ions its peptide explains and write `immonium.tsv` and extra `.pin` columns (default: false). `true` uses the defaults below. See [Immonium ions](#immonium-ions-immoniumtsv).
+  - `rescore`: Boolean. Add the five immonium counts to the linear discriminant (default: false).
+  - `residues`: Boolean. Look for the unmodified-residue ions of P, V, L/I, H, F, Y and W (default: true).
+  - `modified`: List of `{name, residue, modification, mz}`: the ion's label, the one-letter residue, the modification mass on that residue (matched within 0.01 Da) and the ion's singly charged m/z. Default: `pY` (Y, 79.96633, 216.0420) and `acK` (K, 42.010565, 126.0913). An empty list turns them off.
+  - `tolerance`: Same form as `fragment_tol`, which it defaults to.
+  - Example:
+    ```json
+    "immonium": {
+      "rescore": false,
+      "modified": [
+        {"name": "pY", "residue": "Y", "modification": 79.96633, "mz": 216.0420},
+        {"name": "acK", "residue": "K", "modification": 42.010565, "mz": 126.0913}
+      ]
+    }
+    ```
 - **ion_mobility_model.enabled**: Boolean. Fit and use the ion-mobility model when mobility observations are present (default: true). Set this to `false` to keep observed mobility data without fitting predictions.
   - Example:
     ```json
@@ -1446,7 +1462,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, and `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)). `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control table `digestion.tsv` is always written, `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)), and `immonium.tsv` when `immonium` is enabled. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
   - `recommended_tolerances` suggests precursor and fragment tolerances from the rank-1 target PSMs at 1% spectrum q-value, pooled over all files. For each, `bias_ppm` is the median signed error (observed − theoretical), `sigma_ppm` is 1.4826 × the median absolute deviation around it, `required_ppm` is `|bias_ppm| + 4 × sigma_ppm`, and `recommended_ppm` is the smallest of ±5, 10, 20, 50 and 100 ppm that covers `required_ppm` (`null` when even 100 ppm does not). Precursor errors are `precursor_ppm`. Fragment errors start from each PSM's signed, intensity-weighted mean fragment error; the spread of those means understates how far single ions stray, so the median within-PSM standard deviation of the ion errors is added in quadrature to `sigma_ppm`. All errors are raw, before any `mass_recalibration`. Fewer than 100 such PSMs leave both estimates `null` and set `skipped`. The log prints the same result, for example `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`. Only PSMs inside the configured windows are measured, so a recommendation at or above a configured half-width means the window may be clipping real errors: widen it and search again.
   - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
@@ -1641,3 +1657,23 @@ With `diagnostic_ions` enabled, every MS2 spectrum is searched for each configur
 In DIA pseudo mode the scan runs on the raw wide-window MS2 spectra before they are converted to pseudo-spectra, by design: diagnostic ions are fragments of whatever co-isolated in the window, so `scannr` names the raw window scan, not a pseudo-spectrum. timsTOF diaPASEF pseudo-spectra are built straight from the frames, so their raw window spectra are read, and scanned, only with `quant.lfq`; without it a diaPASEF file has no QC entry.
 
 A log line gives the percent of MS2 spectra containing each ion, and `run-summary.json` records per ion and per file the number and percent of MS2 spectra containing it under `qc.diagnostic_ions`. On a 1.2 GB Orbitrap DDA mzML with 109,507 MS2 spectra, the scan with the six built-in ions added 20-50 ms to about 9 s of file IO (debug build).
+
+### Immonium ions (`immonium.tsv`)
+
+An immonium ion is the single-residue internal fragment of a peptide, at the residue mass minus CO plus a proton. With `immonium` enabled, every scored PSM is checked against its processed spectrum (after deisotoping and peak trimming, the peaks the search scored) for:
+
+- **Residue ions** of unmodified P (70.0651), V (72.0808), L/I (86.0964), H (110.0713), F (120.0808), Y (136.0757) and W (159.0917). Their intensity tracks the presence of the residue in the peptide (Hohmann et al. 2008, *Anal. Chem.* 80:5596).
+- **Modified-residue ions**: by default phosphotyrosine at 216.0420 (Steen et al. 2001, *Anal. Chem.* 73:1440) and acetyl-lysine at 126.0913 (Trelle & Jensen 2008, *Anal. Chem.* 80:3422, 98% specific; the 143.118 ion is not specific and is left out).
+
+A peak counts when it is within `tolerance` and singly charged (or its charge is unknown). A residue counts as present only where it is unmodified, so the Y ion is unexplained for a peptide whose only Y is phosphorylated, and the pY ion is explained only when the peptide carries the configured modification mass on that residue. `immonium.tsv` has one row per reported PSM, in the order of `results.sage.parquet`:
+
+- `psm_id`, `file`, `scannr`, `peptide`, `is_decoy`, `rank`, `spectrum_q`: identify the PSM.
+- `explained`: residue ions observed whose unmodified residue is in the peptide.
+- `missing`: residue ions of the peptide that are not observed. An ion below the lowest retained peak is not counted, since it may be outside the scan range.
+- `unexplained`: residue ions observed whose residue is not in the peptide.
+- `residue_ions`: labels of the residue ions observed.
+- `modified_explained` / `modified_unexplained` / `modified_ions`: the same for the configured modified-residue ions.
+
+With `write_pin`, the five counts are added to `results.sage.pin` before `Peptide` for external rescoring. With `rescore: true` they are also appended to the linear discriminant's features. The ions never enter the fragment index, the hyperscore or PTM localization. Mass-offset PSMs are checked against the unmodified peptide, and peaks are matched at their observed m/z, without `mass_recalibration` corrections. DIA pseudo-spectra are checked like DDA spectra, although an immonium ion in a wide window may come from any co-isolated peptide. With `immonium` off or absent, every output is byte-identical to a search without the option.
+
+The rows are evidence, not a site call: a pY ion supports a phosphotyrosine somewhere in the spectrum's peptides (co-isolated peptides included), not a particular site. See [`benchmarks/IMMONIUM.md`](benchmarks/IMMONIUM.md) for the literature and benchmark results.

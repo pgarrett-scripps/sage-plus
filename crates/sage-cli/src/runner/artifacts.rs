@@ -618,6 +618,9 @@ impl Runner {
                 .format(feature.posterior_error)
                 .as_bytes(),
         );
+        if self.parameters.immonium.is_some() {
+            super::immonium::push_pin_fields(&mut record, feature);
+        }
         record.push_field(peptide.to_string().as_bytes());
         record.push_field(
             peptide
@@ -634,7 +637,7 @@ impl Runner {
             .delimiter(b'\t')
             .from_writer(OutputTarget::new(&path)?);
 
-        let headers = csv::ByteRecord::from(vec![
+        let mut headers = vec![
             "SpecId",
             "Label",
             "ScanNr",
@@ -674,7 +677,12 @@ impl Runner {
             "posterior_error",
             "Peptide",
             "Proteins",
-        ]);
+        ];
+        if self.parameters.immonium.is_some() {
+            let peptide = headers.len() - 2;
+            headers.splice(peptide..peptide, super::immonium::PIN_COLUMNS);
+        }
+        let headers = csv::ByteRecord::from(headers);
 
         let re = regex::Regex::new(r"scan=(\d+)").expect("This is valid regex");
 

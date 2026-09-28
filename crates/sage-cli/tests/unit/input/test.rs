@@ -760,3 +760,62 @@ fn diagnostic_ions_config() -> anyhow::Result<()> {
     assert!(serde_json::from_value::<Input>(config).is_err());
     Ok(())
 }
+
+#[test]
+fn immonium_config() -> anyhow::Result<()> {
+    use sage_core::immonium::default_modified_ions;
+    let fixture = serde_json::json!({
+        "database": {"fasta": "tests/Q99536.fasta"},
+        "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"],
+        "precursor_tol": {"ppm": [-10, 10]},
+        "fragment_tol": {"ppm": [-20, 20]}
+    });
+    let parse = |value: Option<serde_json::Value>| {
+        let mut config = fixture.clone();
+        if let Some(value) = value {
+            config["immonium"] = value;
+        }
+        serde_json::from_value::<Input>(config)
+    };
+    let fragment_tol = sage_core::mass::Tolerance::Ppm(-20.0, 20.0);
+    let resolve = |input: Input| {
+        input
+            .immonium
+            .and_then(|config| config.resolve(fragment_tol))
+    };
+
+    assert!(parse(None)?.immonium.is_none());
+    assert!(resolve(parse(Some(false.into()))?).is_none());
+    let on = resolve(parse(Some(true.into()))?).unwrap();
+    assert!(!on.rescore && on.residues);
+    assert_eq!(on.modified, default_modified_ions());
+    assert_eq!(on.tolerance, fragment_tol);
+
+    let custom = parse(Some(serde_json::json!({
+        "rescore": true,
+        "modified": [{"name": "pH", "residue": "H", "modification": 79.96633, "mz": 190.0376}]
+    })))?;
+    custom.validate()?;
+    let custom = resolve(custom).unwrap();
+    assert!(custom.rescore);
+    assert_eq!(custom.modified.len(), 1);
+
+    for invalid in [
+        serde_json::json!({"modified": [{"name": "", "residue": "Y", "modification": 79.97, "mz": 216.04}]}),
+        serde_json::json!({"modified": [{"name": "x", "residue": "1", "modification": 79.97, "mz": 216.04}]}),
+        serde_json::json!({"modified": [{"name": "x", "residue": "Y", "modification": 79.97, "mz": -1.0}]}),
+        serde_json::json!({"tolerance": {"ppm": [5, 10]}}),
+    ] {
+        assert!(
+            parse(Some(invalid.clone()))?.validate().is_err(),
+            "{invalid}"
+        );
+    }
+    // No formula strings or unknown keys.
+    assert!(parse(Some(serde_json::json!({"loss": "H2O"}))).is_err());
+    assert!(parse(Some(serde_json::json!({
+        "modified": [{"name": "x", "residue": "Y", "mz": 216.04, "formula": "HPO3"}]
+    })))
+    .is_err());
+    Ok(())
+}

@@ -628,6 +628,58 @@
       },
       "type": "object"
     },
+    "ImmoniumConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ImmoniumOptions"
+        }
+      ],
+      "description": "`immonium` configuration: `true` for the defaults, or an object."
+    },
+    "ImmoniumOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "modified": {
+          "description": "Modified-residue ions; the built-in pY and acK ions when omitted, none\nwhen empty.",
+          "items": {
+            "$ref": "#/$defs/ModifiedImmoniumIon"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "rescore": {
+          "description": "Add the immonium counts to the linear discriminant (default false).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "residues": {
+          "description": "Look for the unmodified F, Y, W, P, H, V and L/I ions (default true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Matching tolerance; the search's `fragment_tol` when omitted."
+        }
+      },
+      "type": "object"
+    },
     "IntegrationStrategy": {
       "enum": [
         "Apex",
@@ -846,6 +898,39 @@
           "type": "string"
         }
       ]
+    },
+    "ModifiedImmoniumIon": {
+      "additionalProperties": false,
+      "description": "A modified-residue immonium ion.",
+      "properties": {
+        "modification": {
+          "description": "Mass of the modification on that residue, matched within 0.01 Da.",
+          "format": "float",
+          "type": "number"
+        },
+        "mz": {
+          "description": "Singly charged m/z of the ion.",
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "description": "Label reported in the output.",
+          "type": "string"
+        },
+        "residue": {
+          "description": "Modified residue, as a one-letter code.",
+          "maxLength": 1,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "residue",
+        "modification",
+        "mz"
+      ],
+      "type": "object"
     },
     "NamedStaticModification": {
       "additionalProperties": false,
@@ -1826,6 +1911,17 @@
     },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"
+    },
+    "immonium": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImmoniumConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Per-PSM immonium-ion evidence, written to `immonium.tsv` and the PIN\nfile. `true` looks for the unmodified F, Y, W, P, H, V and L/I ions\nand the phosphotyrosine (216.0420) and acetyl-lysine (126.0913) ions.\nAn object sets `rescore` (add the counts to the linear discriminant,\ndefault false), `residues` (default true), `modified` (a list of\n`{name, residue, modification, mz}`) and `tolerance` (default\n`fragment_tol`). Default off."
     },
     "ion_mobility_model": {
       "anyOf": [

@@ -416,6 +416,9 @@ impl Runner {
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
             self.parameters.output_paths.push(path);
         }
+        if let Some(path) = self.write_immonium(&output_features, &filenames)? {
+            self.parameters.output_paths.push(path);
+        }
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
 

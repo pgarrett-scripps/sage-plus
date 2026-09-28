@@ -1,0 +1,27 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "immonium",
+  "title": "immonium.tsv",
+  "description": "Immonium-ion evidence for each reported PSM, in the order of results.sage.parquet. Written only when `immonium` is enabled.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {"name": "psm_id", "type": "integer", "description": "PSM identifier, as in the `psm_id` column of results.sage.parquet."},
+    {"name": "file", "type": "string", "description": "Spectrum file name."},
+    {"name": "scannr", "type": "string", "description": "Native spectrum identifier, as in the `scannr` column of results.sage.parquet."},
+    {"name": "peptide", "type": "string", "description": "Modified peptide sequence."},
+    {"name": "is_decoy", "type": "boolean", "description": "Whether the PSM is a decoy."},
+    {"name": "rank", "type": "integer", "description": "Rank of the PSM within its spectrum."},
+    {"name": "spectrum_q", "type": "number", "description": "Spectrum-level q-value."},
+    {"name": "explained", "type": "integer", "description": "Residue immonium ions (P, V, L/I, H, F, Y, W) observed whose unmodified residue is in the peptide."},
+    {"name": "missing", "type": "integer", "description": "Residue immonium ions the peptide's unmodified residues give that are not observed; ions below the lowest retained peak are not counted."},
+    {"name": "unexplained", "type": "integer", "description": "Residue immonium ions observed whose unmodified residue is not in the peptide."},
+    {"name": "residue_ions", "type": "string", "description": "Comma-separated labels of the residue ions observed; empty when none."},
+    {"name": "modified_explained", "type": "integer", "description": "Configured modified-residue ions observed whose modified residue is in the peptide."},
+    {"name": "modified_unexplained", "type": "integer", "description": "Configured modified-residue ions observed whose modified residue is not in the peptide."},
+    {"name": "modified_ions", "type": "string", "description": "Comma-separated names of the modified-residue ions observed; empty when none."}
+  ],
+  "missingValues": []
+}
