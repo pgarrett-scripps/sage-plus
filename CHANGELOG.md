@@ -19,7 +19,11 @@ entries are retained below for provenance.
   label-free quantification also extracts in RT and 1/K0 (IonQuant, Yu et al. 2020, 2021;
   MaxQuant 4D, Prianichnikov et al. 2020; DIA-NN, Demichev et al. 2020, 2022); the median
   anchor for transfers is Sage Plus's own design. It has no effect without `recenter_on_apex`
-  or without ion mobility.
+  or without ion mobility. On three Ultra2 PASEF E. coli replicates (15 min) it moved 5.9% of
+  identified peaks' centroids more than 1% from the PSM's 1/K0, gave +0.5% precursors at 1% over
+  RT-only apex mode and lowered the median replicate CV from 0.269 to 0.264; decoy rows with
+  signal rose from 611 to 638. It only acts when `recenter_on_apex` is on, which stays off by
+  default.
 - LFQ columns `apex_mobility` (intensity-weighted 1/K0 of the file's integrated peak) and
   `id_mobility_offset` (best PSM 1/K0 minus `apex_mobility`), null unless mobility recentering
   ran. LFQ schema v9 (unlabeled) and v10 (labeled).
@@ -27,7 +31,16 @@ entries are retained below for provenance.
 ### Fixed
 - With `recenter_on_apex`, a precursor whose identified rows find no apex now falls back to
   the identification-RT window search instead of going unquantified. Shifted decoys fall back
-  by the same rule.
+  by the same rule. Decoys lack an apex far more often than targets, so this costs precursors:
+  on PXD028735 HYE it quantified 1,019 more target and 5,683 more decoy precursors (4,281
+  target rows, 902 at `extraction_q_value` <= 0.01), and precursors at 1% fell from 32,850 to
+  30,619 (window mode: 32,102). The control's foreign-species share at extraction q <= 1% fell
+  from 3.2% to 2.9%. On the timsTOF E. coli replicates, precursors at 1% fell 4.4%.
+
+### Known limitations
+- On the 15 min timsTOF E. coli replicates, `recenter_on_apex` (Beta 14 and now) raises the
+  median replicate CV from 0.171 to 0.269 on the same precursors; mobility recentering does not
+  fix this.
 
 ## [v0.1.0-beta.14] - 2026-09-28
 
