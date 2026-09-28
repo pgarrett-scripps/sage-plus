@@ -9,6 +9,21 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `mixed_isomers` evidence on PSM-site rows (`ptm_sites` schema version 4). It flags
+  localizations where the runner-up placement's own distinguishing fragments are also matched,
+  above the spectrum's random-match rate (binomial, Bonferroni over alternatives,
+  Benjamini-Hochberg per modification type, q <= 0.01), as a candidate co-isolated positional
+  isomer. New columns: `mixed_isomers`, `mixed_isomers_q_value`, `mixed_isomers_p_value`,
+  `runner_up_sites`, `runner_up_unique_ions_total`, `runner_up_unique_ions_matched` and
+  `runner_up_intensity_fraction`. `run-summary.json` adds `mixed_isomer_tested`,
+  `mixed_isomer_flagged` and `mixed_isomer_decoy_placement_flags`. Reported only: localization
+  q-values, site q-values and the FLR are unchanged (identical outputs on PXD000138 and
+  PXD007058). Not calibrated: on the PXD000138 known-site libraries, which contain no designed
+  co-present isomers, it flags 4.5% of phospho localizations at `localization_q_value` <= 0.01,
+  and impossible-site placements pass the same cutoff at 41% of the target flag count. Read a
+  flag as "the runner-up is also supported", not as a detected mixture.
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR

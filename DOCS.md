@@ -1383,8 +1383,31 @@ The current implementation combines one AScore-inspired, site-determining-ion st
 
 Two Parquet site reports are written:
 
-- **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
+- **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 4): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, `site_q_value`, the best site-level q-value among the protein sites the row supports, and the `mixed_isomers` evidence described below.
 - **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
+
+### Mixed positional isomers
+
+Localization picks one placement per PSM. When two positional isomers of the same peptide co-elute and are isolated together, one MS2 spectrum holds the fragments of both. Courcelles et al. (2012, *J Proteome Res*) found such isomers for 3-6% of identified phosphopeptides. `mixed_isomers` flags localizations where the runner-up placement also has evidence of its own.
+
+1. The runner-up is the next-best placement whose sites differ from the winner's.
+2. Only its distinguishing ions are counted: the fragments whose mass differs between the two placements. A runner-up ion whose m/z the winner also produces is left out, so every counted ion can only come from the runner-up.
+3. The matched count is tested against the spectrum's random-match rate, the same binomial model the localization score uses. The p-value is multiplied by the number of alternative placements the runner-up was picked from (Bonferroni).
+4. Benjamini-Hochberg q-values are taken across target localizations of each modification type. `mixed_isomers` is true at q <= 0.01.
+
+Scoring each isomer's own site-specific ions against a background and then applying Benjamini-Hochberg follows Thesaurus (Searle et al. 2019, *Nat Methods*), which does this for DIA. The per-spectrum binomial null and the choice of runner-up are Sage Plus's own, and have not been published.
+
+The flag is reported only. It changes no localization, `localization_q_value`, `site_q_value` or FLR. It cannot tell a true mixture from gas-phase phosphate relocation, which makes a pure isomer show some runner-up ions. Relocation is reported as low for HCD (Mischerikow et al. 2010, *Mol Cell Proteomics*), but Searle et al. attribute a third to a half of apparently co-eluting phosphoisomers to it. Treat a flag as "this spectrum also supports the runner-up", not as proof that both isomers are present.
+
+PSM-site columns:
+
+- `mixed_isomers`: the flag. It is false when there is no runner-up to test.
+- `mixed_isomers_q_value` and `mixed_isomers_p_value`: the test. They are null when there is no runner-up.
+- `runner_up_sites`: the runner-up placement, for example `T6` or `S3;T6` (1-based).
+- `runner_up_unique_ions_total` and `runner_up_unique_ions_matched`: the distinguishing ion slots of the runner-up, and how many matched a peak.
+- `runner_up_intensity_fraction`: matched runner-up-distinguishing intensity over that plus the matched winner-distinguishing intensity. This is a rough mixing ratio, not a fitted abundance.
+
+As a null check, the same test is run on the best impossible-site (decoy residue) placement, which cannot be present. `run-summary.json` records `mixed_isomer_tested`, `mixed_isomer_flagged` and `mixed_isomer_decoy_placement_flags` under `ptm_localization`. The last counts target localizations whose decoy placement would pass the same p-value cutoff. It should be small compared with `mixed_isomer_flagged`.
 
 ### Site-level FDR
 
