@@ -415,6 +415,62 @@ fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::e
 }
 
 #[test]
+fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
+    use sage_core::fragment_loss::{FragmentLoss, FragmentLosses};
+    use sage_core::scoring::FragmentLossFeatures;
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"PEPTIDE".as_slice().into(),
+        ..Peptide::default()
+    });
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        fragment_loss: Some(FragmentLossFeatures {
+            matched_peaks: 3,
+            intensity_pct: 2.5,
+        }),
+        ..Feature::default()
+    };
+    let read = |database: &IndexedDatabase| -> parquet::errors::Result<Vec<String>> {
+        let bytes = serialize_features(
+            &[&feature],
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            database,
+            1.0,
+            &[],
+            None,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let values = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.clone(), field.to_string()))
+            .collect::<HashMap<_, _>>();
+        Ok(["matched_loss_peaks", "loss_intensity_pct"]
+            .iter()
+            .map(|column| values[*column].clone())
+            .collect())
+    };
+    assert_eq!(read(&database)?, ["null", "null"]);
+    database.fragment_losses = Some(std::sync::Arc::new(FragmentLosses {
+        losses: vec![FragmentLoss {
+            name: "Water".into(),
+            mass: 18.010565,
+            sites: vec!["S".parse().unwrap()],
+            ion_kinds: vec![sage_core::ion_series::Kind::B],
+            allow_modified: false,
+        }],
+        max_losses: 1,
+    }));
+    assert_eq!(read(&database)?, ["3", "2.5"]);
+    Ok(())
+}
+
+#[test]
 fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<()> {
     let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,

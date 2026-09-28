@@ -7,6 +7,7 @@ pub mod digestion;
 pub mod enzyme;
 pub mod fasta;
 pub mod fdr;
+pub mod fragment_loss;
 pub mod heap;
 pub mod immonium;
 pub mod ion_series;

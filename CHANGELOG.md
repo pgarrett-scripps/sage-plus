@@ -46,6 +46,23 @@ entries are retained below for provenance.
   6% of MS2-confirmed rows more than half a FWHM off), adds 2% precursors at 1% and 10% rows at
   `extraction_q_value` <= 0.01 with unchanged ratio accuracy, but the human-only control's
   foreign rate at that cutoff rises from 2.6% to 3.2%, so it stays opt-in.
+- Generic fragment losses: `database.fragment_losses` configures water- and ammonia-style
+  losses by label, `mass`, `sites` (the modification site vocabulary), `ion_kinds` (a subset
+  of `database.ion_kinds`) and `allow_modified` (default false); `database.max_fragment_losses`
+  (default 1) caps stacking. Loss ions are matched only in full candidate scoring, never in
+  the preliminary fragment index, and enter the linear discriminant as two separate features,
+  `matched_loss_peaks` and `loss_intensity_pct`. Both are nullable columns of
+  `results.sage.parquet` (null when off; the same schema v3/v4 as the immonium columns, placed
+  before them) and, with `write_pin`, `.pin` columns before the immonium ones. With both
+  options on, the discriminant row is the base features, then the loss features, then the
+  immonium features. The hyperscore, `matched_peaks` and modification `neutral_losses` are
+  unchanged. Off unless the key is present, and then scores, identifications and q-values are
+  unchanged. On five HCD, ion-trap CID and ETciD datasets the separate
+  features changed identifications at 1% FDR by under 1% with no entrapment FDP inflation,
+  while scoring losses in the hyperscore lost 1-12% of PSMs (loss-only matches raise the
+  matched-ion count, which favours wrong candidates; count-free, parent-supported and
+  Comet-weighted in-score variants were only neutral); see
+  `benchmarks/FRAGMENT_LOSSES.md`. The setting is not enabled by default.
 
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus

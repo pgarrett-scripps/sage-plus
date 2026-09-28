@@ -121,6 +121,10 @@ into Sage Plus:
 These records describe the alternatives considered, exactness checks, code tradeoffs, and the
 benchmarks used before integration.
 
+[Generic fragment losses](FRAGMENT_LOSSES.md) compares water and ammonia loss integrations
+(hyperscore, separate rescoring features, chimera peak handling) with `run_fragment_losses.py`
+and records why the setting is optional and off by default.
+
 ## Commands
 
 List the available recipes:

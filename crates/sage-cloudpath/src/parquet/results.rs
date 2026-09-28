@@ -6,7 +6,8 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
 }
 
 /// Schema version of `results.sage.parquet`: 3 without precursor labels, 4
-/// with them. Both add the nullable immonium columns to versions 1 and 2.
+/// with them. Both add the nullable fragment-loss and immonium columns to
+/// versions 1 and 2.
 fn results_schema_version(has_labels: bool) -> &'static str {
     if has_labels {
         "4"
@@ -159,6 +160,7 @@ pub fn serialize_features(
     immonium: Option<&ImmoniumSettings>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
+    let has_fragment_losses = database.fragment_losses.is_some();
     let schema = build_results_schema(has_labels)?;
 
     let options = writer_properties(
@@ -404,6 +406,25 @@ pub fn serialize_features(
             } else {
                 write_reporter_ions(col, features, reporter_ions, spectrum_occurrences)?;
             }
+        }
+
+        // Generic fragment-loss evidence: null for every row when
+        // `database.fragment_losses` is not configured.
+        let loss = features
+            .iter()
+            .map(|f| has_fragment_losses.then(|| f.fragment_loss.unwrap_or_default()))
+            .collect::<Vec<_>>();
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<Int32Type>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.matched_peaks as i32)),
+            )?;
+        }
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<FloatType>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.intensity_pct)),
+            )?;
         }
 
         // Immonium evidence: null for every row when `immonium` is off.

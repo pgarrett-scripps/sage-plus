@@ -618,6 +618,15 @@ impl Runner {
                 .format(feature.posterior_error)
                 .as_bytes(),
         );
+        if self.database.fragment_losses.is_some() {
+            let loss = feature.fragment_loss.unwrap_or_default();
+            record.push_field(itoa::Buffer::new().format(loss.matched_peaks).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(loss.intensity_pct.ln_1p())
+                    .as_bytes(),
+            );
+        }
         if self.parameters.immonium.is_some() {
             super::immonium::push_pin_fields(&mut record, feature);
         }
@@ -675,13 +684,14 @@ impl Runner {
             "scored_candidates",
             "ln(-poisson)",
             "posterior_error",
-            "Peptide",
-            "Proteins",
         ];
-        if self.parameters.immonium.is_some() {
-            let peptide = headers.len() - 2;
-            headers.splice(peptide..peptide, super::immonium::PIN_COLUMNS);
+        if self.database.fragment_losses.is_some() {
+            headers.extend(["matched_loss_peaks", "ln(loss_intensity_pct)"]);
         }
+        if self.parameters.immonium.is_some() {
+            headers.extend(super::immonium::PIN_COLUMNS);
+        }
+        headers.extend(["Peptide", "Proteins"]);
         let headers = csv::ByteRecord::from(headers);
 
         let re = regex::Regex::new(r"scan=(\d+)").expect("This is valid regex");

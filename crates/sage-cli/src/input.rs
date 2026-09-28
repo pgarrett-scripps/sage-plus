@@ -516,6 +516,9 @@ impl Input {
                 .validate_modification_keys()
                 .map_err(anyhow::Error::msg)?;
             database.validate_enzyme().map_err(anyhow::Error::msg)?;
+            database
+                .validate_fragment_losses()
+                .map_err(anyhow::Error::msg)?;
             ensure!(
                 database.fasta.is_some() || database.peptides.is_some(),
                 "Either `database.fasta` or `database.peptides` must be set"

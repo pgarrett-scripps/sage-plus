@@ -40,8 +40,13 @@ const FEATURE_NAMES: [&str; FEATURES] = [
     "sqrt(delta_ims_model)",
 ];
 
-/// Feature-row width with the immonium-ion columns appended.
-const IMMONIUM_FEATURES: usize = FEATURES + crate::immonium::LDA_FEATURES;
+/// Generic fragment-loss columns, appended after the base features when
+/// `database.fragment_losses` is configured.
+const LOSS_FEATURES: usize = 2;
+const LOSS_FEATURE_NAMES: [&str; LOSS_FEATURES] =
+    ["ln1p(matched_loss_peaks)", "ln1p(loss_intensity_pct)"];
+
+/// Immonium-ion columns, appended last when immonium rescoring is on.
 const IMMONIUM_FEATURE_NAMES: [&str; crate::immonium::LDA_FEATURES] = [
     "immonium_explained",
     "immonium_missing",
@@ -50,19 +55,36 @@ const IMMONIUM_FEATURE_NAMES: [&str; crate::immonium::LDA_FEATURES] = [
     "immonium_modified_unexplained",
 ];
 
+/// A feature row (or coefficient vector), printed with its column names. The
+/// four layouts have distinct widths, so the width identifies the columns.
 struct Features<'a>(&'a [f64]);
 
 impl std::fmt::Debug for Features<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let loss: &[&str] = &LOSS_FEATURE_NAMES;
+        let immonium: &[&str] = &IMMONIUM_FEATURE_NAMES;
+        let (loss, immonium) = match self.0.len() - FEATURES.min(self.0.len()) {
+            n if n == LOSS_FEATURES => (loss, &[][..]),
+            n if n == immonium.len() => (&[][..], immonium),
+            n if n == LOSS_FEATURES + immonium.len() => (loss, immonium),
+            _ => (&[][..], &[][..]),
+        };
         f.debug_map()
-            .entries(
-                FEATURE_NAMES
-                    .iter()
-                    .chain(&IMMONIUM_FEATURE_NAMES)
-                    .zip(self.0),
-            )
+            .entries(FEATURE_NAMES.iter().chain(loss).chain(immonium).zip(self.0))
             .finish()
     }
+}
+
+/// Concatenate feature blocks into one row of width `D`.
+fn concat_row<const D: usize>(parts: &[&[f64]]) -> [f64; D] {
+    let mut row = [0.0; D];
+    let mut at = 0;
+    for part in parts {
+        row[at..at + part.len()].copy_from_slice(part);
+        at += part.len();
+    }
+    debug_assert_eq!(at, D, "feature blocks do not fill the row");
+    row
 }
 
 /// Fewest target and fewest decoy PSMs [`score_psms`] fits a model on: one
@@ -303,6 +325,10 @@ pub fn score_psms(scores: &mut [Feature], precursor_tol: Tolerance) -> Result<()
 /// [`crate::immonium::ImmoniumEvidence::lda_row`] appended to the feature
 /// row when `immonium` is true. PSMs without immonium evidence contribute
 /// zeros; a column that is zero for every PSM is ignored by the fit.
+///
+/// Independently of `immonium`, the two generic fragment-loss features are
+/// inserted after the base features whenever the PSMs carry
+/// [`Feature::fragment_loss`] (`database.fragment_losses` is configured).
 pub fn score_psms_with_immonium(
     scores: &mut [Feature],
     precursor_tol: Tolerance,
@@ -377,21 +403,38 @@ pub fn score_psms_with_immonium(
         ]
     };
 
-    let discriminants = if immonium {
-        let extended = |perc: &Feature| -> [f64; IMMONIUM_FEATURES] {
-            let base = compute_features(perc);
-            let extra = perc.immonium.unwrap_or_default().lda_row();
-            std::array::from_fn(|j| {
-                if j < FEATURES {
-                    base[j]
-                } else {
-                    extra[j - FEATURES]
-                }
-            })
-        };
-        fit_discriminants(scores, &decoys, extended)?
-    } else {
-        fit_discriminants(scores, &decoys, compute_features)?
+    // Row layout: base features, then the generic fragment-loss features when
+    // `database.fragment_losses` is configured (every PSM then carries
+    // `fragment_loss`), then the immonium features when immonium rescoring
+    // is on. With neither, the model is the unchanged 20-feature one.
+    let losses = scores.iter().any(|perc| perc.fragment_loss.is_some());
+    let loss_row = |perc: &Feature| -> [f64; LOSS_FEATURES] {
+        let loss = perc.fragment_loss.unwrap_or_default();
+        [
+            (loss.matched_peaks as f64).ln_1p(),
+            (loss.intensity_pct as f64).ln_1p(),
+        ]
+    };
+    let immonium_row = |perc: &Feature| perc.immonium.unwrap_or_default().lda_row();
+
+    const WITH_LOSSES: usize = FEATURES + LOSS_FEATURES;
+    const WITH_IMMONIUM: usize = FEATURES + crate::immonium::LDA_FEATURES;
+    const WITH_BOTH: usize = WITH_LOSSES + crate::immonium::LDA_FEATURES;
+    let discriminants = match (losses, immonium) {
+        (true, true) => fit_discriminants(scores, &decoys, |perc: &Feature| {
+            concat_row::<WITH_BOTH>(&[
+                &compute_features(perc),
+                &loss_row(perc),
+                &immonium_row(perc),
+            ])
+        })?,
+        (true, false) => fit_discriminants(scores, &decoys, |perc: &Feature| {
+            concat_row::<WITH_LOSSES>(&[&compute_features(perc), &loss_row(perc)])
+        })?,
+        (false, true) => fit_discriminants(scores, &decoys, |perc: &Feature| {
+            concat_row::<WITH_IMMONIUM>(&[&compute_features(perc), &immonium_row(perc)])
+        })?,
+        (false, false) => fit_discriminants(scores, &decoys, compute_features)?,
     };
     if discriminants.iter().any(|score| !score.is_finite()) {
         return Err(LdaFailure::NonFinite);

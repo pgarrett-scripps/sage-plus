@@ -628,6 +628,54 @@ Example:
 }
 ```
 
+#### Generic fragment losses
+
+`fragment_losses` adds water- and ammonia-style loss ions (for example b-H2O
+or y-NH3) that depend on the residues a fragment contains, not on a
+modification. It is off unless the key is present; without it scores,
+identifications and q-values are unchanged and the two loss columns of
+`results.sage.parquet` are null. It is separate from a modification's
+`neutral_losses`, which keeps its own behaviour.
+
+```json
+"database": {
+  "fragment_losses": {
+    "Water":   {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"], "allow_modified": false},
+    "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
+  },
+  "max_fragment_losses": 1
+}
+```
+
+- The key (`Water`, `Ammonia`) is a label only. Formulas are not parsed:
+  `mass` is the neutral mass lost, in daltons, and must be positive and finite.
+- `sites` uses the modification site vocabulary (residues such as `"S"`,
+  `"first_residue:E"`, `"peptide_n_term"`, `"peptide_c_term"`; motif sites are
+  rejected). A fragment can carry the loss when it contains at least one site.
+- `ion_kinds` must be a subset of `database.ion_kinds`.
+- `allow_modified` (default false): whether a residue or terminus that carries
+  any modification still counts as a site.
+- `max_fragment_losses` (default 1): the most generic losses stacked on one
+  fragment. A loss is never used more often than the fragment has sites for it.
+
+Loss ions are never in the preliminary fragment index; they are matched only
+when a candidate is fully scored. They do not change the hyperscore,
+`matched_peaks` or `matched_intensity_pct`. Instead each PSM gets two
+rescoring features, `matched_loss_peaks` and `loss_intensity_pct`, which the
+linear discriminant uses (after the base features and before any immonium
+features) and which are written to the nullable `matched_loss_peaks` and
+`loss_intensity_pct` columns of `results.sage.parquet` and, as
+`matched_loss_peaks` and `ln(loss_intensity_pct)`, to `results.sage.pin`
+before the immonium columns and `Peptide`. Scoring loss
+ions inside the hyperscore lost 1-12% of PSMs in our benchmarks, because a
+loss-only match raises the matched-ion count and wrong candidates collect more
+of them than the correct peptide; count-free, parent-supported and
+Comet-style down-weighted variants only reached parity. The
+separate features changed identifications by less than 1% at 1% FDR on HCD,
+ion-trap CID and ETciD data, with no entrapment FDP inflation (see
+[`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)). The
+setting is therefore optional and not part of the default configuration.
+
 ### Modifications
 
 Define each modification once under its stable name in `static_mods` or
@@ -1558,7 +1606,8 @@ Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM 
 Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
 scores; columns without one are descriptive. `results.sage.v3.parquet.schema` (unlabeled) and
 `results.sage.v4.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
-They are v1 and v2 plus the seven nullable `immonium_*` columns at the end.
+They are v1 and v2 plus nine nullable columns at the end: the two fragment-loss columns, then
+the seven `immonium_*` columns.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1612,6 +1661,7 @@ They are v1 and v2 plus the seven nullable `immonium_*` columns at the end.
 - `protein_q`: Protein-level q-value from picked-protein FDR over peptides unique to one protein; 1 for shared peptides. Lower is better.
 - `protein_group_q`: Protein-group q-value from picked group FDR over peptides in exactly one group; 1 for peptides shared between groups. Lower is better.
 - `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
+- `matched_loss_peaks`, `loss_intensity_pct`: Generic fragment-loss evidence (cleavage and charge pairs whose loss form matched, and the percent of MS2 intensity those loss peaks carry); see [Generic fragment losses](#generic-fragment-losses). They do not count toward `matched_peaks` or the hyperscore. Null when `database.fragment_losses` is not configured. Higher is better.
 - `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.

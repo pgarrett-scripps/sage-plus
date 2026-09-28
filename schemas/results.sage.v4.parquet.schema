@@ -70,6 +70,8 @@ message schema {
             optional float element;
         }
     }
+    optional int32 matched_loss_peaks;
+    optional float loss_intensity_pct;
     optional int32 immonium_explained;
     optional int32 immonium_missing;
     optional int32 immonium_unexplained;
