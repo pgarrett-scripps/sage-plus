@@ -9,6 +9,16 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Immonium modified-residue ions no longer depend on where the search placed the modification.
+  An ion such as `Phospho@Y` is explained when the peptide carries the modification and has a
+  residue of the ion's kind free to carry it (unmodified, or carrying that modification), so
+  `AS[Phospho]YK` now explains the pY ion. Before, only a phosphate placed on the Y did, and the
+  count could disagree with the site PTM localization reported after the linear discriminant had
+  used it. An immonium ion shows a modified residue is present, not where it is (Steen et al.
+  2001; Olsen et al. 2007). `immonium_modified_explained`, `immonium_modified_unexplained` and,
+  with `rescore`, scores change for such PSMs; with `immonium` off nothing changes.
+
 ## [v0.1.0-beta.14] - 2026-09-28
 
 ### Added
@@ -82,8 +92,6 @@ entries are retained below for provenance.
 ### Known limitations
 - With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
   identification is not quantified; it does not fall back to the window search.
-- Immonium `modified_explained` counts use the modification sites before PTM localization
-  relocates them.
 - `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
   SILAC), and loss ions are matched at every fragment charge.
 - The per-modification FLR groups types by name and delta mass rounded to 0.001 Da.

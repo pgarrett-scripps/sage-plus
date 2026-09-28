@@ -33,7 +33,9 @@ Opt-in `immonium` (default off). Per PSM, on the processed spectrum the search s
 2. Modified-residue ions declared on the modification, `immonium_ions` (a list for every site,
    or a map from declared site to list, m/z only, no formulas). For example
    `"Phospho": {..., "immonium_ions": {"Y": [216.0420]}}` gives the ion `Phospho@Y`, explained
-   only when the peptide carries Phospho on a Y. No ions are built in: `modified_explained` /
+   when the peptide carries Phospho and has a Y free to carry it, wherever the search placed the
+   phosphate (since the next release; Beta 14 required Phospho placed on a Y, which made the
+   count depend on the search's positional isomer rather than on the localized site). No ions are built in: `modified_explained` /
    `modified_unexplained` are 0 unless a modification declares some.
 3. Output to seven nullable `immonium_*` columns of `results.sage.parquet` (null when off) and,
    with `write_pin`, five `.pin` columns for external rescoring.

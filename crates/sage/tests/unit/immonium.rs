@@ -245,7 +245,7 @@ fn counts_explained_missing_and_unexplained_residue_ions() {
 }
 
 #[test]
-fn phosphotyrosine_ion_is_explained_only_by_phospho_on_y() {
+fn phosphotyrosine_ion_is_explained_by_phospho_with_a_free_y() {
     let settings = settings();
     let spectrum = spectrum(&[60.0, residue_immonium_mz(b'Y'), phospho_y()]);
 
@@ -262,12 +262,47 @@ fn phosphotyrosine_ion_is_explained_only_by_phospho_on_y() {
         "Phospho@Y"
     );
 
-    // Phosphate on S instead: the pY ion is unexplained, Y explained.
+    // Phosphate placed on S, with an unmodified Y: the pY ion is still
+    // explained, since it shows a pY is present, not where the search put the
+    // phosphate. The Y residue ion is explained by the free Y.
     let psp = modified("ASYAAK", "Phospho", 79.96633, &[1]);
     let evidence = settings.evaluate(&spectrum, &psp);
     assert_eq!(evidence.explained, 1);
+    assert_eq!(evidence.modified_explained, 1);
+    assert_eq!(evidence.modified_unexplained, 0);
+
+    // Phospho without any Y: the pY ion is unexplained.
+    let no_y = modified("ASAAAK", "Phospho", 79.96633, &[1]);
+    let evidence = settings.evaluate(&spectrum, &no_y);
     assert_eq!(evidence.modified_explained, 0);
     assert_eq!(evidence.modified_unexplained, 1);
+
+    // A Y carrying another modification cannot be the pY.
+    let mut blocked = modified("ASYAAK", "Phospho", 79.96633, &[1]);
+    let mut nitro = ModificationDefinition::bare(44.985078);
+    nitro.name = Some("Nitro".into());
+    let phospho = blocked
+        .applied_modifications()
+        .next()
+        .map(|applied| Arc::new(applied.modification.clone()))
+        .unwrap();
+    blocked.modifications = CompactModifications::from_applied([
+        AppliedModification {
+            site: Site::Sequence(1),
+            modification: phospho,
+            kind: ModificationKind::Ordinary,
+        },
+        AppliedModification {
+            site: Site::Sequence(2),
+            modification: Arc::new(nitro),
+            kind: ModificationKind::Ordinary,
+        },
+    ])
+    .unwrap();
+    assert_eq!(
+        settings.evaluate(&spectrum, &blocked).modified_unexplained,
+        1
+    );
 
     // Another modification of the same mass on Y is not Phospho.
     let other = modified("AAYAAK", "Sulfo", 79.95682, &[2]);
@@ -330,4 +365,28 @@ fn residue_ions_off_skips_residue_ions() {
         &peptide("AAFAAK"),
     );
     assert_eq!(evidence, ImmoniumEvidence::default());
+}
+
+#[test]
+fn modified_ion_counts_do_not_depend_on_site_placement() {
+    // PTM localization moves the phosphate of a PSM between positional
+    // isomers after the search scored it. The search placed it on S; the
+    // localized peptidoform has it on Y. Both explain the pY ion, so the
+    // count the linear discriminant used during the search is the one that
+    // matches the localized peptide.
+    let settings = settings();
+    let spectrum = spectrum(&[60.0, phospho_y()]);
+    let searched = modified("ASAYK", "Phospho", 79.96633, &[1]);
+    let localized = modified("ASAYK", "Phospho", 79.96633, &[3]);
+    let before = settings.evaluate(&spectrum, &searched);
+    let after = settings.evaluate(&spectrum, &localized);
+    assert_eq!(before.modified_explained, 1);
+    assert_eq!(after.modified_explained, 1);
+    assert_eq!(before.modified_unexplained, after.modified_unexplained);
+    assert_eq!(before.modified_observed, after.modified_observed);
+
+    // No phospho at all: the pY ion is unexplained.
+    let evidence = settings.evaluate(&spectrum, &peptide("ASAYK"));
+    assert_eq!(evidence.modified_explained, 0);
+    assert_eq!(evidence.modified_unexplained, 1);
 }

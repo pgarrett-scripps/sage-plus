@@ -307,23 +307,33 @@ impl ImmoniumSettings {
     }
 }
 
-/// Does `peptide` carry the modification that gives `ion`, on one of the
-/// ion's residues?
+/// Does `peptide` explain `ion`? It must carry the modification that gives
+/// the ion, and contain a residue of the ion's kind that can carry it (one
+/// without another modification). Which residue the search placed the
+/// modification on does not matter: an immonium ion shows that a modified
+/// residue is present, not where it is (Steen et al. 2001; Olsen et al.
+/// 2007), so the count is the same for every positional isomer and survives
+/// PTM localization moving the site.
 fn carries(peptide: &Peptide, ion: &ModifiedImmoniumIon) -> bool {
-    let residue_at = |site: Site| match site {
-        Site::Sequence(index) => peptide.sequence.get(index as usize).copied(),
-        Site::Nterm => peptide.sequence.first().copied(),
-        Site::Cterm => peptide.sequence.last().copied(),
-    };
-    peptide.applied_modifications().any(|applied| {
-        let definition = applied.modification;
-        let same = match definition.name.as_deref() {
+    let same =
+        |definition: &crate::modification::ModificationDefinition| match definition.name.as_deref()
+        {
             Some(name) => name == ion.modification,
             None => (definition.mass - ion.mass).abs() <= MODIFICATION_MASS_TOLERANCE,
         };
-        same && (ion.any_residue
-            || residue_at(applied.site).is_some_and(|residue| ion.residues.contains(&residue)))
-    })
+    if !peptide
+        .applied_modifications()
+        .any(|applied| same(applied.modification))
+    {
+        return false;
+    }
+    ion.any_residue
+        || peptide.sequence.iter().enumerate().any(|(index, residue)| {
+            ion.residues.contains(residue)
+                && peptide.applied_modifications().all(|applied| {
+                    applied.site != Site::Sequence(index as u32) || same(applied.modification)
+                })
+        })
 }
 
 /// Immonium ions of one PSM.
@@ -336,10 +346,11 @@ pub struct ImmoniumEvidence {
     pub missing: u8,
     /// Residue ions observed whose unmodified residue is not in the peptide.
     pub unexplained: u8,
-    /// Modified-residue ions observed whose modified residue is in the peptide.
+    /// Modified-residue ions observed that the peptide explains: it carries
+    /// the modification and has a residue of the ion's kind free to carry
+    /// it, wherever the modification was placed.
     pub modified_explained: u8,
-    /// Modified-residue ions observed whose modified residue is not in the
-    /// peptide.
+    /// Modified-residue ions observed that the peptide does not explain.
     pub modified_unexplained: u8,
     /// Bit `i` is set when [`RESIDUE_IONS`]`[i]` is observed.
     pub residue_observed: u8,
