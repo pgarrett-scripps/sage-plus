@@ -9,6 +9,16 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `isomer_delta` in `results.sage.parquet`: the Mascot Delta Score of Savitski et al. 2011
+  (Mol Cell Proteomics 10:M110.003830) on Sage's hyperscore. It is the reported PSM's
+  hyperscore minus the best positional isomer's hyperscore, where every placement of the same
+  variable modifications on the same sequence is rescored against the spectrum. It is null, never
+  0, for a peptide with no variable modification, a single possible placement, or more than 4,096
+  placements (not scored). It is negative when an isomer that was not scored in the search beats the
+  reported placement. Additive optional column in both parquet schemas. It is not a PIN feature.
+  `ptm_localization`, `localization_q_value` and `site_q_value` are unchanged.
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR

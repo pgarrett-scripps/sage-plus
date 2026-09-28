@@ -1386,6 +1386,52 @@ Two Parquet site reports are written:
 - **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
 - **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
 
+### Isomer delta
+
+`isomer_delta` in `results.sage.parquet` is the Mascot Delta Score of Savitski et al. 2011
+("Confident phosphorylation site localization using the Mascot Delta Score", *Mol Cell
+Proteomics* 10:M110.003830), with Sage's hyperscore in place of the Mascot ion score. It is the hyperscore of the PSM
+minus the best hyperscore among its positional isomers. A positional isomer has the same stripped
+sequence and the same modification composition, with the variable modifications at other sites.
+The column is independent of `ptm_localization`: it is computed during the search for every
+reported PSM, target and decoy, whether or not localization is enabled, and it does not change
+the localization scores or the FLR.
+
+- **Enumeration.** All variable modifications move together. Each type keeps its copy count and
+  may occupy any site its rule allows that no other modification holds. Static modifications stay
+  where they are. Every isomer is rescored against the spectrum with the PSM's precursor charge,
+  so an isomer that fell out of the preliminary top candidates still counts; `delta_next`, by
+  contrast, compares with the next candidate, often a different peptide. With `mass_offsets`, the
+  offset's placements that the search scored for the spectrum also count. Library-restricted
+  modifications (`site_mode: "library"`) are enumerated over every site their residue rule
+  allows, not only library sites.
+- **Negative values.** An isomer that was never scored in the search can outscore the reported
+  placement. `isomer_delta` is then negative: the reported site is not the best one.
+- **Null.** There are three cases, all written as null, never 0:
+  1. the peptidoform carries no variable modification (unmodified, or only static modifications);
+  2. its modifications have only one possible placement: one candidate site, or every candidate
+     site occupied;
+  3. it has more than 4,096 placements. These isomers are not scored.
+  Cases 1 and 2 mean no isomer exists; case 3 means isomers exist but none was scored. They can
+  be told apart from the peptide: count the rule-compatible sites.
+- **Ties.** 0 means the best isomer scores the same as the reported placement, so the site is
+  not determined.
+- **Scale.** Hyperscore is on a natural-log scale, while the Mascot ion score is -10 log10(p).
+  Savitski's cutoff (a delta of 10 for a false localization rate near 1% on their data)
+  therefore does not carry over. See the validation
+  below for cutoffs on Sage's scale.
+- **Output.** `isomer_delta` is in `results.sage.parquet` only. It is not a PIN feature: it is a
+  localization score, not evidence that the peptide is right, and Percolator needs a value for
+  every row, so null would have to be imputed. Sage writes no TSV PSM table.
+
+- **Validation.** This was tested on the PXD000138 synthetic phosphopeptide libraries (files 1-3), where the
+  true sites are known. For single-phospho PSMs that have an isomer, `isomer_delta` separates correct
+  from wrong sites with an AUC of 0.91. The existing `localization_q_value` scores 0.93, and the sites
+  table's `delta_localization_score` 0.98. The true FLR is 2.4% at a delta of 1, 1.6% at 2, and 0% from 5 up.
+  The smallest cutoff with a true FLR at or below 1% was about 4.2. Use `localization_q_value`
+  for FLR control. `isomer_delta` is the published Mascot-style score for comparison with other tools,
+  or as a stricter extra filter. Adding it costs about 5% CPU time in the search.
+
 ### Site-level FDR
 
 `site_q_value` is a target-decoy q-value estimated at the site level, separately from the PSM, peptide and protein levels. Use `site_q_value <= 0.01` to report sites at 1% site FDR.
@@ -1526,6 +1572,7 @@ scores; columns without one are descriptive. `results.sage.v1.parquet.schema` an
 - `hyperscore`: X!Tandem hyperscore for the PSM. Higher is better.
 - `delta_next`: Hyperscore of this candidate minus that of the next-ranked candidate (its full hyperscore when there is none). Higher is better.
 - `delta_best`: Hyperscore of the best candidate (rank 1) minus that of this candidate; 0 for rank 1. Lower is better.
+- `isomer_delta`: Hyperscore of this PSM minus the best hyperscore among the positional isomers of its peptidoform, an adaptation of the Mascot Delta Score. Null when there is no isomer or none was scored. Higher is better. See [Isomer delta](#isomer-delta).
 - `rt`: Retention time.
 - `aligned_rt`: Globally aligned retention time.
 - `predicted_rt`: Predicted retention time, if enabled.
