@@ -9,6 +9,7 @@ DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
 - `delta_next`: hyperscore minus the next-ranked candidate's hyperscore; larger is better.
 - `delta_best`: best candidate's hyperscore minus this candidate's, 0 for rank 1; smaller is better.
 - `matched_peaks`, `longest_b`, `longest_y`, `longest_y_pct`, `matched_intensity_pct`, `ms2_intensity`: fragment-match evidence; larger is better. `longest_y_pct` is a fraction from 0 to 1. `ms2_intensity` is the summed intensity of matched fragments.
+- `matched_loss_peaks`, `loss_intensity_pct`: present only when `database.fragment_losses` is configured, as the last two columns. The number of cleavage and charge pairs whose generic-loss form (for example b-H2O or y-NH3) matched a peak, and the percent of MS2 intensity those loss peaks carry. They do not count toward `matched_peaks`, `matched_intensity_pct` or the hyperscore; they are separate rescoring features. Larger is better.
 - `precursor_ppm`, `fragment_ppm`, `calibrated_precursor_ppm`, `calibrated_fragment_ppm`: mass errors; closer to zero is better.
 - `delta_rt_model`, `delta_mobility`: absolute differences from the predicted value; smaller is better.
 - `poisson`: log10 of the Poisson probability mass of the PSM's matched-peak count, with the expected count set to the mean over the spectrum's scored candidates. Always 0 or negative. It is a point probability, not a tail p-value. For top-ranked PSMs, which match more peaks than the mean, smaller (more negative) is better.

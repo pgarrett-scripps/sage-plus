@@ -628,6 +628,43 @@
       },
       "type": "object"
     },
+    "FragmentLossEntry": {
+      "additionalProperties": false,
+      "description": "One configured fragment loss. The map key is a label only.",
+      "properties": {
+        "allow_modified": {
+          "description": "Whether a residue or terminus carrying any modification still counts\nas a loss site (default false).",
+          "type": "boolean"
+        },
+        "ion_kinds": {
+          "description": "Ion kinds that can carry the loss. A subset of `database.ion_kinds`.",
+          "items": {
+            "$ref": "#/$defs/Kind"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "mass": {
+          "description": "Neutral mass removed from the fragment, in daltons. Positive and finite.",
+          "format": "float",
+          "type": "number"
+        },
+        "sites": {
+          "description": "Where the loss can occur, in the modification site vocabulary (for\nexample `\"S\"`, `\"first_residue:E\"` or `\"peptide_c_term\"`). A fragment\nis eligible when it contains at least one listed site.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mass",
+        "sites",
+        "ion_kinds"
+      ],
+      "type": "object"
+    },
     "IntegrationStrategy": {
       "enum": [
         "Apex",
@@ -1619,6 +1656,16 @@
             "null"
           ]
         },
+        "fragment_losses": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FragmentLossEntry"
+          },
+          "description": "Generic fragment neutral losses, keyed by a label, for example\n`{\"Water\": {\"mass\": 18.010565, \"sites\": [\"S\", \"T\", \"E\", \"D\"],\n\"ion_kinds\": [\"b\", \"y\"]}}`. Loss ions are matched only when a\ncandidate is fully scored and enter rescoring as separate features.\nOff unless present. Separate from modification `neutral_losses`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "generate_decoys": {
           "type": [
             "boolean",
@@ -1648,6 +1695,15 @@
           "description": "Hard cap on the total peptide variants generated per input peptide,\nincluding its unmodified form. Values below 1 are normalized to 1.\nVariants with fewer PTMs are preferred (generated first).",
           "format": "uint",
           "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_fragment_losses": {
+          "description": "Most generic fragment losses stacked on one fragment (default 1).\nRequires `fragment_losses`.",
+          "format": "uint",
+          "minimum": 1,
           "type": [
             "integer",
             "null"

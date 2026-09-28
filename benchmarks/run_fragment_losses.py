@@ -13,7 +13,7 @@ Variants (see FRAGMENT_LOSSES.md):
   B     candidate, losses scored inside the hyperscore
   C     candidate, losses as separate LDA features (the shipped behaviour)
   D     candidate, as C but chimeric peak removal keeps loss-only peaks
-The `-chimera` suffix runs a variant with `chimera: true`.
+The `-chimera` suffix runs a variant with `chimera: true` and `report_psms: 2`.
 
 B and D are selected with the experiment hook SAGE_PLUS_FRAGMENT_LOSS_SCORING,
 which exists only in the experiment commit named in FRAGMENT_LOSSES.md.
@@ -124,7 +124,8 @@ VARIANTS = {
 
 def merge(dst: dict, src: dict) -> dict:
     for key, value in src.items():
-        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+        # A tolerance is one of ppm or da, so an override replaces it whole.
+        if isinstance(value, dict) and isinstance(dst.get(key), dict) and not key.endswith("_tol"):
             merge(dst[key], value)
         else:
             dst[key] = copy.deepcopy(value)
@@ -137,7 +138,9 @@ def config(dataset: str, variant: str) -> dict:
     if losses:
         merge(cfg["database"], LOSSES)
     if chimera:
+        # Chimeric search reports a second PSM only when report_psms > 1.
         cfg["chimera"] = True
+        cfg["report_psms"] = 2
     return cfg
 
 
@@ -147,7 +150,7 @@ def run(binary: str, cfg_path: Path, out: Path, hook: str | None) -> dict:
     if hook:
         env["SAGE_PLUS_FRAGMENT_LOSS_SCORING"] = hook
     # Time inside the memory gate so queueing for memory is not counted.
-    cmd = [MEMGATE, "12", TIME, "-v", binary, str(cfg_path), "-o", str(out), "--overwrite",
+    cmd = [MEMGATE, "6", TIME, "-v", binary, str(cfg_path), "-o", str(out), "--overwrite",
            "--disable-telemetry-i-dont-want-to-improve-sage"]
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     (out.parent / f"{out.name}.log").write_text(proc.stderr)

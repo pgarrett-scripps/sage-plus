@@ -1098,3 +1098,162 @@ fn assert_matches_published_schemas(
     }
     Ok(())
 }
+
+fn approved_fragment_losses() -> serde_json::Value {
+    serde_json::json!({
+        "Water": {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"]},
+        "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
+    })
+}
+
+/// Generic fragment losses are separate rescoring features: with them
+/// configured, every search score of the PSM (hyperscore, matched peaks,
+/// intensities, ranks) is unchanged, and without them the loss evidence is
+/// absent.
+#[test]
+fn fragment_losses_add_evidence_without_changing_search_scores() -> anyhow::Result<()> {
+    let fasta = sage_cloudpath::util::read_fasta(
+        &sage_cloudpath::to_url("../../tests/Q99536.fasta").expect("valid url"),
+        "rev_",
+        true,
+    )?;
+    let spectra = sage_cloudpath::util::read_mzml(
+        &sage_cloudpath::to_url("../../tests/LQSRPAAPPAPGPGQLTLR.mzML").expect("valid url"),
+        0,
+        None,
+    )?;
+    let processed = SpectrumProcessor::new(100, true, 0.0).process(spectra[0].clone());
+
+    let mut features = Vec::new();
+    for losses in [None, Some(approved_fragment_losses())] {
+        let mut builder = Builder::default();
+        builder.update_fasta("foo".into());
+        builder.fragment_losses = losses.map(serde_json::from_value).transpose()?;
+        builder
+            .validate_fragment_losses()
+            .map_err(anyhow::Error::msg)?;
+        let database = builder.make_parameters().build(fasta.clone());
+        let scorer = Scorer {
+            db: &database,
+            precursor_tol: Tolerance::Ppm(-50.0, 50.0),
+            fragment_tol: Tolerance::Ppm(-10.0, 10.0),
+            min_matched_peaks: 4,
+            min_isotope_err: -1,
+            max_isotope_err: 3,
+            min_precursor_charge: 2,
+            max_precursor_charge: 4,
+            override_precursor_charge: false,
+            max_fragment_charge: Some(1),
+            chimera: false,
+            report_psms: 1,
+            wide_window: false,
+            annotate_matches: true,
+            mass_shift_ppm: 50.0,
+            score_type: ScoreType::SageHyperScore,
+            mass_recalibration: None,
+        };
+        let psms = scorer.score(&processed);
+        assert_eq!(psms.len(), 1);
+        features.push(psms.into_iter().next().unwrap());
+    }
+    let (off, on) = (&features[0], &features[1]);
+    assert!(off.fragment_loss.is_none());
+    let loss = on.fragment_loss.expect("loss evidence when configured");
+    // LQSRPAAPPAPGPGQLTLR carries S, T, Q and R loss sites.
+    assert!(loss.matched_peaks > 0, "{loss:?}");
+    assert!(loss.intensity_pct > 0.0 && loss.intensity_pct < 100.0);
+    // `fragment_loss` is not serialized: every other field but the
+    // process-wide `psm_id` counter is identical, including the annotated
+    // fragments.
+    let fields = |feature| -> anyhow::Result<serde_json::Value> {
+        let mut value = serde_json::to_value(feature)?;
+        value["psm_id"] = serde_json::Value::Null;
+        Ok(value)
+    };
+    assert_eq!(fields(off)?, fields(on)?);
+    assert_eq!(off.matched_peaks, 20);
+    assert_eq!(
+        off.fragments.as_ref().map(|f| f.mz_experimental.clone()),
+        on.fragments.as_ref().map(|f| f.mz_experimental.clone())
+    );
+    Ok(())
+}
+
+/// Without `database.fragment_losses` the pin and results files keep their
+/// published columns; with it they gain the two loss features, in the pin
+/// before `Peptide` and in Parquet after the last published column.
+#[test]
+fn fragment_loss_columns_appear_only_when_configured() -> anyhow::Result<()> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-fragment-losses-{}-{}",
+        std::process::id(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let published = sage_cloudpath::parquet::build_schema()?
+        .get_fields()
+        .iter()
+        .map(|field| field.name().to_string())
+        .collect::<Vec<_>>();
+
+    let mut outputs = Vec::new();
+    for losses in [false, true] {
+        let mut config: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+        config["write_pin"] = true.into();
+        if losses {
+            config["database"]["fragment_losses"] = approved_fragment_losses();
+        }
+        let run = root.join(format!("losses-{losses}"));
+        std::fs::create_dir_all(&run)?;
+        std::fs::write(run.join("config.json"), serde_json::to_vec(&config)?)?;
+        let result = Command::new(env!("CARGO_BIN_EXE_sage"))
+            .current_dir(&workspace)
+            .arg(run.join("config.json"))
+            .arg("--output_directory")
+            .arg(run.join("output"))
+            .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+            .args(["--threads", "2"])
+            .output()?;
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let pin = std::fs::read_to_string(run.join("output/results.sage.pin"))?;
+        let pin_header = pin.lines().next().expect("pin header").to_string();
+        let reader = SerializedFileReader::new(std::fs::File::open(
+            run.join("output/results.sage.parquet"),
+        )?)?;
+        let columns = reader
+            .metadata()
+            .file_metadata()
+            .schema()
+            .get_fields()
+            .iter()
+            .map(|field| field.name().to_string())
+            .collect::<Vec<_>>();
+        outputs.push((pin_header, columns));
+    }
+
+    let (off_pin, off_columns) = &outputs[0];
+    let (on_pin, on_columns) = &outputs[1];
+    assert_eq!(off_columns, &published);
+    assert!(!off_pin.contains("loss"), "{off_pin}");
+    assert_eq!(on_columns[..published.len()], published[..]);
+    assert_eq!(
+        on_columns[published.len()..],
+        ["matched_loss_peaks", "loss_intensity_pct"]
+    );
+    assert_eq!(
+        on_pin.as_str(),
+        off_pin.replace(
+            "posterior_error\tPeptide",
+            "posterior_error\tmatched_loss_peaks\tln(loss_intensity_pct)\tPeptide"
+        )
+    );
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

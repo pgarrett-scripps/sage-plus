@@ -9,6 +9,20 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- Generic fragment losses: `database.fragment_losses` configures water- and ammonia-style
+  losses by label, `mass`, `sites` (the modification site vocabulary), `ion_kinds` (a subset
+  of `database.ion_kinds`) and `allow_modified` (default false); `database.max_fragment_losses`
+  (default 1) caps stacking. Loss ions are matched only in full candidate scoring, never in
+  the preliminary fragment index, and enter the linear discriminant as two separate features,
+  `matched_loss_peaks` and `loss_intensity_pct`, which are appended to `results.sage.parquet`
+  and to `results.sage.pin` (before `Peptide`). The hyperscore, `matched_peaks` and
+  modification `neutral_losses` are unchanged. Off unless the key is present, and then every
+  output is identical to before. On five HCD, ion-trap CID and ETciD datasets the separate
+  features changed identifications at 1% FDR by under 1% with no entrapment FDP inflation,
+  while scoring losses in the hyperscore lost 1-12% of PSMs; see
+  `benchmarks/FRAGMENT_LOSSES.md`. The setting is not enabled by default.
+
 ### Changed
 - PTM localization FLR is now estimated per modification type. Each type (reported name plus
   delta mass) gets its own target/decoy competition, following the per-modification decoy FLR

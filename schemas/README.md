@@ -7,6 +7,7 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 
 - `results.sage.v1.parquet.schema` describes unlabeled `results.sage.parquet`, including typed protein occurrence coordinates.
 - `results.sage.v2.parquet.schema` adds precursor label channel and group identity.
+- With `database.fragment_losses` configured, either version gains two final columns, `required int32 matched_loss_peaks` and `required float loss_intensity_pct` (see `scores.v1.md`); without it the files match the schema exactly.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.

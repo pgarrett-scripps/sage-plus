@@ -23,8 +23,10 @@ pub struct FragmentLossEntry {
     /// Where the loss can occur, in the modification site vocabulary (for
     /// example `"S"`, `"first_residue:E"` or `"peptide_c_term"`). A fragment
     /// is eligible when it contains at least one listed site.
+    #[schemars(length(min = 1))]
     pub sites: Vec<String>,
     /// Ion kinds that can carry the loss. A subset of `database.ion_kinds`.
+    #[schemars(length(min = 1))]
     pub ion_kinds: Vec<Kind>,
     /// Whether a residue or terminus carrying any modification still counts
     /// as a loss site (default false).
@@ -48,32 +50,6 @@ pub struct FragmentLosses {
     pub losses: Vec<FragmentLoss>,
     /// Most generic losses stacked on one fragment.
     pub max_losses: usize,
-    pub scoring: LossScoring,
-}
-
-/// How matched loss ions enter scoring.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum LossScoring {
-    /// Loss ions are alternatives of their cleavage in the hyperscore.
-    Hyperscore,
-    /// Loss ions are separate rescoring features; the hyperscore and
-    /// matched peaks ignore them. Chimeric peak removal removes their peaks.
-    Features,
-    /// As [`LossScoring::Features`], but chimeric peak removal keeps the
-    /// peaks matched only by loss ions.
-    FeaturesKeepPeaks,
-}
-
-impl LossScoring {
-    /// Benchmark hook: `SAGE_PLUS_FRAGMENT_LOSS_SCORING` selects a scoring
-    /// variant for the experiments in `benchmarks/FRAGMENT_LOSSES.md`.
-    fn from_env() -> Self {
-        match std::env::var("SAGE_PLUS_FRAGMENT_LOSS_SCORING").as_deref() {
-            Ok("hyperscore") => Self::Hyperscore,
-            Ok("features_keep_peaks") => Self::FeaturesKeepPeaks,
-            _ => Self::Features,
-        }
-    }
 }
 
 /// Default for `database.max_fragment_losses`.
@@ -165,11 +141,7 @@ pub fn resolve(
             allow_modified: entry.allow_modified,
         });
     }
-    Ok(Some(FragmentLosses {
-        losses,
-        max_losses,
-        scoring: LossScoring::from_env(),
-    }))
+    Ok(Some(FragmentLosses { losses, max_losses }))
 }
 
 fn kind_name(kind: Kind) -> String {

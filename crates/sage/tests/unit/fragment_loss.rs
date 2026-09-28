@@ -191,7 +191,7 @@ fn stacking_combines_different_losses() {
 
 #[test]
 fn modified_residues_are_sites_only_when_allowed() {
-    let static_mods = [(ModificationSpecificity::Residue(b'S'), 79.966331)].into();
+    let static_mods = [(ModificationSpecificity::Residue(b'S'), 79.966_33)].into();
     let modified = peptide("ASGK").apply(&[], &static_mods, 1, None).remove(0);
     let mut water = entry(WATER, &["S"], &[Kind::B]);
     let blocked = losses(BTreeMap::from([("Water".to_string(), water.clone())]), None);

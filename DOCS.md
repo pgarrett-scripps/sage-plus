@@ -626,6 +626,47 @@ Example:
 }
 ```
 
+#### Generic fragment losses
+
+`fragment_losses` adds water- and ammonia-style loss ions (for example b-H2O
+or y-NH3) that depend on the residues a fragment contains, not on a
+modification. It is off unless the key is present; without it the search and
+every output are unchanged. It is separate from a modification's
+`neutral_losses`, which keeps its own behaviour.
+
+```json
+"database": {
+  "fragment_losses": {
+    "Water":   {"mass": 18.010565, "sites": ["S", "T", "E", "D"], "ion_kinds": ["b", "y"], "allow_modified": false},
+    "Ammonia": {"mass": 17.026549, "sites": ["R", "K", "N", "Q"], "ion_kinds": ["y"]}
+  },
+  "max_fragment_losses": 1
+}
+```
+
+- The key (`Water`, `Ammonia`) is a label only. Formulas are not parsed:
+  `mass` is the neutral mass lost, in daltons, and must be positive and finite.
+- `sites` uses the modification site vocabulary (residues such as `"S"`,
+  `"first_residue:E"`, `"peptide_n_term"`, `"peptide_c_term"`; motif sites are
+  rejected). A fragment can carry the loss when it contains at least one site.
+- `ion_kinds` must be a subset of `database.ion_kinds`.
+- `allow_modified` (default false): whether a residue or terminus that carries
+  any modification still counts as a site.
+- `max_fragment_losses` (default 1): the most generic losses stacked on one
+  fragment. A loss is never used more often than the fragment has sites for it.
+
+Loss ions are never in the preliminary fragment index; they are matched only
+when a candidate is fully scored. They do not change the hyperscore,
+`matched_peaks` or `matched_intensity_pct`. Instead each PSM gets two
+rescoring features, `matched_loss_peaks` and `loss_intensity_pct`, which the
+linear discriminant uses and which are written as the last two columns of
+`results.sage.parquet` and before `Peptide` in `results.sage.pin`. Scoring loss
+ions inside the hyperscore lost 1-12% of PSMs in our benchmarks, and the
+separate features changed identifications by less than 1% at 1% FDR on HCD,
+ion-trap CID and ETciD data, with no entrapment FDP inflation (see
+[`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)). The
+setting is therefore optional and not part of the default configuration.
+
 ### Modifications
 
 Define each modification once under its stable name in `static_mods` or

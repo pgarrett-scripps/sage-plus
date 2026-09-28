@@ -6,13 +6,30 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     ))
 }
 
-fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(if has_labels {
+fn build_results_schema(
+    has_labels: bool,
+    has_fragment_losses: bool,
+) -> Result<Type, parquet::errors::ParquetError> {
+    let schema = if has_labels {
         include_str!("../../../../schemas/results.sage.v2.parquet.schema")
     } else {
         include_str!("../../../../schemas/results.sage.v1.parquet.schema")
-    })
+    };
+    if !has_fragment_losses {
+        return parquet::schema::parser::parse_message_type(schema);
+    }
+    // `database.fragment_losses` appends its rescoring features after the
+    // last column, so every other column keeps its position.
+    let body = schema
+        .trim_end()
+        .strip_suffix('}')
+        .expect("results schema ends with a closing brace");
+    parquet::schema::parser::parse_message_type(&format!("{body}    {FRAGMENT_LOSS_COLUMNS}\n}}\n"))
 }
+
+/// Columns written only when `database.fragment_losses` is configured.
+const FRAGMENT_LOSS_COLUMNS: &str =
+    "required int32 matched_loss_peaks;\n    required float loss_intensity_pct;";
 
 struct OutputProteinSite {
     protein: ByteArray,
@@ -129,7 +146,8 @@ pub fn serialize_features(
     provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
-    let schema = build_results_schema(has_labels)?;
+    let has_fragment_losses = database.fragment_losses.is_some();
+    let schema = build_results_schema(has_labels, has_fragment_losses)?;
 
     let options = writer_properties(
         vec![
@@ -374,6 +392,16 @@ pub fn serialize_features(
             } else {
                 write_reporter_ions(col, features, reporter_ions, spectrum_occurrences)?;
             }
+        }
+        if has_fragment_losses {
+            write_col!(
+                |f: &&Feature| f.fragment_loss.unwrap_or_default().matched_peaks as i32,
+                Int32Type
+            );
+            write_col!(
+                |f: &&Feature| f.fragment_loss.unwrap_or_default().intensity_pct,
+                FloatType
+            );
         }
 
         rg.close()?;

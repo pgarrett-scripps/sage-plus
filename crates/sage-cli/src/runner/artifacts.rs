@@ -618,6 +618,15 @@ impl Runner {
                 .format(feature.posterior_error)
                 .as_bytes(),
         );
+        if self.database.fragment_losses.is_some() {
+            let loss = feature.fragment_loss.unwrap_or_default();
+            record.push_field(itoa::Buffer::new().format(loss.matched_peaks).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(loss.intensity_pct.ln_1p())
+                    .as_bytes(),
+            );
+        }
         record.push_field(peptide.to_string().as_bytes());
         record.push_field(
             peptide
@@ -634,7 +643,7 @@ impl Runner {
             .delimiter(b'\t')
             .from_writer(OutputTarget::new(&path)?);
 
-        let headers = csv::ByteRecord::from(vec![
+        let mut headers = vec![
             "SpecId",
             "Label",
             "ScanNr",
@@ -672,9 +681,12 @@ impl Runner {
             "scored_candidates",
             "ln(-poisson)",
             "posterior_error",
-            "Peptide",
-            "Proteins",
-        ]);
+        ];
+        if self.database.fragment_losses.is_some() {
+            headers.extend(["matched_loss_peaks", "ln(loss_intensity_pct)"]);
+        }
+        headers.extend(["Peptide", "Proteins"]);
+        let headers = csv::ByteRecord::from(headers);
 
         let re = regex::Regex::new(r"scan=(\d+)").expect("This is valid regex");
 
