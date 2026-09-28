@@ -242,6 +242,9 @@ pub struct LfqOptions {
     #[schemars(range(min = 0.0, max = 1.0))]
     pub peptide_q_value: Option<f32>,
     pub mbr: Option<bool>,
+    /// Center extraction on the MS1 elution apex rather than the MS2
+    /// identification RT.
+    pub recenter_on_apex: Option<bool>,
 }
 
 impl From<LfqOptions> for LfqSettings {
@@ -255,6 +258,7 @@ impl From<LfqOptions> for LfqSettings {
             rt_pct_tolerance: value.rt_pct_tolerance.unwrap_or(default.rt_pct_tolerance),
             peptide_q_value: value.peptide_q_value.unwrap_or(default.peptide_q_value),
             mbr: value.mbr.unwrap_or(default.mbr),
+            recenter_on_apex: value.recenter_on_apex.unwrap_or(default.recenter_on_apex),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
                 .unwrap_or(default.mobility_pct_tolerance),

@@ -802,6 +802,13 @@
             "null"
           ]
         },
+        "recenter_on_apex": {
+          "description": "Center extraction on the MS1 elution apex rather than the MS2\nidentification RT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rt_pct_tolerance": {
           "format": "float",
           "minimum": 0.0,

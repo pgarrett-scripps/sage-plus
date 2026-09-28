@@ -13,6 +13,8 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `lfq.v4.parquet.schema` adds those diagnostics to labeled LFQ.
 - `lfq.v5.parquet.schema` adds the per-row `extraction_q_value` to unlabeled LFQ.
 - `lfq.v6.parquet.schema` adds it to labeled LFQ.
+- `lfq.v7.parquet.schema` adds peak geometry (`apex_rt`, `peak_start_rt`, `peak_end_rt`, `fwhm`, `id_apex_offset`) to unlabeled LFQ.
+- `lfq.v8.parquet.schema` adds it to labeled LFQ.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.

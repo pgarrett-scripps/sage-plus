@@ -40,7 +40,13 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         },
     );
 
-    let bytes = serialize_lfq(&areas, &["run-a".into(), "run-b".into()], &database, &[])?;
+    let bytes = serialize_lfq(
+        &areas,
+        &["run-a".into(), "run-b".into()],
+        &database,
+        &[],
+        "identification_rt",
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -51,7 +57,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("5")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -130,8 +136,8 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
 
     let filenames = ["run-a".into()];
     assert_eq!(
-        serialize_lfq(&forward, &filenames, &database, &[])?,
-        serialize_lfq(&reverse, &filenames, &database, &[])?
+        serialize_lfq(&forward, &filenames, &database, &[], "identification_rt")?,
+        serialize_lfq(&reverse, &filenames, &database, &[], "identification_rt")?
     );
     Ok(())
 }
@@ -173,7 +179,13 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         );
     }
 
-    let bytes = serialize_lfq(&areas, &["run-a".into()], &database, &[])?;
+    let bytes = serialize_lfq(
+        &areas,
+        &["run-a".into()],
+        &database,
+        &[],
+        "identification_rt",
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -181,7 +193,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("6")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("8")
     }));
     let rows = reader
         .get_row_iter(None)?

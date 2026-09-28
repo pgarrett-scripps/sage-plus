@@ -499,6 +499,7 @@ For additional information about configuration options and output file formats, 
       "ppm_tolerance": 5.0,    // Optional[float] {default = 5.0}, tolerance (in p.p.m.) for DICE window around calculated precursor mass
       "rt_pct_tolerance": 0.5, // Optional[float] {default = 0.5}, symmetric match-between-runs RT tolerance as percent of total gradient length
       "mbr": true,             // Optional[bool] {default = true}, trace precursors into runs without direct MS2 evidence
+      "recenter_on_apex": false, // Optional[bool] {default = false}, center each peak on its MS1 elution apex instead of the MS2 identification RT
       // Optional[bool] {default = true}. Combine all charge states for quantification. Setting this to false
       // quantifies each peptide-charge precursor in `precursor_charge` range (see below) separately
       "combine_charge_states": true
@@ -1080,6 +1081,7 @@ channel-aware when these offsets are configured.
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
   - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
   - **mbr**: Boolean. Trace identified precursors into runs without direct MS2 evidence. Set this to `false` to quantify a precursor only in runs where it was identified (default: true).
+  - **recenter_on_apex**: Boolean. Experimental. Center each LFQ peak on its MS1 elution apex rather than on the MS2 identification RT (default: false). With MBR, the traced window is centered on the median aligned identification RT across files instead of the single most confident PSM. In each identified file, Sage climbs from the identification bin to the apex of the isotope-consistent trace; the cross-run apex is the median of those apexes, each identified file is aligned on its own apex, and files without an identification get the usual warp search towards the aligned identified traces. Integration bounds follow the summed trace down to a valley or half the apex height, with no fixed bin caps. Shifted decoys are picked from the same identification bins. On the PXD028735 HYE benchmark it picked a point more than half a peak width from the true apex for 6% of MS2-confirmed rows (12% by default), gave 2% more precursors at 1% and similar ratio accuracy, but slightly more foreign-species rows in the human-only control at `extraction_q_value` <= 0.01 (3.2% vs 2.6%), so it stays off by default.
 
 Example: 
 ```json
@@ -1598,6 +1600,9 @@ grouping off) and the grouping peptide q-value.
 - `intensity`: Integrated MS1 signal. A missing signal is a Parquet null, never a numeric zero sentinel.
 - `ms2_confirmed`: Boolean indicating direct accepted MS2 identification evidence for this precursor in this file. `false` does not mean the intensity used a different quantification algorithm; all LFQ intensities use the same cross-run workflow.
 - `ms2_confirmed_strict`, `file_score`, `file_spectral_angle`, `file_trace_cosine`, `file_rt_shift_bins`, `transfer_candidate`: per-file evidence diagnostics, defined in [`schemas/scores.v1.md`](schemas/scores.v1.md).
+- `apex_rt`, `peak_start_rt`, `peak_end_rt`: Retention time, in the file's own RT units (minutes), of the selected peak apex and of the first and last integrated points in this file. Null when intensity is null.
+- `fwhm`: Full width at half maximum of the file's traced peak, in minutes. Null when the trace does not fall to half height inside the traced window.
+- `id_apex_offset`: Retention time of this file's best accepted PSM minus `apex_rt`, in minutes. Negative means the precursor was sampled before its apex (the usual DDA case). Null when the file has no accepted PSM of this precursor.
 - `extraction_q_value`: Per-row (precursor and file) extraction q-value, given for every target row with a signal, MS2-backed and transferred alike. Each target's shifted decoy is evaluated at the target's own peak, and these paired decoy rows compete with all target rows by `file_score`. Null for decoy precursors and for rows without a signal. It is a diagnostic: it does not filter output, does not replace the precursor `q_value`, and on a pure-human control roughly a fifth of transfers passing 1% were still foreign-species, so it is not a calibrated transfer FDR. `lfq_settings.mbr` defaults are unchanged.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.

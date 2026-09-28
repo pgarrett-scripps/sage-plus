@@ -472,6 +472,11 @@ impl Runner {
                 &filenames,
                 &self.database,
                 &self.parquet_provenance,
+                if self.parameters.quant.lfq_settings.recenter_on_apex {
+                    "elution_apex"
+                } else {
+                    "identification_rt"
+                },
             )?;
 
             let path = self.make_path("lfq.parquet");
