@@ -89,6 +89,33 @@ pub struct LfqSettings {
     /// instead of on the most confident PSM's 1/K0. No effect otherwise.
     #[serde(default = "default_true")]
     pub recenter_mobility: bool,
+    /// Experimental, Sage Plus's own design. Place every file's peak, MS2
+    /// confirmed or not, at one consensus apex per precursor built from the
+    /// identified files' traces in aligned RT (and, with ion mobility and
+    /// `recenter_mobility`, one consensus 1/K0), projected into each file
+    /// through the RT alignment. Each file may only refine the apex within a
+    /// few bins tied to the cross-run apex residual. Implies the apex-mode
+    /// window, bounds and fallback of `recenter_on_apex`.
+    #[serde(default)]
+    pub consensus_seed: bool,
+    /// How the consensus apex is built (only with `consensus_seed`).
+    #[serde(default)]
+    pub consensus_seed_method: ConsensusSeedMethod,
+}
+
+/// How [`LfqSettings::consensus_seed`] builds a precursor's consensus apex
+/// from its identified files.
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsensusSeedMethod {
+    /// Apex of the summed isotope-consistent traces of the identified files,
+    /// climbed from their median identification bin.
+    #[default]
+    Summed,
+    /// Intensity-weighted median of each identified file's own apex.
+    WeightedMedian,
 }
 
 fn default_recenter_on_apex() -> bool {
@@ -113,6 +140,8 @@ impl Default for LfqSettings {
             mbr: true,
             recenter_on_apex: default_recenter_on_apex(),
             recenter_mobility: true,
+            consensus_seed: false,
+            consensus_seed_method: ConsensusSeedMethod::Summed,
         }
     }
 }
@@ -125,7 +154,13 @@ impl LfqSettings {
     /// Whether mobility windows are recentered on the peak (when the data
     /// has ion mobility).
     fn mobility_recentering(&self) -> bool {
-        self.recenter_on_apex && self.recenter_mobility
+        self.apex_mode() && self.recenter_mobility
+    }
+
+    /// Whether extraction is centered on the elution apex (`recenter_on_apex`
+    /// or `consensus_seed`).
+    pub fn apex_mode(&self) -> bool {
+        self.recenter_on_apex || self.consensus_seed
     }
 }
 
@@ -304,7 +339,7 @@ pub fn build_feature_map(
     // median identification RT across files rather than on the single most
     // confident PSM; the apexes themselves are refined from the traces.
     let anchor_rt = |feat: &Feature| -> f32 {
-        if !(settings.recenter_on_apex && settings.mbr) {
+        if !(settings.apex_mode() && settings.mbr) {
             return feat.aligned_rt;
         }
         let mut rts = peptide_rts
@@ -611,10 +646,17 @@ impl FeatureMap {
             pairs.entry((id, anchor)).or_default()[usize::from(decoy)] = Some(grid);
         }
 
+        // With consensus seeding, every file refines the consensus apex within
+        // the same number of bins, targets and decoys alike.
+        let consensus = self
+            .settings
+            .consensus_seed
+            .then(|| self.refinement_bins(&pairs, n_files));
+
         let mut quantified = pairs
             .into_par_iter()
             .flat_map_iter(|((id, anchor), [target, decoy])| {
-                self.quantify_pair(id, anchor, target, decoy, n_files)
+                self.quantify_pair(id, anchor, target, decoy, n_files, consensus)
             })
             .collect::<Vec<_>>();
 
@@ -662,9 +704,42 @@ impl FeatureMap {
         peaks
     }
 
+    /// Local refinement range, in bins, for consensus seeding: twice the
+    /// robust spread (1.4826 x median absolute residual) of identified
+    /// files' apexes around their precursor's consensus apex in aligned RT,
+    /// pooled over all target precursors with at least two identified
+    /// apexes, rounded up and clamped to `[1, APEX_SNAP_BINS]`. It measures
+    /// what the global RT alignment leaves unexplained at the peak apex.
+    fn refinement_bins(
+        &self,
+        pairs: &HashMap<(PrecursorId, usize), [Option<Grid>; 2], fnv::FnvBuildHasher>,
+        n_files: usize,
+    ) -> usize {
+        let mut residuals = pairs
+            .par_iter()
+            .filter_map(|((id, anchor), [target, _])| {
+                let grid = target.as_ref()?;
+                let seeds = self.seeds(grid, *id, *anchor, n_files);
+                Some(
+                    grid.summarize_traces()
+                        .seed_residuals(&self.settings, &seeds),
+                )
+            })
+            .flatten_iter()
+            .collect::<Vec<_>>();
+        let k = refinement_bins(&mut residuals);
+        log::info!(
+            "consensus LFQ seeds: {} identified apex residuals, refinement +/- {} bins",
+            residuals.len(),
+            k
+        );
+        k
+    }
+
     /// Pick and integrate a precursor's target grid, evaluate its shifted
     /// decoy at the target's peak (the extraction q-value competitor), and
     /// pick the decoy on its own (the precursor q-value competitor).
+    /// `consensus` is the refinement range with consensus seeding.
     fn quantify_pair(
         &self,
         id: PrecursorId,
@@ -672,11 +747,12 @@ impl FeatureMap {
         target: Option<Grid>,
         decoy: Option<Grid>,
         n_files: usize,
+        consensus: Option<usize>,
     ) -> Vec<((PrecursorId, bool), usize, QuantifiedPeak)> {
         // Identification RTs as bins of the target grid. The shifted decoy
         // grid has the same geometry, so it is seeded at the same bins and
         // runs through exactly the same apex search.
-        let seeds = match (&target, self.settings.recenter_on_apex) {
+        let seeds = match (&target, self.settings.apex_mode()) {
             (Some(grid), true) => Some(self.seeds(grid, id, anchor, n_files)),
             _ => None,
         };
@@ -684,7 +760,7 @@ impl FeatureMap {
         let mut decoy = decoy;
         let mut out = Vec::with_capacity(2);
         if let Some(mut grid) = target {
-            if let Some(picked) = self.trace_and_pick(&mut grid, seeds) {
+            if let Some(picked) = self.trace_and_pick(&mut grid, seeds, consensus) {
                 let paired = match decoy.as_mut() {
                     Some(decoy) => self.paired_evidence(decoy, &picked, seeds),
                     None => vec![None; picked.evidence.len()],
@@ -702,7 +778,7 @@ impl FeatureMap {
             }
         }
         if let Some(mut grid) = decoy {
-            if let Some(picked) = self.trace_and_pick(&mut grid, seeds) {
+            if let Some(picked) = self.trace_and_pick(&mut grid, seeds, consensus) {
                 out.push(self.expand(
                     n_files,
                     id,
@@ -722,9 +798,16 @@ impl FeatureMap {
     /// in the anchor PSM's mobility window, each file's window is then moved
     /// onto the peak's intensity-weighted 1/K0 ([`Grid::mobility_centers`]),
     /// and the peak is traced and picked again in the moved windows.
-    fn trace_and_pick(&self, grid: &mut Grid, seeds: Option<&[Option<usize>]>) -> Option<Picked> {
+    fn trace_and_pick(
+        &self,
+        grid: &mut Grid,
+        seeds: Option<&[Option<usize>]>,
+        consensus: Option<usize>,
+    ) -> Option<Picked> {
         let settings = &self.settings;
-        let (peak, areas, evidence, window) = grid.summarize_traces().pick(settings, seeds)?;
+        let (peak, areas, evidence, window) = grid
+            .summarize_traces()
+            .pick_placed(settings, seeds, consensus)?;
         let mut picked = Picked {
             peak,
             areas,
@@ -737,7 +820,10 @@ impl FeatureMap {
         }
         let centers = grid.mobility_centers(&picked.window, seeds);
         grid.set_mobility_centers(&centers);
-        match grid.summarize_traces().pick(settings, seeds) {
+        match grid
+            .summarize_traces()
+            .pick_placed(settings, seeds, consensus)
+        {
             Some((peak, areas, evidence, window)) => {
                 picked = Picked {
                     peak,
@@ -1031,6 +1117,13 @@ impl MobilityGrid {
     /// Intensity-weighted 1/K0 of a file's matched isotope peaks in RT bins
     /// `bins`, inside the window around `center`.
     fn centroid(&self, file: usize, bins: std::ops::Range<usize>, center: f32) -> Option<f32> {
+        let (moment, total) = self.moments(file, bins, center);
+        (total > 0.0).then(|| (moment / total) as f32)
+    }
+
+    /// Summed intensity times 1/K0, and summed intensity, of a file's matched
+    /// isotope peaks in RT bins `bins`, inside the window around `center`.
+    fn moments(&self, file: usize, bins: std::ops::Range<usize>, center: f32) -> (f64, f64) {
         let weights = self.weights(self.clamp(center));
         let (mut moment, mut total) = (0.0f64, 0.0f64);
         for col in bins {
@@ -1052,7 +1145,7 @@ impl MobilityGrid {
                         .sum::<f64>();
             }
         }
-        (total > 0.0).then(|| (moment / total) as f32)
+        (moment, total)
     }
 
     /// Mobility apex of a file's peak: starting from the anchor window, move
@@ -1132,13 +1225,35 @@ impl Traces {
         Vec<Option<FileEvidence>>,
         PeakWindow,
     )> {
+        self.pick_placed(settings, seeds, None)
+    }
+
+    /// [`Traces::pick`], with every file placed at one consensus apex
+    /// refined within `consensus` bins ([`Traces::integrate_consensus`])
+    /// instead of each identified file's own apex.
+    #[allow(clippy::type_complexity)]
+    pub fn pick_placed(
+        &mut self,
+        settings: &LfqSettings,
+        seeds: Option<&[Option<usize>]>,
+        consensus: Option<usize>,
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
         // Precursors without an identification inside the grid (e.g. label
         // channels seeded by another channel) keep the window search, and so
         // do precursors whose identified rows find no apex near their
         // identification. Targets and decoys take the same branch rule.
         if let Some(seeds) = seeds.filter(|seeds| seeds.iter().any(Option::is_some)) {
             let unwarped = self.clone();
-            if let Some(picked) = self.integrate_apex(settings, seeds) {
+            let picked = match consensus {
+                Some(k) => self.integrate_consensus(settings, seeds, k),
+                None => self.integrate_apex(settings, seeds),
+            };
+            if let Some(picked) = picked {
                 return Some(picked);
             }
             *self = unwarped;
@@ -1187,12 +1302,7 @@ impl Traces {
     )> {
         let rows = self.dot_product.rows;
         let cols = self.dot_product.cols;
-        let apexes = (0..rows)
-            .map(|file| {
-                let seed = (*seeds.get(file)?)?;
-                climb_to_apex(&self.consistent(file, settings), seed)
-            })
-            .collect::<Vec<_>>();
+        let apexes = self.row_apexes(settings, seeds);
         let mut found = apexes.iter().flatten().copied().collect::<Vec<_>>();
         if found.is_empty() {
             return None;
@@ -1219,6 +1329,145 @@ impl Traces {
                     Self::best_shift(&reference, self.dot_product.row_slice(file), WARP_SLACK);
             }
         }
+        self.finish_apex(settings, seeds, apex, shifts, reference, None)
+    }
+
+    /// Each identified row's climb from its identification bin to the apex
+    /// of its isotope-consistent trace.
+    fn row_apexes(&self, settings: &LfqSettings, seeds: &[Option<usize>]) -> Vec<Option<usize>> {
+        (0..self.dot_product.rows)
+            .map(|file| {
+                let seed = (*seeds.get(file)?)?;
+                climb_to_apex(&self.consistent(file, settings), seed)
+            })
+            .collect()
+    }
+
+    /// Consensus apex bin of a precursor in aligned RT, from its identified
+    /// rows (see [`ConsensusSeedMethod`]); `apexes` are the rows' own climbs.
+    fn consensus_apex(
+        &self,
+        settings: &LfqSettings,
+        seeds: &[Option<usize>],
+        apexes: &[Option<usize>],
+    ) -> Option<usize> {
+        match settings.consensus_seed_method {
+            ConsensusSeedMethod::Summed => {
+                let mut summed = vec![0.0; self.dot_product.cols];
+                let mut bins = Vec::new();
+                for (file, seed) in seeds.iter().enumerate() {
+                    let Some(seed) = seed else { continue };
+                    bins.push(*seed);
+                    for (s, v) in summed.iter_mut().zip(self.consistent(file, settings)) {
+                        *s += v;
+                    }
+                }
+                if bins.is_empty() {
+                    return None;
+                }
+                bins.sort_unstable();
+                climb_to_apex(&summed, bins[(bins.len() - 1) / 2])
+            }
+            ConsensusSeedMethod::WeightedMedian => {
+                weighted_median(apexes.iter().enumerate().filter_map(|(file, apex)| {
+                    let apex = (*apex)?;
+                    let height = self.consistent(file, settings)[apex];
+                    Some((apex, height))
+                }))
+            }
+        }
+    }
+
+    /// Distances, in bins, from each identified row's own apex to the
+    /// precursor's consensus apex, when at least two rows have one. Pooled
+    /// over precursors they set the consensus refinement range.
+    pub fn seed_residuals(&self, settings: &LfqSettings, seeds: &[Option<usize>]) -> Vec<f64> {
+        let apexes = self.row_apexes(settings, seeds);
+        if apexes.iter().flatten().count() < 2 {
+            return Vec::new();
+        }
+        let Some(consensus) = self.consensus_apex(settings, seeds, &apexes) else {
+            return Vec::new();
+        };
+        apexes
+            .iter()
+            .flatten()
+            .map(|&apex| (apex as f64 - consensus as f64).abs())
+            .collect()
+    }
+
+    /// Integrate every row at one consensus apex (our own design, not a
+    /// published method):
+    ///
+    /// * The consensus apex is built from the identified rows' traces in
+    ///   aligned RT ([`Traces::consensus_apex`]); the grid is already in
+    ///   aligned RT, so the same bin is the seed projected into every file
+    ///   through its RT alignment.
+    /// * Every row, identified or not, is placed at the highest point of its
+    ///   isotope dot product within `k` bins of the seed, and shifted so
+    ///   that point lands on the seed. There is no free climb from the
+    ///   identification RT and no free warp search.
+    /// * Bounds, score and evidence are those of [`Traces::integrate_apex`].
+    #[allow(clippy::type_complexity)]
+    pub fn integrate_consensus(
+        &mut self,
+        settings: &LfqSettings,
+        seeds: &[Option<usize>],
+        k: usize,
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
+        let apexes = self.row_apexes(settings, seeds);
+        let seed = self.consensus_apex(settings, seeds, &apexes)?;
+        let cols = self.dot_product.cols;
+        let shifts = self.local_shifts(seed, k);
+        let mut reference = vec![0.0; cols];
+        for (file, _) in seeds.iter().enumerate().filter(|(_, s)| s.is_some()) {
+            if file >= self.dot_product.rows {
+                continue;
+            }
+            for (i, r) in reference.iter_mut().enumerate() {
+                let j = i as isize + shifts[file];
+                if j >= 0 && (j as usize) < cols {
+                    *r += self.dot_product[(file, j as usize)];
+                }
+            }
+        }
+        self.finish_apex(settings, seeds, seed, shifts, reference, Some(k))
+    }
+
+    /// Shift of each row that moves its highest point within `k` bins of
+    /// `seed` onto `seed`.
+    fn local_shifts(&self, seed: usize, k: usize) -> Vec<isize> {
+        (0..self.dot_product.rows)
+            .map(|file| {
+                local_apex(self.dot_product.row_slice(file), seed, k) as isize - seed as isize
+            })
+            .collect()
+    }
+
+    /// Warp the rows by `shifts`, bound the peak on `reference` and score it
+    /// (shared by [`Traces::integrate_apex`] and
+    /// [`Traces::integrate_consensus`]).
+    #[allow(clippy::type_complexity)]
+    fn finish_apex(
+        &mut self,
+        settings: &LfqSettings,
+        seeds: &[Option<usize>],
+        apex: usize,
+        shifts: Vec<isize>,
+        reference: Vec<f64>,
+        consensus: Option<usize>,
+    ) -> Option<(
+        Peak,
+        Vec<Option<f64>>,
+        Vec<Option<FileEvidence>>,
+        PeakWindow,
+    )> {
+        let cols = self.dot_product.cols;
         Self::apply_time_warps(&mut self.spectral_angle, &shifts);
         Self::apply_time_warps(&mut self.dot_product, &shifts);
 
@@ -1267,6 +1516,7 @@ impl Traces {
             shifts,
             reference,
             seeded: true,
+            consensus,
         };
         let (areas, evidence) = self.window_evidence(&window, settings);
         Some((peak, areas, evidence, window))
@@ -1449,6 +1699,7 @@ impl Traces {
             shifts,
             reference: self.dot_product.row_slice(self.reference_file_id).to_vec(),
             seeded: false,
+            consensus: None,
         };
         let (areas, evidence) = self.window_evidence(&window, settings);
         Some((best, areas, evidence, window))
@@ -1484,15 +1735,24 @@ impl Traces {
         settings: &LfqSettings,
         seeds: Option<&[Option<usize>]>,
     ) -> (PeakWindow, Vec<Option<FileEvidence>>) {
-        let mut shifts = Self::time_warps_to(&window.reference, &self.dot_product, WARP_SLACK);
-        let seeds = seeds.filter(|_| window.seeded).unwrap_or_default();
-        for (file, seed) in seeds.iter().enumerate() {
-            if let Some(apex) =
-                seed.and_then(|seed| climb_to_apex(&self.consistent(file, settings), seed))
-            {
-                shifts[file] = apex as isize - window.rt as isize;
+        let shifts = match window.consensus {
+            // Consensus placement: each decoy row refines the target's seed
+            // within the same range as the target rows did.
+            Some(k) => self.local_shifts(window.rt, k),
+            None => {
+                let mut shifts =
+                    Self::time_warps_to(&window.reference, &self.dot_product, WARP_SLACK);
+                let seeds = seeds.filter(|_| window.seeded).unwrap_or_default();
+                for (file, seed) in seeds.iter().enumerate() {
+                    if let Some(apex) =
+                        seed.and_then(|seed| climb_to_apex(&self.consistent(file, settings), seed))
+                    {
+                        shifts[file] = apex as isize - window.rt as isize;
+                    }
+                }
+                shifts
             }
-        }
+        };
         Self::apply_time_warps(&mut self.spectral_angle, &shifts);
         Self::apply_time_warps(&mut self.dot_product, &shifts);
         let window = PeakWindow {
@@ -1579,6 +1839,9 @@ pub struct PeakWindow {
     /// Whether the peak came from the identification-seeded apex search
     /// ([`Traces::integrate_apex`]) rather than the window search.
     pub seeded: bool,
+    /// With consensus seeding ([`Traces::integrate_consensus`]), the
+    /// refinement range in bins around the consensus apex `rt`.
+    pub consensus: Option<usize>,
 }
 
 impl PeakWindow {
@@ -1662,6 +1925,20 @@ impl Grid {
                 mobility.apex(file, window.file_bins(file, self.matrix.cols)?)
             })
             .collect::<Vec<_>>();
+        if window.consensus.is_some() {
+            // Consensus seeding: every file takes one 1/K0, the
+            // intensity-weighted median of the identified files' apexes
+            // (1/K0 is calibrated, so it projects into each file unchanged).
+            let consensus =
+                weighted_median(apexes.iter().enumerate().filter_map(|(file, apex)| {
+                    let apex = (*apex)?;
+                    let bins = window.file_bins(file, self.matrix.cols)?;
+                    let (_, total) = mobility.moments(file, bins, apex);
+                    Some((apex, total))
+                }))
+                .unwrap_or(mobility.anchor);
+            return vec![mobility.clamp(consensus); self.files];
+        }
         let mut found = apexes.iter().flatten().copied().collect::<Vec<_>>();
         if found.is_empty() {
             return vec![mobility.anchor; self.files];
@@ -1812,6 +2089,54 @@ fn climb_to_apex(trace: &[f64], seed: usize) -> Option<usize> {
             None => return Some(apex),
         }
     }
+}
+
+/// Highest point of `trace` within `k` bins of `seed`, the nearest to `seed`
+/// on ties (and `seed` itself without signal).
+fn local_apex(trace: &[f64], seed: usize, k: usize) -> usize {
+    let mut best = seed.min(trace.len().saturating_sub(1));
+    for d in 1..=k {
+        for i in [seed.checked_sub(d), Some(seed + d)].into_iter().flatten() {
+            if i < trace.len() && trace[i] > trace[best] {
+                best = i;
+            }
+        }
+    }
+    best
+}
+
+/// Lower weighted median of `(value, weight)` pairs; `None` without positive
+/// total weight.
+fn weighted_median<T: Copy + PartialOrd>(items: impl Iterator<Item = (T, f64)>) -> Option<T> {
+    let mut items = items
+        .filter(|(_, w)| w.is_finite() && *w > 0.0)
+        .collect::<Vec<_>>();
+    items.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let total = items.iter().map(|(_, w)| w).sum::<f64>();
+    let mut acc = 0.0;
+    for (value, weight) in items {
+        acc += weight;
+        if acc >= total / 2.0 {
+            return Some(value);
+        }
+    }
+    None
+}
+
+/// Consensus refinement range from pooled apex residuals (bins): twice the
+/// robust standard deviation, 1.4826 x the median absolute residual, rounded
+/// up and clamped to `[1, APEX_SNAP_BINS]`.
+fn refinement_bins(residuals: &mut [f64]) -> usize {
+    if residuals.is_empty() {
+        return 1;
+    }
+    residuals.sort_unstable_by(f64::total_cmp);
+    let n = residuals.len();
+    let median = match n % 2 {
+        1 => residuals[n / 2],
+        _ => (residuals[n / 2 - 1] + residuals[n / 2]) / 2.0,
+    };
+    ((2.0 * 1.4826 * median).ceil() as usize).clamp(1, APEX_SNAP_BINS)
 }
 
 /// Integration bounds `[left, right)` around `apex`: extend while the trace

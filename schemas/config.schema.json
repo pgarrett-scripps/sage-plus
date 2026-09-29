@@ -392,6 +392,21 @@
       ],
       "type": "object"
     },
+    "ConsensusSeedMethod": {
+      "description": "How [`LfqSettings::consensus_seed`] builds a precursor's consensus apex\nfrom its identified files.",
+      "oneOf": [
+        {
+          "const": "summed",
+          "description": "Apex of the summed isotope-consistent traces of the identified files,\nclimbed from their median identification bin.",
+          "type": "string"
+        },
+        {
+          "const": "weighted_median",
+          "description": "Intensity-weighted median of each identified file's own apex.",
+          "type": "string"
+        }
+      ]
+    },
     "DeisotopeConfig": {
       "anyOf": [
         {
@@ -829,6 +844,24 @@
             "boolean",
             "null"
           ]
+        },
+        "consensus_seed": {
+          "description": "Experimental: place every file at one consensus apex per precursor\n(and one consensus 1/K0 on ion mobility data), projected through the\nRT alignment. Implies `recenter_on_apex`'s window and bounds.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "consensus_seed_method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConsensusSeedMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the consensus apex is built: `summed` or `weighted_median`."
         },
         "integration": {
           "anyOf": [

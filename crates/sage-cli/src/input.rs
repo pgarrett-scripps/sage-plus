@@ -261,6 +261,12 @@ pub struct LfqOptions {
     /// With `recenter_on_apex` and ion mobility data, also center each
     /// file's mobility window on its peak's intensity-weighted 1/K0.
     pub recenter_mobility: Option<bool>,
+    /// Experimental: place every file at one consensus apex per precursor
+    /// (and one consensus 1/K0 on ion mobility data), projected through the
+    /// RT alignment. Implies `recenter_on_apex`'s window and bounds.
+    pub consensus_seed: Option<bool>,
+    /// How the consensus apex is built: `summed` or `weighted_median`.
+    pub consensus_seed_method: Option<sage_core::lfq::ConsensusSeedMethod>,
 }
 
 impl From<LfqOptions> for LfqSettings {
@@ -276,6 +282,10 @@ impl From<LfqOptions> for LfqSettings {
             mbr: value.mbr.unwrap_or(default.mbr),
             recenter_on_apex: value.recenter_on_apex.unwrap_or(default.recenter_on_apex),
             recenter_mobility: value.recenter_mobility.unwrap_or(default.recenter_mobility),
+            consensus_seed: value.consensus_seed.unwrap_or(default.consensus_seed),
+            consensus_seed_method: value
+                .consensus_seed_method
+                .unwrap_or(default.consensus_seed_method),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
                 .unwrap_or(default.mobility_pct_tolerance),

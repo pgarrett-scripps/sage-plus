@@ -10,6 +10,14 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- Experimental `lfq_settings.consensus_seed` (default false) and `consensus_seed_method`
+  (`summed` or `weighted_median`): one consensus apex (and 1/K0 on timsTOF) per precursor, projected
+  into every file through the RT alignment, with each file refining at most +/- k bins (k from the
+  identified-apex residuals, 1-10 bins). Shifted decoys are placed by the same steps. Sage Plus's own
+  design; published MBR tools transfer an RT only to runs without an identification. It is not
+  recommended: on exclusion plasma the median peptide CV rose from 25.5% to 50.7% because the
+  exclusion runs' RT alignment is biased by about 4 s, and HYE ratio accuracy and timsTOF CV were
+  worse than window mode. Off by default, and outputs with it off are unchanged.
 - `lfq_settings.recenter_mobility` (default true) extends the experimental `recenter_on_apex`
   to ion mobility. On timsTOF data, each file's 1/K0 window is moved from the most confident
   PSM's 1/K0 onto the intensity-weighted 1/K0 of its integrated peak (identified files) or onto

@@ -1055,7 +1055,7 @@ fn shifted_decoy_grid_gets_the_same_mobility_recentering_as_its_target() {
     decoy.reset_mobility_centers();
 
     let id = PrecursorId::Combined(PeptideIx(0));
-    let out = map.quantify_pair(id, usize::MAX, Some(target), Some(decoy), 2);
+    let out = map.quantify_pair(id, usize::MAX, Some(target), Some(decoy), 2, None);
     assert_eq!(out.len(), 2);
     let (target, decoy) = (&out[0].2, &out[1].2);
     let file1 = target.file_evidence[1].as_ref().unwrap();
@@ -1065,6 +1065,302 @@ fn shifted_decoy_grid_gets_the_same_mobility_recentering_as_its_target() {
     );
     for file in 0..2 {
         let t = target.file_evidence[file].as_ref().unwrap();
+        for d in [
+            &target.paired_decoy_evidence[file],
+            &decoy.file_evidence[file],
+        ] {
+            let d = d.as_ref().unwrap();
+            assert_eq!(d.rt_shift_bins, t.rt_shift_bins);
+            assert_eq!(d.score.to_bits(), t.score.to_bits());
+            assert_eq!(d.apex_mobility, t.apex_mobility);
+        }
+    }
+    assert_eq!(decoy.intensities, target.intensities);
+    assert_eq!(decoy.peak.score.to_bits(), target.peak.score.to_bits());
+}
+
+/// Rows of Gaussian peaks: `(apex bin, height)` per row.
+fn peak_traces(cols: usize, rows: &[&[(usize, f64)]]) -> Traces {
+    let mut dot_product = Matrix::new(vec![0.0; rows.len() * cols], rows.len(), cols);
+    for (row, peaks) in rows.iter().enumerate() {
+        for &(apex, height) in peaks.iter() {
+            for (bin, value) in dot_product.row_slice_mut(row).iter_mut().enumerate() {
+                *value += height * (-0.5 * ((bin as f64 - apex as f64) / 3.0).powi(2)).exp();
+            }
+        }
+    }
+    Traces {
+        spectral_angle: Matrix::new(vec![0.95; rows.len() * cols], rows.len(), cols),
+        dot_product,
+        reference_file_id: 0,
+        geometry: GridGeometry {
+            rt_min: 0.0,
+            rt_step: 1.0,
+        },
+    }
+}
+
+#[test]
+fn local_apex_stays_within_k_bins_and_prefers_the_seed_on_ties() {
+    let trace = [0.0, 1.0, 5.0, 2.0, 0.0, 0.0, 0.0, 9.0];
+    assert_eq!(local_apex(&trace, 3, 1), 2);
+    // The larger peak at 7 is out of reach.
+    assert_eq!(local_apex(&trace, 4, 2), 2);
+    assert_eq!(local_apex(&trace, 4, 3), 7);
+    assert_eq!(local_apex(&[0.0; 5], 2, 2), 2);
+    assert_eq!(local_apex(&[1.0; 5], 2, 2), 2);
+}
+
+#[test]
+fn weighted_median_and_refinement_bins() {
+    assert_eq!(
+        weighted_median([(3, 1.0), (1, 1.0), (2, 1.0)].into_iter()),
+        Some(2)
+    );
+    assert_eq!(weighted_median([(1, 1.0), (5, 3.0)].into_iter()), Some(5));
+    assert_eq!(weighted_median([(1, 0.0), (5, f64::NAN)].into_iter()), None);
+    assert_eq!(
+        weighted_median([(1.5f32, 2.0), (0.5, 1.0)].into_iter()),
+        Some(1.5)
+    );
+    // 2 x 1.4826 x median |residual| (2) = 5.9 -> 6 bins.
+    assert_eq!(refinement_bins(&mut [0.0, 2.0, 2.0, 4.0, 9.0]), 6);
+    assert_eq!(refinement_bins(&mut []), 1);
+    assert_eq!(refinement_bins(&mut [0.0, 0.0, 1.0]), 1);
+    assert_eq!(refinement_bins(&mut [40.0]), APEX_SNAP_BINS);
+}
+
+#[test]
+fn consensus_seed_places_every_row_within_k_bins_of_one_seed() {
+    // Two identified rows whose identifications sit on opposite tails of
+    // peaks at bins 20 and 21, and one transfer row whose peak at 22 is
+    // next to a larger, unrelated peak at 45.
+    let traces = peak_traces(60, &[&[(20, 10.0)], &[(21, 8.0)], &[(22, 6.0), (45, 30.0)]]);
+    let seeds = [Some(27), Some(15), None];
+    for method in [
+        ConsensusSeedMethod::Summed,
+        ConsensusSeedMethod::WeightedMedian,
+    ] {
+        let settings = LfqSettings {
+            consensus_seed: true,
+            consensus_seed_method: method,
+            ..LfqSettings::default()
+        };
+        let (peak, areas, evidence, window) = traces
+            .clone()
+            .pick_placed(&settings, Some(&seeds), Some(3))
+            .unwrap();
+        assert!(window.seeded);
+        assert_eq!(window.consensus, Some(3));
+        assert!((20..=21).contains(&peak.rt), "{method:?} {}", peak.rt);
+        assert_eq!(window.rt, peak.rt);
+        // Each row is moved onto the seed from its own apex, within 3 bins.
+        for (row, own) in [20isize, 21, 22].into_iter().enumerate() {
+            assert_eq!(window.shifts[row], own - peak.rt as isize, "{method:?}");
+            let evidence = evidence[row].as_ref().unwrap();
+            assert_eq!(evidence.apex_rt, own as f32);
+        }
+        assert!(areas.iter().all(Option::is_some));
+    }
+
+    // Without consensus placement the same rows keep their free searches.
+    let settings = LfqSettings {
+        recenter_on_apex: true,
+        ..LfqSettings::default()
+    };
+    let (_, _, _, window) = traces.clone().pick(&settings, Some(&seeds)).unwrap();
+    assert_eq!(window.consensus, None);
+}
+
+#[test]
+fn consensus_seed_decoys_take_the_same_placement_as_targets() {
+    let settings = LfqSettings {
+        consensus_seed: true,
+        ..LfqSettings::default()
+    };
+    let target = peak_traces(60, &[&[(20, 10.0)], &[(22, 6.0)]]);
+    let seeds = [Some(25), None];
+    let (peak, areas, evidence, window) = target
+        .clone()
+        .pick_placed(&settings, Some(&seeds), Some(2))
+        .unwrap();
+
+    // A shifted decoy with the same traces is picked exactly as the target,
+    // and as its own paired decoy it reproduces the target rows.
+    let (decoy_peak, decoy_areas, _, decoy_window) = target
+        .clone()
+        .pick_placed(&settings, Some(&seeds), Some(2))
+        .unwrap();
+    assert_eq!(decoy_peak.rt, peak.rt);
+    assert_eq!(decoy_peak.score.to_bits(), peak.score.to_bits());
+    assert_eq!(decoy_areas, areas);
+    assert_eq!(decoy_window.shifts, window.shifts);
+    let paired = target
+        .clone()
+        .paired_evidence(&window, &settings, Some(&seeds));
+    for (a, b) in paired.iter().zip(&evidence) {
+        let (a, b) = (a.as_ref().unwrap(), b.as_ref().unwrap());
+        assert_eq!(a.rt_shift_bins, b.rt_shift_bins);
+        assert_eq!(a.score.to_bits(), b.score.to_bits());
+    }
+
+    // A paired decoy row gets the same refinement range as the target rows,
+    // not the free warp search: a strong decoy peak 12 bins away is not
+    // reached, while the apex-mode paired search reaches it.
+    let decoy = peak_traces(60, &[&[(20, 1.0)], &[(20 + 12, 50.0)]]);
+    let paired = decoy
+        .clone()
+        .paired_evidence(&window, &settings, Some(&seeds));
+    for row in paired.iter().flatten() {
+        assert!(row.rt_shift_bins.abs() <= 2, "{row:?}");
+    }
+    let free = PeakWindow {
+        consensus: None,
+        ..window.clone()
+    };
+    let unrestricted = decoy
+        .clone()
+        .paired_evidence(&free, &settings, Some(&seeds));
+    assert!(unrestricted[1].as_ref().unwrap().rt_shift_bins.abs() > 2);
+}
+
+#[test]
+fn consensus_seed_is_projected_into_each_file_through_its_alignment() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    // Aligned RT = observed RT + offset. Every file elutes at aligned 0.4;
+    // the identifications sit 12 bins after (file 0) and 8 bins before
+    // (file 1) the apex, and file 2 has none.
+    let offsets = [0.0f32, 0.002, -0.003];
+    let step = LfqSettings::default().rt_tolerance() * 2.0 / GRID_SIZE as f32;
+    let features =
+        [(0, 0.4 + 12.0 * step), (1, 0.4 - 8.0 * step)].map(|(file_id, aligned)| Feature {
+            peptide_idx: PeptideIx(0),
+            peptide_q: 0.0,
+            spectrum_q: 0.0,
+            label: 1,
+            file_id,
+            aligned_rt: aligned,
+            rt: aligned - offsets[file_id],
+            charge: 2,
+            ..Feature::default()
+        });
+    let alignments = [0, 1, 2].map(|file| Alignment {
+        intercept: offsets[file],
+        ..identity_alignment(file)
+    });
+    let key = (PrecursorId::Combined(PeptideIx(0)), false);
+    let quantify = |settings: LfqSettings| {
+        let map = build_feature_map(settings, (2, 2), &features, &db);
+        let apexes = [0, 1, 2].map(|file| (file, 0.4 - offsets[file]));
+        let spectra = eluting_ms1_spectra(&map, &db, &apexes);
+        map.quantify(&db, &spectra, &alignments)
+            .remove(&key)
+            .unwrap()
+    };
+    let seeded = quantify(LfqSettings {
+        consensus_seed: true,
+        ..LfqSettings::default()
+    });
+    for (file, evidence) in seeded.file_evidence.iter().enumerate() {
+        let evidence = evidence.as_ref().unwrap();
+        // Reported in the file's own RT units, on its own apex.
+        let expected = 0.4 - offsets[file];
+        assert!(
+            (evidence.apex_rt - expected).abs() <= 1.5 * step,
+            "file {file}: {} vs {expected}",
+            evidence.apex_rt
+        );
+        assert!(evidence.rt_shift_bins.abs() <= 1, "{evidence:?}");
+    }
+    let offset = seeded.file_evidence[0]
+        .as_ref()
+        .unwrap()
+        .id_apex_offset
+        .unwrap();
+    assert!((offset - 12.0 * step).abs() <= 1.5 * step, "{offset}");
+    let areas = seeded
+        .intensities
+        .iter()
+        .map(|a| a.unwrap())
+        .collect::<Vec<_>>();
+    for area in &areas {
+        assert!((area - areas[0]).abs() <= areas[0] * 1e-2, "{areas:?}");
+    }
+
+    // Off by default: the default settings do not take this path.
+    assert!(!LfqSettings::default().consensus_seed);
+    assert!(!LfqSettings::default().apex_mode());
+}
+
+#[test]
+fn consensus_seed_gives_the_shifted_decoy_grid_the_same_mobility_and_rt_placement() {
+    let builder: Builder =
+        serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
+    let db = parameters.build_from_peptides(peptides);
+    let settings = LfqSettings {
+        consensus_seed: true,
+        ..LfqSettings::default()
+    };
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        peptide_q: 0.0,
+        spectrum_q: 0.0,
+        label: 1,
+        aligned_rt: 0.5,
+        charge: 2,
+        ims: 1.0,
+        ..Feature::default()
+    };
+    let map = build_feature_map(settings, (2, 2), &[feature], &db);
+    let entry = map.ranges.iter().find(|range| !range.decoy).unwrap();
+    let rt_tol = settings.rt_tolerance();
+    let mut target = Grid::new(entry, rt_tol, [0.8, 0.15, 0.05], 2, GRID_SIZE);
+    target.resolve_mobility(entry, 0.01);
+    let geometry = target.geometry();
+    let add = |grid: &mut Grid, file: usize, offset: f32, mobility: f32| {
+        for step in -30..=30 {
+            let rt = 0.5 + (offset + step as f32) * geometry.rt_step;
+            let height = (-0.5 * (step as f32 / 6.0).powi(2)).exp() * 1000.0;
+            for (isotope, abundance) in [0.78, 0.16, 0.06].into_iter().enumerate() {
+                grid.mobility.as_mut().unwrap().add_entry(
+                    &geometry,
+                    rt,
+                    isotope,
+                    file,
+                    abundance * height,
+                    mobility,
+                );
+            }
+        }
+    };
+    add(&mut target, 0, 4.0, 1.006);
+    add(&mut target, 1, 5.0, 1.011);
+    let mut decoy = Grid::new(entry, rt_tol, [0.8, 0.15, 0.05], 2, GRID_SIZE);
+    decoy.mobility = target.mobility.clone();
+    target.reset_mobility_centers();
+    decoy.reset_mobility_centers();
+
+    let id = PrecursorId::Combined(PeptideIx(0));
+    let out = map.quantify_pair(id, usize::MAX, Some(target), Some(decoy), 2, Some(2));
+    assert_eq!(out.len(), 2);
+    let (target, decoy) = (&out[0].2, &out[1].2);
+    // One consensus 1/K0 (the identified file's) for every file: file 1's
+    // ions at 1.011 are only partly inside the window around 1.006.
+    let mobility = target.file_evidence[0]
+        .as_ref()
+        .unwrap()
+        .apex_mobility
+        .unwrap();
+    assert!((mobility - 1.006).abs() < 2e-4, "{mobility}");
+    for file in 0..2 {
+        let t = target.file_evidence[file].as_ref().unwrap();
+        assert!(t.rt_shift_bins.abs() <= 2);
         for d in [
             &target.paired_decoy_evidence[file],
             &decoy.file_evidence[file],

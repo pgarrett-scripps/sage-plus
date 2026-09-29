@@ -473,7 +473,7 @@ impl Runner {
                 &filenames,
                 &self.database,
                 &self.parquet_provenance,
-                if self.parameters.quant.lfq_settings.recenter_on_apex {
+                if self.parameters.quant.lfq_settings.apex_mode() {
                     "elution_apex"
                 } else {
                     "identification_rt"
