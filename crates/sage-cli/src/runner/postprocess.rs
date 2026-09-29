@@ -276,7 +276,7 @@ impl Runner {
                         .mods
                         .iter()
                         .enumerate()
-                        .filter(|(_, modification)| modification.competition_eligible)
+                        .filter(|(_, modification)| modification.competes())
                         .map(move |(mod_idx, _)| (feature_idx, mod_idx))
                 })
             })

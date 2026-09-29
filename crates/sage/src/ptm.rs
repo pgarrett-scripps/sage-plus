@@ -40,6 +40,13 @@ const MASS_EPS: f32 = 1e-3;
 /// this cap the modification is reported as un-localized.
 const MAX_ARRANGEMENTS: usize = 4096;
 
+/// Fewest matched separating ions by which the best arrangement must beat the
+/// runner-up before its sites are accepted as localized. Separating ions are
+/// the fragments whose mass differs between those two arrangements; between
+/// neighbouring residues there are only one b and one y ion per charge, so a
+/// single noise peak can otherwise decide the site.
+pub const MIN_SEPARATING_MARGIN: i32 = 2;
+
 /// Localization confidence for a single candidate site.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct SiteScore {
@@ -74,8 +81,13 @@ pub struct ModLocalization {
     pub target_decoy_score: f32,
     /// Whether an impossible-site decoy arrangement won the competition.
     pub decoy_winner: bool,
-    /// Whether a balanced target/decoy competition could be constructed.
+    /// Whether a balanced target/decoy competition could be constructed. False
+    /// when every candidate site is occupied: those sites are certain for the
+    /// peptide, so they take no part in the false-localization-rate estimate.
     pub competition_eligible: bool,
+    /// Matched separating ions of the best arrangement minus those of the
+    /// runner-up (0 when there is no runner-up).
+    pub separating_margin: i32,
     /// Dataset-level false-localization-rate q-value, assigned after all PSMs
     /// have been localized.
     pub localization_q_value: f32,
@@ -98,6 +110,15 @@ impl ModLocalization {
         } else {
             q_value
         };
+    }
+
+    /// Whether this localization enters the false-localization-rate competition:
+    /// a balanced decoy competition exists and the best arrangement beats the
+    /// runner-up by at least [`MIN_SEPARATING_MARGIN`] matched separating ions.
+    /// Localizations that fail the margin keep q-value 1.0 and do not count as
+    /// targets or decoys.
+    pub fn competes(&self) -> bool {
+        self.competition_eligible && self.separating_margin >= MIN_SEPARATING_MARGIN
     }
 }
 
@@ -452,6 +473,7 @@ fn localize_mass(
             target_decoy_score: 0.0,
             decoy_winner: true,
             competition_eligible: false,
+            separating_margin: 0,
             localization_q_value: 1.0,
             best_sites: placed
                 .iter()
@@ -536,6 +558,22 @@ fn localize_mass(
             delta_score = 0.0;
         }
     }
+    let separating_margin = match arrangements.as_slice() {
+        [best, runner_up, ..] => {
+            let best_variant = build_variant(peptide, mass, &candidates, &best.sites);
+            let runner_variant = build_variant(peptide, mass, &candidates, &runner_up.sites);
+            let (best_hits, runner_hits) = separating_matches(
+                &best_variant,
+                &runner_variant,
+                spectrum,
+                ion_kinds,
+                fragment_tol,
+                max_charge,
+            );
+            best_hits as i32 - runner_hits as i32
+        }
+        _ => 0,
+    };
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
@@ -622,8 +660,11 @@ fn localize_mass(
         delta_score,
         target_decoy_score,
         decoy_winner,
-        competition_eligible: decoy_candidates.is_some(),
-        localization_q_value: 1.0,
+        competition_eligible: total_c > k && decoy_candidates.is_some(),
+        separating_margin,
+        // Every candidate occupied: the placement is fixed by the peptide, and
+        // only a wrong peptide (covered by the PSM q-value) could misplace it.
+        localization_q_value: if total_c == k { 0.0 } else { 1.0 },
         best_sites,
         all_sites,
     })
@@ -849,6 +890,43 @@ fn score_arrangement(
         }
     }
     (matched, trials)
+}
+
+/// Matched ions that separate two arrangements of one peptide: for every
+/// fragment whose mass differs between `a` and `b`, count matches of `a`'s ion
+/// and of `b`'s ion, at the charges [`score_arrangement`] uses.
+fn separating_matches(
+    a: &Peptide,
+    b: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> (u32, u32) {
+    let matches = |mass: f32| {
+        (1..max_charge)
+            .filter(|&charge| {
+                select_most_intense_peak(
+                    &spectrum.masses,
+                    &spectrum.intensities,
+                    mass / charge as f32,
+                    fragment_tol,
+                    None,
+                )
+                .is_some()
+            })
+            .count() as u32
+    };
+    let (mut a_hits, mut b_hits) = (0u32, 0u32);
+    for kind in ion_kinds {
+        for (ion_a, ion_b) in IonSeries::new(a, *kind).zip(IonSeries::new(b, *kind)) {
+            if (ion_a.monoisotopic_mass - ion_b.monoisotopic_mass).abs() > MASS_EPS {
+                a_hits += matches(ion_a.monoisotopic_mass);
+                b_hits += matches(ion_b.monoisotopic_mass);
+            }
+        }
+    }
+    (a_hits, b_hits)
 }
 
 /// A fragment covering `c_in_region` of the `total_c` candidate sites is

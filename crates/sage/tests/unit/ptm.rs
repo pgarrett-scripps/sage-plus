@@ -230,22 +230,55 @@ fn tied_target_arrangements_cannot_inherit_confident_competition_q_values() {
 }
 
 #[test]
-fn single_candidate_can_retain_competition_confidence() {
+fn fully_occupied_candidates_are_certain_and_skip_the_competition() {
     let mut precursor = peptide("AAASAAA");
     precursor.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
-    let mut localization = localize(
+    let localization = localize(
         &precursor,
-        &synthetic_spectrum(&precursor),
+        &ProcessedSpectrum::default(),
         &[Kind::B, Kind::Y],
         &[(ModificationSpecificity::Residue(b'S'), PHOSPHO)],
         Tolerance::Ppm(-10.0, 10.0),
         None,
         2,
     );
-    let modification = &mut localization.mods[0];
-    assert_eq!(modification.delta_score, 0.0);
-    modification.set_competition_q_value(0.001);
-    assert_eq!(modification.localization_q_value, 0.001);
+    let modification = &localization.mods[0];
+    assert_eq!(modification.candidate_sites, modification.site_count);
+    assert!(!modification.competition_eligible);
+    assert!(!modification.competes());
+    assert_eq!(modification.localization_q_value, 0.0);
+    assert_eq!(modification.best_sites[0].probability, 1.0);
+}
+
+#[test]
+fn localization_competes_only_with_a_separating_ion_margin() {
+    let mut truth = peptide("AASAATAA");
+    truth.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let potential = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    let localize_against = |spectrum: &ProcessedSpectrum| {
+        localize(
+            &truth,
+            spectrum,
+            &[Kind::B, Kind::Y],
+            &potential,
+            Tolerance::Ppm(-10.0, 10.0),
+            None,
+            2,
+        )
+        .mods
+        .remove(0)
+    };
+
+    let supported = localize_against(&synthetic_spectrum(&truth));
+    assert!(supported.separating_margin >= MIN_SEPARATING_MARGIN);
+    assert!(supported.competes());
+
+    let unsupported = localize_against(&ProcessedSpectrum::default());
+    assert_eq!(unsupported.separating_margin, 0);
+    assert!(!unsupported.competes());
 }
 
 #[test]
