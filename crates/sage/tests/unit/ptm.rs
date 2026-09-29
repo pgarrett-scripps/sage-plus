@@ -245,7 +245,7 @@ fn fully_occupied_candidates_are_certain_and_skip_the_competition() {
     let modification = &localization.mods[0];
     assert_eq!(modification.candidate_sites, modification.site_count);
     assert!(!modification.competition_eligible);
-    assert!(!modification.competes());
+    assert!(!modification.competes(0));
     assert_eq!(modification.localization_q_value, 0.0);
     assert_eq!(modification.best_sites[0].probability, 1.0);
 }
@@ -273,12 +273,16 @@ fn localization_competes_only_with_a_separating_ion_margin() {
     };
 
     let supported = localize_against(&synthetic_spectrum(&truth));
-    assert!(supported.separating_margin >= MIN_SEPARATING_MARGIN);
-    assert!(supported.competes());
+    assert!(supported.separating_margin >= 2);
+    assert!(supported.competes(DEFAULT_MIN_SEPARATING_MARGIN));
+    assert!(supported.competes(2));
+    assert!(!supported.competes(supported.separating_margin as u32 + 1));
 
     let unsupported = localize_against(&ProcessedSpectrum::default());
     assert_eq!(unsupported.separating_margin, 0);
-    assert!(!unsupported.competes());
+    assert!(!unsupported.competes(DEFAULT_MIN_SEPARATING_MARGIN));
+    // A zero margin lets arrangements tied on separating ions compete.
+    assert!(unsupported.competes(0));
 }
 
 #[test]

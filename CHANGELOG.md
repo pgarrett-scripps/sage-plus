@@ -15,7 +15,21 @@ entries are retained below for provenance.
   (acylated ε-amine; lost ammonia would be 15NH3, 18.0236 Da). 13C-only labels (K6, R6) are
   excluded conservatively; `allow_modified: true` keeps them. No code change.
 
+### Added
+- `localized_peptide` in `results.sage.parquet` (schema v5 unlabeled, v6 labeled): the peptide in
+  ProForma 2.0 with each localized modification on its best sites. A localization that is not
+  confident is written as a ProForma scored position group (LeDuc et al. 2022), for example
+  `PEPT[#g1(0.10)]IS[Phospho#g1(0.90)]K`. Scores are the uncalibrated site probabilities.
+- `ptm_localization.min_separating_margin` (default 1): a localization enters the FLR competition
+  only when the best arrangement beats the runner-up by this many matched separating ions;
+  otherwise its q-value is 1. `separating_margin` is our own rule, validated on the PXD000138
+  known-site library (true FLR 0.96% to 0.93% at margin 1, 0% at margin 2).
+
 ### Changed
+- Modifications with as many candidate sites as copies (one Met, one oxidation) are certain:
+  site probability 1, localization q-value 0, and no FLR competition. Before, they competed
+  against impossible-site decoys and rarely passed; Met oxidation localizations on PXD007058 at
+  1% went from 0 to 256.
 - Immonium modified-residue ions no longer depend on where the search placed the modification.
   An ion such as `Phospho@Y` is explained when the peptide carries the modification and has a
   residue of the ion's kind free to carry it (unmodified, or carrying that modification), so

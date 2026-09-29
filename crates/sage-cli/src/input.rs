@@ -33,6 +33,12 @@ pub struct PtmLocalizationSettings {
     /// Arrangement-level false-localization-rate q-value cutoff.
     #[schemars(range(min = 0.0, max = 1.0))]
     pub localization_q_value: f32,
+    /// Fewest matched separating ions (fragments whose mass differs between the
+    /// best and runner-up arrangements) by which the best arrangement must win
+    /// to enter the false-localization-rate competition. Localizations below
+    /// the margin keep q-value 1. Use 0 to let tied arrangements compete, 2 for
+    /// fewer localizations with fewer wrong sites.
+    pub min_separating_margin: u32,
 }
 
 impl Default for PtmLocalizationSettings {
@@ -41,6 +47,7 @@ impl Default for PtmLocalizationSettings {
             enabled: false,
             psm_q_value: 0.01,
             localization_q_value: 0.01,
+            min_separating_margin: sage_core::ptm::DEFAULT_MIN_SEPARATING_MARGIN,
         }
     }
 }

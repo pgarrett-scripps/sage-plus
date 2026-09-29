@@ -1472,6 +1472,7 @@ modification sites are searched and is not a spectral library.
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
   - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
   - **localization_q_value**: Float from 0 through 1. Arrangement-level false localization rate cutoff for reported PTM localizations (default: 0.01).
+  - **min_separating_margin**: Integer, 0 or more. Fewest matched separating ions by which the best arrangement must beat the runner-up to enter the FLR competition (default: 1). See [PTM Site Localization](#ptm-site-localization).
 
 ## PTM Site Localization
 
@@ -1483,7 +1484,8 @@ Example configuration:
 "ptm_localization": {
   "enabled": true,
   "psm_q_value": 0.01,
-  "localization_q_value": 0.01
+  "localization_q_value": 0.01,
+  "min_separating_margin": 1
 }
 ```
 
@@ -1496,6 +1498,16 @@ For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), 
 6. reports target arrangements at or below `ptm_localization.localization_q_value`, together with an AScore-style delta and per-site localization probabilities.
 
 The false localization rate (FLR) is estimated per modification type. A named modification (a configured name or a known Unimod label) is one type whatever its delta mass, so Phospho written as 79.9663 and as 79.966 is one type. Unnamed mass-only modifications are grouped by delta mass: masses sorted and chained while neighbours are within 0.002 Da, with no fixed grid, so two masses that differ by less than that are never split by a rounding boundary. Site FDR (`site_q_value`) uses the same types. Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
+
+**Fully occupied and unseparated localizations.** When a modification has as many candidate sites as copies, such as a peptide with one Met and one oxidation, there is nothing to localize: its sites have probability 1, localization q-value 0, and it does not enter the FLR competition. A localization also stays out of the competition, with q-value 1, unless the best arrangement beats the runner-up by at least `min_separating_margin` matched *separating ions*: fragments, at charges 1 to the fragment charge limit, whose mass differs between those two arrangements. Two arrangements tied on those ions have no spectral evidence between them, which also happens when a spectrum is a mixture of both isomers. On the PXD000138 synthetic known-site library (Marx et al. 2013), single-site phosphopeptides at 1% FLR gave:
+
+| `min_separating_margin` | Localizations passing | Wrong sites | Estimated FLR | True FLR |
+|---|---|---|---|---|
+| none (Beta 14) | 3,640 | 35 | 0.96% | 0.96% |
+| 1 (default) | 3,639 | 34 | 0.44% | 0.93% |
+| 2 | 2,751 | 0 | 0.33% | 0% |
+
+Margin 1 keeps nearly every localization while removing ties from the competition. Margin 2 removed every wrong site in this library but cost about a quarter of the localizations; on PXD007058, phospho localizations at 1% FLR were 7,231 at margin 1 and 5,413 at margin 2. The margin rule is our own addition, not a published method; it was validated only on the library above.
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 

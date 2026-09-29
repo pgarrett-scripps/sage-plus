@@ -261,6 +261,7 @@ impl Runner {
             features[idx].localization = Some(localization);
         }
 
+        let min_separating_margin = self.parameters.ptm_localization.min_separating_margin;
         // The false-localization-rate competition uses target PSMs only and
         // runs separately for each modification type (see
         // `target_decoy_q_values_by_type`). Decoy PSMs read their q-value off
@@ -276,7 +277,9 @@ impl Runner {
                         .mods
                         .iter()
                         .enumerate()
-                        .filter(|(_, modification)| modification.competes())
+                        .filter(move |(_, modification)| {
+                            modification.competes(min_separating_margin)
+                        })
                         .map(move |(mod_idx, _)| (feature_idx, mod_idx))
                 })
             })

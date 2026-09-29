@@ -60,6 +60,10 @@
         },
         "localization_q_value": {
           "type": "number"
+        },
+        "min_separating_margin": {
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [

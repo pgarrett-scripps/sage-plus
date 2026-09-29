@@ -496,6 +496,9 @@ pub struct PtmLocalizationRunStats {
     pub localized_psms: usize,
     pub psm_q_value: f32,
     pub localization_q_value: f32,
+    /// Separating-ion margin a localization needed to compete.
+    #[serde(default)]
+    pub min_separating_margin: u32,
     /// Target protein sites in the site-level FDR competition.
     #[serde(default)]
     pub target_protein_sites: usize,

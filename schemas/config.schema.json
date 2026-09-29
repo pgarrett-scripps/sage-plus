@@ -1113,6 +1113,13 @@
           "minimum": 0.0,
           "type": "number"
         },
+        "min_separating_margin": {
+          "default": 1,
+          "description": "Fewest matched separating ions (fragments whose mass differs between the\nbest and runner-up arrangements) by which the best arrangement must win\nto enter the false-localization-rate competition. Localizations below\nthe margin keep q-value 1. Use 0 to let tied arrangements compete, 2 for\nfewer localizations with fewer wrong sites.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "psm_q_value": {
           "default": 0.009999999776482582,
           "description": "Identification q-value cutoff for PSMs included in PTM site reports.",

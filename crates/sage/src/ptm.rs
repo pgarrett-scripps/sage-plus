@@ -40,12 +40,11 @@ const MASS_EPS: f32 = 1e-3;
 /// this cap the modification is reported as un-localized.
 const MAX_ARRANGEMENTS: usize = 4096;
 
-/// Fewest matched separating ions by which the best arrangement must beat the
-/// runner-up before its sites are accepted as localized. Separating ions are
-/// the fragments whose mass differs between those two arrangements; between
-/// neighbouring residues there are only one b and one y ion per charge, so a
-/// single noise peak can otherwise decide the site.
-pub const MIN_SEPARATING_MARGIN: i32 = 2;
+/// Default fewest matched separating ions by which the best arrangement must
+/// beat the runner-up before its sites are accepted as localized. Separating
+/// ions are the fragments whose mass differs between those two arrangements;
+/// with a margin of 0, arrangements tied on those ions also compete.
+pub const DEFAULT_MIN_SEPARATING_MARGIN: u32 = 1;
 
 /// Localization confidence for a single candidate site.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -114,11 +113,11 @@ impl ModLocalization {
 
     /// Whether this localization enters the false-localization-rate competition:
     /// a balanced decoy competition exists and the best arrangement beats the
-    /// runner-up by at least [`MIN_SEPARATING_MARGIN`] matched separating ions.
+    /// runner-up by at least `min_separating_margin` matched separating ions.
     /// Localizations that fail the margin keep q-value 1.0 and do not count as
     /// targets or decoys.
-    pub fn competes(&self) -> bool {
-        self.competition_eligible && self.separating_margin >= MIN_SEPARATING_MARGIN
+    pub fn competes(&self, min_separating_margin: u32) -> bool {
+        self.competition_eligible && self.separating_margin >= min_separating_margin as i32
     }
 }
 
