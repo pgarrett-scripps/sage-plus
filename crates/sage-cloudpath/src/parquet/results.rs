@@ -5,22 +5,22 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
     build_results_schema(false)
 }
 
-/// Schema version of `results.sage.parquet`: 3 without precursor labels, 4
-/// with them. Both add the nullable fragment-loss and immonium columns to
-/// versions 1 and 2.
+/// Schema version of `results.sage.parquet`: 5 without precursor labels, 6
+/// with them. Versions 3 and 4 added the nullable fragment-loss and immonium
+/// columns to versions 1 and 2; versions 5 and 6 add `localized_peptide`.
 fn results_schema_version(has_labels: bool) -> &'static str {
     if has_labels {
-        "4"
+        "6"
     } else {
-        "3"
+        "5"
     }
 }
 
 fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/results.sage.v4.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v6.parquet.schema")
     } else {
-        include_str!("../../../../schemas/results.sage.v3.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v5.parquet.schema")
     })
 }
 
@@ -147,7 +147,8 @@ fn write_null_column(
 /// `spectrum_occurrences` maps `psm_id` to the zero-based occurrence of a
 /// repeated spectrum ID; PSMs that are absent are the first occurrence.
 /// `immonium` is the search's immonium settings; without them the immonium
-/// columns are null.
+/// columns are null. `localization_q_cutoff` is the localization q-value
+/// cutoff when site localization is on; without it `localized_peptide` is null.
 #[allow(clippy::too_many_arguments)]
 pub fn serialize_features(
     features: &[&Feature],
@@ -158,6 +159,7 @@ pub fn serialize_features(
     output_psm_q_value: f32,
     provenance: &[(String, String)],
     immonium: Option<&ImmoniumSettings>,
+    localization_q_cutoff: Option<f32>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let has_fragment_losses = database.fragment_losses.is_some();
@@ -465,6 +467,23 @@ pub fn serialize_features(
                             .into_bytes()
                             .into()
                     })
+                }),
+            )?;
+        }
+
+        // Localized peptide in ProForma: null without a localization.
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                features.iter().map(|f| {
+                    localization_q_cutoff.zip(f.localization.as_ref()).map(
+                        |(cutoff, localization)| {
+                            localization
+                                .proforma(&database[f.peptide_idx], cutoff)
+                                .into_bytes()
+                                .into()
+                        },
+                    )
                 }),
             )?;
         }

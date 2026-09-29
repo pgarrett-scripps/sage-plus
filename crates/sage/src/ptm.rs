@@ -196,6 +196,97 @@ pub struct Localization {
     pub mods: Vec<ModLocalization>,
 }
 
+impl Localization {
+    /// The peptide in ProForma 2.0 notation with every localized modification
+    /// moved to its best sites.
+    ///
+    /// A modification whose localization q-value is at most `q_cutoff` (and
+    /// below 1) is written plainly on its best sites. Any other localization
+    /// with more candidates than copies is written as a scored position group
+    /// (ProForma 2.0, LeDuc et al. 2022): the modification on each best site
+    /// with its label and score, `S[Phospho#g1(0.90)]`, and every other
+    /// candidate scoring at least 0.005 as `T[#g1(0.09)]`. With `k` copies the
+    /// group names `k` sites. Scores are the site probabilities, rounded to two
+    /// decimals. Groups are not written for terminal candidates, which
+    /// ProForma position groups do not cover; those stay on their best sites.
+    pub fn proforma(&self, peptide: &Peptide, q_cutoff: f32) -> String {
+        let length = peptide.sequence.len();
+        let encode = |site: &SiteScore| match site.attachment {
+            crate::ptm_library::Attachment::PeptideNTerm
+            | crate::ptm_library::Attachment::ProteinNTerm => length,
+            crate::ptm_library::Attachment::PeptideCTerm
+            | crate::ptm_library::Attachment::ProteinCTerm => length + 1,
+            crate::ptm_library::Attachment::Residue => site.position,
+        };
+
+        let mut variant = peptide.clone();
+        // Residue index -> (group label on the modification, extra group tags).
+        let mut annotations: std::collections::BTreeMap<usize, (Option<String>, Vec<String>)> =
+            std::collections::BTreeMap::new();
+        let mut group = 0usize;
+        for modification in &self.mods {
+            if modification.best_sites.is_empty()
+                || modification.candidate_sites <= modification.site_count
+            {
+                continue;
+            }
+            let candidates = modification
+                .all_sites
+                .iter()
+                .map(encode)
+                .collect::<Vec<_>>();
+            let chosen = modification
+                .best_sites
+                .iter()
+                .map(encode)
+                .collect::<Vec<_>>();
+            variant.relocate_modification_mass(modification.mass, &candidates, &chosen, MASS_EPS);
+
+            let confident = modification.localization_q_value <= q_cutoff
+                && modification.localization_q_value < 1.0;
+            if confident || candidates.iter().any(|&index| index >= length) {
+                continue;
+            }
+            group += 1;
+            for (site, &index) in modification.all_sites.iter().zip(&candidates) {
+                let label = format!("#g{group}({:.2})", site.probability);
+                let entry = annotations.entry(index).or_default();
+                if chosen.contains(&index) {
+                    entry.0 = Some(label);
+                } else if site.probability >= 0.005 {
+                    entry.1.push(format!("[{label}]"));
+                }
+            }
+        }
+
+        let mut out = String::new();
+        if let Some(mass) = variant.nterm {
+            out.push_str(&variant.modification_tag(Site::Nterm, mass));
+            out.push('-');
+        }
+        for (index, &residue) in variant.sequence.iter().enumerate() {
+            out.push(residue as char);
+            let mass = variant.modification_at(index);
+            let annotation = annotations.get(&index);
+            if mass != 0.0 {
+                let mut tag = variant.modification_tag(Site::Sequence(index as u32), mass);
+                if let Some(label) = annotation.and_then(|a| a.0.as_deref()) {
+                    tag.insert_str(tag.len() - 1, label);
+                }
+                out.push_str(&tag);
+            }
+            if let Some((_, extra)) = annotation {
+                extra.iter().for_each(|tag| out.push_str(tag));
+            }
+        }
+        if let Some(mass) = variant.cterm {
+            out.push('-');
+            out.push_str(&variant.modification_tag(Site::Cterm, mass));
+        }
+        out
+    }
+}
+
 /// Mirror of [`crate::scoring`]'s private `max_fragment_charge`, so the
 /// localization search considers the same fragment charge range as scoring.
 fn max_fragment_charge(max_fragment_charge: Option<u8>, precursor_charge: u8) -> u8 {

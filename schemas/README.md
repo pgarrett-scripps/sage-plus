@@ -10,7 +10,11 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `results.sage.v3.parquet.schema` (unlabeled) and `results.sage.v4.parquet.schema` (labeled) are
   v1 and v2 plus nine nullable columns at the end: `matched_loss_peaks` and `loss_intensity_pct`,
   filled when `database.fragment_losses` is configured (see `scores.v1.md`), then seven
-  `immonium_*` columns, filled when `immonium` is on. Current Sage writes v3 or v4.
+  `immonium_*` columns, filled when `immonium` is on.
+- `results.sage.v5.parquet.schema` (unlabeled) and `results.sage.v6.parquet.schema` (labeled) are
+  v3 and v4 plus a nullable `localized_peptide` column at the end: the peptide in ProForma 2.0
+  with localized modifications on their best sites, filled when `ptm_localization` is on.
+  Current Sage writes v5 or v6.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.

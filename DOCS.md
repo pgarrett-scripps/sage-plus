@@ -1501,6 +1501,7 @@ The current implementation combines one AScore-inspired, site-determining-ion st
 
 Two Parquet site reports are written:
 
+- **`localized_peptide`** in `results.sage.parquet`: every PSM localized above (spectrum q-value at most `ptm_localization.psm_q_value`), written in ProForma 2.0 with each modification moved to its best sites. A modification that passes `localization_q_value`, or whose candidates are all occupied, is written plainly, for example `PEPS[Phospho]TIDEK`. Any other modification is written as a ProForma scored position group (LeDuc et al. 2022): the modification with its label and score on each best site, and every other candidate with a score of at least 0.005 as a bare group tag, for example `PEPT[#g1(0.10)]IS[Phospho#g1(0.90)]K`. Scores are the site localization probabilities rounded to two decimals. They rank sites but are not calibrated, and tend to be overconfident, so use `localization_q_value` to decide what is localized. A modification with a terminal candidate is written plainly on its best site, because position groups do not cover termini. Decoy PSMs are included.
 - **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
 - **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
 
@@ -1611,10 +1612,10 @@ The `results.sage.parquet` file contains the following columns:
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
 Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
-scores; columns without one are descriptive. `results.sage.v3.parquet.schema` (unlabeled) and
-`results.sage.v4.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
-They are v1 and v2 plus nine nullable columns at the end: the two fragment-loss columns, then
-the seven `immonium_*` columns.
+scores; columns without one are descriptive. `results.sage.v5.parquet.schema` (unlabeled) and
+`results.sage.v6.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
+They are v1 and v2 plus ten nullable columns at the end: the two fragment-loss columns, the
+seven `immonium_*` columns, then `localized_peptide`.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1670,6 +1671,7 @@ the seven `immonium_*` columns.
 - `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
 - `matched_loss_peaks`, `loss_intensity_pct`: Generic fragment-loss evidence (cleavage and charge pairs whose loss form matched, and the percent of MS2 intensity those loss peaks carry); see [Generic fragment losses](#generic-fragment-losses). They do not count toward `matched_peaks` or the hyperscore. Null when `database.fragment_losses` is not configured. Higher is better.
 - `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
+- `localized_peptide`: The peptide in ProForma 2.0 with each localized modification on its best sites; see [PTM site localization](#ptm-site-localization). Null when `ptm_localization` is off or the PSM was not localized.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 

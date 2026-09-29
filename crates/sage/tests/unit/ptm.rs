@@ -518,3 +518,69 @@ fn unnamed_modification_types_cluster_without_a_grid() {
     assert_eq!(types[0], types[1]);
     assert_ne!(types[0], types[2]);
 }
+
+#[test]
+fn proforma_moves_modifications_and_groups_ambiguous_sites() {
+    let truth = truth_with_phospho();
+    let mut scored = peptide("AASAATAA");
+    scored.modifications = CompactModifications::from_sparse([(5, PHOSPHO)]);
+    let mut localization = localize(
+        &scored,
+        &synthetic_spectrum(&truth),
+        &[Kind::B, Kind::Y],
+        &[
+            (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+            (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+        ],
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    let modification = &mut localization.mods[0];
+    assert_eq!(modification.best_sites[0].position, 2);
+
+    // Confident: plain tag on the best site, moved off the reported T.
+    modification.localization_q_value = 0.0;
+    assert_eq!(localization.proforma(&scored, 0.01), "AAS[+79.96633]AATAA");
+
+    // Ambiguous: a scored position group over both candidates.
+    let modification = &mut localization.mods[0];
+    modification.localization_q_value = 1.0;
+    modification.best_sites[0].probability = 0.9;
+    for site in &mut modification.all_sites {
+        site.probability = if site.position == 2 { 0.9 } else { 0.1 };
+    }
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AAS[+79.96633#g1(0.90)]AAT[#g1(0.10)]AA"
+    );
+
+    // Candidates below 0.005 are left out of the group.
+    for site in &mut localization.mods[0].all_sites {
+        site.probability = if site.position == 2 { 0.999 } else { 0.001 };
+    }
+    localization.mods[0].best_sites[0].probability = 0.999;
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AAS[+79.96633#g1(1.00)]AATAA"
+    );
+}
+
+#[test]
+fn proforma_writes_fully_occupied_sites_plainly() {
+    let mut precursor = peptide("AAASAAA");
+    precursor.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
+    let localization = localize(
+        &precursor,
+        &ProcessedSpectrum::default(),
+        &[Kind::B, Kind::Y],
+        &[(ModificationSpecificity::Residue(b'S'), PHOSPHO)],
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    assert_eq!(
+        localization.proforma(&precursor, 0.01),
+        "AAAS[+79.96633]AAA"
+    );
+}

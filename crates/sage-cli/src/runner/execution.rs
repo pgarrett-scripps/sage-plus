@@ -405,6 +405,10 @@ impl Runner {
             output_psm_q_value,
             &self.parquet_provenance,
             self.parameters.immonium.as_ref(),
+            self.parameters
+                .ptm_localization
+                .enabled
+                .then_some(self.parameters.ptm_localization.localization_q_value),
         )?;
 
         let path = self.make_path("results.sage.parquet");
