@@ -1306,14 +1306,6 @@ impl<'db> Scorer<'db> {
         self.db.fragment_losses.is_some()
     }
 
-    /// Whether loss ions are matched at fragment charge `charge`.
-    fn loss_charge_allowed(&self, charge: u8) -> bool {
-        self.db
-            .fragment_losses
-            .as_deref()
-            .is_none_or(|losses| losses.matches_charge(charge))
-    }
-
     /// Remove peaks matching a PSM from a query spectrum
     fn remove_matched_peaks(&self, query: &mut ProcessedSpectrum, psm: &Feature) {
         let peptide = self.db.resolve_peptide(psm);
@@ -1532,7 +1524,7 @@ impl<'db> Scorer<'db> {
                         .filter(|variant| !variant.fragment_loss),
                     charge,
                 );
-                if score_losses && self.loss_charge_allowed(charge) {
+                if score_losses {
                     if let Some((_, peak_idx)) = self.select_variant(
                         query,
                         fragment_index,

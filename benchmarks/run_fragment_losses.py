@@ -11,8 +11,6 @@ Variants (see FRAGMENT_LOSSES.md and VARIANTS below):
   base  baseline executable, no `fragment_losses` key
   A     candidate, no `fragment_losses` key (must equal base row for row)
   C     candidate, losses as separate LDA features (the shipped behaviour)
-  C-1+  as C, loss ions matched at fragment charge 1+ only
-        (`max_fragment_loss_charge`, Beta 15 and later)
   B, B-int, B-intact, B-narrow, B-max2, Cs, Cf, P0, P05, P1, P0-narrow,
   P0Cs, W02  experiment integrations, see VARIANTS
 The `-chimera` suffix runs a variant with `chimera: true` and `report_psms: 2`.
@@ -124,8 +122,6 @@ LOSSES_NARROW = {
     "max_fragment_losses": 1,
 }
 LOSSES_MAX2 = {**LOSSES, "max_fragment_losses": 2}
-# Loss ions matched at fragment charge 1+ only, as Comet does (Beta 15).
-LOSSES_1PLUS = {**LOSSES, "max_fragment_loss_charge": 1}
 
 S = "SAGE_PLUS_FRAGMENT_LOSS_"
 PARENT = {S + "SCORING": "parent"}
@@ -146,8 +142,6 @@ VARIANTS = {
     "W02": ("candidate", LOSSES, {S + "SCORING": "weighted", S + "WEIGHT": "0.2"}, False),
     # C: separate LDA features (matched_loss_peaks, loss_intensity_pct).
     "C": ("candidate", LOSSES, {S + "SCORING": "features"}, False),
-    # C-1+: as C, loss ions matched at fragment charge 1+ only.
-    "C-1+": ("candidate", LOSSES_1PLUS, {}, False),
     # Cs: features count only loss peaks whose intact parent matched.
     "Cs": ("candidate", LOSSES, {S + "SCORING": "features", S + "FEATURE_PARENT": "1"}, False),
     # Cf: as Cs, count feature as a fraction of matched peaks.

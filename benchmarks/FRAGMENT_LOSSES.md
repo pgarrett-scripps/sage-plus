@@ -1,4 +1,4 @@
-# Generic fragment losses (Beta 14, loss charge Beta 15)
+# Generic fragment losses (Beta 14)
 
 `database.fragment_losses` adds residue-dependent loss ions (b-H2O, y-NH3 and
 so on) to full candidate scoring. This page records how the integration was
@@ -391,15 +391,16 @@ to expect; the effect here is none on CID, HCD or ETciD.
 - It remains available for users who want the loss evidence in their PSM
   tables or Percolator/mokapot features.
 
-## Loss-ion charge (Beta 15)
+## Loss-ion charge (Beta 15 experiment, setting not shipped)
 
-Beta 14 matches loss ions at every fragment charge that the intact ions are
-matched at. Comet matches them at 1+ only, and Andromeda reportedly does the
-same (table above). `database.max_fragment_loss_charge` caps the fragment charge
-of loss ions only; the intact ions are unchanged. It is absent by default, so
-Beta 14 configurations reproduce. **C-1+** is C with
-`"max_fragment_loss_charge": 1`, run with the Beta 15 binary (`b15/limits`). C
+Loss ions are matched at every fragment charge that the intact ions are
+matched at (up to `max_fragment_charge`). Comet matches them at 1+ only, and
+Andromeda reportedly does the same (table above). To test a 1+ cap, commit
+85b94cc on `b15/limits` added a `database.max_fragment_loss_charge` setting;
+**C-1+** is C with `"max_fragment_loss_charge": 1`, run with that binary. C
 from the same binary reproduces the Beta 14 C row for row on every dataset.
+The setting was then removed (see the decision below), so these runs need
+commit 85b94cc to reproduce.
 
 At 1% q-value:
 
@@ -437,11 +438,13 @@ is within 0.1% of C, and so are the PSM and peptide FDP (C-1+ is 0.03-0.05
 point lower at PSM level on Human_01 and CID). Protein FDP moves by a few
 entrapment proteins either way, as for every variant above.
 
-**Recommendation:** document `"max_fragment_loss_charge": 1` in the
-recommended configuration. It performs as well as all charges, matches Comet
-(and reportedly Andromeda), and puts less random evidence into the
-features. The default stays at all charges: the evidence shows parity, not a
-clear gain, and an absent key must keep reproducing Beta 14 results.
+**Decision:** no charge setting. A fixed 1+ cap would drop real loss peaks
+where multiply charged fragments are common (high-charge precursors, ETD,
+crosslinks), and a separate setting adds tuning for no measured gain. Loss
+ions follow the intact-ion fragment charges. Limits: both loss features sum
+over all charges, so rescoring cannot weight 2+ loss matches separately, and
+no benchmark dataset had many multiply charged fragments (PXD004447 is all 2+
+precursors, so its fragments are 1+ only).
 
 ## `allow_modified` and labelled residues (Beta 15 analysis)
 

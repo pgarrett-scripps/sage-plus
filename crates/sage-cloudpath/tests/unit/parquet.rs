@@ -465,7 +465,6 @@ fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::error
             allow_modified: false,
         }],
         max_losses: 1,
-        max_charge: None,
     }));
     assert_eq!(read(&database)?, ["3", "2.5"]);
     Ok(())

@@ -1780,16 +1780,6 @@
             "null"
           ]
         },
-        "max_fragment_loss_charge": {
-          "description": "Highest fragment charge at which generic fragment-loss ions are\nmatched (default: every fragment charge searched). `1` matches loss\nions at 1+ only, as Comet does. Requires `fragment_losses`.",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 1,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "max_fragment_losses": {
           "description": "Most generic fragment losses stacked on one fragment (default 1).\nRequires `fragment_losses`.",
           "format": "uint",
