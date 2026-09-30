@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.15] - 2026-09-29
+
 ### Documentation
 - `allow_modified: false` and labelled residues, analysed in `benchmarks/FRAGMENT_LOSSES.md`:
   excluding TMT/iTRAQ-labelled K and 15N SILAC labels (K8, R10) from ammonia loss is correct
@@ -34,6 +36,19 @@ entries are retained below for provenance.
   mass-only modifications by delta mass within 0.002 Da without a fixed grid. Before, a type was
   the name plus the delta mass rounded to 0.001 Da, so two spellings of one modification, or two
   masses on either side of a rounding boundary, could fall into separate competitions.
+- `benchmarks/FRAGMENT_LOSSES.md` adds a third round: an in-score loss contribution plus the two
+  loss features did not beat the features alone at a fixed 1% entrapment FDP, so scoring is
+  unchanged.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- On 15 min timsTOF E. coli replicates, `recenter_on_apex` raises the median replicate CV from
+  0.171 to 0.269 on the same precursors. Leave it off for timsTOF data.
+- Immonium modified-residue ions count as explained only when the search placed the
+  modification on the ion's residue, before PTM localization can move it.
+- At `min_separating_margin` 1 the estimated localization FLR is about half the true FLR on the
+  PXD000138 single-site peptides (0.44% against 0.93%).
 
 ## [v0.1.0-beta.14] - 2026-09-28
 
