@@ -40,6 +40,12 @@ const MASS_EPS: f32 = 1e-3;
 /// this cap the modification is reported as un-localized.
 const MAX_ARRANGEMENTS: usize = 4096;
 
+/// Default fewest matched separating ions by which the best arrangement must
+/// beat the runner-up before its sites are accepted as localized. Separating
+/// ions are the fragments whose mass differs between those two arrangements;
+/// with a margin of 0, arrangements tied on those ions also compete.
+pub const DEFAULT_MIN_SEPARATING_MARGIN: u32 = 1;
+
 /// Localization confidence for a single candidate site.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct SiteScore {
@@ -74,8 +80,13 @@ pub struct ModLocalization {
     pub target_decoy_score: f32,
     /// Whether an impossible-site decoy arrangement won the competition.
     pub decoy_winner: bool,
-    /// Whether a balanced target/decoy competition could be constructed.
+    /// Whether a balanced target/decoy competition could be constructed. False
+    /// when every candidate site is occupied: those sites are certain for the
+    /// peptide, so they take no part in the false-localization-rate estimate.
     pub competition_eligible: bool,
+    /// Matched separating ions of the best arrangement minus those of the
+    /// runner-up (0 when there is no runner-up).
+    pub separating_margin: i32,
     /// Dataset-level false-localization-rate q-value, assigned after all PSMs
     /// have been localized.
     pub localization_q_value: f32,
@@ -99,25 +110,68 @@ impl ModLocalization {
             q_value
         };
     }
-}
 
-/// Identity of a modification type for the false-localization-rate
-/// competition: the reported name (Unimod label, configured name, or signed
-/// mass) and the delta mass on a 0.001 Da grid, the tolerance at which two
-/// localized masses are treated as the same modification.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModificationType {
-    pub name: String,
-    mass_milli_da: i64,
-}
-
-impl ModificationType {
-    pub fn new(name: &str, mass: f32) -> Self {
-        Self {
-            name: name.to_owned(),
-            mass_milli_da: (mass as f64 / MASS_EPS as f64).round() as i64,
-        }
+    /// Whether this localization enters the false-localization-rate competition:
+    /// a balanced decoy competition exists and the best arrangement beats the
+    /// runner-up by at least `min_separating_margin` matched separating ions.
+    /// Localizations that fail the margin keep q-value 1.0 and do not count as
+    /// targets or decoys.
+    pub fn competes(&self, min_separating_margin: u32) -> bool {
+        self.competition_eligible && self.separating_margin >= min_separating_margin as i32
     }
+}
+
+/// Largest gap between the delta masses of two unnamed modifications that
+/// belong to one modification type.
+pub const TYPE_MASS_TOLERANCE: f32 = 2e-3;
+
+/// Identity of a modification type for the false-localization-rate and
+/// site-level FDR competitions.
+///
+/// A named modification (configured name or Unimod label) is its name,
+/// whatever its delta mass. Unnamed, mass-only modifications are grouped by
+/// [`modification_types`], which clusters their masses so that masses closer
+/// than [`TYPE_MASS_TOLERANCE`] always share a type: there is no fixed grid
+/// whose boundaries could split one modification in two.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ModificationType {
+    Named(String),
+    /// Index of the mass cluster among the population's unnamed masses.
+    Unnamed(usize),
+}
+
+/// Modification types for a population of `(name, delta mass)` identities,
+/// in caller order. Every localization or site that competes together must
+/// be passed in one call, so that targets and decoys get the same keys.
+///
+/// Named identities are keyed by name. Unnamed masses are sorted and split
+/// wherever two neighbours are more than [`TYPE_MASS_TOLERANCE`] apart
+/// (single linkage), so the grouping depends only on the gaps between the
+/// masses present.
+pub fn modification_types(identities: &[(Option<&str>, f32)]) -> Vec<ModificationType> {
+    let mut unnamed = identities
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, _))| name.is_none())
+        .map(|(ix, &(_, mass))| (mass, ix))
+        .collect::<Vec<_>>();
+    unnamed.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut cluster = vec![0usize; identities.len()];
+    let mut current = 0usize;
+    for (position, &(mass, ix)) in unnamed.iter().enumerate() {
+        if position > 0 && mass - unnamed[position - 1].0 > TYPE_MASS_TOLERANCE {
+            current += 1;
+        }
+        cluster[ix] = current;
+    }
+    identities
+        .iter()
+        .enumerate()
+        .map(|(ix, (name, _))| match name {
+            Some(name) => ModificationType::Named((*name).to_owned()),
+            None => ModificationType::Unnamed(cluster[ix]),
+        })
+        .collect()
 }
 
 impl ModLocalization {
@@ -128,9 +182,10 @@ impl ModLocalization {
             .unwrap_or_else(|| format!("{:+}", self.mass))
     }
 
-    /// Modification type whose competition this localization belongs to.
-    pub fn modification_type(&self) -> ModificationType {
-        ModificationType::new(&self.reported_name(), self.mass)
+    /// Input to [`modification_types`]: the label (`None` when unnamed) and
+    /// the delta mass.
+    pub fn type_identity(&self) -> (Option<&str>, f32) {
+        (self.label.as_deref(), self.mass)
     }
 }
 
@@ -138,6 +193,97 @@ impl ModLocalization {
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
 pub struct Localization {
     pub mods: Vec<ModLocalization>,
+}
+
+impl Localization {
+    /// The peptide in ProForma 2.0 notation with every localized modification
+    /// moved to its best sites.
+    ///
+    /// A modification whose localization q-value is at most `q_cutoff` (and
+    /// below 1) is written plainly on its best sites. Any other localization
+    /// with more candidates than copies is written as a scored position group
+    /// (ProForma 2.0, LeDuc et al. 2022): the modification on each best site
+    /// with its label and score, `S[Phospho#g1(0.90)]`, and every other
+    /// candidate scoring at least 0.005 as `T[#g1(0.09)]`. With `k` copies the
+    /// group names `k` sites. Scores are the site probabilities, rounded to two
+    /// decimals. Groups are not written for terminal candidates, which
+    /// ProForma position groups do not cover; those stay on their best sites.
+    pub fn proforma(&self, peptide: &Peptide, q_cutoff: f32) -> String {
+        let length = peptide.sequence.len();
+        let encode = |site: &SiteScore| match site.attachment {
+            crate::ptm_library::Attachment::PeptideNTerm
+            | crate::ptm_library::Attachment::ProteinNTerm => length,
+            crate::ptm_library::Attachment::PeptideCTerm
+            | crate::ptm_library::Attachment::ProteinCTerm => length + 1,
+            crate::ptm_library::Attachment::Residue => site.position,
+        };
+
+        let mut variant = peptide.clone();
+        // Residue index -> (group label on the modification, extra group tags).
+        let mut annotations: std::collections::BTreeMap<usize, (Option<String>, Vec<String>)> =
+            std::collections::BTreeMap::new();
+        let mut group = 0usize;
+        for modification in &self.mods {
+            if modification.best_sites.is_empty()
+                || modification.candidate_sites <= modification.site_count
+            {
+                continue;
+            }
+            let candidates = modification
+                .all_sites
+                .iter()
+                .map(encode)
+                .collect::<Vec<_>>();
+            let chosen = modification
+                .best_sites
+                .iter()
+                .map(encode)
+                .collect::<Vec<_>>();
+            variant.relocate_modification_mass(modification.mass, &candidates, &chosen, MASS_EPS);
+
+            let confident = modification.localization_q_value <= q_cutoff
+                && modification.localization_q_value < 1.0;
+            if confident || candidates.iter().any(|&index| index >= length) {
+                continue;
+            }
+            group += 1;
+            for (site, &index) in modification.all_sites.iter().zip(&candidates) {
+                let label = format!("#g{group}({:.2})", site.probability);
+                let entry = annotations.entry(index).or_default();
+                if chosen.contains(&index) {
+                    entry.0 = Some(label);
+                } else if site.probability >= 0.005 {
+                    entry.1.push(format!("[{label}]"));
+                }
+            }
+        }
+
+        let mut out = String::new();
+        if let Some(mass) = variant.nterm {
+            out.push_str(&variant.modification_tag(Site::Nterm, mass));
+            out.push('-');
+        }
+        for (index, &residue) in variant.sequence.iter().enumerate() {
+            out.push(residue as char);
+            let mass = variant.modification_at(index);
+            let annotation = annotations.get(&index);
+            if mass != 0.0 {
+                let mut tag = variant.modification_tag(Site::Sequence(index as u32), mass);
+                if let Some(label) = annotation.and_then(|a| a.0.as_deref()) {
+                    tag.insert_str(tag.len() - 1, label);
+                }
+                out.push_str(&tag);
+            }
+            if let Some((_, extra)) = annotation {
+                extra.iter().for_each(|tag| out.push_str(tag));
+            }
+        }
+        if let Some(mass) = variant.cterm {
+            out.push('-');
+            out.push_str(&variant.modification_tag(Site::Cterm, mass));
+        }
+        out
+    }
 }
 
 /// Mirror of [`crate::scoring`]'s private `max_fragment_charge`, so the
@@ -417,6 +563,7 @@ fn localize_mass(
             target_decoy_score: 0.0,
             decoy_winner: true,
             competition_eligible: false,
+            separating_margin: 0,
             localization_q_value: 1.0,
             best_sites: placed
                 .iter()
@@ -501,6 +648,22 @@ fn localize_mass(
             delta_score = 0.0;
         }
     }
+    let separating_margin = match arrangements.as_slice() {
+        [best, runner_up, ..] => {
+            let best_variant = build_variant(peptide, mass, &candidates, &best.sites);
+            let runner_variant = build_variant(peptide, mass, &candidates, &runner_up.sites);
+            let (best_hits, runner_hits) = separating_matches(
+                &best_variant,
+                &runner_variant,
+                spectrum,
+                ion_kinds,
+                fragment_tol,
+                max_charge,
+            );
+            best_hits as i32 - runner_hits as i32
+        }
+        _ => 0,
+    };
     let best_matched = arrangements.first().map(|a| a.matched).unwrap_or(0);
     let best_target_score = arrangements.first().map(|a| a.score).unwrap_or(0.0);
 
@@ -587,8 +750,11 @@ fn localize_mass(
         delta_score,
         target_decoy_score,
         decoy_winner,
-        competition_eligible: decoy_candidates.is_some(),
-        localization_q_value: 1.0,
+        competition_eligible: total_c > k && decoy_candidates.is_some(),
+        separating_margin,
+        // Every candidate occupied: the placement is fixed by the peptide, and
+        // only a wrong peptide (covered by the PSM q-value) could misplace it.
+        localization_q_value: if total_c == k { 0.0 } else { 1.0 },
         best_sites,
         all_sites,
     })
@@ -814,6 +980,43 @@ fn score_arrangement(
         }
     }
     (matched, trials)
+}
+
+/// Matched ions that separate two arrangements of one peptide: for every
+/// fragment whose mass differs between `a` and `b`, count matches of `a`'s ion
+/// and of `b`'s ion, at the charges [`score_arrangement`] uses.
+fn separating_matches(
+    a: &Peptide,
+    b: &Peptide,
+    spectrum: &ProcessedSpectrum,
+    ion_kinds: &[Kind],
+    fragment_tol: Tolerance,
+    max_charge: u8,
+) -> (u32, u32) {
+    let matches = |mass: f32| {
+        (1..max_charge)
+            .filter(|&charge| {
+                select_most_intense_peak(
+                    &spectrum.masses,
+                    &spectrum.intensities,
+                    mass / charge as f32,
+                    fragment_tol,
+                    None,
+                )
+                .is_some()
+            })
+            .count() as u32
+    };
+    let (mut a_hits, mut b_hits) = (0u32, 0u32);
+    for kind in ion_kinds {
+        for (ion_a, ion_b) in IonSeries::new(a, *kind).zip(IonSeries::new(b, *kind)) {
+            if (ion_a.monoisotopic_mass - ion_b.monoisotopic_mass).abs() > MASS_EPS {
+                a_hits += matches(ion_a.monoisotopic_mass);
+                b_hits += matches(ion_b.monoisotopic_mass);
+            }
+        }
+    }
+    (a_hits, b_hits)
 }
 
 /// A fragment covering `c_in_region` of the `total_c` candidate sites is

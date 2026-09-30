@@ -405,6 +405,10 @@ impl Runner {
             output_psm_q_value,
             &self.parquet_provenance,
             self.parameters.immonium.as_ref(),
+            self.parameters
+                .ptm_localization
+                .enabled
+                .then_some(self.parameters.ptm_localization.localization_q_value),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -609,6 +613,7 @@ impl Runner {
                 localized_psms,
                 psm_q_value: self.parameters.ptm_localization.psm_q_value,
                 localization_q_value: self.parameters.ptm_localization.localization_q_value,
+                min_separating_margin: self.parameters.ptm_localization.min_separating_margin,
                 target_protein_sites: site_stats.target_protein_sites,
                 decoy_protein_sites: site_stats.decoy_protein_sites,
                 protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,

@@ -259,6 +259,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         1.0,
         &[],
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -267,7 +268,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("5")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -315,6 +316,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
         &database,
         1.0,
         &[],
+        None,
         None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
@@ -390,6 +392,7 @@ fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::e
             1.0,
             &[],
             settings,
+            None,
         )?;
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
         let rows = reader
@@ -440,6 +443,7 @@ fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::error
             database,
             1.0,
             &[],
+            None,
             None,
         )?;
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
@@ -505,6 +509,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         1.0,
         &[],
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -513,7 +518,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("6")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -876,6 +881,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         1.0,
         &[],
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader
@@ -923,6 +929,7 @@ fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()
         &database,
         1.0,
         &[],
+        None,
         None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
