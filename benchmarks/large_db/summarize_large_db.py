@@ -33,11 +33,22 @@ from pathlib import Path
 
 import duckdb
 
+from run_large_db import parse_log
+
 HUMAN_PREFIXES = ("sp|", "human:", "irt:")
 
 
 def load_runs(path: Path) -> dict:
-    return json.loads((path / "large-db-runs.json").read_text())["runs"]
+    """Recorded runs, with prefilter counts re-read from each log so records
+    written before the parser knew a log format still carry them."""
+    runs = json.loads((path / "large-db-runs.json").read_text())["runs"]
+    for name, record in runs.items():
+        log = path / name / "stderr.log"
+        if "prefilter" not in record and log.exists():
+            parsed = parse_log(log.read_text(errors="replace"))
+            if "prefilter" in parsed:
+                record["prefilter"] = parsed["prefilter"]
+    return runs
 
 
 def results(directory: Path) -> str:
@@ -266,6 +277,7 @@ def main() -> None:
         "campi_databases": json.loads((args.root / "databases/campi-databases.json").read_text()),
         "scaling": scaling_rows,
         "narrow": scaling(runs / "narrow", receipt, reference)[0],
+        "high_limit": scaling(runs / "high-limit", receipt, reference)[0],
         "six_frame": six_frame(runs / "six-frame",
                                [references / "ecoli.fasta", references / "yeast.fasta"]),
         "metaproteome": metaproteome(runs / "metaproteome"),

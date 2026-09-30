@@ -1,7 +1,7 @@
 # Development and Evaluation of Sage Plus
 
 This chapter compares upstream Sage `v0.15.0-beta.2` with Sage Plus
-`v0.1.0-beta.6`, the latest published releases checked on September 20, 2026.
+`v0.1.0-beta.15`, the latest published releases checked on September 30, 2026.
 The manuscript presents one comparison between the two engines. It does not
 compare successive Sage Plus releases.
 
@@ -11,7 +11,7 @@ from the refreshed executable searches. The named-modification schematic and
 mass-offset experiment explain the current modification workflow.
 
 Search commands, input and executable hashes, successes, and failures are kept
-under `runs/paper-refresh-20260920/` in the working repository. Read
+under `runs/paper-refresh-20260930/` in the working repository. Read
 `REPRODUCIBILITY.md` for the frozen analysis paths and build commands. Failed
 attempts remain part of the execution record and are excluded from successful
 resource summaries. Large source spectra remain at their verified acquisition

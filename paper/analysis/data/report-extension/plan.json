@@ -1,6 +1,6 @@
 {
   "comparison": {
-    "plus": "v0.1.0-beta.6",
+    "plus": "v0.1.0-beta.15",
     "upstream": "v0.15.0-beta.2"
   },
   "jobs": [
@@ -75,7 +75,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -201,7 +201,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -257,7 +257,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -425,7 +425,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -481,7 +481,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -649,7 +649,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -705,7 +705,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -873,7 +873,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -929,7 +929,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1097,7 +1097,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1153,7 +1153,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1321,7 +1321,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1377,7 +1377,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1545,7 +1545,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1601,7 +1601,7 @@
       "warmup": true
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1769,7 +1769,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,
@@ -1825,7 +1825,7 @@
       "warmup": false
     },
     {
-      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage",
+      "binary": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage",
       "config": {
         "batch_size": 1,
         "chimera": false,

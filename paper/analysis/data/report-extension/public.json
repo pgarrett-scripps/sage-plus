@@ -1,56 +1,56 @@
 {
   "analysis_sources_sha256": {
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/analyze_scientific.py": "d5bf59e7752f190c36f8a3803fe688860807ea4b1268d52d43aedc4383289009",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/generate_ptm_library_benchmark.py": "6e2fdc451b343bc31fa4e323d6291f0aac3e63d282b80286bb1b630c59eacbd1",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/paper/analysis/scripts/collect_report.py": "d4ed7b8cc95bf0216bd27d0ece3b0fbfd54569004fe8a15d564be9133b43a647"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/analyze_scientific.py": "d5bf59e7752f190c36f8a3803fe688860807ea4b1268d52d43aedc4383289009",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/generate_ptm_library_benchmark.py": "419ee0a282d9583e621f39e2255a0488998a156c723b5848b478d1f0ad906f57",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/scientific_diagnostics.py": "e53a2a16b325690fca8ce830ba5e2f646d58a356175b317903b60c8286cf6fc0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/paper/analysis/scripts/collect_report.py": "7270c691e4f1eb6c27520a4340735c750bde16d17dc765f455487b3549e58d62"
   },
   "data": [
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 84,
-          "no_matching_rank_one_spectrum_charge": 1,
-          "same_assignment_above_threshold": 80
+          "different_assignment": 127,
+          "no_matching_rank_one_spectrum_charge": 24,
+          "same_assignment_above_threshold": 104
         },
         "upstream": {
-          "different_assignment": 73,
-          "no_matching_rank_one_spectrum_charge": 1,
-          "same_assignment_above_threshold": 40
+          "different_assignment": 69,
+          "no_matching_rank_one_spectrum_charge": 2,
+          "same_assignment_above_threshold": 37
         }
       },
       "engines": {
         "plus": {
           "0.001": {
-            "decoy_psms": 13,
-            "target_peptidoforms": 7892,
-            "target_psms": 14832,
-            "target_sequences": 7892
+            "decoy_psms": 14,
+            "target_peptidoforms": 8398,
+            "target_psms": 15760,
+            "target_sequences": 8398
           },
           "0.005": {
             "decoy_psms": 82,
-            "target_peptidoforms": 9111,
-            "target_psms": 16626,
-            "target_sequences": 9111
+            "target_peptidoforms": 9208,
+            "target_psms": 16761,
+            "target_sequences": 9208
           },
           "0.01": {
-            "decoy_psms": 168,
-            "target_peptidoforms": 9293,
-            "target_psms": 16917,
-            "target_sequences": 9293
+            "decoy_psms": 169,
+            "target_peptidoforms": 9340,
+            "target_psms": 17013,
+            "target_sequences": 9340
           },
           "0.02": {
-            "decoy_psms": 344,
-            "target_peptidoforms": 9475,
-            "target_psms": 17290,
-            "target_sequences": 9475
+            "decoy_psms": 346,
+            "target_peptidoforms": 9508,
+            "target_psms": 17375,
+            "target_sequences": 9508
           },
           "0.05": {
-            "decoy_psms": 897,
-            "target_peptidoforms": 9871,
-            "target_psms": 17961,
-            "target_sequences": 9871
+            "decoy_psms": 902,
+            "target_peptidoforms": 9891,
+            "target_psms": 18060,
+            "target_sequences": 9891
           }
         },
         "upstream": {
@@ -88,18 +88,18 @@
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 114,
-        "candidate_only": 165,
+        "baseline_only": 108,
+        "candidate_only": 255,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.983618108155716,
-        "maximum_peptide_q_difference": 0.247708046,
-        "maximum_score_difference": 8.3753712,
+        "jaccard": 0.9787979674084458,
+        "maximum_peptide_q_difference": 0.99915613513,
+        "maximum_score_difference": 8.2420604,
         "pair": "public-comparison-v2/PXD001468-0",
         "q": 0.01,
-        "shared_target_psms": 16752,
+        "shared_target_psms": 16758,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD001468-0"
@@ -107,47 +107,47 @@
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 66,
-          "no_matching_rank_one_spectrum_charge": 3,
-          "same_assignment_above_threshold": 111
+          "different_assignment": 132,
+          "no_matching_rank_one_spectrum_charge": 41,
+          "same_assignment_above_threshold": 133
         },
         "upstream": {
-          "different_assignment": 56,
+          "different_assignment": 69,
           "no_matching_rank_one_spectrum_charge": 12,
-          "same_assignment_above_threshold": 47
+          "same_assignment_above_threshold": 41
         }
       },
       "engines": {
         "plus": {
           "0.001": {
             "decoy_psms": 16,
-            "target_peptidoforms": 9335,
-            "target_psms": 17023,
-            "target_sequences": 9335
+            "target_peptidoforms": 9481,
+            "target_psms": 17330,
+            "target_sequences": 9481
           },
           "0.005": {
             "decoy_psms": 94,
-            "target_peptidoforms": 10814,
-            "target_psms": 19027,
-            "target_sequences": 10814
+            "target_peptidoforms": 10935,
+            "target_psms": 19147,
+            "target_sequences": 10935
           },
           "0.01": {
-            "decoy_psms": 193,
-            "target_peptidoforms": 11103,
-            "target_psms": 19471,
-            "target_sequences": 11103
+            "decoy_psms": 194,
+            "target_peptidoforms": 11152,
+            "target_psms": 19590,
+            "target_sequences": 11152
           },
           "0.02": {
-            "decoy_psms": 396,
-            "target_peptidoforms": 11362,
-            "target_psms": 19892,
-            "target_sequences": 11362
+            "decoy_psms": 398,
+            "target_peptidoforms": 11403,
+            "target_psms": 19989,
+            "target_sequences": 11403
           },
           "0.05": {
-            "decoy_psms": 1034,
-            "target_peptidoforms": 11858,
-            "target_psms": 20701,
-            "target_sequences": 11858
+            "decoy_psms": 1040,
+            "target_peptidoforms": 11889,
+            "target_psms": 20821,
+            "target_sequences": 11889
           }
         },
         "upstream": {
@@ -185,18 +185,18 @@
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 115,
-        "candidate_only": 180,
+        "baseline_only": 122,
+        "candidate_only": 306,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9849382211783927,
-        "maximum_peptide_q_difference": 0.20395954100000002,
-        "maximum_score_difference": 8.0027685,
+        "jaccard": 0.9782873376623377,
+        "maximum_peptide_q_difference": 0.9983955508,
+        "maximum_score_difference": 7.9701675000000005,
         "pair": "public-comparison-v2/PXD001468-1",
         "q": 0.01,
-        "shared_target_psms": 19291,
+        "shared_target_psms": 19284,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD001468-1"
@@ -204,47 +204,47 @@
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 512,
-          "no_matching_rank_one_spectrum_charge": 42,
-          "same_assignment_above_threshold": 419
+          "different_assignment": 748,
+          "no_matching_rank_one_spectrum_charge": 101,
+          "same_assignment_above_threshold": 533
         },
         "upstream": {
-          "different_assignment": 465,
+          "different_assignment": 492,
           "no_matching_rank_one_spectrum_charge": 68,
-          "same_assignment_above_threshold": 285
+          "same_assignment_above_threshold": 222
         }
       },
       "engines": {
         "plus": {
           "0.001": {
-            "decoy_psms": 45,
-            "target_peptidoforms": 32320,
-            "target_psms": 46372,
-            "target_sequences": 32320
+            "decoy_psms": 46,
+            "target_peptidoforms": 33123,
+            "target_psms": 47235,
+            "target_sequences": 33123
           },
           "0.005": {
-            "decoy_psms": 264,
-            "target_peptidoforms": 37208,
-            "target_psms": 53043,
-            "target_sequences": 37208
+            "decoy_psms": 267,
+            "target_peptidoforms": 37834,
+            "target_psms": 53693,
+            "target_sequences": 37834
           },
           "0.01": {
-            "decoy_psms": 555,
-            "target_peptidoforms": 39117,
-            "target_psms": 55612,
-            "target_sequences": 39117
+            "decoy_psms": 559,
+            "target_peptidoforms": 39561,
+            "target_psms": 56057,
+            "target_sequences": 39561
           },
           "0.02": {
-            "decoy_psms": 1154,
-            "target_peptidoforms": 40784,
-            "target_psms": 57776,
-            "target_sequences": 40784
+            "decoy_psms": 1162,
+            "target_peptidoforms": 41117,
+            "target_psms": 58157,
+            "target_sequences": 41117
           },
           "0.05": {
-            "decoy_psms": 3033,
-            "target_peptidoforms": 42931,
-            "target_psms": 60697,
-            "target_sequences": 42931
+            "decoy_psms": 3050,
+            "target_peptidoforms": 43196,
+            "target_psms": 61020,
+            "target_sequences": 43196
           }
         },
         "upstream": {
@@ -282,18 +282,18 @@
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 818,
-        "candidate_only": 973,
+        "baseline_only": 782,
+        "candidate_only": 1382,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9682615629984052,
-        "maximum_peptide_q_difference": 0.171324547,
-        "maximum_score_difference": 9.86721427,
+        "jaccard": 0.9619275497457731,
+        "maximum_peptide_q_difference": 0.99785446,
+        "maximum_score_difference": 9.92737627,
         "pair": "public-comparison-v2/PXD028735-0",
         "q": 0.01,
-        "shared_target_psms": 54639,
+        "shared_target_psms": 54675,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD028735-0"
@@ -301,96 +301,96 @@
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 504,
-          "no_matching_rank_one_spectrum_charge": 37,
-          "same_assignment_above_threshold": 416
+          "different_assignment": 737,
+          "no_matching_rank_one_spectrum_charge": 106,
+          "same_assignment_above_threshold": 602
         },
         "upstream": {
-          "different_assignment": 442,
+          "different_assignment": 450,
           "no_matching_rank_one_spectrum_charge": 54,
-          "same_assignment_above_threshold": 354
+          "same_assignment_above_threshold": 272
         }
       },
       "engines": {
         "plus": {
           "0.001": {
-            "decoy_psms": 44,
-            "target_peptidoforms": 31724,
-            "target_psms": 45838,
-            "target_sequences": 31724
+            "decoy_psms": 45,
+            "target_peptidoforms": 32584,
+            "target_psms": 46860,
+            "target_sequences": 32584
           },
           "0.005": {
-            "decoy_psms": 266,
-            "target_peptidoforms": 37021,
-            "target_psms": 53440,
-            "target_sequences": 37021
+            "decoy_psms": 269,
+            "target_peptidoforms": 37749,
+            "target_psms": 54118,
+            "target_sequences": 37749
           },
           "0.01": {
-            "decoy_psms": 559,
-            "target_peptidoforms": 38982,
-            "target_psms": 56044,
-            "target_sequences": 38982
+            "decoy_psms": 565,
+            "target_peptidoforms": 39539,
+            "target_psms": 56617,
+            "target_sequences": 39539
           },
           "0.02": {
-            "decoy_psms": 1164,
-            "target_peptidoforms": 40702,
-            "target_psms": 58253,
-            "target_sequences": 40702
+            "decoy_psms": 1171,
+            "target_peptidoforms": 41080,
+            "target_psms": 58638,
+            "target_sequences": 41080
           },
           "0.05": {
-            "decoy_psms": 3071,
-            "target_peptidoforms": 42953,
-            "target_psms": 61448,
-            "target_sequences": 42953
+            "decoy_psms": 3090,
+            "target_peptidoforms": 43294,
+            "target_psms": 61820,
+            "target_sequences": 43294
           }
         },
         "upstream": {
           "0.001": {
             "decoy_psms": 45,
-            "target_peptidoforms": 31633,
-            "target_psms": 46031,
-            "target_sequences": 31633
+            "target_peptidoforms": 31631,
+            "target_psms": 46015,
+            "target_sequences": 31631
           },
           "0.005": {
             "decoy_psms": 265,
-            "target_peptidoforms": 36890,
-            "target_psms": 53337,
-            "target_sequences": 36890
+            "target_peptidoforms": 36889,
+            "target_psms": 53333,
+            "target_sequences": 36889
           },
           "0.01": {
             "decoy_psms": 558,
-            "target_peptidoforms": 38925,
-            "target_psms": 55937,
-            "target_sequences": 38925
+            "target_peptidoforms": 38924,
+            "target_psms": 55948,
+            "target_sequences": 38924
           },
           "0.02": {
             "decoy_psms": 1161,
-            "target_peptidoforms": 40608,
-            "target_psms": 58129,
-            "target_sequences": 40608
+            "target_peptidoforms": 40607,
+            "target_psms": 58128,
+            "target_sequences": 40607
           },
           "0.05": {
             "decoy_psms": 3071,
-            "target_peptidoforms": 43002,
-            "target_psms": 61450,
-            "target_sequences": 43002
+            "target_peptidoforms": 43003,
+            "target_psms": 61449,
+            "target_sequences": 43003
           }
         }
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 850,
-        "candidate_only": 957,
+        "baseline_only": 776,
+        "candidate_only": 1445,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9682391816360248,
-        "maximum_peptide_q_difference": 0.2097864078,
-        "maximum_score_difference": 7.5960217000000005,
+        "jaccard": 0.9613019009286847,
+        "maximum_peptide_q_difference": 0.99920031114,
+        "maximum_score_difference": 7.809274459999999,
         "pair": "public-comparison-v2/PXD028735-1",
         "q": 0.01,
-        "shared_target_psms": 55087,
+        "shared_target_psms": 55172,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD028735-1"
@@ -398,47 +398,47 @@
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 580,
-          "no_matching_rank_one_spectrum_charge": 27,
-          "same_assignment_above_threshold": 485
+          "different_assignment": 824,
+          "no_matching_rank_one_spectrum_charge": 75,
+          "same_assignment_above_threshold": 620
         },
         "upstream": {
-          "different_assignment": 515,
+          "different_assignment": 535,
           "no_matching_rank_one_spectrum_charge": 43,
-          "same_assignment_above_threshold": 363
+          "same_assignment_above_threshold": 301
         }
       },
       "engines": {
         "plus": {
           "0.001": {
-            "decoy_psms": 47,
-            "target_peptidoforms": 33189,
-            "target_psms": 48942,
-            "target_sequences": 33189
+            "decoy_psms": 48,
+            "target_peptidoforms": 34108,
+            "target_psms": 49707,
+            "target_sequences": 34108
           },
           "0.005": {
-            "decoy_psms": 280,
-            "target_peptidoforms": 38246,
-            "target_psms": 56230,
-            "target_sequences": 38246
+            "decoy_psms": 283,
+            "target_peptidoforms": 38887,
+            "target_psms": 56874,
+            "target_sequences": 38887
           },
           "0.01": {
-            "decoy_psms": 584,
-            "target_peptidoforms": 40117,
-            "target_psms": 58508,
-            "target_sequences": 40117
+            "decoy_psms": 588,
+            "target_peptidoforms": 40530,
+            "target_psms": 58977,
+            "target_sequences": 40530
           },
           "0.02": {
-            "decoy_psms": 1217,
-            "target_peptidoforms": 41686,
-            "target_psms": 60908,
-            "target_sequences": 41686
+            "decoy_psms": 1225,
+            "target_peptidoforms": 42042,
+            "target_psms": 61312,
+            "target_sequences": 42042
           },
           "0.05": {
-            "decoy_psms": 3206,
-            "target_peptidoforms": 43952,
-            "target_psms": 64143,
-            "target_sequences": 43952
+            "decoy_psms": 3225,
+            "target_peptidoforms": 44249,
+            "target_psms": 64521,
+            "target_sequences": 44249
           }
         },
         "upstream": {
@@ -476,18 +476,18 @@
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 921,
-        "candidate_only": 1092,
+        "baseline_only": 879,
+        "candidate_only": 1519,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9661276481179222,
-        "maximum_peptide_q_difference": 0.20993675,
-        "maximum_score_difference": 8.87550435,
+        "jaccard": 0.959937182571505,
+        "maximum_peptide_q_difference": 0.9990447206,
+        "maximum_score_difference": 8.98824235,
         "pair": "public-comparison-v2/PXD028735-2",
         "q": 0.01,
-        "shared_target_psms": 57416,
+        "shared_target_psms": 57458,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD028735-2"
@@ -495,47 +495,47 @@
     {
       "disagreement": {
         "plus": {
-          "different_assignment": 556,
-          "no_matching_rank_one_spectrum_charge": 26,
-          "same_assignment_above_threshold": 457
+          "different_assignment": 791,
+          "no_matching_rank_one_spectrum_charge": 79,
+          "same_assignment_above_threshold": 609
         },
         "upstream": {
-          "different_assignment": 477,
+          "different_assignment": 486,
           "no_matching_rank_one_spectrum_charge": 39,
-          "same_assignment_above_threshold": 376
+          "same_assignment_above_threshold": 286
         }
       },
       "engines": {
         "plus": {
           "0.001": {
-            "decoy_psms": 45,
-            "target_peptidoforms": 32179,
-            "target_psms": 46664,
-            "target_sequences": 32179
+            "decoy_psms": 47,
+            "target_peptidoforms": 32293,
+            "target_psms": 48310,
+            "target_sequences": 32293
           },
           "0.005": {
-            "decoy_psms": 272,
-            "target_peptidoforms": 37231,
-            "target_psms": 54737,
-            "target_sequences": 37231
+            "decoy_psms": 275,
+            "target_peptidoforms": 37812,
+            "target_psms": 55379,
+            "target_sequences": 37812
           },
           "0.01": {
-            "decoy_psms": 572,
-            "target_peptidoforms": 39271,
-            "target_psms": 57321,
-            "target_sequences": 39271
+            "decoy_psms": 577,
+            "target_peptidoforms": 39762,
+            "target_psms": 57842,
+            "target_sequences": 39762
           },
           "0.02": {
-            "decoy_psms": 1193,
-            "target_peptidoforms": 40961,
-            "target_psms": 59710,
-            "target_sequences": 40961
+            "decoy_psms": 1200,
+            "target_peptidoforms": 41330,
+            "target_psms": 60093,
+            "target_sequences": 41330
           },
           "0.05": {
-            "decoy_psms": 3149,
-            "target_peptidoforms": 43385,
-            "target_psms": 63002,
-            "target_sequences": 43385
+            "decoy_psms": 3168,
+            "target_peptidoforms": 43671,
+            "target_psms": 63387,
+            "target_sequences": 43671
           }
         },
         "upstream": {
@@ -573,48 +573,48 @@
       },
       "overlap": {
         "all_psm_identities_equal": false,
-        "baseline_only": 892,
-        "candidate_only": 1039,
+        "baseline_only": 811,
+        "candidate_only": 1479,
         "engine_status": {
           "plus": "complete",
           "upstream": "complete"
         },
-        "jaccard": 0.9668287152354285,
-        "maximum_peptide_q_difference": 0.18519355999999998,
-        "maximum_score_difference": 6.305975999999999,
+        "jaccard": 0.9609568138032155,
+        "maximum_peptide_q_difference": 0.99956609347,
+        "maximum_score_difference": 6.367689299999999,
         "pair": "public-comparison-v2/PXD028735-3",
         "q": 0.01,
-        "shared_target_psms": 56282,
+        "shared_target_psms": 56363,
         "status": "complete"
       },
       "pair": "public-comparison-v2/PXD028735-3"
     }
   ],
   "inputs_sha256": {
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/identification-metrics.json": "ce620d324d8f74765190c720ffd8d5e88828ddb29e5cce93bb518445ce578773",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/results.sage.parquet": "20654ed8974c828e687605112df003af4e30d8c9dcb821001c15a0b680869806",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/identification-metrics.json": "0623d58601e65e0028ebd1cea6f0822b652c0c66a66208b7abb1ff90499bbf32",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/results.sage.tsv": "8139b65647cc7db57fa26a563aaceaf343d0c0deeb83b6e342e71f39463a56f9",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/identification-metrics.json": "ea6c5ed351f7624fbc37455a626738873e195eced8df8052276d03510a80884b",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/results.sage.parquet": "9a7b073396d0be14b66b7f4f4568b00c9af65178d8ae0f3e58975c30547d14e0",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/identification-metrics.json": "66671adb054713336bb6ec8144ac0edc8c2f0b9d58d6eecba9be4b455cbd6d87",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/results.sage.tsv": "577ef164b65587e8256f3d12dbcbd1e0b833e3e82b7aa0664cb9272ed6ae1624",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/identification-metrics.json": "43ddcbd401ae6bb7a3261321f2315f8b9be21e966535bef95c1bda7d594699dc",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/results.sage.parquet": "11ed3b26120e92d62be043c7191b7f422626db966765f437bb7af24451fac1c3",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/identification-metrics.json": "14dacb56401d621c30e5a1a401c5fa3bfa207c8769857d3c392162318ce9fd13",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/results.sage.tsv": "b240ec573dc3c6020bfdfeaa96a85d7ae949f975df550001860d03bb9a4f55bc",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/identification-metrics.json": "da4c83552e2454e69cbcbd6698a161adb64bae23a8bcc49a27e69aeef04788af",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/results.sage.parquet": "2446a597d80ef6e43d98f565ff0254c6d7bb095f97fbc09efe6fda7072a9f7a5",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/identification-metrics.json": "1c2de4b5cabbb21c01dcbc3ef87493dacf79965e9d4ac6136e86afc0de590378",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/results.sage.tsv": "ddbd9117d1c571ec7f69c308b6fbeba0ee8c4cdd6a01cdc66d07ddb555974eca",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/identification-metrics.json": "17c1c8c7cfb62f639eb7486cf0d5a175174c7651f2ff5bee8bcd5e1850774a15",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/results.sage.parquet": "4a5ead84799d43b2dbdca6693e20d0c8a86081b66ca5a1560b2a269acac5a721",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/identification-metrics.json": "b31d5410ccc14b1f231a22e6b207fc0af9149951efff7066b722570cea880e51",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/results.sage.tsv": "e7c24e22cf641ed34cc53f7cdda2a757b7016f058dae128586da3b8e7d73d8fc",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/identification-metrics.json": "b3e583042b730ef23dcd67b4b6c0d3db7bed7b39439ff6d9f0be69edec728adc",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/results.sage.parquet": "4b9441b79047b8ad3c06d28f3254a1e313be4bcf9e2904dcb820fc97bf0452a3",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/identification-metrics.json": "f95e6d13d882451ad355bd656e91cccc160e6049946641b905eed5bb6a757aa0",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/results.sage.tsv": "155b9b9817c0b9794c9ae86b5ea4373b3ac325a2d0ce3274943f1ead63ef2887",
-    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260920/source/benchmarks/scientific-results/20260920/pilot-summary.json": "b455c63bc1c165dea5b5ee57d441ae426187f09beea7a52b498d178333c98601"
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/identification-metrics.json": "76d212b930569e6973a297413dc157bf48616bd952f47252043aa51b7277871c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-0-plus/results.sage.parquet": "e3ac8e0f996eff39e9d64c94704fe27078a3a4da96969c030a61b665c817ad99",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/identification-metrics.json": "0623d58601e65e0028ebd1cea6f0822b652c0c66a66208b7abb1ff90499bbf32",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-0-upstream/results.sage.tsv": "1e39755858451a62213e6779c2eb1efd2a2f7c157ce78dcb3d6c2c4cb11298ad",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/identification-metrics.json": "25a7b32c16b3a5467679242d5a2a1c6d9b4a7c8387cd5e0036a1c8ae4b095cb5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-1-plus/results.sage.parquet": "fe7cee002785448856d842500a7e54ed6340a96fca56dda90828f56c1f25f5cd",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/identification-metrics.json": "66671adb054713336bb6ec8144ac0edc8c2f0b9d58d6eecba9be4b455cbd6d87",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD001468-1-upstream/results.sage.tsv": "666886d644b35125276f9d23654ac53027b8243060bed47942223457674457d1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/identification-metrics.json": "c38c83d6b574531799f23502971f4921133ceed5c87fb82ac014b0c54250ba46",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-0-plus/results.sage.parquet": "a00c4e66c69f99f078a2c2e12f6592215048508e4f23117274036f6feae49eef",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/identification-metrics.json": "14dacb56401d621c30e5a1a401c5fa3bfa207c8769857d3c392162318ce9fd13",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-0-upstream/results.sage.tsv": "b9312bd29fb94f0b571e1e6e54c7ed18de4320bfff6046f61741dd2bbac8ffed",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/identification-metrics.json": "0d86952113d0b7a846015a5c27d7c54378216b4031a2fdab3b196e8864d8e47c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-1-plus/results.sage.parquet": "80529a0bc358e2ed39dcc3c04b6f8a383c8aad17773de5e61d23ee1aeeb975a0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/identification-metrics.json": "240edecdf08a5c4f7a693b6e2ed9df1f7c50c37928b6518cd5e4abd1648380a9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-1-upstream/results.sage.tsv": "680449df5ac54d6c022d633b30eb09b1b959839b245aa90b86d64967fa2f95eb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/identification-metrics.json": "500eddb2977ad5cb5f5c5d211298c54e0f06ab4fc541ba39974eee68658d0bb4",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-2-plus/results.sage.parquet": "434ad5d2933a409f23198af757d300f78f3076b28b8df19d6a2156db15fc42de",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/identification-metrics.json": "b31d5410ccc14b1f231a22e6b207fc0af9149951efff7066b722570cea880e51",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-2-upstream/results.sage.tsv": "30639ff653e482cf4e91ab346d34eb0202a73bf248b0aa5976e6f2c65eee508e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/identification-metrics.json": "7ea3e7a4a023da98441b90e084680b359a3c34b73645f797ccd42034a45208c6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-3-plus/results.sage.parquet": "ce7a372aa1ddc2e8d01d6d2a42b9ebe4907bdc044217f36ff1186b9114ac98b0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/identification-metrics.json": "f95e6d13d882451ad355bd656e91cccc160e6049946641b905eed5bb6a757aa0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/evidence-selected/runs/public-comparison-v2/PXD028735-3-upstream/results.sage.tsv": "a84a42255e52ee838f53fd420efd51e9de07ab700fca11f128d81fd2d4bb3830",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/scientific-results/20260930/pilot-summary.json": "2df23ecfeff625e519bda4a1e3f612b71baa2225ede0d093540728cd526753da"
   }
 }

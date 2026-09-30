@@ -86,18 +86,18 @@ def main():
                 '--sage', PLUS, '--paired-fasta', '/data/sage-plus-scientific/mass-offset-20260919/inputs/paired.fasta')
     command(REPO / 'benchmarks/run_named_modifications.py', '--sage', PLUS,
             '--output', PAPER / 'analysis/data/named-modifications.json', '--work', BASE / 'named-modifications')
-    output = REPO / 'benchmarks/scientific-results/20260920'
+    output = REPO / 'benchmarks/scientific-results/20260930'
     output.mkdir(parents=True, exist_ok=True)
     command(REPO / 'benchmarks/analyze_scientific.py', '--root', SELECTED,
             '--output', output / 'pilot-summary.json')
-    offset_summary = REPO / 'benchmarks/scientific-results/mass-offset-20260920/summary.json'
+    offset_summary = REPO / 'benchmarks/scientific-results/mass-offset-20260930/summary.json'
     command(REPO / 'benchmarks/summarize_mass_offset.py', '--root', offset_root,
             '--pairs', '/data/sage-plus-scientific/mass-offset-20260919/inputs/paired.txt',
             '--output', offset_summary)
     context = {'evidence': str(SELECTED), 'extension': str(EXT_SELECTED),
                'analysis_repository': str(REPO),
-               'sage_version': 'v0.15.0-beta.2', 'sage_plus_version': 'v0.1.0-beta.6',
-               'sage_plus_commit': '3e30135fb8786ec8a12c1f62e0ff9300e57f9567',
+               'sage_version': 'v0.15.0-beta.2', 'sage_plus_version': 'v0.1.0-beta.15',
+               'sage_plus_commit': 'dde13c7486d7b19f3d5a0ef7ebe9db44e2a90a65',
                'executables': file_identities([UPSTREAM, PLUS])}
     atomic_json(PAPER / 'analysis/data/release-context.json', context)
     atomic_json(PAPER / 'analysis/data/report-extension/plan.json', read(EXT_SELECTED / 'plan.json'))

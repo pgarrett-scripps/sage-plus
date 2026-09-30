@@ -15,12 +15,14 @@ PAPER = HERE.parent.parent
 OUT = PAPER / "figures" / "large_db.png"
 
 # Search modes are categorical: prefilter, unfiltered, and prefilter with
-# monoisotopic precursors only. Stopped or refused runs are drawn as crosses at
-# the memory limit so the axis still shows where each mode ended.
+# monoisotopic precursors only. Runs stopped by the memory guard are drawn as
+# crosses at the limit so the axis still shows where each mode ended. The
+# one-hundred-times prefilter search repeated at a 22 GiB limit is a star.
 MODES = (
     ("scaling", True, "Prefilter", "#2a78d6", "-", "o"),
     ("scaling", False, "Unfiltered", "#eb6834", (0, (4, 2)), "s"),
     ("narrow", True, "Prefilter, monoisotopic", "#1c8a5a", (0, (1.5, 1.5)), "D"),
+    ("high_limit", True, "Prefilter, 22 GiB limit", "#2a78d6", "none", "*"),
 )
 TICKS = ("0", "1", "3", "10", "30", "100", "all")
 LIMIT_GIB = 16
@@ -33,12 +35,13 @@ def position(multiple):
 
 
 def mode_lines(ax, summary, value, limit=None):
-    for offset, (series, prefilter, _, color, style, marker) in zip((-0.15, 0, 0.15), MODES):
+    for offset, (series, prefilter, _, color, style, marker) in zip((-0.15, 0, 0.15, 0), MODES):
         rows = ordered(summary.get(series, []), prefilter)
         done = [row for row in rows if completed(row)]
         ax.plot([position(row["multiple"]) for row in done], [value(row) for row in done],
-                color=color, linestyle=style, marker=marker, markersize=5,
-                markerfacecolor="white", linewidth=1.6)
+                color=color, linestyle=style, marker=marker,
+                markersize=9 if marker == "*" else 5,
+                markerfacecolor=color if marker == "*" else "white", linewidth=1.6)
         stopped = [row for row in rows if not completed(row)]
         if limit is not None and stopped:
             ax.scatter([position(row["multiple"]) + offset for row in stopped], [limit] * len(stopped),
@@ -85,7 +88,8 @@ def main() -> int:
 
     ax = axes[1][0]
     panel(ax, "D", "Accepted peptides")
-    rows = [row for row in ordered(summary["scaling"], True) if completed(row)]
+    rows = [row for row in ordered(summary["scaling"], True) + ordered(summary["high_limit"], True)
+            if completed(row)]
     x = [position(row["multiple"]) for row in rows]
     human = [row["human_peptides"] / 1e3 for row in rows]
     entrap = [row["entrapment_peptides"] / 1e3 for row in rows]
@@ -131,12 +135,13 @@ def main() -> int:
     ax.set_ylim(0, 1.3 * max(m + h for m, h in zip(microbial, human, strict=True)))
     ax.legend(loc="upper center", ncol=2, fontsize=7.5, frameon=False)
 
-    handles = [Line2D([], [], color=color, linestyle=style, marker=marker, markersize=5,
-                      markerfacecolor="white", label=label)
+    handles = [Line2D([], [], color=color, linestyle=style, marker=marker,
+                      markersize=9 if marker == "*" else 5,
+                      markerfacecolor=color if marker == "*" else "white", label=label)
                for _, _, label, color, style, marker in MODES]
     handles.append(Line2D([], [], color=MUTED, marker="x", linestyle="none",
-                          label="Refused or stopped"))
-    fig.legend(handles=handles, loc="outside upper center", ncol=len(handles), fontsize=8.5)
+                          label="Stopped by memory guard"))
+    fig.legend(handles=handles, loc="outside upper center", ncol=3, fontsize=8.5)
     for row_axes in axes:
         for ax in row_axes:
             ax.grid(axis="y", color=GRID, linewidth=0.65)

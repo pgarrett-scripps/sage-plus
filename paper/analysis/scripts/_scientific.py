@@ -4,8 +4,8 @@ from pathlib import Path
 from statistics import median
 
 PAPER = Path(__file__).resolve().parents[2]
-PILOT = '../benchmarks/scientific-results/20260920/pilot-summary.json'
-ARCHIVE = '../benchmarks/scientific-results/20260920/evidence-verification.json'
+PILOT = '../benchmarks/scientific-results/20260930/pilot-summary.json'
+ARCHIVE = '../benchmarks/scientific-results/20260930/evidence-verification.json'
 INPUTS = [PILOT, ARCHIVE]
 ENGINE = {'upstream': 'Sage', 'plus': 'Sage Plus'}
 STUDY = {'human': 'HEK', 'hye': 'Mixture'}

@@ -10,7 +10,7 @@
   [#text(size: 7.1pt)[Peptide storage]], [#text(size: 7.1pt)[Protein-backed spans and compact records]], [#text(size: 7.1pt)[Rust constructors may need conversions]],
   [#text(size: 7.1pt)[Fragment index]], [#text(size: 7.1pt)[Lossless six-byte exact-mass records]], [#text(size: 7.1pt)[Lower memory with bounded buckets]],
   [#text(size: 7.1pt)[Spectrum preprocessing]], [#text(size: 7.1pt)[Scored envelopes and fragment charges]], [#text(size: 7.1pt)[Boolean settings remain valid]],
-  [#text(size: 7.1pt)[Exact prefilter]], [#text(size: 7.1pt)[Chunked paired target-decoy filtering]], [#text(size: 7.1pt)[Lower memory with added runtime]],
+  [#text(size: 7.1pt)[Database prefilter]], [#text(size: 7.1pt)[Streamed digest with a fragment-match threshold]], [#text(size: 7.1pt)[Lower memory with a small identification loss]],
   [#text(size: 7.1pt)[Outputs and quantification]], [#text(size: 7.1pt)[Typed protein occurrences and toggles]], [#text(size: 7.1pt)[Select embedded Parquet schema metadata]],
   [#text(size: 7.1pt)[Release engineering]], [#text(size: 7.1pt)[Native HDF5 and pinned CI actions]], [#text(size: 7.1pt)[Consistent cross-platform archives]],
 )

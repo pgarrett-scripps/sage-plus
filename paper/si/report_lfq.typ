@@ -4,7 +4,7 @@ table.header([#text(size: 8pt)[Engine]], [#text(size: 8pt)[Species]], [#text(siz
 [#text(size: 8pt)[Sage]], [#text(size: 8pt)[human]], [#text(size: 8pt)[35,975]], [#text(size: 8pt)[-0.044]], [#text(size: 8pt)[0.239]], [#text(size: 8pt)[29.9]], [#text(size: 8pt)[0.859]],
 [#text(size: 8pt)[Sage]], [#text(size: 8pt)[yeast]], [#text(size: 8pt)[10,583]], [#text(size: 8pt)[-0.142]], [#text(size: 8pt)[0.275]], [#text(size: 8pt)[25.9]], [#text(size: 8pt)[0.005]],
 [#text(size: 8pt)[Sage]], [#text(size: 8pt)[ecoli]], [#text(size: 8pt)[1,866]], [#text(size: 8pt)[+0.183]], [#text(size: 8pt)[0.451]], [#text(size: 8pt)[27.4]], [#text(size: 8pt)[0.054]],
-[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[human]], [#text(size: 8pt)[35,230]], [#text(size: 8pt)[-0.045]], [#text(size: 8pt)[0.235]], [#text(size: 8pt)[29.7]], [#text(size: 8pt)[0.884]],
-[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[yeast]], [#text(size: 8pt)[10,439]], [#text(size: 8pt)[-0.141]], [#text(size: 8pt)[0.272]], [#text(size: 8pt)[25.9]], [#text(size: 8pt)[0.005]],
-[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[ecoli]], [#text(size: 8pt)[1,826]], [#text(size: 8pt)[+0.189]], [#text(size: 8pt)[0.447]], [#text(size: 8pt)[27.5]], [#text(size: 8pt)[0.055]],
+[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[human]], [#text(size: 8pt)[47,987]], [#text(size: 8pt)[-0.039]], [#text(size: 8pt)[0.209]], [#text(size: 8pt)[29.5]], [#text(size: 8pt)[0.333]],
+[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[yeast]], [#text(size: 8pt)[12,543]], [#text(size: 8pt)[-0.142]], [#text(size: 8pt)[0.273]], [#text(size: 8pt)[26.1]], [#text(size: 8pt)[0.004]],
+[#text(size: 8pt)[Sage Plus]], [#text(size: 8pt)[ecoli]], [#text(size: 8pt)[2,284]], [#text(size: 8pt)[+0.184]], [#text(size: 8pt)[0.466]], [#text(size: 8pt)[26.7]], [#text(size: 8pt)[0.044]],
 )

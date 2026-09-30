@@ -1,0 +1,252 @@
+{
+  "cutoffs": [
+    0.001,
+    0.002,
+    0.005,
+    0.01,
+    0.02,
+    0.05
+  ],
+  "known_sites": {
+    "0": {
+      "competing": 3640,
+      "evaluable": 3817,
+      "points": [
+        {
+          "cutoff": 0.001,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.002,
+          "estimated_flr": 0.0015037594130262733,
+          "false": 11,
+          "passing": 1586,
+          "true_flr": 0.0069356872635561164
+        },
+        {
+          "cutoff": 0.005,
+          "estimated_flr": 0.004777070134878159,
+          "false": 22,
+          "passing": 3325,
+          "true_flr": 0.006616541353383459
+        },
+        {
+          "cutoff": 0.01,
+          "estimated_flr": 0.009691935032606125,
+          "false": 32,
+          "passing": 3600,
+          "true_flr": 0.008888888888888889
+        },
+        {
+          "cutoff": 0.02,
+          "estimated_flr": 0.012546625919640064,
+          "false": 35,
+          "passing": 3640,
+          "true_flr": 0.009615384615384616
+        },
+        {
+          "cutoff": 0.05,
+          "estimated_flr": 0.012546625919640064,
+          "false": 35,
+          "passing": 3640,
+          "true_flr": 0.009615384615384616
+        }
+      ]
+    },
+    "1": {
+      "competing": 3639,
+      "evaluable": 3817,
+      "points": [
+        {
+          "cutoff": 0.001,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.002,
+          "estimated_flr": 0.0015772870974615216,
+          "false": 11,
+          "passing": 1586,
+          "true_flr": 0.0069356872635561164
+        },
+        {
+          "cutoff": 0.005,
+          "estimated_flr": 0.004368402063846588,
+          "false": 34,
+          "passing": 3639,
+          "true_flr": 0.00934322616103325
+        },
+        {
+          "cutoff": 0.01,
+          "estimated_flr": 0.004368402063846588,
+          "false": 34,
+          "passing": 3639,
+          "true_flr": 0.00934322616103325
+        },
+        {
+          "cutoff": 0.02,
+          "estimated_flr": 0.004368402063846588,
+          "false": 34,
+          "passing": 3639,
+          "true_flr": 0.00934322616103325
+        },
+        {
+          "cutoff": 0.05,
+          "estimated_flr": 0.004368402063846588,
+          "false": 34,
+          "passing": 3639,
+          "true_flr": 0.00934322616103325
+        }
+      ]
+    },
+    "2": {
+      "competing": 2751,
+      "evaluable": 3817,
+      "points": [
+        {
+          "cutoff": 0.001,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.002,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.005,
+          "estimated_flr": 0.003335186280310154,
+          "false": 0,
+          "passing": 2751,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.01,
+          "estimated_flr": 0.003335186280310154,
+          "false": 0,
+          "passing": 2751,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.02,
+          "estimated_flr": 0.003335186280310154,
+          "false": 0,
+          "passing": 2751,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.05,
+          "estimated_flr": 0.003335186280310154,
+          "false": 0,
+          "passing": 2751,
+          "true_flr": 0.0
+        }
+      ]
+    },
+    "3": {
+      "competing": 2282,
+      "evaluable": 3817,
+      "points": [
+        {
+          "cutoff": 0.001,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.002,
+          "estimated_flr": 0.0,
+          "false": 0,
+          "passing": 1037,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.005,
+          "estimated_flr": 0.002349256072193384,
+          "false": 0,
+          "passing": 2282,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.01,
+          "estimated_flr": 0.002349256072193384,
+          "false": 0,
+          "passing": 2282,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.02,
+          "estimated_flr": 0.002349256072193384,
+          "false": 0,
+          "passing": 2282,
+          "true_flr": 0.0
+        },
+        {
+          "cutoff": 0.05,
+          "estimated_flr": 0.002349256072193384,
+          "false": 0,
+          "passing": 2282,
+          "true_flr": 0.0
+        }
+      ]
+    }
+  },
+  "localized_peptide": {
+    "rows": 6314,
+    "scored_groups": 1151
+  },
+  "margins": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "pxd007058": {
+    "+15.994915": {
+      "certain": 256,
+      "localizations": 321,
+      "localizations_q01": 256,
+      "protein_sites_q01": 103
+    },
+    "+79.96633": {
+      "certain": 1111,
+      "localizations": 8377,
+      "localizations_q01": 7231,
+      "protein_sites_q01": 4070
+    }
+  },
+  "runs": {
+    "pxd000138-margin0": {
+      "config_sha256": "0403ff0b9981165219ad5a2b7a0e2f2b488577356fca4d1c15d5f2f3dd955f7b",
+      "sites_sha256": "b2ffad5477539dd4455afdf99b9f3c2187177621edc3b048c94764b0e8bb6622"
+    },
+    "pxd000138-margin1": {
+      "config_sha256": "26b45073787a2d677173a11aa1e7446546bb6015ba1adee898a710e4084be3b8",
+      "sites_sha256": "d2b0b31fb0b0704ad8f8211dcd05c829c1321dbbd690f5fdd39071417bf6c310"
+    },
+    "pxd000138-margin2": {
+      "config_sha256": "4300cd3e69e1f227b9b195e3c97614a6a4871aa25e806d566f727e63f925a6b5",
+      "sites_sha256": "5841561626ac0e75024da6b7328db67408c07098121dd50aa939d43226ae8fd7"
+    },
+    "pxd000138-margin3": {
+      "config_sha256": "8e208ac598f138b93c7aef3a2e57b06471e75f329801bf83423f8786a0bf69ea",
+      "sites_sha256": "20feefcc746cb30a3c01389880813de012abce4fe9d3c634f47b7efa1690eaf3"
+    },
+    "pxd007058": {
+      "config_sha256": "4961408afdfc484aa748b4c41455f5c16dd35b49d665774365e65aa395eb70e0",
+      "sites_sha256": "e00627f9913a5c3a8030d67c12a40a3ed791f0e6177cd0d71ac9c5beb437242a"
+    }
+  },
+  "sage_sha256": "7ccdadbdce03c5eab03e90dbe23706165a1644eab218a25b2286574f1a37fdd4",
+  "truth": "/mnt/data1/sage-plus-scientific/loc-known-sites/pxd000138/truth_libraries.json"
+}

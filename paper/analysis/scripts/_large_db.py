@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 PAPER = Path(__file__).resolve().parents[2]
-SUMMARY = '../benchmarks/scientific-results/large-db-20260925/summary.json'
+SUMMARY = '../benchmarks/scientific-results/large-db-20260930/summary.json'
 LARGE_DB_INPUTS = [SUMMARY]
 MULTIPLE_ORDER = [0, '1x', '3x', '10x', '30x', '100x', 'full']
 OUTCOME = {'completed': 'completed', 'refused': 'refused by preflight',
@@ -43,7 +43,7 @@ def multiple_label(multiple):
 
 
 def database_label(series, row):
-    if series in ('scaling', 'narrow'):
+    if series in ('scaling', 'narrow', 'high_limit'):
         return multiple_label(row['multiple'])
     if series == 'six_frame':
         return {'annotated': 'Annotated proteomes',
@@ -107,7 +107,7 @@ def add_large_db_stats(st):
         st.add(f'large.{multiple}.kept', counts['retained'] / 1e6, fmt='.1f',
                desc=f'{multiple} peptides kept by the prefilter, millions', sign='+')
         st.add(f'large.{multiple}.retention', 100 * counts['retained'] / counts['streamed'],
-               fmt='.0f', desc=f'{multiple} prefilter retention percent', between=(0, 100))
+               fmt='.1f', desc=f'{multiple} prefilter retention percent', between=(0, 100))
         st.add(f'large.{multiple}.rss', row['peak_rss_gib'], fmt='.1f',
                desc=f'{multiple} prefilter peak RSS GiB', between=(0, 16))
         st.add(f'large.{multiple}.minutes', row['wall_seconds'] / 60, fmt='.1f',
@@ -119,18 +119,35 @@ def add_large_db_stats(st):
            desc='3x unfiltered peak RSS GiB', between=(0, 16))
     st.add('large.3x.full.minutes', full3['wall_seconds'] / 60, fmt='.1f',
            desc='3x unfiltered wall minutes', sign='+')
-    st.add('large.10x.full.need', scaling['hek-igc-10x-full']['refused_estimate_gib'],
-           fmt='.1f', desc='GiB the 10x unfiltered preflight said it needed', sign='+')
+    full10 = scaling['hek-igc-10x-full']
+    st.add('large.10x.full.rss', full10['peak_rss_gib'], fmt='.1f',
+           desc='10x unfiltered peak RSS GiB', between=(0, 16))
+    st.add('large.10x.full.minutes', full10['wall_seconds'] / 60, fmt='.1f',
+           desc='10x unfiltered wall minutes', sign='+')
+    st.add('large.10x.full.psms', full10['accepted_psms'], fmt=',',
+           desc='10x unfiltered accepted PSMs', sign='+')
     st.add('large.30x.psms', scaling['hek-igc-30x-prefilter']['accepted_psms'], fmt=',',
            desc='30x accepted PSMs', sign='+')
-    st.add('large.100x.need', scaling['hek-igc-100x-prefilter']['refused_estimate_gib'],
-           fmt='.1f', desc='GiB the 100x preflight said the unmodified digest needed', sign='+')
+    high = by_name(summary['high_limit'])['hek-igc-100x-prefilter-22g']
+    counts = high['prefilter_counts']
+    st.add('large.100x.rss', high['peak_rss_gib'], fmt='.1f',
+           desc='100x prefilter peak RSS GiB at the raised limit', between=(16, 22))
+    st.add('large.100x.minutes', high['wall_seconds'] / 60, fmt='.1f',
+           desc='100x prefilter wall minutes', sign='+')
+    st.add('large.100x.psms', high['accepted_psms'], fmt=',',
+           desc='100x accepted PSMs', sign='+')
+    st.add('large.100x.fdp', high['combined_fdp'], fmt='.2f',
+           desc='100x combined entrapment FDP percent', between=(0, 5))
+    st.add('large.100x.streamed', counts['streamed'] / 1e6, fmt='.0f',
+           desc='100x peptides checked by the prefilter, millions', sign='+')
+    st.add('large.100x.kept', counts['retained'] / 1e6, fmt='.1f',
+           desc='100x peptides kept by the prefilter, millions', sign='+')
 
     for multiple in ('10x', '30x'):
         row = narrow[f'hek-igc-{multiple}-mono-prefilter']
         counts = row['prefilter_counts']
         st.add(f'large.mono.{multiple}.retention', 100 * counts['retained'] / counts['streamed'],
-               fmt='.0f', desc=f'{multiple} monoisotopic prefilter retention percent',
+               fmt='.1f', desc=f'{multiple} monoisotopic prefilter retention percent',
                between=(0, 100))
         st.add(f'large.mono.{multiple}.rss', row['peak_rss_gib'], fmt='.1f',
                desc=f'{multiple} monoisotopic prefilter peak RSS GiB', between=(0, 16))
@@ -149,11 +166,11 @@ def add_large_db_stats(st):
            fmt='.1f', desc='Largest percent drop in accepted PSMs with the prefilter, across pairs',
            between=(0, 5))
 
-    exact, default = sweep(summary, 1), sweep(summary, 3)
+    exact, default = sweep(summary, 1), sweep(summary, 4)
     for label, row in (('exact', exact), ('default', default)):
         counts = row['prefilter_counts']
         st.add(f'large.sweep.{label}.retention', 100 * counts['retained'] / counts['streamed'],
-               fmt='.0f', desc=f'10x prefilter retention percent, {label} threshold',
+               fmt='.1f', desc=f'10x prefilter retention percent, {label} threshold',
                between=(0, 100))
         st.add(f'large.sweep.{label}.rss', row['peak_rss_gib'], fmt='.1f',
                desc=f'10x prefilter peak RSS GiB, {label} threshold', between=(0, 16))
@@ -185,8 +202,12 @@ def add_large_db_stats(st):
            desc='CAMPI sample-specific metagenome proteins', sign='+')
     st.add('large.campi.residues', metagenome['residues'] / 1e6, fmt='.0f',
            desc='CAMPI sample-specific metagenome residues, millions', sign='+')
-    st.add('large.campi.F06.need', meta['campi-F06-full']['refused_estimate_gib'], fmt='.1f',
-           desc='GiB the CAMPI F06 unfiltered preflight needed', sign='+')
+    for sample in ('F06', 'F05'):
+        row = meta[f'campi-{sample}-full']
+        st.add(f'large.campi.{sample}.full.rss', row['peak_rss_gib'], fmt='.1f',
+               desc=f'CAMPI {sample} unfiltered peak RSS GiB', between=(0, 16))
+        st.add(f'large.campi.{sample}.full.psms', row['accepted_psms'], fmt=',',
+               desc=f'CAMPI {sample} unfiltered accepted PSMs', sign='+')
     for sample in ('F06', 'F05'):
         row = meta[f'campi-{sample}-prefilter']
         st.add(f'large.campi.{sample}.psms', row['accepted_psms'], fmt=',',

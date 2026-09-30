@@ -1,0 +1,266 @@
+{
+  "entrapment": {
+    "indexed": [
+      {
+        "combined_fdp": 0.012681159420289856,
+        "entrapments": 7,
+        "lower_bound_fdp": 0.006340579710144928,
+        "nominal_q": 0.01,
+        "peptides_outside_pairing": 18,
+        "targets": 1097
+      },
+      {
+        "combined_fdp": 0.06924979389942292,
+        "entrapments": 42,
+        "lower_bound_fdp": 0.03462489694971146,
+        "nominal_q": 0.05,
+        "peptides_outside_pairing": 19,
+        "targets": 1171
+      }
+    ],
+    "offset": [
+      {
+        "combined_fdp": 0.014222222222222223,
+        "entrapments": 8,
+        "lower_bound_fdp": 0.0071111111111111115,
+        "nominal_q": 0.01,
+        "peptides_outside_pairing": 19,
+        "targets": 1117
+      },
+      {
+        "combined_fdp": 0.0687960687960688,
+        "entrapments": 42,
+        "lower_bound_fdp": 0.0343980343980344,
+        "nominal_q": 0.05,
+        "peptides_outside_pairing": 19,
+        "targets": 1179
+      }
+    ]
+  },
+  "environment": {
+    "platform": "Linux-6.8.0-35-generic-x86_64-with-glibc2.39",
+    "processor_count": 16,
+    "threads": 8
+  },
+  "evidence_root": "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset",
+  "executable": {
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage": "7ccdadbdce03c5eab03e90dbe23706165a1644eab218a25b2286574f1a37fdd4"
+  },
+  "inputs_sha256": {
+    "/data/sage-plus-scientific/20260914/ptm-truth/truth.tsv": "ec388dee961b19169760d337bfa43f7e6edd708246054930decb7bb5e742a2e2",
+    "/data/sage-plus-scientific/mass-offset-20260919/inputs/paired.txt": "fc5a60f951f28b0f5cce8af325ae2ed41010161fac2c70708af5b275a082bf2a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/matrix.json": "f1d2cb1c1f64401678c61e69191f392afa6b2f86a5de3a23c9c3cdd8fbc54672",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/scientific_metrics.py": "b3b82a94fbab19a3e441d2225bb12dcbec9510e02da9e8eb1900d7723102d96c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/source/benchmarks/summarize_mass_offset.py": "742075113cd59eb1575b63087d8b961b35541be34db3c3ceeeedb54cfea68de8"
+  },
+  "localization": [
+    {
+      "agreement": {
+        "accepted_indexed": 3141,
+        "accepted_offset": 3141,
+        "same_peptidoform": 3141,
+        "same_peptidoform_and_score": 3141,
+        "shared_spectra": 3142
+      },
+      "indexed": {
+        "correct_site_events": 1128,
+        "database_peptides": 817340,
+        "incorrect_site_events": 15,
+        "scope": "site events at 1% spectrum, peptide, and localization q, against synthesis-defined sites. Includes identification error",
+        "site_error_fraction": 0.013123359580052493
+      },
+      "offset": {
+        "correct_site_events": 1127,
+        "database_peptides": 185782,
+        "incorrect_site_events": 15,
+        "scope": "site events at 1% spectrum, peptide, and localization q, against synthesis-defined sites. Includes identification error",
+        "site_error_fraction": 0.013134851138353765
+      },
+      "spectra": "HCD_1"
+    },
+    {
+      "agreement": {
+        "accepted_indexed": 1958,
+        "accepted_offset": 1958,
+        "same_peptidoform": 1959,
+        "same_peptidoform_and_score": 1959,
+        "shared_spectra": 1959
+      },
+      "indexed": {
+        "correct_site_events": 876,
+        "database_peptides": 817340,
+        "incorrect_site_events": 1,
+        "scope": "site events at 1% spectrum, peptide, and localization q, against synthesis-defined sites. Includes identification error",
+        "site_error_fraction": 0.0011402508551881414
+      },
+      "offset": {
+        "correct_site_events": 876,
+        "database_peptides": 185782,
+        "incorrect_site_events": 1,
+        "scope": "site events at 1% spectrum, peptide, and localization q, against synthesis-defined sites. Includes identification error",
+        "site_error_fraction": 0.0011402508551881414
+      },
+      "spectra": "HCD_2"
+    }
+  ],
+  "scale": [
+    {
+      "configuration": "indexed",
+      "database_fragments": 202367366,
+      "database_peptides": 6677185,
+      "offset_psms": 0,
+      "peak_rss_mib": 2696.529296875,
+      "peptides": 11351,
+      "psms": 20534,
+      "search_stage_seconds": 4.0155,
+      "trials": 2,
+      "wall_seconds": 16.3975
+    },
+    {
+      "configuration": "offsets-1",
+      "database_fragments": 163091816,
+      "database_peptides": 5652591,
+      "offset_psms": 4187,
+      "peak_rss_mib": 2320.45703125,
+      "peptides": 11412,
+      "psms": 20670,
+      "search_stage_seconds": 9.1435,
+      "trials": 2,
+      "wall_seconds": 20.232
+    },
+    {
+      "configuration": "offsets-2",
+      "database_fragments": 163091816,
+      "database_peptides": 5652591,
+      "offset_psms": 7315,
+      "peak_rss_mib": 2306.103515625,
+      "peptides": 11485,
+      "psms": 20751,
+      "search_stage_seconds": 15.8625,
+      "trials": 2,
+      "wall_seconds": 26.884999999999998
+    },
+    {
+      "configuration": "offsets-3",
+      "database_fragments": 163091816,
+      "database_peptides": 5652591,
+      "offset_psms": 10467,
+      "peak_rss_mib": 2312.34765625,
+      "peptides": 11877,
+      "psms": 21034,
+      "search_stage_seconds": 22.147,
+      "trials": 2,
+      "wall_seconds": 33.1015
+    }
+  ],
+  "schema_version": 1,
+  "scope": "Mass offset search against the equivalent database expansion. Engineering evidence on public spectra. Not an independent biological study.",
+  "verified_evidence_sha256": {
+    "/data/sage-plus-scientific/20260914/converted/PXD001468/b1906_293T_proteinID_01A_QE3_122212.mgf": "0c2d232a8a7daadc53191285047db4269d210ec02cecab766ae61d3fe057630d",
+    "/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_1.raw.-1.mgf": "108f884c9c13b02cc78ab6737d45c82b8e973ad8cc689a97185b8ec461bcb2e7",
+    "/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_2.raw.-1.mgf": "d754c94f51a8fa20d7e0ba88c545c0788c9a56d03fa2ce1b43bdb617e2a50254",
+    "/data/sage-plus-scientific/20260914/ptm-truth/synthetic.fasta": "8b4f1078313744a50558f5f9ba53508b6ee1169a22c4c8c65ab400bb0a5daaa7",
+    "/data/sage-plus-scientific/20260914/references/human.fasta": "dffdff3807ec6eb7e752035b5475aaefa26d1b36e513e3344198d521a2169c42",
+    "/data/sage-plus-scientific/mass-offset-20260919/inputs/paired.fasta": "8f5da09f2c295e87641ad7c6cbd9740aac0a00291f36ef8e2560f3dc6f5d6d0c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/config.json": "b62b96ce30e226120ede9fa73e0abfc42120f60ee89853a03d1570839d7b86c7",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/digestion.tsv": "3801fe77d68d5d716b33d8cc093f73453177340e23e875820664a9632045ceb5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/results.json": "a5adf37426dbbd9e183d22f6d3e6e65ed5f438a254cba91f0ab7f90494582ea3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/results.sage.parquet": "abf10651bb78d754f03748afb74cbd05cb06f2450a7bddd05923d7dfa79a11f3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/run-summary.json": "5fa7fb58dff3ad85cff7093eae7596319ca8c84cf9ba939300607922b48bdbfb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/indexed/search.log": "1a0e08c70ad44e3464378a8eb5e33455d05a2388b45f459d32173914f67bea9f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/config.json": "4ef8006668f5d02f2f5cdc3787bd76c9a94f79b7e590f43638fcf2411879f71c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/digestion.tsv": "6c0eae79a3a6e28205551c9fe9389e221d5bd67cd5e060a50c767b431ca4c69a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/results.json": "8b656c81113a1fc2bdb333e92ba2c50e7a0dae5c8686e52bedd8d1c5945d1f94",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/results.sage.parquet": "067dbc9a15565f62d7e9d975b282ed6788e1e1689c3ca9c9cdad40e03458a0db",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/run-summary.json": "ed920d4a83a8d24aeae5db0ae19d4e343cc703cf9b8669cb0d0bbe64a3d85caa",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/entrapment/offset/search.log": "a7ba5dbd17cfadef5044121ab4dc0c182a477f638fd9aba4a2a52b7ede76af82",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/config.json": "f3976d435e73e7cd6750daf21fd4c85d4adb3bf7407272f070b9ee31a1db7f7a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/digestion.tsv": "42734c3cb0b4d26aed5db2488e7b7f9686a2088865975eab3d9e50757897399e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.json": "b6063fff9e3bd8c9bb05b525723565cf57c14e2fc2d3d8392ac690f9198001f3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.sage.parquet": "01542fdabfda4ed8923fc3ff363a96bc77e67c8588b0fd02b96095d565f3ac8c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.sage.protein-sites.parquet": "5c08255598154a6f4d49a85b5e412f17978759ab5678f47e2eca86fc4e07656d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.sage.ptm-library.parquet": "0461e11a66d065381b1b76bb61307ec9a017152c9cda4d40d60f86e62ac038b7",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.sage.ptm-library.tsv": "f73037caa6276f49de9345f31d8244d5930dc5e0078a5df09c2cde48dd2248fd",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/results.sage.ptm-sites.parquet": "fcdf4e93c943e6002df09aa844c6a1dacdf2d2a6d4393f61a9b378000aac429f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/run-summary.json": "0c723bfc77da78f16c543fcc1e7399f3f7e7f153f42781579df6403cba649008",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-indexed/search.log": "66a66021058cc8525a438412e5b8809efa498ad5b7526f56fe733a362d777d58",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/config.json": "e00b97e6e5df91c8efb8bf84fe309e03efed2e961a09a26b72278c4ca602f4cf",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/digestion.tsv": "42734c3cb0b4d26aed5db2488e7b7f9686a2088865975eab3d9e50757897399e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.json": "29bf03e3a0e23009dfeb61df1f89577f5a5f0c75ca5758272252283d4b867872",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.sage.parquet": "494e8df1a97005093903ee733c61b2a9dd70f057c833660e5381f84a7511c08b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.sage.protein-sites.parquet": "bd095267f90401c01fff51ca11f0f39ead976240ed3158883aeab7fa500bebb2",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.sage.ptm-library.parquet": "5d1623e6ada794d95e265d61f83fb7a52e0e09e41d62cd074cb16933312067e2",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.sage.ptm-library.tsv": "f73037caa6276f49de9345f31d8244d5930dc5e0078a5df09c2cde48dd2248fd",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/results.sage.ptm-sites.parquet": "ed7034dbfecd4cef0a38990d9aad8a976866fb09ee21c3b3b310942af298f087",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/run-summary.json": "e1efdf2be5c8a352fede2053d330e2f17084e8af9359347121a97c3e53f4843b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_1-offset/search.log": "09b4267aa08c415b9ad38996f6465712475111fe51b39ddbca534ba667f61c0d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/config.json": "45eb45bdb50a260fb3161bba7a6f456baf2f142d46cd74e7e57783a4987a0de8",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/digestion.tsv": "f71ac6a83f8f55f458f3f635cd26ce70dad5e56cb5ae4244f2b9aa851fba33a5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.json": "75e299d50e0623fd5a79d6a6b2dd07c0710b5316e5f6bb1436a0f556a430c8ea",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.sage.parquet": "cabf5f7262fc582265e3e732e1120dcdce0536b18d28e8dd899c125e728af9d8",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.sage.protein-sites.parquet": "e780fab51da3bbd67e14f461cd81b9f48aef4d171873a120508470120522a28a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.sage.ptm-library.parquet": "277e0c48d9927f099fc7a539de7cfb21bf31588d626f05f03bc3d09cda862a0c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.sage.ptm-library.tsv": "8174a4cee81e526144f0db771095c00968b332adb68d3d6e14df8fb5ef2914c6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/results.sage.ptm-sites.parquet": "c6fac5fd954ce76c997454f9387f5a954bb4f8df7704675a3b6dc1a33be0864e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/run-summary.json": "f50c5ddae187bd2f278e6bbed0805fee202ba75128e393d3ed45c0cb29b9496d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-indexed/search.log": "72fca1f05222db96373be5fe317447531e5f259ad2f1fef714c84efd2392341c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/config.json": "de0b074c1de3f610c6bbafab8d2d5019e3a8c69fecf08832571530a2f66c015e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/digestion.tsv": "f71ac6a83f8f55f458f3f635cd26ce70dad5e56cb5ae4244f2b9aa851fba33a5",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.json": "a70431afb9ade4be13d0db6437a03fa5581831be0ff25b30d98e276c5e7cd72d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.sage.parquet": "2dc58ccfb33204562a6cff2c62daa25394ed81601cc001f9b5e8a2b371e03491",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.sage.protein-sites.parquet": "1b454dabf938142cba0aa7528d24a17d52bce085c711d7ef67ddc73b80ab41b3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.sage.ptm-library.parquet": "6553d1b72623e22c20618d76edca9d72c2968fcf225578fdcbd092c7a2df9520",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.sage.ptm-library.tsv": "8174a4cee81e526144f0db771095c00968b332adb68d3d6e14df8fb5ef2914c6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/results.sage.ptm-sites.parquet": "d893e507835f7cc6b74e709c6294c6fead9c22d58d5620d677283a77d0769a16",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/run-summary.json": "51f3b3e93a3785df5a51bea6b9397038869c0ee60323df6a1d2af8e4a6fbb847",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/localization/HCD_2-offset/search.log": "30f6277d3fb5ccfa213d8024d3a3e9a23b52a0ed91f5b09b0ecfd85457df0784",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/config.json": "60f6e0a46ca42e5c44ed98d811a7db29e8cef661403de06b2ebd78f9738fb8d3",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/digestion.tsv": "58359d26dffd2dd24f5337c1ff6d15af8ea09a94fb94927930f61fb0033a14c6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/results.json": "75ea065ea3ff2c52c821dc262073a65b553d263bb8a9c21c74755e336259c0b8",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/results.sage.parquet": "2de9daf457d6a5523f948d4dcabb221119a671672c350c642e97ebdab4185759",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/run-summary.json": "06b83ad55c2dac2fa2b1e504b5d0f01e762756e7fc4fd0174948ffb1276870ce",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r1/search.log": "ee5b244600230c64f01dda9b9fde544c936d09013b363cb59f51cdfedfd54751",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/config.json": "b0ac847d763fdaceb40201c94bd4899eecf6a079763ecd4a6afafb562ef0cb38",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/digestion.tsv": "58359d26dffd2dd24f5337c1ff6d15af8ea09a94fb94927930f61fb0033a14c6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/results.json": "ad630076d9136867f04d67de67a38559f1728aec7511c035346be23648336c83",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/results.sage.parquet": "2de9daf457d6a5523f948d4dcabb221119a671672c350c642e97ebdab4185759",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/run-summary.json": "34f47f2308aac8bf9e2f1af31e1891b652c2d3773b9f8bd8668b92123dd5a0d9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/indexed-r2/search.log": "673205b727ed3cef9d2eb83ea8d92bb528e3fd3276ec52c85221579738d8081b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/config.json": "0ecf9813d6f9a349902ac1fdbd4b06f85f04fde6830294e8797699c60edc8c6b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/digestion.tsv": "2c54496709709353805b0c7c5aec1b02e94c54aeddb271598ff9e0457906d3d1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/results.json": "a0ff246df447fc16f4b4e8b13f43af5061e12031e14545c544c25b8831ae00a9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/results.sage.parquet": "c96c58cf43e159bc37d7b58df9a3940f0ce681d8a8ac692b8dbbc0262c3c7d5e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/run-summary.json": "200fd269e8652e1732fef593217a4aa58075177dae7281017e4edddd0307a9ea",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r1/search.log": "1c7d3be2fd75ac34a6a4096d097449895fbccfe06b8e92da070d7001cfdceec1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/config.json": "b9672ea0ac29a5ccffbc272b34328e7ca6f8fd5cebb2b0b663c42fc63303ff51",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/digestion.tsv": "2c54496709709353805b0c7c5aec1b02e94c54aeddb271598ff9e0457906d3d1",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/results.json": "52b51f095fc5b2aaaecfa10ec52b1c5b2c6661b7b0175e729376e9c833bddabe",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/results.sage.parquet": "c96c58cf43e159bc37d7b58df9a3940f0ce681d8a8ac692b8dbbc0262c3c7d5e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/run-summary.json": "bd47ed6eb87d64ca96fc8cc03cc4e9d4fbce71477740666da8020b01be6eeec0",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-1-r2/search.log": "14836a59075bddc4865326464ab5cc2df18de4809e6645f83770e3f0801c6016",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/config.json": "03232920caaf0ef1ce9a60cc1b1d7baff0d764ad40c1c9d8e8f1490a343072b7",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/digestion.tsv": "fc24f8fae9f03d77e9172b174ab32ae12990e30e33e6951997989e745042df78",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/results.json": "368c4432e85dd2df703f206b506c83ae4c8b7b1093ba6eabe3efa7b0c9aa3e0b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/results.sage.parquet": "5630b8bf399d122d71b3ca50057d8ef5c1b1fae619063d6ca6dfece39a4d555a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/run-summary.json": "9d40af6e61815917fda3269bb1ed48af8d7001e7fc6684f32a508d597fc558a9",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r1/search.log": "b2d233375b2ea4f39520fab623bb1046df36495800d449dc8ba7968bab0e3061",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/config.json": "cbfc0070c7bd03e7ea9a9a8bf12ef749b2c7e75e50927ca889bdada5b44d209b",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/digestion.tsv": "fc24f8fae9f03d77e9172b174ab32ae12990e30e33e6951997989e745042df78",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/results.json": "5463f4aa3953f4adc791ba16f37aa42247f11c20dc3fbc1fe721b7035883b228",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/results.sage.parquet": "5630b8bf399d122d71b3ca50057d8ef5c1b1fae619063d6ca6dfece39a4d555a",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/run-summary.json": "6827463c46abf05c8e106cb92df5a712ed54c416355f6c01a103502eaf247e62",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-2-r2/search.log": "a8d96a740ecb35b5af22a53dd35be2cb380a6c5cb7d8dfb2bea49f404f24da9d",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/config.json": "8f2b8af85173ae608ee7ccd8bc1f80098e1da47f69d7ef2dba3f9e58b2c4ff8e",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/digestion.tsv": "f5cbf903b54cd20a00f9fbc2a5252f88080fb4615f0a88144ea6a1b7ef5a038f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/results.json": "0669d0f012287e1346afe5e79cc5bde7b4033a1b564c99c2915024f4ce3d6100",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/results.sage.parquet": "d80c9727e0312207f7b7e717e4db0b5e91fcbabb75817e9a359c61410faefefb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/run-summary.json": "2ea1adf5c5e7b720ad37e09b2d3ce7eef681956e8ef82ae9137ea7a71b1f50bb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r1/search.log": "f59409265e1913732fcd51ef0e0c4409a24010cca4e6de262196945cde8d3b97",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/config.json": "163f789a3aa2357dc942e29ed0d0ffc44f63f77d34b8ad552b0bc122302096f6",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/digestion.tsv": "f5cbf903b54cd20a00f9fbc2a5252f88080fb4615f0a88144ea6a1b7ef5a038f",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/results.json": "b635be464b0c239f5baf47ca1d897144555f2a74fb584fb062ed630b0be3094c",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/results.sage.parquet": "d80c9727e0312207f7b7e717e4db0b5e91fcbabb75817e9a359c61410faefefb",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/run-summary.json": "243da789497f83e6a8ec074abd98af5a7e6d9c0822d91d0257e15e551e335438",
+    "/home/ty/Repos/sage-plus/runs/paper-refresh-20260930/mass-offset/scale/offsets-3-r2/search.log": "4a3907331102ff74a45bd93d87a975da75eebf6be745c89e094a3d9bdd87a69e"
+  }
+}

@@ -141,8 +141,8 @@ L 402.277344 138.79918
 " style="fill: none; stroke: #a2abb3; stroke-width: 0.7; stroke-linejoin: miter; stroke-linecap: square"/>
    </g>
    <g id="LineCollection_1">
-    <path d="M 80.226698 44.976496 
-L 320.767772 44.976496 
+    <path d="M -1 44.976496 
+L 234.284948 44.976496 
 " clip-path="url(#pdfe80d9e5a)" style="fill: none; stroke: #247d83; stroke-width: 1.7"/>
    </g>
    <g id="line2d_14">
@@ -151,35 +151,33 @@ L 320.767772 44.976496
 L 0 -4 
 " style="stroke: #247d83"/>
     </defs>
-    <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#m5c7210ca8b" x="80.226698" y="44.976496" style="fill: #247d83; stroke: #247d83"/>
-    </g>
+    <g clip-path="url(#pdfe80d9e5a)"/>
    </g>
    <g id="line2d_15">
     <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#m5c7210ca8b" x="320.767772" y="44.976496" style="fill: #247d83; stroke: #247d83"/>
+     <use xlink:href="#m5c7210ca8b" x="234.284948" y="44.976496" style="fill: #247d83; stroke: #247d83"/>
     </g>
    </g>
    <g id="text_9">
-    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #247d83" x="192.846007" y="33.976496" transform="rotate(-0 192.846007 33.976496)">−0.019</text>
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #247d83" x="130.867843" y="33.976496" transform="rotate(-0 130.867843 33.976496)">−0.054</text>
    </g>
    <g id="LineCollection_2">
-    <path d="M 163.997114 107.524952 
-L 342.292312 107.524952 
+    <path d="M 232.012123 107.524952 
+L 397.066016 107.524952 
 " clip-path="url(#pdfe80d9e5a)" style="fill: none; stroke: #247d83; stroke-width: 1.7"/>
    </g>
    <g id="line2d_16">
     <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#m5c7210ca8b" x="163.997114" y="107.524952" style="fill: #247d83; stroke: #247d83"/>
+     <use xlink:href="#m5c7210ca8b" x="232.012123" y="107.524952" style="fill: #247d83; stroke: #247d83"/>
     </g>
    </g>
    <g id="line2d_17">
     <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#m5c7210ca8b" x="342.292312" y="107.524952" style="fill: #247d83; stroke: #247d83"/>
+     <use xlink:href="#m5c7210ca8b" x="397.066016" y="107.524952" style="fill: #247d83; stroke: #247d83"/>
     </g>
    </g>
    <g id="text_10">
-    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #247d83" x="276.714446" y="96.524952" transform="rotate(-0 276.714446 96.524952)">+0.029</text>
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #247d83" x="343.596955" y="96.524952" transform="rotate(-0 343.596955 96.524952)">+0.067</text>
    </g>
    <g id="line2d_18">
     <defs>
@@ -191,12 +189,12 @@ z
 " style="stroke: #247d83; stroke-linejoin: miter"/>
     </defs>
     <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#mfc9b914aa9" x="192.846007" y="44.976496" style="fill: #247d83; stroke: #247d83; stroke-linejoin: miter"/>
+     <use xlink:href="#mfc9b914aa9" x="130.867843" y="44.976496" style="fill: #247d83; stroke: #247d83; stroke-linejoin: miter"/>
     </g>
    </g>
    <g id="line2d_19">
     <g clip-path="url(#pdfe80d9e5a)">
-     <use xlink:href="#mfc9b914aa9" x="276.714446" y="107.524952" style="fill: #247d83; stroke: #247d83; stroke-linejoin: miter"/>
+     <use xlink:href="#mfc9b914aa9" x="343.596955" y="107.524952" style="fill: #247d83; stroke: #247d83; stroke-linejoin: miter"/>
     </g>
    </g>
   </g>

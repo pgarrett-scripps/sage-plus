@@ -41,7 +41,7 @@ def psms(directory, engine):
 
 def public():
     result = []
-    pilot = load(REPO / 'benchmarks/scientific-results/20260920/pilot-summary.json')
+    pilot = load(REPO / 'benchmarks/scientific-results/20260930/pilot-summary.json')
     for pair in pilot['public_identifications']:
         if pair['status'] != 'complete':
             continue

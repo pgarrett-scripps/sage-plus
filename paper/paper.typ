@@ -89,9 +89,11 @@ identification results and quantitative accuracy. Compact storage can reduce
 memory, whereas preprocessing and predictive models can change candidate
 rankings and confidence scores. We therefore compared Sage #lit(
   "v0.15.0-beta.2",
-) and Sage Plus #lit("v0.1.0-beta.6") using resource measurements, accepted
+) and Sage Plus #lit("v0.1.0-beta.15") using resource measurements, accepted
 peptide-spectrum match (PSM) identities, independent peptide entrapment
-estimates, known mixture ratios, and a species-absent quantitative control.
+estimates, known mixture ratios, and a species-absent quantitative control. A
+synthetic library with known phosphorylation sites tested whether Sage Plus
+localization confidence matches its observed error.
 
 = Development of Sage Plus <sec:development>
 
@@ -107,7 +109,7 @@ this chapter. The source map is in @sec:si-development.
   tbl("tbl.development"),
   caption: [Development areas in Sage Plus relative to Sage #lit(
       "v0.15.0-beta.2",
-    ). Changes describe the evaluated Sage Plus #lit("v0.1.0-beta.6") snapshot.
+    ). Changes describe the evaluated Sage Plus #lit("v0.1.0-beta.15") release.
     Evaluation refers to the complete released workflows. Individual mechanisms
     were not isolated by ablation.],
 ) <tbl:development>
@@ -150,20 +152,22 @@ for a smaller retained index. Because prefiltering can affect which target and
 decoy candidates enter scoring, its effects cannot be evaluated from memory use
 alone. We measured runtime and identification behavior alongside memory.
 
-Memory estimation, runtime limits, minimum-free-memory protection, and
-configurable batching constrain searches that could exceed workstation capacity.
-The runner also exposes validation, progress, and cancellation interfaces.
-Automation interfaces were not evaluated here.
+A runtime limit on measured memory and configurable batching constrain searches
+that could exceed workstation capacity. A preflight estimate previews memory use
+but never refuses a search, because database size is hard to predict before
+digestion. The runner also exposes validation, progress, and cancellation
+interfaces. Automation interfaces were not evaluated here.
 
 == Scientific and modeling extensions
 
 Sage Plus adds averagine-scored isotope envelopes, charge-aware fragment
 matching, per-file mass-error alignment, and richer retention-time and mobility
-prediction. These changes can affect candidate scores and acceptance thresholds.
-The comparison evaluates their combined effects with the storage and execution
-changes. Controlled ablations would be needed to attribute a result to an
-individual mechanism. Implementation details are recorded in
-@sec:si-development.
+prediction. Cross-run retention-time alignment is nonlinear by default. Optional
+fragment-loss and immonium-ion features can enter the rescoring model. These
+changes can affect candidate scores and acceptance thresholds. The comparison
+evaluates their combined effects with the storage and execution changes.
+Controlled ablations would be needed to attribute a result to an individual
+mechanism. Implementation details are recorded in @sec:si-development.
 
 == Named modifications and explicit attachment sites
 
@@ -179,19 +183,19 @@ different chemical hypotheses (@fig:modification-model).
 The same site matcher governs fixed modifications, indexed variable
 modifications, search-time offsets, localization, and predictive features.
 Occurrence limits apply across all sites belonging to a named definition.
-Conflicting fixed definitions fail validation. Optional neutral-loss fragments
-and total variant caps provide further control over the configured search space.
-A cap changes which hypotheses are searched and therefore belongs in the
-interpretation of that workload.
+Conflicting fixed definitions fail validation. Optional per-site neutral losses,
+generic fragment losses, and total variant caps provide further control over the
+configured search space. A cap changes which hypotheses are searched and
+therefore belongs in the interpretation of that workload.
 
 Attachment identity is retained in site reports and reusable PTM libraries.
 Residue evidence cannot authorize an adjacent terminal-group modification.
 Localization respects library-restricted sites and keeps other modifications
 fixed when testing placements. Indistinguishable attachments are excluded from
-reusable site evidence. Legacy symbol-keyed configurations remain readable,
-while migration and preview commands expose the explicit definitions and their
-eligible placements. Supporting methods describe the synthetic attachment tests
-and analytical schema compatibility (@sec:si-attachments).
+reusable site evidence. Configurations in upstream Sage symbol syntax remain
+readable, and a preview command lists each definition's eligible placements.
+Supporting methods describe the synthetic attachment tests and analytical schema
+compatibility (@sec:si-attachments).
 
 #figure(
   fig("fig.modification-model", width: 100%),
@@ -223,18 +227,25 @@ evaluates the resulting memory and search-time tradeoff.
 LFQ adds configurable match-between-runs tolerance and a switch for cross-run
 extraction. Typed output records strict confirmation from tandem spectra and
 per-file signal diagnostics. These diagnostics include spectral agreement, trace
-agreement, and retention-time displacement. Their ranking score is not a
-calibrated probability that an individual transfer is correct. The quantitative
-experiment tests unlabeled LFQ ratios, coverage, and a species-absent control.
-Labeled channels and empirical spectral-library export remain unevaluated here.
+agreement, retention-time displacement, and the integrated peak's apex and
+bounds. Each precursor and file row also receives an extraction q-value from a
+shifted decoy scored at the target's own peak. This value is a diagnostic of
+random-peak extraction, not a calibrated probability that an individual transfer
+or its intensity is correct. The quantitative experiment tests unlabeled LFQ
+ratios, coverage, and a species-absent control. Labeled channels and empirical
+spectral-library export remain unevaluated here.
 
-When peptide or protein confidence modeling is underdetermined or gives a
-nonfinite posterior, Sage Plus falls back to count-based target-decoy q-values.
-Equal scores remain one threshold group. Localization with equally scoring best
-target arrangements reports no confidence in an arbitrary winning site, while
-retaining those arrangements in the localization competition population. The
-synthetic phosphorylation experiment evaluates peptide acceptance and synthesis
-consistency under explicit confidence thresholds (@sec:si-ptm).
+Peptide, protein, and protein-group q-values use picked target-decoy competition
+@savitski2015. Only the better-scoring member of each target and decoy pair is
+ranked, and equal scores remain one threshold group. Localization confidence is
+estimated separately for each modification type. A localization enters that
+competition only when its best arrangement beats the runner-up by a minimum
+number of matched site-separating ions. A modification with as many candidate
+sites as copies is reported as certain. The result table writes each localized
+peptide in ProForma notation @leduc2022, with uncertain placements as scored
+position groups. @sec:localization measures localization error against known
+sites. The synthetic phosphorylation experiment evaluates peptide acceptance and
+synthesis consistency under explicit confidence thresholds (@sec:si-ptm).
 
 = Evaluation design <sec:methods>
 
@@ -254,7 +265,9 @@ measure different resource limits.
 The experiment compares complete executable behavior under matched inputs.
 Identical configuration keys can activate different implementations, as
 described in @sec:development. Default modeling behavior was retained within
-each frozen executable.
+each frozen executable. Sage Plus search-space defaults also stayed on,
+including initiator-methionine clipping and isoleucine/leucine merging, except
+in the entrapment searches described below.
 
 == Public spectra and reference databases
 
@@ -281,10 +294,11 @@ standards. The yeast identity followed the primary methods and reagent
 documentation. Reference receipts preserve the selected accessions and
 downloaded contents.
 
-Sage Plus rejected mixture reference entries containing undefined `X` residues.
-All completed mixture comparisons therefore used the same amended reference,
-with affected proteins removed in their entirety from both engines' search
-space. Excluded accessions and amendment records appear in @sec:si-inputs.
+Sage Plus does not search peptides containing undefined `X` residues unless
+ambiguous-residue expansion is enabled. To give both engines the same search
+space, all mixture comparisons used an amended reference with the affected
+proteins removed in their entirety. Excluded accessions and amendment records
+appear in @sec:si-inputs.
 
 == Search settings and identification agreement
 
@@ -330,6 +344,10 @@ with two selected files per study and three shared database-construction seeds.
 Each constructed database was searched by both engines. FDRBench #lit("1.1.1")
 supplied the paired shuffled entrapment estimator @wen2025. Sequence extraction
 and digestion used the documented reference rather than a small protein subset.
+The paired estimator pairs each fully cleaved target peptide with its shuffled
+partner. Sage Plus initiator-methionine clipping creates peptides outside that
+pairing, so the Sage Plus entrapment searches disabled clipping. This also
+matches the upstream search space.
 
 The independent audit retained one actual best-discriminant PSM per peptidoform
 and checked consistent peptide q-values. It reproduced target and entrapment
@@ -440,9 +458,8 @@ comparison. A selected HEK file was searched with indexed oxidation or with one,
 two, and three configured offsets. Each configuration had two measured trials at
 eight workers. The retained configurations specify indexed acetylation,
 modification budgets, isotope-error windows, and the precursor and fragment
-tolerances. The focused runs used a #lit("22") GiB process-memory guard and
-required at least #lit("2") GiB available system memory. These limits differ
-from the principal comparison and are recorded with every command.
+tolerances. The focused runs used a #lit("22") GiB process-memory guard. This
+limit differs from the principal comparison and is recorded with every command.
 
 Search-stage duration, whole-process wall time, resident memory, and index size
 were collected separately. Configurations with additional offsets test more
@@ -459,23 +476,46 @@ The fixtures also tested ambiguity that must prevent reusable site evidence.
 They assess consistency of the implemented semantics across search paths.
 Empirical terminal-localization calibration requires separate data.
 
+== Localization against known phosphosites
+
+The synthetic phosphopeptide library from PRIDE accession PXD000138 carries one
+known phosphorylation site per peptide sequence @marx2013. Three of its
+acquisitions were read directly from the vendor RAW files and searched with
+variable phosphorylation of serine, threonine, and tyrosine and variable
+methionine oxidation. Every localization was written regardless of its q-value.
+Separate searches required a margin of zero, one, two, or three matched
+site-separating ions. A localization was evaluable when its peptide occurred in
+the library with exactly one seeded site and the search placed one phosphate. It
+was correct when the placed site was the seeded site. At each localization
+q-value cutoff, the true false localization rate (FLR) was the fraction of
+passing evaluable localizations that were wrong. The estimated FLR was the
+largest reported q-value among them. The margin rule is our own design and was
+chosen on this library, so these results are not held out.
+
+Two phosphopeptide-enriched U2OS acquisitions from PRIDE accession PXD007058
+@ferries2017 were searched once at the default margin. They supplied counts of
+localizations and protein sites for each modification type in a biological
+sample, where true sites are unknown.
+
 == Large search database evaluation
 
-The large-database searches used a development build of Sage Plus #lit(
-  "v0.1.0-beta.11",
-) at commit `f924783`, with executable SHA-256 prefix `38c8e694`. They kept the
-public search settings above and added an explicit #lit("16") GiB memory limit
-with eight workers. Each database was searched twice, once with the prefilter
-enabled and once without it. The prefilter scans the spectra first and keeps a
-peptide only when one precursor hypothesis of a spectrum, a charge, isotope
-error, and mass offset, has at least three preliminary fragment matches, the
-default. Its retention therefore depends on the precursor search space, and a
-separate arm restricted isotope errors to the monoisotopic precursor. A sweep on
-the ten-times subset varied the required matches from one to six and limited the
-prefilter to each spectrum's #lit("75") or #lit("50") most intense peaks. One
-required match keeps every peptide that could enter the preliminary search.
-Outcomes were recorded as completed, refused by the preflight estimate before
-building, or stopped by the runtime memory guard.
+The large-database searches used the same Sage Plus #lit("v0.1.0-beta.15")
+release as the comparison. They kept the public search settings above and added
+an explicit #lit("16") GiB memory limit with eight workers. Each database was
+searched twice, once with the prefilter enabled and once without it. The
+prefilter indexes the spectra first, then streams proteins through that index in
+parallel, one protein per worker. It keeps a peptide only when one precursor
+hypothesis of a spectrum, a charge, isotope error, and mass offset, has at least
+four preliminary fragment matches, the default. Neither the whole digest nor a
+fragment index for discarded peptides is held. Its retention depends on the
+precursor search space, and a separate arm restricted isotope errors to the
+monoisotopic precursor. A sweep on the ten-times subset varied the required
+matches from one to six and limited the prefilter to each spectrum's #lit("75")
+or #lit("50") most intense peaks. One required match keeps every peptide that
+could enter the preliminary search. Memory estimates never refuse a search in
+this release, so outcomes were recorded as completed or stopped by the runtime
+memory guard. The one-hundred-times prefilter search, stopped at #lit("16") GiB,
+was repeated alone with a #lit("22") GiB limit.
 
 The scaling series searched one HEK file against the human reference combined
 with random subsets of the Integrated Gene Catalog of the human gut microbiome
@@ -524,8 +564,9 @@ corresponding values were #s("pilot.PXD028735.plus.rss") and #s(
   "pilot.PXD028735.rss_reduction",
 ) percent relative to Sage.
 
-Median wall time was also lower for Sage Plus in these two workloads. HEK
-searches took #s("pilot.PXD001468.plus.seconds") seconds with Sage Plus and #s(
+Median wall time was nearly equal for HEK and lower for Sage Plus on the
+mixture. HEK searches took #s("pilot.PXD001468.plus.seconds") seconds with Sage
+Plus and #s(
   "pilot.PXD001468.upstream.seconds",
 ) seconds with Sage. Mixture searches took #s("pilot.PXD028735.plus.seconds")
 and #s("pilot.PXD028735.upstream.seconds") seconds, respectively. The reductions
@@ -547,9 +588,8 @@ summaries and target PSM counts appear in @tbl:si-timing.
     Exact values and accepted PSM counts appear in @tbl:si-timing.],
 ) <fig:timing>
 
-The runtime advantage reversed with entrapment-expanded references, while Sage
-Plus retained lower median peak memory (@fig:workloads). The median time changes
-were #s(
+Sage Plus was slower with entrapment-expanded references, while it retained
+lower median peak memory (@fig:workloads). The median time changes were #s(
   "report.hek.entrapment.seconds",
 ) percent for HEK and #s("report.mixture.entrapment.seconds") percent for the
 mixture. Their corresponding memory changes were #s("report.hek.entrapment.rss")
@@ -670,26 +710,28 @@ the HEK study was #s("pilot.human.upstream.fdp") percent for Sage and #s(
   "pilot.human.plus.fdp",
 ) percent for Sage Plus. For the mixture study, the estimates were #s(
   "pilot.hye.upstream.fdp",
-) and #s("pilot.hye.plus.fdp") percent, respectively. The engines therefore gave
-similar mean estimates in this selected pilot, with the direction of the
-difference varying by study.
+) and #s("pilot.hye.plus.fdp") percent, respectively. The engines gave similar
+mean estimates in this selected pilot, with Sage Plus lower for HEK and higher
+for the mixture.
 
 The Sage Plus minus Sage difference was #s("pilot.human.delta") percentage
 points for HEK, with a descriptive interval from #s("pilot.human.lower") to #s(
   "pilot.human.upper",
 ). For the mixture, it was #s("pilot.hye.delta") percentage points, with an
-interval from #s("pilot.hye.lower") to #s("pilot.hye.upper"). Both intervals
-include zero, leaving the direction of the difference unresolved in this pilot.
-@fig:entrapment summarizes these differences and their conditional intervals.
+interval from #s("pilot.hye.lower") to #s("pilot.hye.upper"). The HEK interval
+includes zero. The mixture interval lies just above zero, so Sage Plus estimated
+a higher mixture FDP in this pilot, by less than one tenth of a percentage
+point. @fig:entrapment summarizes these differences and their conditional
+intervals.
 
 #figure(
   fig("fig.scientific-entrapment-pilot", width: 85%),
   caption: [Sage Plus minus Sage paired FDP at the nominal one-percent peptide
     q-value threshold. Points show study means and horizontal bars show
     conditional bootstrap percentile intervals across selected files and shared
-    construction seeds. Both intervals include zero. FDP differences are in
-    percentage points. These intervals do not establish equivalence or general
-    FDR calibration.],
+    construction seeds. Only the HEK interval includes zero. FDP differences are
+    in percentage points. These intervals do not establish equivalence or
+    general FDR calibration.],
 ) <fig:entrapment>
 
 
@@ -725,7 +767,9 @@ counts span the jointly searched mixture and control files. They are not protein
 counts or counts of independently confirmed recipient-file transfers. Sage Plus
 precursor yield changed by #s("report.lfq.yield_change.0.01") percent at the
 primary threshold and by #s("report.lfq.yield_change.0.05") percent at the
-secondary threshold. The direction therefore depended on the confidence cutoff.
+secondary threshold. This release changed defaults that feed LFQ, including
+nonlinear retention-time alignment (@sec:development). The extension does not
+attribute the gain to any one change.
 
 @fig:lfq displays the species-specific ratio distributions. @fig:lfq-endpoints
 compares bias, absolute ratio error, preparation CVs, and missingness. Each
@@ -866,6 +910,55 @@ of accepted peptides. Their difference is a few entrapment peptides at this
 scale, so these searches do not establish equivalent error rates or general
 calibration.
 
+= Localization against known sites <sec:localization>
+
+At a one percent localization q-value, the error against known sites stayed
+below one percent, but the default estimate understated it (@fig:localization).
+Of #s("loc.evaluable") evaluable phosphosite localizations, #s("loc.m1.passing")
+passed a one percent localization q-value at the default margin of one
+separating ion. #s("loc.m1.false") placed the phosphate on the wrong residue, a
+true FLR of #s("loc.m1.true") percent against an estimated #s(
+  "loc.m1.estimated",
+) percent. The estimate therefore understated the error on this library. Without
+a margin, #s("loc.m0.passing") localizations passed, with a true FLR of #s(
+  "loc.m0.true",
+) percent against an estimated #s("loc.m0.estimated") percent. A margin of two
+passed #s(
+  "loc.m2.passing",
+) localizations, #s("loc.m2.loss") percent fewer than the default, and #s(
+  "loc.m2.false",
+) were wrong. A margin of three passed #s("loc.m3.passing") with #s(
+  "loc.m3.false",
+) wrong. At the default margin, loosening the cutoff to five percent still
+passed #s(
+  "loc.m1.passing05",
+) localizations, because every competing localization already had a q-value
+below one percent.
+
+In the U2OS phosphoproteome, the default search localized #s(
+  "loc.bio.phospho.q01",
+) phosphorylations and #s("loc.bio.oxidation.q01") methionine oxidations at one
+percent. Of these, #s("loc.bio.phospho.certain") and #s(
+  "loc.bio.oxidation.certain",
+) had no competing arrangement and were reported as certain. These collapsed to
+#s("loc.bio.phospho.sites") phosphorylation and #s("loc.bio.oxidation.sites")
+oxidation protein sites at one percent localization and site q-value. In the
+synthetic library, #s("loc.proforma.groups") percent of #s("loc.proforma.rows")
+localized peptides were written with a scored position group rather than a
+single placement.
+
+#figure(
+  fig("fig.localization", width: 100%),
+  caption: [Localization error against known phosphosites. A: estimated against
+    true FLR across localization q-value cutoffs for each separating-ion margin
+    on the PXD000138 synthetic library. Points above the dotted diagonal are
+    cutoffs where the estimate understated the error. B: localizations passing
+    one percent at each margin, labeled with the true FLR. C: localizations,
+    certain localizations, and protein sites at one percent for phosphorylation
+    and methionine oxidation in the PXD007058 U2OS phosphoproteome, where true
+    sites are unknown.],
+) <fig:localization>
+
 = Searching large databases <sec:large-db>
 
 The prefilter extended the database sizes Sage Plus could search within #lit(
@@ -877,12 +970,24 @@ prefilter kept #s("large.3x.kept") million of #s(
   "large.3x.full.rss",
 ) GiB unfiltered, with wall times of #s("large.3x.minutes") and #s(
   "large.3x.full.minutes",
-) minutes. At ten times, the unfiltered preflight refused the search with an
-estimated #s("large.10x.full.need") GiB requirement. The prefilter search
-completed at #s("large.10x.rss") GiB in #s("large.10x.minutes") minutes, keeping
-#s("large.10x.kept") of #s("large.10x.streamed") million peptides. At thirty
-times, it completed at #s("large.30x.rss") GiB in #s("large.30x.minutes")
-minutes, keeping #s("large.30x.kept") of #s("large.30x.streamed") million.
+) minutes. At ten times, the unfiltered search completed at #s(
+  "large.10x.full.rss",
+) GiB in #s("large.10x.full.minutes") minutes. The prefilter search needed #s(
+  "large.10x.rss",
+) GiB and #s("large.10x.minutes") minutes, keeping #s("large.10x.kept") of #s(
+  "large.10x.streamed",
+) million peptides. At thirty times, the memory guard stopped the unfiltered
+search, while the prefilter search completed at #s("large.30x.rss") GiB in #s(
+  "large.30x.minutes",
+) minutes, keeping #s("large.30x.kept") of #s("large.30x.streamed") million.
+
+At one hundred times, the guard stopped both modes at #lit("16") GiB. Repeated
+alone with a #lit("22") GiB limit, the prefilter search checked #s(
+  "large.100x.streamed",
+) million peptides, kept #s("large.100x.kept") million, and completed at #s(
+  "large.100x.rss",
+) GiB in #s("large.100x.minutes") minutes with #s("large.100x.psms") accepted
+PSMs. The full catalog did not fit within #lit("16") GiB in either mode.
 
 The prefilter changed results little where both modes completed. Across #s(
   "large.pairs.compared",
@@ -891,53 +996,52 @@ The prefilter changed results little where both modes completed. Across #s(
 ) percent of the peptides accepted without it and at most #s(
   "large.pairs.max.psm.loss",
 ) percent fewer PSMs. Accepted PSMs fell from #s("large.human.psms") on the
-human reference to #s("large.10x.psms") at ten times and #s("large.30x.psms") at
-thirty times, as the larger search space raised the score needed at the same
-q-value. The ten-times search still accepted #s(
-  "large.10x.retained",
-) percent of the human-only peptides. Combined entrapment FDP stayed at #s(
-  "large.1x.fdp",
-), #s("large.3x.fdp"), #s("large.10x.fdp"), and #s("large.30x.fdp") percent for
-one, three, ten, and thirty times.
+human reference to #s("large.10x.psms") at ten times, #s("large.30x.psms") at
+thirty times, and #s("large.100x.psms") at one hundred times, as the larger
+search space raised the score needed at the same q-value. The ten-times search
+still accepted #s("large.10x.retained") percent of the human-only peptides.
+Combined entrapment FDP was #s("large.1x.fdp"), #s("large.3x.fdp"), #s(
+  "large.10x.fdp",
+), #s("large.30x.fdp"), and #s("large.100x.fdp") percent for one, three, ten,
+thirty, and one hundred times.
 
 #figure(
   fig("fig.large-db", width: 100%),
   caption: [Large-database searches with the prefilter within a 16 GiB limit. A
     and B: peak resident memory and wall time for the HEK file against the human
     reference with gut catalog subsets, as multiples of the human residues.
-    Crosses mark searches refused by the preflight or stopped by the memory
-    guard. C: fraction of streamed peptides kept by the prefilter. Restricting
-    the precursor to its monoisotopic mass keeps fewer. D: accepted human and
-    catalog-only peptides at one percent peptide q-value, labeled with the
-    combined entrapment FDP. E: accepted microbial peptides from annotated
-    proteomes or six-frame genome translations, split by presence in the
-    annotated proteomes. F: accepted peptides from two CAMPI fecal samples
-    searched against their metagenome database. Every run appears in
-    @tbl:si-large-db.],
+    Crosses mark searches stopped by the memory guard. The star marks the
+    one-hundred-times prefilter search repeated with a 22 GiB limit. C: fraction
+    of streamed peptides kept by the prefilter. Restricting the precursor to its
+    monoisotopic mass keeps fewer. D: accepted human and catalog-only peptides
+    at one percent peptide q-value, labeled with the combined entrapment FDP. E:
+    accepted microbial peptides from annotated proteomes or six-frame genome
+    translations, split by presence in the annotated proteomes. F: accepted
+    peptides from two CAMPI fecal samples searched against their metagenome
+    database. Every run appears in @tbl:si-large-db.],
 ) <fig:large-db>
 
 The match threshold set how much of each database the prefilter kept
 (@tbl:si-prefilter-sweep). At ten times, one required match kept #s(
   "large.sweep.exact.retention",
-) percent of peptides with a peak of #s("large.sweep.exact.rss") GiB. The
-default of three kept #s("large.sweep.default.retention") percent at #s(
-  "large.sweep.default.rss",
-) GiB and accepted #s("large.sweep.psm.loss") percent fewer PSMs. Combined
-entrapment FDP was #s("large.sweep.default.fdp") against #s(
-  "large.sweep.exact.fdp",
-) percent. At a fixed threshold, retention followed the precursor search space
-rather than the database size. The prefilter kept #s("large.3x.retention"), #s(
-  "large.10x.retention",
-), and #s("large.30x.retention") percent of peptides at three, ten, and thirty
-times. With monoisotopic precursors only, it kept #s(
-  "large.mono.10x.retention",
-) and #s("large.mono.30x.retention") percent at ten and thirty times, peaking at
-#s("large.mono.10x.rss") and #s("large.mono.30x.rss") GiB and accepting #s(
-  "large.mono.10x.psms",
-) and #s("large.mono.30x.psms") PSMs. The prefilter still holds the unmodified
-digest while scanning. The preflight refused the larger subsets and the full
-catalog before building, estimating #s("large.100x.need") GiB at one hundred
-times.
+) percent of peptides with a peak of #s("large.sweep.exact.rss") GiB and
+accepted the same PSMs as the unfiltered search. The default of four kept #s(
+  "large.sweep.default.retention",
+) percent at #s("large.sweep.default.rss") GiB and accepted #s(
+  "large.sweep.psm.loss",
+) percent fewer PSMs. Combined entrapment FDP was #s(
+  "large.sweep.default.fdp",
+) against #s("large.sweep.exact.fdp") percent. At a fixed threshold, retention
+followed the precursor search space rather than the database size. The prefilter
+kept #s("large.3x.retention"), #s("large.10x.retention"), and #s(
+  "large.30x.retention",
+) percent of peptides at three, ten, and thirty times. With monoisotopic
+precursors only, it kept #s("large.mono.10x.retention") and #s(
+  "large.mono.30x.retention",
+) percent at ten and thirty times, peaking at #s("large.mono.10x.rss") and #s(
+  "large.mono.30x.rss",
+) GiB and accepting #s("large.mono.10x.psms") and #s("large.mono.30x.psms")
+PSMs.
 
 Six-frame translation searched #s("large.six.frame.peptides") million peptides
 against #s("large.six.annotated.peptides") million for the annotated reference.
@@ -948,16 +1052,16 @@ It accepted #s("large.six.frame.microbial") microbial peptides against #s(
 ) percent occur in the annotated proteomes and #s("large.six.unannotated") do
 not. These unannotated peptides are candidates, not validated novel proteins.
 
-Both CAMPI fecal samples completed against their metagenome database, while the
-unfiltered searches were refused at estimates of at least #s(
-  "large.campi.F06.need",
-) GiB. Sample F06 accepted #s("large.campi.F06.psms") PSMs and #s(
+Both CAMPI fecal samples completed against their metagenome database in both
+modes. Sample F06 accepted #s("large.campi.F06.psms") PSMs and #s(
   "large.campi.F06.microbial",
-) microbial peptides at #s("large.campi.F06.rss") GiB. Sample F05 accepted #s(
-  "large.campi.F05.psms",
-) PSMs and #s("large.campi.F05.microbial") microbial peptides at #s(
-  "large.campi.F05.rss",
-) GiB.
+) microbial peptides at #s("large.campi.F06.rss") GiB with the prefilter,
+against #s("large.campi.F06.full.psms") PSMs at #s("large.campi.F06.full.rss")
+GiB without it. Sample F05 accepted #s("large.campi.F05.psms") PSMs and #s(
+  "large.campi.F05.microbial",
+) microbial peptides at #s("large.campi.F05.rss") GiB, against #s(
+  "large.campi.F05.full.psms",
+) PSMs at #s("large.campi.F05.full.rss") GiB without it.
 
 = Discussion <sec:discussion>
 
@@ -983,14 +1087,18 @@ shorter runtime. The scaling results suggest that memory savings could help when
 processing several files concurrently. Testing aggregate throughput at a fixed
 worker budget would establish whether that benefit occurs in practice.
 
-The prefilter makes large search databases a memory question the preflight can
-answer before a search starts. Requiring three preliminary fragment matches
-discards most of a large database for a small loss of identifications, and one
-required match restores results identical to an unfiltered search. Its reach is
-bounded by a cost it does not remove. The FASTA and the unmodified digest are
-still loaded in full, which set the limit at thirty times the human residues.
-Streaming the database would extend the range. Metaproteomic FDP estimation in
-sample-specific databases also remains outside what these searches test.
+The prefilter moves the memory limit from the size of the database to the number
+of peptides the spectra support. Because proteins are digested and checked one
+at a time, the whole digest is never held, and the unfiltered digest no longer
+sets the ceiling. Requiring four preliminary fragment matches discards most of a
+large database for a small loss of identifications, and one required match
+restores results identical to an unfiltered search. Its reach is still bounded
+by what it keeps. At one hundred times the human residues, the kept peptides and
+their fragment index exceeded #lit("16") GiB, and the search completed only with
+a higher limit. Memory estimates before a search are rough and can overcount, so
+the runtime guard, not the estimate, decides whether a search fits.
+Metaproteomic FDP estimation in sample-specific databases also remains outside
+what these searches test.
 
 High PSM agreement and similar entrapment estimates show that the two releases
 produced similar accepted identification sets and peptide-level error estimates
@@ -1025,10 +1133,16 @@ search under the joint peptide and spectrum thresholds. Sparse decoy evidence
 and unaudited acquisition-to-library mapping still limit interpretation of the
 site diagnostic (@sec:si-ptm).
 
+On known phosphosites, the default localization estimate was about half the
+observed error at one percent. A margin of two separating ions removed the wrong
+placements in that library at the cost of fewer localizations. The margin was
+chosen on the same library, so both results need confirmation on independent
+known-site data.
+
 Sage Plus reduced memory use while maintaining similar identification and LFQ
 results on the tested datasets. Runtime remains workload dependent, and
-quantitative transfer confidence and PTM localization require further
-validation.
+quantitative transfer confidence and the calibration of PTM localization require
+further validation.
 
 // <<< BODY END
 

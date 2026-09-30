@@ -36,6 +36,11 @@ PATTERNS = {
     "prefilter": re.compile(
         r"prefilter search:\s+(\d+) ms \((\d+) peptides streamed, (\d+) retained\)"
     ),
+    # Beta 15 streams proteins and reports the peptides it checked and kept.
+    "prefilter_streamed": re.compile(
+        r"prefilter search:\s+(\d+) ms \((\d+) proteins streamed, (\d+) peptides checked, "
+        r"(\d+) kept"
+    ),
     "spectra": re.compile(r"indexed (\d+) spectra: .* ([\d.]+) MiB, window depth"),
 }
 
@@ -62,6 +67,13 @@ def parse_log(log: str) -> dict:
             "seconds": int(match[1]) / 1000,
             "streamed": int(match[2]),
             "retained": int(match[3]),
+        }
+    elif match := PATTERNS["prefilter_streamed"].search(log):
+        record["prefilter"] = {
+            "seconds": int(match[1]) / 1000,
+            "proteins": int(match[2]),
+            "streamed": int(match[3]),
+            "retained": int(match[4]),
         }
     if match := PATTERNS["spectra"].search(log):
         record["spectrum_index"] = {"spectra": int(match[1]), "mib": float(match[2])}

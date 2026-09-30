@@ -14,7 +14,7 @@ OLD = Path('/data/sage-plus-scientific/20260914')
 OLD_EXT = Path('/data/sage-plus-scientific/report-extension-20260915')
 ROOT = BASE / 'evidence'
 EXT = BASE / 'extension'
-PLUS = BASE / 'bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage'
+PLUS = BASE / 'bin/sage-plus-v0.1.0-beta.15-x86_64-unknown-linux-gnu/sage'
 UPSTREAM = Path('/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage')
 runner.BASELINE = UPSTREAM
 runner.CANDIDATE = PLUS
@@ -29,7 +29,7 @@ def matrix(name, jobs, destination):
     jobs = copy.deepcopy(jobs)
     for job in jobs:
         job['binary'] = str(PLUS if job['engine'] == 'plus' else UPSTREAM)
-    plan = {'comparison': {'upstream': 'v0.15.0-beta.2', 'plus': 'v0.1.0-beta.6'}, 'jobs': jobs}
+    plan = {'comparison': {'upstream': 'v0.15.0-beta.2', 'plus': 'v0.1.0-beta.15'}, 'jobs': jobs}
     atomic_json(destination / 'plan.json', plan)
     atomic_json(destination / 'environment.json', {
         'platform': platform.platform(), 'python': platform.python_version(),
@@ -71,6 +71,11 @@ def main():
             if not target.exists():
                 target.symlink_to(old / name)
         jobs = [read(path)['signature']['job'] for path in sorted(old.glob('*/result.json'))]
+        for job in jobs:
+            # The paired entrapment database pairs fully cleaved peptides only, so
+            # initiator-Met clipped peptides would have no entrapment partner.
+            if job['engine'] == 'plus':
+                job['config']['database']['clip_n_term_met'] = False
         matrix(old.name, jobs, destination)
         for job in jobs:
             output = destination / job['id']

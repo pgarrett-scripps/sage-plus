@@ -10,14 +10,14 @@ text.
 Sage `v0.15.0-beta.2` was obtained from #link(
   "https://github.com/lazear/sage",
 )[the Sage repository], source commit
-`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus `v0.1.0-beta.6` was
+`df9219951cc9a54cf4cd55d76541af24b687bd3d`. Sage Plus `v0.1.0-beta.15` was
 obtained from #link("https://github.com/pgarrett-scripps/sage-plus")[the Sage
-  Plus repository], source commit `3e30135fb8786ec8a12c1f62e0ff9300e57f9567`.
+  Plus repository], source commit `dde13c7486d7b19f3d5a0ef7ebe9db44e2a90a65`.
 FDRBench `1.1.1` used source commit `3b619a9acf60d7292fb651a00da55f58cb67fb79`.
 
 The comparison was refreshed using the published Sage Plus Linux executable,
 verified against the release SHA256SUMS manifest. The evidence directory is
-`runs/paper-refresh-20260920/`, relative to the Sage Plus working repository.
+`runs/paper-refresh-20260930/`, relative to the Sage Plus working repository.
 Its `evidence/` and `extension/` directories retain commands, configurations,
 executable and input hashes, run outcomes, and analytical outputs. Large spectra
 and unchanged reference inputs remain at their recorded acquisition paths. These
@@ -41,8 +41,9 @@ Peptide storage is defined in `crates/sage/src/peptide.rs` and `sequence.rs`.
 The fragment index is in `database.rs`, and spectrum storage and isotope
 processing are in `spectrum.rs`. Resource estimation and limits are in
 `crates/sage-cli/src/memory.rs` and the runner modules. API events and summaries
-are defined by `api.rs`, `events.rs`, and `runner/artifacts.rs`. Persistent
-worker orchestration is in `crates/sage-mcp/src/lib.rs`.
+are defined by `api.rs`, `events.rs`, and `runner/artifacts.rs`. Picked
+target-decoy q-values are in `fdr.rs`, and localization confidence is in
+`ptm.rs`.
 
 Scientific extensions are implemented in `crates/sage/src/mass_calibration.rs`,
 `scoring.rs`, and the retention and mobility modules under `ml/`. Modification
@@ -85,8 +86,9 @@ P33369  P45766  P75901  P39901  P76000  P37003  P58095
 ```
 
 The amended `hye-irt-defined.fasta` excluded these entries in full for both
-engines. The original reference, comparison plan, and failed Sage Plus outputs
-were retained alongside the amended `public-comparison-v2` results.
+engines, so both searched the same sequences. The original reference and
+comparison plan were retained alongside the amended `public-comparison-v2`
+results.
 
 The community sample annotation named a different yeast species from the primary
 methods. The reagent identified in those methods was Promega V7461. Its
@@ -319,8 +321,8 @@ second at the spectrum threshold. Adding the peptide threshold retained #s(
 Upstream Sage retained #s("report.ptm.1.upstream.joint_accepted") in each file.
 @fig:ptm distinguishes spectrum-level acceptance from the joint confidence rule.
 
-The count-based fallback in Sage Plus permits peptide acceptance when density
-modeling is underdetermined. This behavior does not by itself establish error
+Sage Plus peptide q-values come from picked target-decoy competition, which
+needs no density model. This behavior does not by itself establish error
 calibration. Sparse decoy evidence in this restricted synthetic database limits
 interpretation, and the absence of accepted upstream peptides prevents a matched
 site-accuracy comparison.
@@ -374,9 +376,41 @@ PTM-library and site-report schemas preserve attachment identity alongside
 protein coordinates. Legacy four-column libraries represent residue evidence.
 Terminal-group evidence requires an explicit attachment field. This distinction
 prevents a residue annotation from authorizing a neighboring terminal group.
-Migration accepts legacy modification syntax, and library-aware previews expose
+Upstream Sage modification syntax still loads, and library-aware previews expose
 eligible sites before spectrum searching. The fixture configuration, binary
 identity, and check outcomes accompany the refreshed analysis records.
+
+= Further analysis options <sec:si-features>
+
+Several Sage Plus options were not exercised by the matched comparison. They are
+listed here so that readers can separate what was measured from what is
+available. Each is documented with its benchmark notes in the release
+repository.
+
+Fragment matching can include the radical z-dot ions produced by electron-based
+activation, alongside the even-electron z ion. Search-time mass recalibration
+fits per-file precursor models and per-analyzer fragment models on a validated
+subset of confident matches, then searches again with corrected masses. It is
+off by default. Every search reports precursor and fragment tolerances
+recommended from the observed mass errors of confident matches.
+
+Water and ammonia losses and immonium ions can enter the final discriminant as
+rescoring features. Both are off by default. Losses never enter the fragment
+index, and immonium ions never enter localization. Following published practice,
+a phosphotyrosine immonium ion indicates that a phosphotyrosine is present, not
+where it is.
+
+Quality-control outputs are always written. A digestion summary reports missed
+cleavages and nonspecific termini among confident peptides, corrected by the
+decoys that pass the same filter. A polymer check reports the share of survey
+ion current carried by polyethylene glycol, polypropylene glycol, and siloxane
+ladders, and warns when one exceeds a set share. Optional diagnostic-ion reports
+record configured marker ions in every tandem spectrum.
+
+Analytical Parquet files record the producing version and commit, the effective
+configuration, and digests of the database inputs. Data-independent
+acquisitions, including diaPASEF, can be searched as pseudo-spectra. That mode
+was not evaluated in this chapter.
 
 #pagebreak()
 = Tables <sec:si-tables>
@@ -443,11 +477,11 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
 
 #figure(
   tbl("tbl.large-db"),
-  caption: [Every large-database search with its outcome. Refused searches
-    stopped at the preflight estimate before building, and stopped searches hit
-    the runtime memory guard. Peptides searched counts the database peptides
-    after prefiltering where it applied. PSMs and peptides are accepted at one
-    percent q-value.],
+  caption: [Every large-database search with its outcome. Stopped searches hit
+    the runtime memory guard. The one-hundred-times prefilter search was
+    repeated alone with a 22 GiB limit. Peptides searched counts the database
+    peptides after prefiltering where it applied. PSMs and peptides are accepted
+    at one percent q-value.],
 ) <tbl:si-large-db>
 
 #figure(

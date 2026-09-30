@@ -56,7 +56,7 @@
   modification-aware analysis. Named modifications retain distinct residue and
   terminal-group attachments, while search-time mass offsets limit index growth.
   This study documents those changes and evaluates their consequences by
-  comparing Sage #lit("v0.15.0-beta.2") with Sage Plus #lit("v0.1.0-beta.6")
+  comparing Sage #lit("v0.15.0-beta.2") with Sage Plus #lit("v0.1.0-beta.15")
   using matched public spectra, references, and search settings. The evaluation
   covered computational resources, worker scaling, identification agreement,
   peptide entrapment, and label-free quantification. Among completed repeated
@@ -64,16 +64,23 @@
     "pilot.PXD001468.rss_reduction",
   ) and #s(
     "pilot.PXD028735.rss_reduction",
-  ) percent less peak resident memory with Sage Plus. Runtime favored Sage Plus
-  in the repeated public searches but favored Sage with entrapment-expanded
-  references. Accepted peptide-spectrum match Jaccard indices ranged from #s(
+  ) percent less peak resident memory with Sage Plus. Runtime was similar or
+  favored Sage Plus in the repeated public searches but favored Sage with
+  entrapment-expanded references. Accepted peptide-spectrum match Jaccard
+  indices ranged from #s(
     "pilot.overlap.min",
   ) to #s("pilot.overlap.max"). Disagreement included both changed assignments
   and identical assignments crossing different confidence thresholds. Mean
-  peptide entrapment estimates were similar, with conditional difference
-  intervals spanning zero. Label-free quantification produced nearly identical
-  ratios on shared features, while a human-only control revealed accepted
-  foreign-species signal in both engines. Sage Plus used less memory while
+  peptide entrapment estimates differed by less than one tenth of a percentage
+  point. Label-free quantification produced nearly identical ratios on shared
+  features, while a human-only control revealed accepted foreign-species signal
+  in both engines. With an optional prefilter, Sage Plus searched a database ten
+  times the human proteome in #s("large.10x.rss") GiB, against #s(
+    "large.10x.full.rss",
+  ) GiB without it. On a synthetic library of known phosphosites, #s(
+    "loc.m1.true",
+  ) percent of localizations accepted at one percent were wrong, against an
+  estimated #s("loc.m1.estimated") percent. Sage Plus used less memory while
   retaining high identification agreement on the tested workloads. Confidence in
   cross-run extracted intensities remains unresolved.
 ]

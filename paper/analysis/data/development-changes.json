@@ -1,237 +1,237 @@
 {
-  "description": "Reviewed development inventory and evaluation coverage for the evaluated release pair. Historical motivations and expected consequences retain design intent.",
-  "sources": {
-    "upstream": {
-      "commit": "df9219951cc9a54cf4cd55d76541af24b687bd3d",
-      "files": [
-        {
-          "path": "crates/sage-cloudpath/src/lib.rs",
-          "sha256": "8df76fd6aaf4d43779dbbaafc5771b259eb35310dde063c89499611d8bf464d1"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/parquet.rs",
-          "sha256": "30d22b69c84d4377ef66258354ead04ec0a02e4b4ef376e42207f70104c794aa"
-        },
-        {
-          "path": "crates/sage-cli/src/output.rs",
-          "sha256": "d4a4940c70bffc03155648ef68313f75f466387506bf222064357e30274b0004"
-        },
-        {
-          "path": "crates/sage-cli/src/runner.rs",
-          "sha256": "7c43e3695c3ab88d262ec211f84cea1bc67cd06725bd3a4063951c44b59c4dc7"
-        },
-        {
-          "path": "crates/sage/src/peptide.rs",
-          "sha256": "32d58aea353608452ecaee548cc4c82ab1a8ac39d4e62a5305114379809bfdad"
-        },
-        {
-          "path": "crates/sage/src/database.rs",
-          "sha256": "82d3651c3fc7454862420763b68c5c657677219ff206abb87f4b5b9e510393ed"
-        },
-        {
-          "path": "crates/sage/src/spectrum.rs",
-          "sha256": "82ce5aecde2aa30daee9e091bd33d21ad9781efdac99619287748ed88420ce32"
-        },
-        {
-          "path": "crates/sage/src/lfq.rs",
-          "sha256": "292c11565149a911af34e5369ffe2fdb96abcceae4da1feefb89cccb1cda5e2a"
-        },
-        {
-          "path": "crates/sage/src/ml/retention_model.rs",
-          "sha256": "8a48b7a862e631c9bbe04a43fc1d71d5e0df84e18806f9fdfdbcdf720b9654da"
-        },
-        {
-          "path": "crates/sage/src/ml/mobility_model.rs",
-          "sha256": "7d1d2513147e7e6f5e8c8bd9702232f06e07b19f11ee37356cebf45bbe4017a1"
-        }
-      ]
+ "description": "Reviewed development inventory and evaluation coverage for the evaluated release pair. Historical motivations and expected consequences retain design intent.",
+ "sources": {
+  "upstream": {
+   "commit": "df9219951cc9a54cf4cd55d76541af24b687bd3d",
+   "files": [
+    {
+     "path": "crates/sage-cloudpath/src/lib.rs",
+     "sha256": "8df76fd6aaf4d43779dbbaafc5771b259eb35310dde063c89499611d8bf464d1"
     },
-    "plus": {
-      "commit": "3e30135fb8786ec8a12c1f62e0ff9300e57f9567",
-      "files": [
-        {
-          "path": "UPSTREAM.md",
-          "sha256": "09da794a5d70b7f4c6d9dee7be6dc1e1737fe4130f579cc2d745308a944a3f70"
-        },
-        {
-          "path": "CHANGELOG.md",
-          "sha256": "ecafde1ba60fd68dcedb6569727ce75599e2d7e0585db1278fbda0b2a98c21a7"
-        },
-        {
-          "path": "DOCS.md",
-          "sha256": "629265430aa5ad1385a5d31a8eebacc2b4c2866827b621aac22980e30821d506"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/mzmlb.rs",
-          "sha256": "c51e6b091132643ff168589ea3a8d43ffcad5d30b94a2b4c06e668bd2027b54b"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/thermoraw.rs",
-          "sha256": "9db24d9e98b5e1e038ad610549fd00fc3b244c9c2ac3b9ed61029577dd13a52c"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/parquet/results.rs",
-          "sha256": "260a308c565c321c4df9e911ca2e33a68cb788e522f30685f56baff544ad62a6"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/parquet/lfq.rs",
-          "sha256": "ed1f383a986e392c6d109a2539138e6aeb3a920a0148bb3ce9bfe456a97de0f6"
-        },
-        {
-          "path": "crates/sage-cloudpath/src/parquet/sites.rs",
-          "sha256": "fa8a0af6798b205b244d654f94f82ee45b6da2332f73b39415181b24b89dfa17"
-        },
-        {
-          "path": "crates/sage/src/peptide.rs",
-          "sha256": "96e94aca2adfee66e32b68f16b32bddc61df3b16c6940c1915f093bcb401aaef"
-        },
-        {
-          "path": "crates/sage/src/sequence.rs",
-          "sha256": "79cdc14c650d650e2f2fed5b3f337b68edb7c3d48f19b540a4304f7b2bcd3da5"
-        },
-        {
-          "path": "crates/sage/src/database.rs",
-          "sha256": "62c0039e0298c9b5ef21cad65d2fd2cd9deabb0a6a51e58a6b025bc2ca4e32a1"
-        },
-        {
-          "path": "crates/sage/src/cleavage.rs",
-          "sha256": "ad8cd683d7aa850bc791447e082e867512cc743467aff14b1e8ad34cb5876b98"
-        },
-        {
-          "path": "crates/sage/src/spectrum.rs",
-          "sha256": "abd5b918963dbbcc8343168d4faed94d2280f41268cd9a7a4da36b0a73d1b52a"
-        },
-        {
-          "path": "crates/sage/src/mass_calibration.rs",
-          "sha256": "ce01e5e75ecc6faf7400b3a27a7da4f28a59ed7784de35797ce09f720c08ef27"
-        },
-        {
-          "path": "crates/sage/src/scoring.rs",
-          "sha256": "a0ca0c866cde4ef2dac2e592de9848a5965ca1e83f083ee911693b0c8f7216d7"
-        },
-        {
-          "path": "crates/sage/src/modification.rs",
-          "sha256": "8948a053740dcf22464b87a85450febe7d5d0655f73b90f76a69a469dcd65dfb"
-        },
-        {
-          "path": "crates/sage/src/ion_series.rs",
-          "sha256": "34a7c90aad65b97611cf716c8872fe8cb46971512f20329290148635a8aecc48"
-        },
-        {
-          "path": "crates/sage/src/lfq.rs",
-          "sha256": "afbf9ece25103d4e91a9344023e9b7b380e8cd5ea2430a1a627adbd44ae8413e"
-        },
-        {
-          "path": "crates/sage/src/ptm.rs",
-          "sha256": "4d6c8697be602e655330c923b1d619c01eb97f173e2c4e04048c9802ec626755"
-        },
-        {
-          "path": "crates/sage/src/ambiguity.rs",
-          "sha256": "273e20a7d977bc9ee51dc9e3321cc8036d93d88bc71583d616b2683a0b4a21fd"
-        },
-        {
-          "path": "crates/sage/src/spectral_library.rs",
-          "sha256": "c5148e6194ee01b8ac4a514bcd280ed607b21ac2ded8d992ee3eef5374a066c8"
-        },
-        {
-          "path": "crates/sage/src/ml/retention_model.rs",
-          "sha256": "5cc24e5ef20a229e6a168c00a6d86bbf95d014c90c42f851229d7552f1ae54bb"
-        },
-        {
-          "path": "crates/sage/src/ml/mobility_model.rs",
-          "sha256": "35271ac1b72819282953a25a8a363a69296046797b31ccde71e114b45b321452"
-        },
-        {
-          "path": "crates/sage/src/ml/retention_alignment.rs",
-          "sha256": "63c159ac144029453e3ed97b08983d5ef3799282d1e42de0e2de573b88d20a11"
-        },
-        {
-          "path": "crates/sage-cli/src/memory.rs",
-          "sha256": "c39607b5c4df48bae8ce70852a46d4785989ab8823bc17b010fbb388ad57603c"
-        },
-        {
-          "path": "crates/sage-cli/src/api.rs",
-          "sha256": "121696ab99b8cfa4f76175d84feb5e36ff786534e00a1b4a11f70216ebe256c6"
-        },
-        {
-          "path": "crates/sage-cli/src/events.rs",
-          "sha256": "badd3fef6799f1fd815adb98a2cacb61a403967fbcec88afe3711b1de29336c7"
-        },
-        {
-          "path": "crates/sage-cli/src/runner/artifacts.rs",
-          "sha256": "fafd22f3a8458f4c6eda1e94f568635d32f45eae9fa7d64e196ad8493bf3e0b4"
-        },
-        {
-          "path": "crates/sage-mcp/src/lib.rs",
-          "sha256": "75745b7ba175aa59c15a64cf3b48677bbf7b2194299afae8dfd48b31af19ec23"
-        },
-        {
-          "path": "crates/sage/src/ml/qvalue.rs",
-          "sha256": "f9384500ddb9ed48c75cde275b71f20a7106531dc581423d73decd1903909859"
-        },
-        {
-          "path": "crates/sage-cli/src/runner/execution.rs",
-          "sha256": "5866bfef3f13ac6b1e1fb71c6a06fa2e21ed719a193b9a6ca992ed5cf33c6a55"
-        }
-      ]
+    {
+     "path": "crates/sage-cloudpath/src/parquet.rs",
+     "sha256": "30d22b69c84d4377ef66258354ead04ec0a02e4b4ef376e42207f70104c794aa"
+    },
+    {
+     "path": "crates/sage-cli/src/output.rs",
+     "sha256": "d4a4940c70bffc03155648ef68313f75f466387506bf222064357e30274b0004"
+    },
+    {
+     "path": "crates/sage-cli/src/runner.rs",
+     "sha256": "7c43e3695c3ab88d262ec211f84cea1bc67cd06725bd3a4063951c44b59c4dc7"
+    },
+    {
+     "path": "crates/sage/src/peptide.rs",
+     "sha256": "32d58aea353608452ecaee548cc4c82ab1a8ac39d4e62a5305114379809bfdad"
+    },
+    {
+     "path": "crates/sage/src/database.rs",
+     "sha256": "82d3651c3fc7454862420763b68c5c657677219ff206abb87f4b5b9e510393ed"
+    },
+    {
+     "path": "crates/sage/src/spectrum.rs",
+     "sha256": "82ce5aecde2aa30daee9e091bd33d21ad9781efdac99619287748ed88420ce32"
+    },
+    {
+     "path": "crates/sage/src/lfq.rs",
+     "sha256": "292c11565149a911af34e5369ffe2fdb96abcceae4da1feefb89cccb1cda5e2a"
+    },
+    {
+     "path": "crates/sage/src/ml/retention_model.rs",
+     "sha256": "8a48b7a862e631c9bbe04a43fc1d71d5e0df84e18806f9fdfdbcdf720b9654da"
+    },
+    {
+     "path": "crates/sage/src/ml/mobility_model.rs",
+     "sha256": "7d1d2513147e7e6f5e8c8bd9702232f06e07b19f11ee37356cebf45bbe4017a1"
     }
+   ]
   },
-  "changes": [
+  "plus": {
+   "commit": "dde13c7486d7b19f3d5a0ef7ebe9db44e2a90a65",
+   "files": [
     {
-      "area": "Input",
-      "upstream": "mzML, MGF, and Bruker readers",
-      "plus": "mzMLb, Thermo RAW, peptide and cleavage inputs",
-      "motivation": "Broader data and digestion workflows",
-      "expected": "Fewer conversions, new input contracts",
-      "evaluation": "Native readers not evaluated."
+     "path": "UPSTREAM.md",
+     "sha256": "09da794a5d70b7f4c6d9dee7be6dc1e1737fe4130f579cc2d745308a944a3f70"
     },
     {
-      "area": "Output",
-      "upstream": "TSV and optional Parquet, wide LFQ tables",
-      "plus": "Typed Parquet, protein coordinates, PTM attachments",
-      "motivation": "Explicit identities and missing signals",
-      "expected": "Typed joins, revised consuming scripts",
-      "evaluation": "Normalized PSM and LFQ results compared."
+     "path": "CHANGELOG.md",
+     "sha256": "291ac427b33155b6374e51017c9709f29a78fd8220c6e7122d56b359e464555a"
     },
     {
-      "area": "Storage",
-      "upstream": "Peptide arrays and dense modification vectors",
-      "plus": "Protein spans and compact search structures",
-      "motivation": "Reduce allocation and record size",
-      "expected": "Lower memory with possible access costs",
-      "evaluation": "Memory, runtime, and worker scaling."
+     "path": "DOCS.md",
+     "sha256": "d2dbec23633d7b454e9c18263c9ca48e7aa4bc19e56157ab2b8764e1d7a6b5c1"
     },
     {
-      "area": "Execution",
-      "upstream": "CLI searching and file batching",
-      "plus": "Memory guards, API, events, isolated jobs",
-      "motivation": "Bound resources and expose run state",
-      "expected": "Early rejection, inspectable failures",
-      "evaluation": "Resource failures. Automation not evaluated."
+     "path": "crates/sage-cloudpath/src/mzmlb.rs",
+     "sha256": "7aa997c87feae5f2adc69dbe3ae8f5122bd73b39f07169ec970c5e7c5a4dd39d"
     },
     {
-      "area": "Modeling",
-      "upstream": "Isotope processing and linear prediction",
-      "plus": "Isotope scoring, mass alignment, confidence fallback",
-      "motivation": "Represent candidate evidence more fully",
-      "expected": "Changed scores and acceptance thresholds",
-      "evaluation": "PSM agreement and entrapment. No ablations."
+     "path": "crates/sage-cloudpath/src/thermoraw.rs",
+     "sha256": "76ba34fb3ad1ef8bca642f6a16e659cee5937f1e6b7defd44887c4136eb7b72e"
     },
     {
-      "area": "PTM",
-      "upstream": "Mass-based static and variable modifications",
-      "plus": "Named sites, typed attachments, mass offsets, localization",
-      "motivation": "Explicit hypotheses and site ambiguity",
-      "expected": "Bounded variants, new confidence endpoints",
-      "evaluation": "Peptide acceptance, synthesis consistency, attachment regressions."
+     "path": "crates/sage-cloudpath/src/parquet/results.rs",
+     "sha256": "4377f4f548e3cb8628bf7268e77bdac1fd87dc6438f58c8356dd504b2bb6c5c0"
     },
     {
-      "area": "Quantification",
-      "upstream": "LFQ tracing and reporter-ion quantification",
-      "plus": "Label channels, tracing controls, library export",
-      "motivation": "Extend quantification and result reuse",
-      "expected": "More options, distinct validation needs",
-      "evaluation": "LFQ ratios, coverage, and species-absent control."
+     "path": "crates/sage-cloudpath/src/parquet/lfq.rs",
+     "sha256": "25c3b5180fd118af96d9aec0bf32fea143184293733a26a99aed43e9c1414c19"
+    },
+    {
+     "path": "crates/sage-cloudpath/src/parquet/sites.rs",
+     "sha256": "9459a1d21e1c299cf64c44021b563734f0610ef2b33b3f62f429b5aabb62d85e"
+    },
+    {
+     "path": "crates/sage/src/peptide.rs",
+     "sha256": "5972ed52bf165ccff5cbd60feb58d2eb53531437b9da5ef26b5257f0ffdb9226"
+    },
+    {
+     "path": "crates/sage/src/sequence.rs",
+     "sha256": "f9f332bf10da203794494d6861231ae80a3ca211228de79f145c40141ab4de24"
+    },
+    {
+     "path": "crates/sage/src/database.rs",
+     "sha256": "377892b3473c336a33f26b161b217267ffcab195cedd72e7bda555d3d0cd7c7c"
+    },
+    {
+     "path": "crates/sage/src/cleavage.rs",
+     "sha256": "2ff42eab367c18ace994e20b6bd91cc5664ceb5d17c8203e49a1c8421e53f9d2"
+    },
+    {
+     "path": "crates/sage/src/spectrum.rs",
+     "sha256": "326aef49cf2f0fa99988a47c5d453eb162981e8d5f65d2cbc473ea25900269ce"
+    },
+    {
+     "path": "crates/sage/src/mass_calibration.rs",
+     "sha256": "c16aa8fcd1fdb6dd5a203fd6c62299c98c9442b7221ccf4bac1f6465df2504c6"
+    },
+    {
+     "path": "crates/sage/src/scoring.rs",
+     "sha256": "05f033cdaa85a8eaf21bff7e3f78e65868562d3493b81f89fe9fcd2e7f745cb9"
+    },
+    {
+     "path": "crates/sage/src/modification.rs",
+     "sha256": "c4bd5a9652f2b0a09e84d24b91c3dd8be4a7b3b47bd02d157e53309d0a2dc582"
+    },
+    {
+     "path": "crates/sage/src/ion_series.rs",
+     "sha256": "32d8b91558335c7eced33dca01cc68a6d7efd10f4d17d7ef60d293adaec94187"
+    },
+    {
+     "path": "crates/sage/src/lfq.rs",
+     "sha256": "e7f9c3be750ec6c48ac4171b60eb414969ab7fdaba09a3a3d35de261081bde31"
+    },
+    {
+     "path": "crates/sage/src/ptm.rs",
+     "sha256": "7f935a2f3bb43cab42a2af359bbfcd6447eb3c015153426baaba66ecc9694cb6"
+    },
+    {
+     "path": "crates/sage/src/ambiguity.rs",
+     "sha256": "273e20a7d977bc9ee51dc9e3321cc8036d93d88bc71583d616b2683a0b4a21fd"
+    },
+    {
+     "path": "crates/sage/src/spectral_library.rs",
+     "sha256": "b86f5532f11e4f313442a14f47be67a36ab5b719a306e7855f4fca919d750d90"
+    },
+    {
+     "path": "crates/sage/src/ml/retention_model.rs",
+     "sha256": "77583c8234204a1b4d1384f10f685ce7177d3079b769ddcd9a42b5d0bf2570e9"
+    },
+    {
+     "path": "crates/sage/src/ml/mobility_model.rs",
+     "sha256": "9a43ca9f8bf90541323f84cc2cb4ec6cad585268ce2cb0d86dfce46ef7cb9d95"
+    },
+    {
+     "path": "crates/sage/src/ml/retention_alignment.rs",
+     "sha256": "1a00f4a7589e0394bae6a3b18beffa3666454d44ab4fd66b9a876b7178c80170"
+    },
+    {
+     "path": "crates/sage-cli/src/memory.rs",
+     "sha256": "7c0da462bfdf649f18faa1ea897a61c68c504d56f6925464c2c3ea3303e0043b"
+    },
+    {
+     "path": "crates/sage-cli/src/api.rs",
+     "sha256": "b4db7c44f846295a9aa04483829f38af4967996efbe219f39f0244216d2e1f59"
+    },
+    {
+     "path": "crates/sage-cli/src/events.rs",
+     "sha256": "1a05d7b1400329846db46102d568faaed1f24ed0eaa9aaf32a08f2720d5abf58"
+    },
+    {
+     "path": "crates/sage-cli/src/runner/artifacts.rs",
+     "sha256": "84cb5f7282a8e73bdc0ee4a57ebcb08131252901a9aad9911a2862d4af521c1e"
+    },
+    {
+     "path": "crates/sage/src/ml/qvalue.rs",
+     "sha256": "eb07cdc0583f606568f50f6db449b20faaaa22d456e1e96de3fabdffec4fe9fa"
+    },
+    {
+     "path": "crates/sage-cli/src/runner/execution.rs",
+     "sha256": "d1d79e334e6ecfb3cdea2de5aa2a04a27bbb741174aa310531902ef7415a4b0b"
+    },
+    {
+     "path": "crates/sage/src/fdr.rs",
+     "sha256": "b22a70651fc6715c90f2fd60d34868a5f3af610e7f223d863156daf01b7eace9"
     }
-  ]
+   ]
+  }
+ },
+ "changes": [
+  {
+   "area": "Input",
+   "upstream": "mzML, MGF, and Bruker readers",
+   "plus": "mzMLb, Thermo RAW, peptide and cleavage inputs",
+   "motivation": "Broader data and digestion workflows",
+   "expected": "Fewer conversions, new input contracts",
+   "evaluation": "Native readers not evaluated."
+  },
+  {
+   "area": "Output",
+   "upstream": "TSV and optional Parquet, wide LFQ tables",
+   "plus": "Typed Parquet, protein coordinates, PTM attachments",
+   "motivation": "Explicit identities and missing signals",
+   "expected": "Typed joins, revised consuming scripts",
+   "evaluation": "Normalized PSM and LFQ results compared."
+  },
+  {
+   "area": "Storage",
+   "upstream": "Peptide arrays and dense modification vectors",
+   "plus": "Protein spans and compact search structures",
+   "motivation": "Reduce allocation and record size",
+   "expected": "Lower memory with possible access costs",
+   "evaluation": "Memory, runtime, and worker scaling."
+  },
+  {
+   "area": "Execution",
+   "upstream": "CLI searching and file batching",
+   "plus": "Measured-memory limit, API, events, isolated jobs",
+   "motivation": "Bound resources and expose run state",
+   "expected": "Bounded memory, inspectable failures",
+   "evaluation": "Resource failures. Automation not evaluated."
+  },
+  {
+   "area": "Modeling",
+   "upstream": "Isotope processing and linear prediction",
+   "plus": "Isotope scoring, mass alignment, picked FDR, nonlinear RT",
+   "motivation": "Represent candidate evidence more fully",
+   "expected": "Changed scores and acceptance thresholds",
+   "evaluation": "PSM agreement and entrapment. No ablations."
+  },
+  {
+   "area": "PTM",
+   "upstream": "Mass-based static and variable modifications",
+   "plus": "Named sites, typed attachments, mass offsets, per-type localization FLR",
+   "motivation": "Explicit hypotheses and site ambiguity",
+   "expected": "Bounded variants, new confidence endpoints",
+   "evaluation": "Known-site localization error, synthesis consistency, attachment regressions."
+  },
+  {
+   "area": "Quantification",
+   "upstream": "LFQ tracing and reporter-ion quantification",
+   "plus": "Label channels, extraction q-values, library export",
+   "motivation": "Extend quantification and result reuse",
+   "expected": "More options, distinct validation needs",
+   "evaluation": "LFQ ratios, coverage, and species-absent control."
+  }
+ ]
 }

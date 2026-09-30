@@ -1,6 +1,6 @@
 # Chapter analysis and regeneration
 
-The chapter compares upstream Sage v0.15.0-beta.2 with Sage Plus v0.1.0-beta.6.
+The chapter compares upstream Sage v0.15.0-beta.2 with Sage Plus v0.1.0-beta.15.
 The Sage Plus executable is the published Linux GNU release, verified against
 its SHA256SUMS archive manifest. Exact binary hashes and evidence roots are
 recorded in `analysis/data/release-context.json`.
@@ -8,8 +8,8 @@ recorded in `analysis/data/release-context.json`.
 ## Search evidence
 
 The working repository keeps the complete refresh under
-`runs/paper-refresh-20260920/`. The `source/` directory began as an archive of
-the beta 6 source tag. Its analysis and manuscript changes accompany the new
+`runs/paper-refresh-20260930/`. The `source/` directory began as an archive of
+the beta 15 source tag. Its analysis and manuscript changes accompany the new
 paper. The `evidence/` and `extension/` directories retain every original
 comparative attempt. Any missing identification or entrapment cell receives at
 most one separately retained retry in `retries/`. No failed timing or worker
@@ -20,7 +20,7 @@ recorded attempts without altering their files.
 hashes of their result records. Failed attempts remain part of the completion
 denominator. Resource summaries are conditional on successful completion.
 Input and output verification is recorded in
-`../benchmarks/scientific-results/20260920/evidence-verification.json`.
+`../benchmarks/scientific-results/20260930/evidence-verification.json`.
 
 The shared spectra, reference databases, acquisition receipts, and construction
 seeds remain under `/data/sage-plus-scientific/20260914`. Reuse of these inputs
@@ -48,6 +48,15 @@ The synthesis-consistency diagnostic requires spectrum, peptide, and
 localization q-values at most one percent. The file-to-library mapping remains
 unaudited and these diagnostics do not establish empirical localization-error
 calibration.
+
+The known-site localization evaluation is run by
+`benchmarks/localization_known_sites.py` with the same Sage Plus binary. It
+writes `analysis/data/localization.json`, which records the executable,
+configuration, and site-output hashes of every search. The PXD000138 truth
+library and the PXD007058 spectra stay at their local acquisition paths.
+
+The large-database series is run by `benchmarks/large_db/run_large_db.py` from
+plans made by `make_plans.py`, and summarized by `summarize_large_db.py`.
 
 ## Build the paper
 
