@@ -230,22 +230,59 @@ fn tied_target_arrangements_cannot_inherit_confident_competition_q_values() {
 }
 
 #[test]
-fn single_candidate_can_retain_competition_confidence() {
+fn fully_occupied_candidates_are_certain_and_skip_the_competition() {
     let mut precursor = peptide("AAASAAA");
     precursor.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
-    let mut localization = localize(
+    let localization = localize(
         &precursor,
-        &synthetic_spectrum(&precursor),
+        &ProcessedSpectrum::default(),
         &[Kind::B, Kind::Y],
         &[(ModificationSpecificity::Residue(b'S'), PHOSPHO)],
         Tolerance::Ppm(-10.0, 10.0),
         None,
         2,
     );
-    let modification = &mut localization.mods[0];
-    assert_eq!(modification.delta_score, 0.0);
-    modification.set_competition_q_value(0.001);
-    assert_eq!(modification.localization_q_value, 0.001);
+    let modification = &localization.mods[0];
+    assert_eq!(modification.candidate_sites, modification.site_count);
+    assert!(!modification.competition_eligible);
+    assert!(!modification.competes(0));
+    assert_eq!(modification.localization_q_value, 0.0);
+    assert_eq!(modification.best_sites[0].probability, 1.0);
+}
+
+#[test]
+fn localization_competes_only_with_a_separating_ion_margin() {
+    let mut truth = peptide("AASAATAA");
+    truth.modifications = CompactModifications::from_sparse([(2, PHOSPHO)]);
+    let potential = [
+        (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+        (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+    ];
+    let localize_against = |spectrum: &ProcessedSpectrum| {
+        localize(
+            &truth,
+            spectrum,
+            &[Kind::B, Kind::Y],
+            &potential,
+            Tolerance::Ppm(-10.0, 10.0),
+            None,
+            2,
+        )
+        .mods
+        .remove(0)
+    };
+
+    let supported = localize_against(&synthetic_spectrum(&truth));
+    assert!(supported.separating_margin >= 2);
+    assert!(supported.competes(DEFAULT_MIN_SEPARATING_MARGIN));
+    assert!(supported.competes(2));
+    assert!(!supported.competes(supported.separating_margin as u32 + 1));
+
+    let unsupported = localize_against(&ProcessedSpectrum::default());
+    assert_eq!(unsupported.separating_margin, 0);
+    assert!(!unsupported.competes(DEFAULT_MIN_SEPARATING_MARGIN));
+    // A zero margin lets arrangements tied on separating ions compete.
+    assert!(unsupported.competes(0));
 }
 
 #[test]
@@ -391,8 +428,8 @@ fn terminal_localization_is_typed_and_boundary_ambiguity_is_not_promoted() {
 
 #[test]
 fn oxidation_rows_do_not_change_phospho_q_values() {
-    let phospho = ModificationType::new("Phospho", PHOSPHO);
-    let oxidation = ModificationType::new("Oxidation", 15.994915);
+    let phospho = ModificationType::Named("Phospho".into());
+    let oxidation = ModificationType::Named("Oxidation".into());
     // Phospho: 200 target wins scored 300..101, one decoy win at 150.
     let mut targets = (0..200)
         .map(|i| (phospho.clone(), 300.0 - i as f32, false))
@@ -426,7 +463,7 @@ fn oxidation_rows_do_not_change_phospho_q_values() {
 
 #[test]
 fn per_type_q_values_match_single_type_competition() {
-    let key = ModificationType::new("Phospho", PHOSPHO);
+    let key = ModificationType::Named("Phospho".into());
     let evidence = [(100.0, false), (90.0, false), (80.0, true), (70.0, false)];
     let keyed = evidence
         .iter()
@@ -436,23 +473,118 @@ fn per_type_q_values_match_single_type_competition() {
     assert_eq!(q, target_decoy_q_values(&evidence));
     assert_eq!(probes, vec![2.0 / 3.0]);
     // A probe of a type without a target population cannot be accepted.
-    let other = ModificationType::new("Oxidation", 15.994915);
+    let other = ModificationType::Named("Oxidation".into());
     let (_, probes) = target_decoy_q_values_by_type(&keyed, &[(other, 500.0)]);
     assert_eq!(probes, vec![1.0]);
 }
 
 #[test]
-fn modification_type_identity_uses_name_and_mass() {
+fn named_modification_types_ignore_mass() {
+    // Masses either side of a 0.001 Da rounding boundary (79.96633 rounds to
+    // 79.966, 79.9667 to 79.967) stay one type when named.
+    let types = modification_types(&[
+        (Some("Phospho"), 79.96633),
+        (Some("Phospho"), 79.9667),
+        (Some("Sulfo"), 79.95682),
+    ]);
+    assert_eq!(types[0], ModificationType::Named("Phospho".into()));
+    assert_eq!(types[0], types[1]);
+    assert_ne!(types[0], types[2]);
+}
+
+#[test]
+fn unnamed_modification_types_cluster_without_a_grid() {
+    // 15.9945 and 15.9955 rounded to different cells of the old 0.001 Da
+    // grid (15.994 and 15.996) and split; 0.001 Da apart, they now share a
+    // type. 15.9990 is 0.0035 Da from its neighbour and is a separate type.
+    let types = modification_types(&[
+        (None, 15.9955),
+        (None, 15.9990),
+        (None, 15.9945),
+        (Some("Oxidation"), 15.994915),
+    ]);
+    assert_eq!(types[0], types[2]);
+    assert_ne!(types[0], types[1]);
+    assert!(matches!(types[1], ModificationType::Unnamed(_)));
+    // A named type never merges with an unnamed one of the same mass.
+    assert_eq!(types[3], ModificationType::Named("Oxidation".into()));
+
+    // Clusters depend only on the gaps between the masses present: a chain
+    // of masses 0.0015 Da apart is one type, whatever grid it spans.
+    let chain = (0..5)
+        .map(|i| (None, 42.0100 + 0.0015 * i as f32))
+        .collect::<Vec<_>>();
+    let types = modification_types(&chain);
+    assert!(types.iter().all(|kind| *kind == types[0]));
+
+    // Targets and decoys passed together get the same key for one mass.
+    let types = modification_types(&[(None, 79.9663), (None, 79.9664), (None, 14.0157)]);
+    assert_eq!(types[0], types[1]);
+    assert_ne!(types[0], types[2]);
+}
+
+#[test]
+fn proforma_moves_modifications_and_groups_ambiguous_sites() {
+    let truth = truth_with_phospho();
+    let mut scored = peptide("AASAATAA");
+    scored.modifications = CompactModifications::from_sparse([(5, PHOSPHO)]);
+    let mut localization = localize(
+        &scored,
+        &synthetic_spectrum(&truth),
+        &[Kind::B, Kind::Y],
+        &[
+            (ModificationSpecificity::Residue(b'S'), PHOSPHO),
+            (ModificationSpecificity::Residue(b'T'), PHOSPHO),
+        ],
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    let modification = &mut localization.mods[0];
+    assert_eq!(modification.best_sites[0].position, 2);
+
+    // Confident: plain tag on the best site, moved off the reported T.
+    modification.localization_q_value = 0.0;
+    assert_eq!(localization.proforma(&scored, 0.01), "AAS[+79.96633]AATAA");
+
+    // Ambiguous: a scored position group over both candidates.
+    let modification = &mut localization.mods[0];
+    modification.localization_q_value = 1.0;
+    modification.best_sites[0].probability = 0.9;
+    for site in &mut modification.all_sites {
+        site.probability = if site.position == 2 { 0.9 } else { 0.1 };
+    }
     assert_eq!(
-        ModificationType::new("Phospho", 79.96633),
-        ModificationType::new("Phospho", 79.9665)
+        localization.proforma(&scored, 0.01),
+        "AAS[+79.96633#g1(0.90)]AAT[#g1(0.10)]AA"
     );
-    assert_ne!(
-        ModificationType::new("Phospho", PHOSPHO),
-        ModificationType::new("Sulfo", 79.95682)
+
+    // Candidates below 0.005 are left out of the group.
+    for site in &mut localization.mods[0].all_sites {
+        site.probability = if site.position == 2 { 0.999 } else { 0.001 };
+    }
+    localization.mods[0].best_sites[0].probability = 0.999;
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AAS[+79.96633#g1(1.00)]AATAA"
     );
-    assert_ne!(
-        ModificationType::new("+15.9949", 15.9949),
-        ModificationType::new("+15.9949", 15.9990)
+}
+
+#[test]
+fn proforma_writes_fully_occupied_sites_plainly() {
+    let mut precursor = peptide("AAASAAA");
+    precursor.modifications = CompactModifications::from_sparse([(3, PHOSPHO)]);
+    let localization = localize(
+        &precursor,
+        &ProcessedSpectrum::default(),
+        &[Kind::B, Kind::Y],
+        &[(ModificationSpecificity::Residue(b'S'), PHOSPHO)],
+        Tolerance::Ppm(-10.0, 10.0),
+        None,
+        2,
+    );
+    assert_eq!(
+        localization.proforma(&precursor, 0.01),
+        "AAAS[+79.96633]AAA"
     );
 }

@@ -1339,7 +1339,7 @@ fn fragment_losses_add_evidence_without_changing_search_scores() -> anyhow::Resu
     Ok(())
 }
 
-/// `results.sage.parquet` always has the published v3 columns; the two loss
+/// `results.sage.parquet` always has the published v5 columns; the two loss
 /// columns are null without `database.fragment_losses` and filled with it.
 /// The pin gains the loss features before `Peptide`, and before the immonium
 /// columns when both options are on.

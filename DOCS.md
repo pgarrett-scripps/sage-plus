@@ -654,9 +654,16 @@ identifications and q-values are unchanged and the two loss columns of
   rejected). A fragment can carry the loss when it contains at least one site.
 - `ion_kinds` must be a subset of `database.ion_kinds`.
 - `allow_modified` (default false): whether a residue or terminus that carries
-  any modification still counts as a site.
+  any modification still counts as a site. Static labels count as
+  modifications: TMT-labelled K and 15N SILAC labels (K8, R10) are correctly
+  excluded from ammonia loss, while 13C-only labels (K6, R6), whose lost
+  ammonia keeps its unlabelled mass, are excluded too. Set `allow_modified:
+  true` on the ammonia entry to keep them (see
+  [`benchmarks/FRAGMENT_LOSSES.md`](benchmarks/FRAGMENT_LOSSES.md)).
 - `max_fragment_losses` (default 1): the most generic losses stacked on one
   fragment. A loss is never used more often than the fragment has sites for it.
+- Loss ions are matched at the same fragment charges as the intact ions
+  (`max_fragment_charge`); there is no separate charge setting.
 
 Loss ions are never in the preliminary fragment index; they are matched only
 when a candidate is fully scored. They do not change the hyperscore,
@@ -1181,7 +1188,7 @@ channel-aware when these offsets are configured.
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
   - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
   - **mbr**: Boolean. Trace identified precursors into runs without direct MS2 evidence. Set this to `false` to quantify a precursor only in runs where it was identified (default: true).
-  - **recenter_on_apex**: Boolean. Experimental. Center each LFQ peak on its MS1 elution apex rather than on the MS2 identification RT (default: false). With MBR, the traced window is centered on the median aligned identification RT across files instead of the single most confident PSM. In each identified file, Sage climbs from the identification bin to the apex of the isotope-consistent trace; the cross-run apex is the median of those apexes, each identified file is aligned on its own apex, and files without an identification get the usual warp search towards the aligned identified traces. Integration bounds follow the summed trace down to a valley or half the apex height, with no fixed bin caps. Shifted decoys are picked from the same identification bins. On the PXD028735 HYE benchmark it picked a point more than half a peak width from the true apex for 6% of MS2-confirmed rows (12% by default), gave 2% more precursors at 1% and similar ratio accuracy, but slightly more foreign-species rows in the human-only control at `extraction_q_value` <= 0.01 (3.2% vs 2.6%), so it stays off by default.
+  - **recenter_on_apex**: Boolean. Experimental. Center each LFQ peak on its MS1 elution apex rather than on the MS2 identification RT (default: false). With MBR, the traced window is centered on the median aligned identification RT across files instead of the single most confident PSM. In each identified file, Sage climbs from the identification bin to the apex of the isotope-consistent trace; the cross-run apex is the median of those apexes, each identified file is aligned on its own apex, and files without an identification get the usual warp search towards the aligned identified traces. Integration bounds follow the summed trace down to a valley or half the apex height, with no fixed bin caps. Shifted decoys are picked from the same identification bins. On the PXD028735 HYE benchmark it picked a point more than half a peak width from the true apex for 6% of MS2-confirmed rows (12% by default), gave 2% more precursors at 1% and similar ratio accuracy, but slightly more foreign-species rows in the human-only control at `extraction_q_value` <= 0.01 (3.2% vs 2.6%), so it stays off by default. On 15 min timsTOF E. coli replicates it raised the median replicate CV from 0.171 to 0.269 on the same precursors, so leave it off for timsTOF data.
 
 Example: 
 ```json
@@ -1465,6 +1472,7 @@ modification sites are searched and is not a spectral library.
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
   - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
   - **localization_q_value**: Float from 0 through 1. Arrangement-level false localization rate cutoff for reported PTM localizations (default: 0.01).
+  - **min_separating_margin**: Integer, 0 or more. Fewest matched separating ions by which the best arrangement must beat the runner-up to enter the FLR competition (default: 1). See [PTM Site Localization](#ptm-site-localization).
 
 ## PTM Site Localization
 
@@ -1476,7 +1484,8 @@ Example configuration:
 "ptm_localization": {
   "enabled": true,
   "psm_q_value": 0.01,
-  "localization_q_value": 0.01
+  "localization_q_value": 0.01,
+  "min_separating_margin": 1
 }
 ```
 
@@ -1488,12 +1497,23 @@ For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), 
 5. converts target/decoy competition scores across the dataset into monotonic localization q-values, with a separate competition for each modification type, and
 6. reports target arrangements at or below `ptm_localization.localization_q_value`, together with an AScore-style delta and per-site localization probabilities.
 
-The false localization rate (FLR) is estimated per modification type. A type is the reported `modification` name together with its delta mass (to 0.001 Da). Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
+The false localization rate (FLR) is estimated per modification type. A named modification (a configured name or a known Unimod label) is one type whatever its delta mass, so Phospho written as 79.9663 and as 79.966 is one type. Unnamed mass-only modifications are grouped by delta mass: masses sorted and chained while neighbours are within 0.002 Da, with no fixed grid, so two masses that differ by less than that are never split by a rounding boundary. Site FDR (`site_q_value`) uses the same types. Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
+
+**Fully occupied and unseparated localizations.** When a modification has as many candidate sites as copies, such as a peptide with one Met and one oxidation, there is nothing to localize: its sites have probability 1, localization q-value 0, and it does not enter the FLR competition. A localization also stays out of the competition, with q-value 1, unless the best arrangement beats the runner-up by at least `min_separating_margin` matched *separating ions*: fragments, at charges 1 to the fragment charge limit, whose mass differs between those two arrangements. Two arrangements tied on those ions have no spectral evidence between them, which also happens when a spectrum is a mixture of both isomers. On the PXD000138 synthetic known-site library (Marx et al. 2013), single-site phosphopeptides at 1% FLR gave:
+
+| `min_separating_margin` | Localizations passing | Wrong sites | Estimated FLR | True FLR |
+|---|---|---|---|---|
+| none (Beta 14) | 3,640 | 35 | 0.96% | 0.96% |
+| 1 (default) | 3,639 | 34 | 0.44% | 0.93% |
+| 2 | 2,751 | 0 | 0.33% | 0% |
+
+Margin 1 keeps nearly every localization while removing ties from the competition. Margin 2 removed every wrong site in this library but cost about a quarter of the localizations; on PXD007058, phospho localizations at 1% FLR were 7,231 at margin 1 and 5,413 at margin 2. The margin rule is our own addition, not a published method; it was validated only on the library above.
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 
 Two Parquet site reports are written:
 
+- **`localized_peptide`** in `results.sage.parquet`: every PSM localized above (spectrum q-value at most `ptm_localization.psm_q_value`), written in ProForma 2.0 with each modification moved to its best sites. A modification that passes `localization_q_value`, or whose candidates are all occupied, is written plainly, for example `PEPS[Phospho]TIDEK`. Any other modification is written as a ProForma scored position group (LeDuc et al. 2022): the modification with its label and score on each best site, and every other candidate with a score of at least 0.005 as a bare group tag, for example `PEPT[#g1(0.10)]IS[Phospho#g1(0.90)]K`. Scores are the site localization probabilities rounded to two decimals. They rank sites but are not calibrated, and tend to be overconfident, so use `localization_q_value` to decide what is localized. A modification with a terminal candidate is written plainly on its best site, because position groups do not cover termini. Decoy PSMs are included.
 - **results.sage.ptm-sites.parquet** (schema `ptm_sites` version 3): one row per localized modification site of each target PSM. Columns include `peptide`, `modification`, `position` (1-based, within the peptide), `residue`, `localization_probability`, `delta_localization_score`, `target_decoy_score`, `localization_q_value`, `candidate_sites`, site-determining-ion counts, `site_probabilities`, and `site_q_value`, the best site-level q-value among the protein sites the row supports.
 - **results.sage.protein-sites.parquet** (schema `protein_sites` version 3): one row per target protein site, the best localization for each (protein, modified peptide site) aggregated across all supporting PSMs. Columns include `num_psms`, `best_localization_probability`, `best_localization_q_value`, `best_spectrum_q`, `site_score` and `site_q_value`.
 
@@ -1604,10 +1624,10 @@ The `results.sage.parquet` file contains the following columns:
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
 Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
-scores; columns without one are descriptive. `results.sage.v3.parquet.schema` (unlabeled) and
-`results.sage.v4.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
-They are v1 and v2 plus nine nullable columns at the end: the two fragment-loss columns, then
-the seven `immonium_*` columns.
+scores; columns without one are descriptive. `results.sage.v5.parquet.schema` (unlabeled) and
+`results.sage.v6.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
+They are v1 and v2 plus ten nullable columns at the end: the two fragment-loss columns, the
+seven `immonium_*` columns, then `localized_peptide`.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1663,6 +1683,7 @@ the seven `immonium_*` columns.
 - `reporter_ion_intensity`: Isobaric reporter-ion intensities (or signal-to-noise with `quant.tmt_settings.sn`), one list element per channel in the order of the configured tag (`tmt_1`, `tmt_2`, ...). The list is null when TMT is off or no reporter spectrum matched the PSM. A channel with no peak inside the ±20 ppm window is a null element, never 0.0. Only finite, positive peaks count: a zero-intensity centroid or a non-finite S/N value (from a zero noise estimate) is ignored, so a measured value is always greater than 0. No imputation, normalisation or isotopic-impurity correction is applied. Before v0.1.0-beta.13, missing channels were written as 0.0.
 - `matched_loss_peaks`, `loss_intensity_pct`: Generic fragment-loss evidence (cleavage and charge pairs whose loss form matched, and the percent of MS2 intensity those loss peaks carry); see [Generic fragment losses](#generic-fragment-losses). They do not count toward `matched_peaks` or the hyperscore. Null when `database.fragment_losses` is not configured. Higher is better.
 - `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
+- `localized_peptide`: The peptide in ProForma 2.0 with each localized modification on its best sites; see [PTM site localization](#ptm-site-localization). Null when `ptm_localization` is off or the PSM was not localized.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 

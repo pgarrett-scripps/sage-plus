@@ -9,6 +9,47 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.15] - 2026-09-29
+
+### Documentation
+- `allow_modified: false` and labelled residues, analysed in `benchmarks/FRAGMENT_LOSSES.md`:
+  excluding TMT/iTRAQ-labelled K and 15N SILAC labels (K8, R10) from ammonia loss is correct
+  (acylated ε-amine; lost ammonia would be 15NH3, 18.0236 Da). 13C-only labels (K6, R6) are
+  excluded conservatively; `allow_modified: true` keeps them. No code change.
+
+### Added
+- `localized_peptide` in `results.sage.parquet` (schema v5 unlabeled, v6 labeled): the peptide in
+  ProForma 2.0 with each localized modification on its best sites. A localization that is not
+  confident is written as a ProForma scored position group (LeDuc et al. 2022), for example
+  `PEPT[#g1(0.10)]IS[Phospho#g1(0.90)]K`. Scores are the uncalibrated site probabilities.
+- `ptm_localization.min_separating_margin` (default 1): a localization enters the FLR competition
+  only when the best arrangement beats the runner-up by this many matched separating ions;
+  otherwise its q-value is 1. `separating_margin` is our own rule, validated on the PXD000138
+  known-site library (true FLR 0.96% to 0.93% at margin 1, 0% at margin 2).
+
+### Changed
+- Modifications with as many candidate sites as copies (one Met, one oxidation) are certain:
+  site probability 1, localization q-value 0, and no FLR competition. Before, they competed
+  against impossible-site decoys and rarely passed; Met oxidation localizations on PXD007058 at
+  1% went from 0 to 256.
+- Per-modification FLR and site FDR group named modifications by name alone, and cluster unnamed
+  mass-only modifications by delta mass within 0.002 Da without a fixed grid. Before, a type was
+  the name plus the delta mass rounded to 0.001 Da, so two spellings of one modification, or two
+  masses on either side of a rounding boundary, could fall into separate competitions.
+- `benchmarks/FRAGMENT_LOSSES.md` adds a third round: an in-score loss contribution plus the two
+  loss features did not beat the features alone at a fixed 1% entrapment FDP, so scoring is
+  unchanged.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- On 15 min timsTOF E. coli replicates, `recenter_on_apex` raises the median replicate CV from
+  0.171 to 0.269 on the same precursors. Leave it off for timsTOF data.
+- Immonium modified-residue ions count as explained only when the search placed the
+  modification on the ion's residue, before PTM localization can move it.
+- At `min_separating_margin` 1 the estimated localization FLR is about half the true FLR on the
+  PXD000138 single-site peptides (0.44% against 0.93%).
+
 ## [v0.1.0-beta.14] - 2026-09-28
 
 ### Added
