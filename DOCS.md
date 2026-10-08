@@ -109,6 +109,8 @@ Options:
           Stream versioned JSONL job events to PATH (use '-' for stdout)
       --validate-only
           Validate the configuration and overrides without running a search
+      --write-config <NAME> [PATH]
+          Write a starting configuration (`list` shows the presets); stdout without PATH
   -h, --help
           Print help information
   -V, --version
@@ -276,6 +278,26 @@ sage --write-config-schema sage-config.schema.json
 sage --write-config-schema -
 ```
 
+`--write-config <NAME> [PATH]` writes a starting configuration. Without `PATH` it prints to
+standard output; it will not replace an existing file unless `--overwrite` is given. Each preset
+uses `proteome.fasta` and `sample.mzML` as placeholders, ±10 ppm precursor and ±20 ppm fragment
+tolerances.
+
+| Preset | Search |
+|---|---|
+| `minimal` | Only the required settings: trypsin (2 missed cleavages), carbamidomethyl C, b/y ions |
+| `full` | Every option, set to the value Sage uses when it is left out |
+| `trypsin-hcd` | `minimal` plus variable Met oxidation, 7-50 residues, isotope errors -1..3 |
+| `trypsin-hcd-tmt` | TMTpro on K and peptide N-termini, MS2 TMTpro 18-plex quant |
+| `phospho` | Variable STY phosphorylation with site localization |
+| `etd` | c and z-dot ions (add `"b"` and `"y"` for EThcD) |
+| `nonspecific` | Non-specific digest of 8-15 residues, no alkylation, with the prefilter |
+
+```shell
+sage --write-config list
+sage --write-config trypsin-hcd config.json
+```
+
 Use `--events-jsonl <path>` to stream versioned, newline-delimited JSON events while a
 search runs. `--events-jsonl -` writes events to standard output. Human-readable logs remain
 on standard error, so standard output can be consumed directly by workflow engines and other
@@ -300,7 +322,9 @@ front ends.
 
 ### Notes
 
-- The majority of parameters are optional - only "database.fasta", "precursor_tol", and "fragment_tol" are required. Sage will try and use reasonable defaults for any parameters not supplied
+- Most parameters are optional. Required: `precursor_tol`, `fragment_tol`, a FASTA (`database.fasta` or `--fasta`) or peptide list, `database.static_mods` (may be `{}`), `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`, `restrict`, `missed_cleavages` and `semi_enzymatic`. A missing setting is an error that names it and gives a snippet to paste. `sage --write-config minimal` prints a configuration with exactly these settings.
+- At startup Sage logs, at info level, the defaults it used for search-space settings left unset (peptide length and mass range, missed-cleavage handling, decoys, peak limits, precursor charge, isotope errors and similar).
+- **Breaking (Beta 16):** `enzyme`, `static_mods` and `ion_kinds` no longer have defaults. Before Beta 16 an absent `enzyme` meant trypsin with 0 missed cleavages and `restrict: "P"`, a partial `enzyme` block meant 1 missed cleavage and `restrict: ""`, absent `static_mods` meant none, and absent `ion_kinds` meant b and y. To keep an old result, write those values out explicitly.
 - Tolerances are specified on the *experimental* m/z values. To perform a -100 to +500 Da open search (mass window applied to *theoretical*), you would use `"da": [-500, 100]`
 
 ### Decoys
@@ -450,20 +474,20 @@ For additional information about configuration options and output file formats, 
 {
   "database": {
     "bucket_size": 32768,           // Maximum fragments in each internal search bucket
-    "enzyme": {               // Optional. Default is trypsin, using the parameters below
-      "missed_cleavages": 2,  // Optional[int], Number of missed cleavages for tryptic digest
+    "enzyme": {               // Required when a FASTA is digested
+      "missed_cleavages": 2,  // Required[int | "unlimited"], Number of missed cleavages
       "min_len": 5,           // Optional[int] {default=5}, Minimum AA length of peptides to search
-      "max_len": 50,          // Optional[int] {default=50}, Maximum AA length of peptides to search
-      "cleave_at": "KR",      // Optional[str] {default='KR'}. Amino acids to cleave at
-      "restrict": "P",        // Optional[str] {default='P'}. Do not cleave if one of these AAs follows the cleavage site
+      "max_len": 50,          // Optional[int | "unlimited"] {default=50}, Maximum AA length of peptides to search
+      "cleave_at": "KR",      // Required[str]. Amino acids to cleave at ("" non-specific, "$" no digestion)
+      "restrict": "P",        // Required[str]. Do not cleave if one of these AAs follows the cleavage site
       "c_terminal": false,      // Optional[bool] {default=true}. Cleave at c terminus of matching amino acid
-      "semi_enzymatic": false      // Optional[bool] {default=false}. Generate semi-enzymatic peptides
+      "semi_enzymatic": false      // Required[bool]. Generate semi-enzymatic peptides
     },
     "peptide_min_mass": 500.0,      // Optional[float] {default=500.0}, Minimum monoisotopic mass of peptides to fragment
     "peptide_max_mass": 5000.0,     // Optional[float] {default=5000.0}, Maximum monoisotopic mass of peptides to fragment
-    "ion_kinds": ["b", "y"],        // Optional[List[str]] {default=["b","y"]} Which fragment ions to generate and search?
+    "ion_kinds": ["b", "y"],        // Required[List[str]]. Which fragment ions to generate and search?
     "min_ion_index": 2,     // Optional[int] {default=2}, Do not generate b1/b2/y1/y2 ions for preliminary searching. Does not affect full scoring of PSMs
-    "static_mods": {
+    "static_mods": {                // Required; {} for none
       "TMT": {"mass": 304.207, "sites": ["peptide_n_term", "K"]},
       "Carbamidomethyl": {"mass": 57.0215, "sites": ["C"]}
     },
@@ -587,13 +611,16 @@ stored.
 
 ### Enzyme
 
-The enzyme section contains parameters related to the enzyme used for digestion. The default enzyme is trypsin, with the parameters specified below.
+The enzyme section describes the digestion. It is required whenever a FASTA is digested; a
+peptide-list-only search does not need it. `cleave_at`, `restrict`, `missed_cleavages` and
+`semi_enzymatic` have no defaults and must be stated.
 
-- **missed_cleavages**: Integer. The number of missed cleavages for tryptic digest (default: 1).
+- **missed_cleavages**: Required. Integer, or `"unlimited"` to keep every peptide within the length and mass limits regardless of internal cleavage sites.
 - **min_len**: Integer. The minimum amino acid (AA) length of peptides to search (default: 5).
-- **max_len**: Integer. The maximum AA length of peptides to search (default: 50).
-- **cleave_at**: String. Amino acids to cleave at (default: 'KR').
-- **restrict**: String. Do not cleave if one of these amino acids follows the cleavage site (default: 'P').
+- **max_len**: Integer, or `"unlimited"`. The maximum AA length of peptides to search (default: 50). `"unlimited"` leaves length bounded only by `peptide_max_mass` and the 255-residue limit of Sage's peptide encoding. Combined with `"missed_cleavages": "unlimited"` or `"cleave_at": ""`, every residue can start hundreds of peptides and the digest can be very large; Sage logs one warning in that case.
+- **cleave_at**: Required. String. Amino acids to cleave at, `""` for a non-specific digest, or `"$"` for no digestion.
+- **restrict**: Required. String. Do not cleave if one of these amino acids follows the cleavage site; `""` for none.
+- **semi_enzymatic**: Required. Boolean. Also generate semi-enzymatic peptides.
 - Both accept only the uppercase one-letter codes `ACDEFGHIKLMNPQRSTVWYUO`; `cleave_at` also accepts `""` and `"$"`. Ambiguity codes such as `B`, `Z`, `J` and `X`, lowercase letters and other symbols are configuration errors.
 - **c_terminal**: Boolean. Cleave at the C-terminus of matching amino acids (default:true).
 
@@ -601,12 +628,13 @@ Example:
 ```json
 "database": {
   "enzyme": {
-    "missed_cleavages": 1,
+    "missed_cleavages": 2,
     "min_len": 5,
     "max_len": 50,
     "cleave_at": "KR",
     "restrict": "P",
-    "c_terminal": true
+    "c_terminal": true,
+    "semi_enzymatic": false
   }
 }
 ```
@@ -615,7 +643,7 @@ Example:
 
 - **peptide_min_mass**: Float. The minimum monoisotopic mass of peptides to fragment *in silico* (default: 500.0).
 - **peptide_max_mass**: Float. The maximum monoisotopic mass of peptides to fragment *in silico* (default: 5000.0).
-- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. (default: ["b", "y"])
+- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. Required; there is no default.
 - **min_ion_index**: Integer. Do not generate b1/bN/y1/yN ions for preliminary searching if `min_ion_index = N`. Does not affect full scoring of PSMs (default: 2).
 
 Example:
@@ -688,6 +716,7 @@ setting is therefore optional and not part of the default configuration.
 Define each modification once under its stable name in `static_mods` or
 `variable_mods`. Each definition contains `mass` and a nonempty `sites` list.
 The same site syntax works for static, indexed variable, and mass-offset search.
+`static_mods` is required; use `{}` for a search without fixed modifications.
 
 ```json
 {

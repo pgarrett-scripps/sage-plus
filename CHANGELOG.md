@@ -9,6 +9,29 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- **Breaking:** search-space settings must be stated. `database.static_mods` (may be `{}`),
+  `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`,
+  `restrict`, `missed_cleavages` and `semi_enzymatic` no longer have defaults. A missing setting
+  is an error naming it, with a snippet to paste. The old implicit values were: no enzyme block =
+  trypsin, 0 missed cleavages, `restrict: "P"`; partial block = 1 missed cleavage, `restrict: ""`;
+  no static mods; b and y ions. The JSON Schema marks the same fields required.
+- Committed configurations, tests and benchmark generators state these settings explicitly.
+
+### Added
+- `sage --write-config <NAME> [PATH]` writes a starting configuration: `minimal`, `full`,
+  `trypsin-hcd`, `trypsin-hcd-tmt`, `phospho`, `etd` or `nonspecific` (`list` shows them).
+  Without `PATH` it prints to standard output; an existing file is replaced only with
+  `--overwrite`. Every preset is tested to pass validation.
+- `"missed_cleavages": "unlimited"` keeps every peptide within the length and mass limits.
+- `"max_len": "unlimited"` bounds peptide length only by `peptide_max_mass` and the 255-residue
+  encoding limit. Sage logs one warning when it is combined with unlimited missed cleavages or a
+  non-specific digest (`cleave_at: ""`).
+- Startup logs, at info level, the defaults used for search-space settings left unset.
+
+### Removed
+- `min_free_memory_gb` from seven benchmark configurations; Sage already ignored it.
+
 ## [v0.1.0-beta.15] - 2026-09-29
 
 ### Documentation
