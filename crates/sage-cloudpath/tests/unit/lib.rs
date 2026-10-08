@@ -26,16 +26,26 @@ fn windows_drive_letter_is_not_a_url() {
     // rather than a bogus `Ok(Url { scheme: "c", ... })`.
     let backslash = to_url(r"C:\Users\nonexistent\bar.json");
     assert!(
-        matches!(backslash, Err(Error::IO(_))),
-        "expected IO error for Windows path with backslashes, got {:?}",
+        matches!(backslash, Err(Error::Open { .. })),
+        "expected open error for Windows path with backslashes, got {:?}",
         backslash
     );
 
     let forwardslash = to_url("C:/Users/nonexistent/bar.json");
     assert!(
-        matches!(forwardslash, Err(Error::IO(_))),
-        "expected IO error for Windows path with forward slashes, got {:?}",
+        matches!(forwardslash, Err(Error::Open { .. })),
+        "expected open error for Windows path with forward slashes, got {:?}",
         forwardslash
+    );
+}
+
+#[test]
+fn missing_local_path_error_names_the_path() {
+    let error = to_url("/nonexistent/sage-plus/run.mzML").unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.starts_with("cannot open `/nonexistent/sage-plus/run.mzML`: "),
+        "{message}"
     );
 }
 

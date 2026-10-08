@@ -248,7 +248,7 @@ Defaults can also be placed in a repository-root `.env` file because the Justfil
 
 Use `MEMORY_PEPTIDES=2000000 just bench-memory` to resize the optional generated database workload.
 
-Every search uses the requested Rayon thread count, `--batch-size 1`, disabled telemetry, a fresh
+Every search uses the requested Rayon thread count, `--batch-size 1`, a fresh
 output directory, and a release build made with `--locked`. Builds are completed before timing.
 
 ## Results

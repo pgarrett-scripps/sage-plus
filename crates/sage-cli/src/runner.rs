@@ -1,7 +1,6 @@
 use super::input::Search;
 use super::memory::{trim_allocator, AllocatorTrimResult, MemoryLimits};
 use super::output::SageResults;
-use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
 use log::{info, warn};
@@ -852,6 +851,25 @@ fn load_custom_cleavages(
     Ok(Some(validated))
 }
 
+fn empty_database_message(parameters: &sage_core::database::Parameters) -> String {
+    let enzyme = &parameters.enzyme;
+    let mut message = format!(
+        "the database contains no target peptides. Check that `database.fasta` or \
+         `database.peptides` contains target sequences, and that peptides of length {}-{} \
+         and mass {}-{} Da can be digested from them",
+        enzyme.min_len.unwrap_or(5),
+        enzyme.max_len.unwrap_or(50),
+        parameters.peptide_min_mass,
+        parameters.peptide_max_mass,
+    );
+    if parameters.prefilter {
+        message.push_str(
+            ", or that some peptides match the spectra closely enough to pass the prefilter",
+        );
+    }
+    message
+}
+
 fn missing_decoy_warning(
     generate_decoys: bool,
     decoy_labels: impl IntoIterator<Item = bool>,
@@ -1014,6 +1032,11 @@ impl Runner {
         let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
+        anyhow::ensure!(
+            database.peptides.iter().any(|peptide| !peptide.decoy),
+            "{}",
+            empty_database_message(&database_parameters)
+        );
 
         if let Some(message) = missing_decoy_warning(
             database_parameters.generate_decoys,

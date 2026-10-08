@@ -1456,3 +1456,116 @@ fn fragment_loss_columns_are_filled_only_when_configured() -> anyhow::Result<()>
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn legacy_telemetry_flag_is_a_hidden_no_op() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let help = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg("--help")
+        .output()?;
+    assert!(help.status.success());
+    assert!(!String::from_utf8(help.stdout)?.contains("telemetry"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config.json"))
+        .arg("--validate-only")
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    Ok(())
+}
+
+#[test]
+fn unusable_output_directory_error_names_the_path() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let blocker = std::env::temp_dir().join(format!(
+        "sage-plus-output-blocker-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::write(&blocker, b"")?;
+    let output_directory = blocker.join("results");
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config.json"))
+        .arg("--output_directory")
+        .arg(&output_directory)
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains(&format!(
+            "cannot create output directory `{}`",
+            output_directory.display()
+        )),
+        "{stderr}"
+    );
+    std::fs::remove_file(blocker)?;
+    Ok(())
+}
+
+#[test]
+fn empty_search_spaces_fail_with_the_likely_cause() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-empty-search-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let empty_tsv = root.join("empty.tsv");
+    std::fs::write(&empty_tsv, "sequence\n")?;
+    let base: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+
+    let mut lengths = base.clone();
+    lengths["database"]["enzyme"]["min_len"] = 30.into();
+    lengths["database"]["enzyme"]["max_len"] = 5.into();
+    let mut masses = base.clone();
+    masses["database"]["peptide_min_mass"] = 5000.0.into();
+    masses["database"]["peptide_max_mass"] = 500.0.into();
+    let mut peptides = base.clone();
+    peptides["database"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fasta");
+    peptides["database"]["peptides"] = empty_tsv.to_string_lossy().as_ref().into();
+
+    for (name, config, expected) in [
+        (
+            "lengths",
+            lengths,
+            "`database.enzyme.min_len` (30) is greater than `max_len` (5)",
+        ),
+        (
+            "masses",
+            masses,
+            "`database.peptide_min_mass` (5000) must not exceed",
+        ),
+        (
+            "peptides",
+            peptides,
+            "the database contains no target peptides",
+        ),
+    ] {
+        let path = root.join(format!("{name}.json"));
+        std::fs::write(&path, serde_json::to_vec(&config)?)?;
+        let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+            .current_dir(&workspace)
+            .arg(&path)
+            .arg("--output_directory")
+            .arg(root.join(format!("output-{name}")))
+            .output()?;
+        let stderr = String::from_utf8(output.stderr)?;
+        assert!(!output.status.success(), "{name}: {stderr}");
+        assert!(stderr.contains(expected), "{name}: {stderr}");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}

@@ -91,15 +91,11 @@ impl Runner {
         }
     }
 
-    pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
+    pub fn run(self, parallel: usize) -> anyhow::Result<RunSummary> {
         self.run_with_summary(parallel)
-            .map(|(telemetry, _summary)| telemetry)
     }
 
-    pub fn run_with_summary(
-        mut self,
-        parallel: usize,
-    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
+    pub fn run_with_summary(mut self, parallel: usize) -> anyhow::Result<RunSummary> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
         for warning in self.denoise_warnings() {
             log::warn!("{warning}");
@@ -733,19 +729,12 @@ impl Runner {
             });
         }
 
-        let telemetry = telemetry::Telemetry::new(
-            self.parameters,
-            self.database.peptides.len(),
-            self.database.fragments.len(),
-            run_time,
-        );
-
         self.events.emit(EventKind::JobCompleted {
             runtime_secs: run_time,
             outputs: summary.output_paths.len(),
         });
         self.events.check()?;
 
-        Ok((telemetry, summary))
+        Ok(summary)
     }
 }

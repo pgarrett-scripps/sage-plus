@@ -184,6 +184,29 @@ impl Builder {
         )
     }
 
+    /// Reject peptide length and mass ranges that cannot contain a peptide.
+    pub fn validate_peptide_ranges(&self) -> Result<(), String> {
+        let enzyme = self.enzyme.clone().unwrap_or_default();
+        let (min_len, max_len) = (enzyme.min_len.unwrap_or(5), enzyme.max_len.unwrap_or(50));
+        if min_len > max_len {
+            return Err(format!(
+                "`database.enzyme.min_len` ({min_len}) is greater than `max_len` ({max_len})"
+            ));
+        }
+        let min_mass = self.peptide_min_mass.unwrap_or(500.0);
+        let max_mass = self.peptide_max_mass.unwrap_or(5000.0);
+        if min_mass
+            .partial_cmp(&max_mass)
+            .is_none_or(|order| order.is_gt())
+        {
+            return Err(format!(
+                "`database.peptide_min_mass` ({min_mass}) must not exceed \
+                 `peptide_max_mass` ({max_mass})"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate_modification_keys(&self) -> Result<(), String> {
         for key in self
             .static_mods
@@ -2203,8 +2226,8 @@ impl PackedFragment {
 #[derive(Copy, Clone)]
 struct FragmentBucket {
     mass_prefix: u32,
-    start: u32,
-    end: u32,
+    start: usize,
+    end: usize,
 }
 
 #[derive(Default)]
@@ -2303,9 +2326,8 @@ impl FragmentIndex {
                 let bucket_end = (bucket_start + bucket_size).min(total);
                 buckets.push(FragmentBucket {
                     mass_prefix: prefix << suffix_bits,
-                    start: u32::try_from(bucket_start)
-                        .expect("fragment index exceeds 32-bit offsets"),
-                    end: u32::try_from(bucket_end).expect("fragment index exceeds 32-bit offsets"),
+                    start: bucket_start,
+                    end: bucket_end,
                 });
             }
         }
@@ -2386,7 +2408,7 @@ impl FragmentIndex {
         peptide_hi: u32,
     ) -> FragmentIter<'_> {
         let bucket = self.buckets[bucket_index];
-        let fragments = &self.fragments[bucket.start as usize..bucket.end as usize];
+        let fragments = &self.fragments[bucket.start..bucket.end];
         let first = fragments.partition_point(|fragment| fragment.peptide_index() < peptide_lo);
         let last = fragments.partition_point(|fragment| fragment.peptide_index() <= peptide_hi);
         FragmentIter {
@@ -2415,7 +2437,7 @@ impl FragmentIndex {
         buckets: &[u32],
         peptide_lo: u32,
         peptide_hi: u32,
-        out: &mut Vec<(u32, u32)>,
+        out: &mut Vec<(usize, usize)>,
     ) {
         /// Buckets resolved together. Two searches each, sized against the
         /// core's outstanding-miss capacity rather than a vector width.
@@ -2441,7 +2463,7 @@ impl FragmentIndex {
             let mut longest = 0usize;
             for (lane, &bucket) in chunk.iter().enumerate() {
                 let bucket = self.buckets[bucket as usize];
-                let (start, len) = (bucket.start as usize, (bucket.end - bucket.start) as usize);
+                let (start, len) = (bucket.start, bucket.end - bucket.start);
                 // An empty bucket probes index 0 (always valid here) without
                 // moving; its result is taken from `start` below.
                 let start = if len == 0 { 0 } else { start };
@@ -2483,15 +2505,15 @@ impl FragmentIndex {
                 let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
                 let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
                 let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
-                out.push((first as u32, last as u32));
+                out.push((first, last));
             }
         }
     }
 
     #[inline(always)]
-    fn range_iter(&self, bucket: usize, first: u32, last: u32) -> FragmentIter<'_> {
+    fn range_iter(&self, bucket: usize, first: usize, last: usize) -> FragmentIter<'_> {
         FragmentIter {
-            fragments: &self.fragments[first as usize..last as usize],
+            fragments: &self.fragments[first..last],
             mass_prefix: self.buckets[bucket].mass_prefix,
             next: 0,
         }
@@ -2510,9 +2532,9 @@ struct BatchSearchScratch {
     order: Vec<(u32, u32)>,
     /// Distinct buckets and their resolved ranges.
     distinct: Vec<u32>,
-    resolved: Vec<(u32, u32)>,
+    resolved: Vec<(usize, usize)>,
     /// Resolved range per entry.
-    ranges: Vec<(u32, u32)>,
+    ranges: Vec<(usize, usize)>,
 }
 
 thread_local! {

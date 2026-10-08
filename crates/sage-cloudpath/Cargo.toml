@@ -36,7 +36,6 @@ opentfraw = "1.4.1"
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
 dnoise-core = "0.5.0"
 rayon = "1.5"
-reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 regex = "1.6"
 schemars = "1"
 url = { version = "2", features = ["serde"]}

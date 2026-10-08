@@ -293,7 +293,7 @@ that compatible events can be added to schema version 1.
 
 Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
 accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
-`RunSummary` alongside telemetry. This application layer is intended to be shared by other
+`RunSummary`. This application layer is intended to be shared by other
 front ends.
 
 ## Configuration file schema

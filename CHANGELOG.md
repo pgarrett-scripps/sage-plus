@@ -9,6 +9,22 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Fixed
+- The fragment index no longer panics past 4,294,967,295 fragments. Bucket offsets are 64-bit
+  (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
+  32-bit peptide index inherited from Sage.
+- A missing input file or FASTA names the path: ``cannot open `/x/y.mzML`: No such file or
+  directory``. An output directory that cannot be created is named the same way.
+- A search whose database has no target peptides fails instead of exiting 0 with empty results.
+  The error names the length and mass ranges in force. `enzyme.min_len` above `max_len`, or
+  `peptide_min_mass` above `peptide_max_mass`, is rejected when the configuration is validated.
+
+### Removed
+- Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the
+  `reqwest` dependency is gone. `--disable-telemetry-i-dont-want-to-improve-sage` is still
+  accepted as a hidden no-op so existing scripts keep working. `Runner::run` and
+  `run_with_summary` return the `RunSummary`, and `JobResult` has no `telemetry` field.
+
 ## [v0.1.0-beta.15] - 2026-09-29
 
 ### Documentation

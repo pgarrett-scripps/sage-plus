@@ -524,6 +524,9 @@ impl Input {
                 .map_err(anyhow::Error::msg)?;
             database.validate_enzyme().map_err(anyhow::Error::msg)?;
             database
+                .validate_peptide_ranges()
+                .map_err(anyhow::Error::msg)?;
+            database
                 .validate_fragment_losses()
                 .map_err(anyhow::Error::msg)?;
             ensure!(
@@ -752,7 +755,9 @@ impl Input {
                         // Valid URL, might still be a local directory that doesn't exist
                         if url.scheme() == "file" {
                             let path = url.to_file_path().expect("url scheme is file");
-                            std::fs::create_dir_all(path)?;
+                            std::fs::create_dir_all(&path).with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?;
                         }
 
                         if !url.path().ends_with("/") {
@@ -764,8 +769,12 @@ impl Input {
                         // Treat as a local path (covers Windows `C:\...` which
                         // otherwise parses as a URL with scheme `c`).
                         let path = std::path::Path::new(&path);
-                        std::fs::create_dir_all(path)?;
-                        Url::from_directory_path(path.canonicalize()?).expect("valid path")
+                        std::fs::create_dir_all(path)
+                            .and_then(|_| path.canonicalize())
+                            .map(|path| Url::from_directory_path(path).expect("valid path"))
+                            .with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?
                     }
                 }
             }
