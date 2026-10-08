@@ -524,6 +524,9 @@ impl Input {
                 .map_err(anyhow::Error::msg)?;
             database.validate_enzyme().map_err(anyhow::Error::msg)?;
             database
+                .validate_peptide_ranges()
+                .map_err(anyhow::Error::msg)?;
+            database
                 .validate_fragment_losses()
                 .map_err(anyhow::Error::msg)?;
             ensure!(
@@ -534,6 +537,7 @@ impl Input {
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
+            validate_required_settings(database)?;
             let parameters = database.clone().make_parameters();
             parameters.validate_channels().map_err(anyhow::Error::msg)?;
             parameters
@@ -568,7 +572,8 @@ impl Input {
             "`max_fragment_charge` must be greater than zero"
         );
         ensure!(
-            self.min_peaks.unwrap_or(15) <= self.max_peaks.unwrap_or(150),
+            self.min_peaks.unwrap_or(DEFAULT_MIN_PEAKS)
+                <= self.max_peaks.unwrap_or(DEFAULT_MAX_PEAKS),
             "`min_peaks` cannot exceed `max_peaks`, including defaults"
         );
         if let Some(value) = self.protein_grouping_peptide_fdr {
@@ -724,10 +729,9 @@ impl Input {
             log::warn!("`min_free_memory_gb` is ignored; Sage enforces only `max_memory_gb`");
         }
         let batch_size = resolve_batch_size(self.batch_size)?;
-        let database = self
-            .database
-            .expect("validated database configuration")
-            .make_parameters();
+        let builder = self.database.expect("validated database configuration");
+        let unset_database = UnsetSearchSpace::from(&builder);
+        let database = builder.make_parameters();
         database.validate_channels().map_err(anyhow::Error::msg)?;
         database
             .validate_compact_modifications()
@@ -737,6 +741,48 @@ impl Input {
             .map_err(anyhow::Error::msg)?;
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
+        if let Some(warning) = database.unbounded_length_warning() {
+            log::warn!("{warning}");
+        }
+        let defaults = unset_database.describe(
+            &database,
+            [
+                (
+                    "min_peaks",
+                    self.min_peaks.is_none(),
+                    DEFAULT_MIN_PEAKS.to_string(),
+                ),
+                (
+                    "max_peaks",
+                    self.max_peaks.is_none(),
+                    DEFAULT_MAX_PEAKS.to_string(),
+                ),
+                (
+                    "min_matched_peaks",
+                    self.min_matched_peaks.is_none(),
+                    DEFAULT_MIN_MATCHED_PEAKS.to_string(),
+                ),
+                (
+                    "precursor_charge",
+                    self.precursor_charge.is_none(),
+                    format!(
+                        "[{}, {}]",
+                        DEFAULT_PRECURSOR_CHARGE.0, DEFAULT_PRECURSOR_CHARGE.1
+                    ),
+                ),
+                (
+                    "isotope_errors",
+                    self.isotope_errors.is_none(),
+                    format!(
+                        "[{}, {}]",
+                        DEFAULT_ISOTOPE_ERRORS.0, DEFAULT_ISOTOPE_ERRORS.1
+                    ),
+                ),
+            ],
+        );
+        if !defaults.is_empty() {
+            log::info!("defaults used for unset settings: {}", defaults.join(", "));
+        }
 
         let mzml_paths = self
             .mzml_paths
@@ -752,7 +798,9 @@ impl Input {
                         // Valid URL, might still be a local directory that doesn't exist
                         if url.scheme() == "file" {
                             let path = url.to_file_path().expect("url scheme is file");
-                            std::fs::create_dir_all(path)?;
+                            std::fs::create_dir_all(&path).with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?;
                         }
 
                         if !url.path().ends_with("/") {
@@ -764,8 +812,12 @@ impl Input {
                         // Treat as a local path (covers Windows `C:\...` which
                         // otherwise parses as a URL with scheme `c`).
                         let path = std::path::Path::new(&path);
-                        std::fs::create_dir_all(path)?;
-                        Url::from_directory_path(path.canonicalize()?).expect("valid path")
+                        std::fs::create_dir_all(path)
+                            .and_then(|_| path.canonicalize())
+                            .map(|path| Url::from_directory_path(path).expect("valid path"))
+                            .with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?
                     }
                 }
             }
@@ -830,15 +882,15 @@ impl Input {
             fragment_tol: self.fragment_tol,
             report_psms: self.report_psms.unwrap_or(1),
             output_filter: self.output_filter.unwrap_or_default(),
-            max_peaks: self.max_peaks.unwrap_or(150),
-            min_peaks: self.min_peaks.unwrap_or(15),
-            min_matched_peaks: self.min_matched_peaks.unwrap_or(4),
+            max_peaks: self.max_peaks.unwrap_or(DEFAULT_MAX_PEAKS),
+            min_peaks: self.min_peaks.unwrap_or(DEFAULT_MIN_PEAKS),
+            min_matched_peaks: self.min_matched_peaks.unwrap_or(DEFAULT_MIN_MATCHED_PEAKS),
             max_fragment_charge: self.max_fragment_charge,
             annotate_matches: self.annotate_matches.unwrap_or(false),
             record_input_hashes: self.record_input_hashes.unwrap_or(false),
-            precursor_charge: self.precursor_charge.unwrap_or((2, 4)),
+            precursor_charge: self.precursor_charge.unwrap_or(DEFAULT_PRECURSOR_CHARGE),
             override_precursor_charge: self.override_precursor_charge.unwrap_or(false),
-            isotope_errors: self.isotope_errors.unwrap_or((0, 0)),
+            isotope_errors: self.isotope_errors.unwrap_or(DEFAULT_ISOTOPE_ERRORS),
             deisotope: self
                 .deisotope
                 .unwrap_or(DeisotopeConfig::Enabled(true))
@@ -876,6 +928,180 @@ impl Input {
     pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
         MemoryLimits::from_gib(self.max_memory_gb)
     }
+}
+
+const DEFAULT_MIN_PEAKS: usize = 15;
+const DEFAULT_MAX_PEAKS: usize = 150;
+const DEFAULT_MIN_MATCHED_PEAKS: u16 = 4;
+const DEFAULT_PRECURSOR_CHARGE: (u8, u8) = (2, 4);
+const DEFAULT_ISOTOPE_ERRORS: (i8, i8) = (0, 0);
+
+/// Search-space settings a configuration left unset, so the startup log
+/// can state the defaults the search uses for them.
+struct UnsetSearchSpace {
+    min_len: bool,
+    max_len: bool,
+    peptide_min_mass: bool,
+    peptide_max_mass: bool,
+    max_variable_mods: bool,
+    max_total_variable_mods: bool,
+    generate_decoys: bool,
+    decoy_tag: bool,
+    clip_n_term_met: bool,
+    min_ion_index: bool,
+    merge_isoleucine_leucine: bool,
+}
+
+impl From<&Builder> for UnsetSearchSpace {
+    fn from(builder: &Builder) -> Self {
+        let enzyme = builder.enzyme.as_ref();
+        Self {
+            min_len: enzyme.and_then(|enzyme| enzyme.min_len).is_none(),
+            max_len: enzyme.and_then(|enzyme| enzyme.max_len).is_none(),
+            peptide_min_mass: builder.peptide_min_mass.is_none(),
+            peptide_max_mass: builder.peptide_max_mass.is_none(),
+            max_variable_mods: builder.max_variable_mods.is_none(),
+            max_total_variable_mods: builder.max_total_variable_mods.is_none(),
+            generate_decoys: builder.generate_decoys.is_none(),
+            decoy_tag: builder.decoy_tag.is_none(),
+            clip_n_term_met: builder.clip_n_term_met.is_none(),
+            min_ion_index: builder.min_ion_index.is_none(),
+            merge_isoleucine_leucine: builder.merge_isoleucine_leucine.is_none(),
+        }
+    }
+}
+
+impl UnsetSearchSpace {
+    /// `name=value` for each unset setting, database settings first, then
+    /// the given search-level ones.
+    fn describe<const N: usize>(
+        &self,
+        database: &Parameters,
+        search: [(&str, bool, String); N],
+    ) -> Vec<String> {
+        let enzyme = &database.enzyme;
+        let decoys = database.generate_decoys;
+        [
+            (
+                "min_len",
+                self.min_len,
+                enzyme.min_len.unwrap_or(5).to_string(),
+            ),
+            (
+                "max_len",
+                self.max_len,
+                enzyme.effective_max_len().to_string(),
+            ),
+            (
+                "peptide_min_mass",
+                self.peptide_min_mass,
+                database.peptide_min_mass.to_string(),
+            ),
+            (
+                "peptide_max_mass",
+                self.peptide_max_mass,
+                database.peptide_max_mass.to_string(),
+            ),
+            (
+                "max_variable_mods",
+                self.max_variable_mods,
+                database.max_variable_mods.to_string(),
+            ),
+            (
+                "max_total_variable_mods",
+                self.max_total_variable_mods,
+                database.max_total_variable_mods.to_string(),
+            ),
+            ("generate_decoys", self.generate_decoys, decoys.to_string()),
+            (
+                "decoy_tag",
+                self.decoy_tag,
+                format!("{:?}", database.decoy_tag),
+            ),
+            (
+                "clip_n_term_met",
+                self.clip_n_term_met,
+                database.clip_n_term_met.to_string(),
+            ),
+            (
+                "min_ion_index",
+                self.min_ion_index,
+                database.min_ion_index.to_string(),
+            ),
+            (
+                "merge_isoleucine_leucine",
+                self.merge_isoleucine_leucine,
+                database.merge_isoleucine_leucine.to_string(),
+            ),
+        ]
+        .into_iter()
+        .chain(search)
+        .filter(|(_, unset, _)| *unset)
+        .map(|(name, _, value)| format!("{name}={value}"))
+        .collect()
+    }
+}
+
+/// Paste-ready trypsin/HCD values for each mandatory database setting.
+const REQUIRED_SNIPPETS: [(&str, &str); 3] = [
+    (
+        "enzyme",
+        r#""enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 2, "semi_enzymatic": false}"#,
+    ),
+    ("static_mods", r#""static_mods": {"C": 57.021464}"#),
+    ("ion_kinds", r#""ion_kinds": ["b", "y"]"#),
+];
+
+/// Settings a configuration must state because they define the search
+/// space: `static_mods`, `ion_kinds`, and, when a FASTA is digested, the
+/// enzyme's `cleave_at`, `restrict`, `missed_cleavages` and
+/// `semi_enzymatic`. A peptide-list-only search needs no enzyme.
+fn validate_required_settings(database: &Builder) -> anyhow::Result<()> {
+    let mut missing = Vec::new();
+    let mut blocks = Vec::new();
+    if database.fasta.is_some() {
+        match &database.enzyme {
+            None => {
+                missing.push("database.enzyme".to_string());
+                blocks.push("enzyme");
+            }
+            Some(enzyme) => {
+                let fields = enzyme.missing_required_fields();
+                if !fields.is_empty() {
+                    missing.extend(
+                        fields
+                            .iter()
+                            .map(|field| format!("database.enzyme.{field}")),
+                    );
+                    blocks.push("enzyme");
+                }
+            }
+        }
+    }
+    if database.static_mods.is_none() {
+        missing.push("database.static_mods".into());
+        blocks.push("static_mods");
+    }
+    if database.ion_kinds.is_none() {
+        missing.push("database.ion_kinds".into());
+        blocks.push("ion_kinds");
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let snippets = REQUIRED_SNIPPETS
+        .iter()
+        .filter(|(block, _)| blocks.contains(block))
+        .map(|(_, snippet)| format!("  {snippet}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    anyhow::bail!(
+        "missing required setting(s): {}. Since Beta 16 these have no defaults \
+         (`static_mods` may be `{{}}`). For a standard trypsin/HCD search, add to \
+         \"database\" (use only the keys you are missing):\n{snippets}\n\
+         `sage --write-config minimal` prints a complete starting configuration.",
+        missing.join(", ")
+    )
 }
 
 /// Worker thread count: the `--threads` flag wins over the configuration's

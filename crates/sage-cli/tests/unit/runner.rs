@@ -429,7 +429,12 @@ fn report_keeps_same_basename_files_separate() {
     let (directory, _) = temporary_output("report");
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
@@ -476,7 +481,12 @@ fn denoise_warns_about_inputs_it_cannot_change() {
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let runner = |denoise: bool, lfq: bool| {
         let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-            "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+            "database": {
+                "fasta": format!("{workspace}/tests/Q99536.fasta"),
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {},
+                "ion_kinds": ["b", "y"]
+            },
             "precursor_tol": { "ppm": [-10, 10] },
             "fragment_tol": { "ppm": [-10, 10] },
             "mzml_paths": [
@@ -506,7 +516,12 @@ fn sidecar_outputs_are_registered_written_once_and_listed() {
     let (directory, _) = temporary_output("sidecar");
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
@@ -671,7 +686,12 @@ fn report_shows_signed_fragment_bias() {
     let (directory, _) = temporary_output("report-bias");
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": [format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML")],
@@ -770,7 +790,12 @@ fn diapasef_files_get_quality_control_scans() {
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": [path.clone()],
@@ -806,7 +831,12 @@ fn diapasef_files_without_lfq_get_quality_control_scans() {
     let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let path = format!("{workspace}/crates/sage-cloudpath/tests/data/bruker/example_dia.d");
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": format!("{workspace}/tests/Q99536.fasta") },
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": [path.clone()],
@@ -852,6 +882,9 @@ fn ptm_library_records_match_expanded_ambiguous_residues() {
     let runner = |expand: bool| {
         let input: crate::input::Input = serde_json::from_value(serde_json::json!({
             "database": {
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {},
+                "ion_kinds": ["b", "y"],
                 "fasta": fasta.to_string_lossy(),
                 "expand_ambiguous_residues": expand,
                 "prefilter": false,

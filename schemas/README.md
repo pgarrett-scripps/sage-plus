@@ -48,8 +48,8 @@ records the schema version, selection strategy, PSM and peptide q-value cutoffs,
 support, and minimum fragment frequency. `library_entry_id` groups transitions belonging to the
 same exact peptidoform and precursor charge.
 
-Unlabeled searches write version 1 result schemas. A configured precursor-label search writes
-version 2 results. LFQ uses version 5 without labels and version 6 with labels. Protein site coordinates are one-based and inclusive.
+Unlabeled searches write version 5 result schemas. A configured precursor-label search writes
+version 6 results. LFQ uses version 7 without labels and version 8 with labels. Protein site coordinates are one-based and inclusive.
 Spectral libraries use version 2 only when labeled entries are present.
 
 Beta 6 adds `ptm_library.v2.parquet.schema`, `ptm_sites.v2.parquet.schema`, and

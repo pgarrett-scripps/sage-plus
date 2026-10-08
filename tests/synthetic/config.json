@@ -1,5 +1,8 @@
 {
   "database": {
+    "static_mods": {},
+    "ion_kinds": ["b", "y"],
+    "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
     "fasta": "tests/synthetic/peptide.fasta",
     "generate_decoys": true
   },

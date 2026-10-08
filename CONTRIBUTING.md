@@ -35,6 +35,9 @@ General guidelines before submitting a PR:
 - CI requires at least 80% workspace line coverage and publishes an HTML coverage artifact.
 - If it makes sense to do so, please add additional tests that cover any new features
 - Document code as needed
+- Settings that define the search space (enzyme, static mods, ion kinds) are required. Every
+  other option, and every new one, must keep a default that reproduces the previous behaviour,
+  so existing configurations keep producing the same search.
 
 For local experiments that need optimized binaries, `cargo build --profile fast-release` uses thin
 LTO and incremental compilation, so rebuilds after a change are much faster than `--release`.

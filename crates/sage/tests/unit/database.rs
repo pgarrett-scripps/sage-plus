@@ -115,7 +115,7 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
         .all(|bucket| database.fragments.bucket(bucket).count() <= bucket_size));
     assert_eq!(
         database.fragments.allocated_bytes(),
-        expected.len() * 6 + database.buckets().len() * 12
+        expected.len() * 6 + database.buckets().len() * 24
     );
 }
 
@@ -407,9 +407,9 @@ fn chunked_modification_matches_a_single_pass_with_libraries() {
     };
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
-            missed_cleavages: Some(2),
+            missed_cleavages: Some(2.into()),
             min_len: Some(3),
-            max_len: Some(30),
+            max_len: Some(30.into()),
             ..Default::default()
         }),
         peptide_min_mass: Some(0.0),
@@ -810,9 +810,9 @@ fn digestion() {
     let params = Parameters {
         bucket_size: 128,
         enzyme: EnzymeBuilder {
-            missed_cleavages: Some(1),
+            missed_cleavages: Some(1.into()),
             min_len: Some(6),
-            max_len: Some(10),
+            max_len: Some(10.into()),
             ..Default::default()
         },
         peptide_min_mass: 150.0,
@@ -884,9 +884,9 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
             .unwrap();
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
-            missed_cleavages: Some(1),
+            missed_cleavages: Some(1.into()),
             min_len: Some(3),
-            max_len: Some(50),
+            max_len: Some(50.into()),
             ..Default::default()
         }),
         generate_decoys: Some(false),
@@ -924,9 +924,9 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
         .unwrap();
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
-            missed_cleavages: Some(1),
+            missed_cleavages: Some(1.into()),
             min_len: Some(2),
-            max_len: Some(50),
+            max_len: Some(50.into()),
             ..Default::default()
         }),
         ..Default::default()
@@ -979,7 +979,7 @@ fn estimates_variable_modification_expansion_before_allocation() {
         enzyme: Some(EnzymeBuilder {
             cleave_at: Some("$".into()),
             min_len: Some(1),
-            max_len: Some(50),
+            max_len: Some(50.into()),
             ..Default::default()
         }),
         variable_mods: Some(
@@ -1020,8 +1020,8 @@ fn memory_estimate_totals_are_additive_over_protein_chunks() {
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
             min_len: Some(4),
-            max_len: Some(30),
-            missed_cleavages: Some(1),
+            max_len: Some(30.into()),
+            missed_cleavages: Some(1.into()),
             ..Default::default()
         }),
         variable_mods: Some(
@@ -1075,7 +1075,7 @@ fn protein_site_library_adds_targeted_combinations() {
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
             min_len: Some(1),
-            max_len: Some(20),
+            max_len: Some(20.into()),
             ..Default::default()
         }),
         peptide_min_mass: Some(0.0),
@@ -1132,7 +1132,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
     let builder = Builder {
         enzyme: Some(EnzymeBuilder {
             min_len: Some(1),
-            max_len: Some(20),
+            max_len: Some(20.into()),
             ..Default::default()
         }),
         peptide_min_mass: Some(0.0),
@@ -2470,9 +2470,9 @@ fn generated_decoys_of_n_terminal_peptides_stay_balanced_and_n_terminal() {
 fn ambiguous_parameters(expand: bool) -> Parameters {
     Builder {
         enzyme: Some(EnzymeBuilder {
-            missed_cleavages: Some(0),
+            missed_cleavages: Some(0.into()),
             min_len: Some(5),
-            max_len: Some(50),
+            max_len: Some(50.into()),
             ..Default::default()
         }),
         expand_ambiguous_residues: Some(expand),
@@ -2693,7 +2693,7 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
                 .map(|_| rng.below(u64::from(max_id)) as u32)
                 .collect::<Vec<_>>();
             ids.sort_unstable();
-            let start = fragments.len() as u32;
+            let start = fragments.len();
             fragments.extend(ids.into_iter().map(|peptide_index| PackedFragment {
                 peptide_index,
                 mass_suffix: rng.below(1 << FRAGMENT_MASS_SUFFIX_BITS) as u16,
@@ -2701,7 +2701,7 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             buckets.push(FragmentBucket {
                 mass_prefix: (bucket as u32 + 0x4000) << FRAGMENT_MASS_SUFFIX_BITS,
                 start,
-                end: fragments.len() as u32,
+                end: fragments.len(),
             });
         }
         let index = FragmentIndex { buckets, fragments };
@@ -2734,6 +2734,31 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             }
         }
     }
+}
+
+#[test]
+fn bucket_ranges_keep_offsets_above_32_bits() {
+    // Offsets past u32::MAX would need billions of fragments, so this checks
+    // the empty-index path, which reports bucket starts without reading them.
+    let base = u32::MAX as usize + 7;
+    let index = FragmentIndex {
+        buckets: vec![
+            FragmentBucket {
+                mass_prefix: 0x4000 << FRAGMENT_MASS_SUFFIX_BITS,
+                start: base,
+                end: base,
+            },
+            FragmentBucket {
+                mass_prefix: 0x4001 << FRAGMENT_MASS_SUFFIX_BITS,
+                start: base + (1 << 32),
+                end: base + (1 << 32),
+            },
+        ],
+        fragments: Vec::new(),
+    };
+    let mut out = Vec::new();
+    index.resolve_bucket_ranges(&[1, 0], 0, u32::MAX, &mut out);
+    assert_eq!(out, [(base + (1 << 32), base + (1 << 32)), (base, base)]);
 }
 
 #[test]
@@ -3295,5 +3320,65 @@ mod site_losses {
             offset(serde_json::json!({"S": [H3PO4], "Y": [18.010565]})),
             79.966331 - 18.010565
         );
+    }
+}
+
+#[test]
+fn limits_accept_integers_and_unlimited() {
+    let enzyme: EnzymeBuilder = serde_json::from_value(serde_json::json!({
+        "missed_cleavages": "unlimited",
+        "max_len": "unlimited",
+    }))
+    .unwrap();
+    assert_eq!(enzyme.missed_cleavages, Some(Limit::Unlimited));
+    assert_eq!(enzyme.effective_max_len(), crate::enzyme::MAX_PEPTIDE_LEN);
+    let parameters = EnzymeParameters::from(enzyme.clone());
+    assert_eq!(parameters.missed_cleavages, None);
+    assert_eq!(parameters.max_len, crate::enzyme::MAX_PEPTIDE_LEN);
+    assert_eq!(
+        serde_json::to_value(&enzyme).unwrap()["missed_cleavages"],
+        "unlimited"
+    );
+
+    let enzyme: EnzymeBuilder =
+        serde_json::from_value(serde_json::json!({"missed_cleavages": 3, "max_len": 30})).unwrap();
+    assert_eq!(enzyme.missed_cleavages, Some(Limit::Limited(3)));
+    assert_eq!(enzyme.max_len, Some(Limit::Limited(30)));
+    assert_eq!(serde_json::to_value(&enzyme).unwrap()["max_len"], 30);
+
+    for bad in [
+        serde_json::json!({"missed_cleavages": "all"}),
+        serde_json::json!({"missed_cleavages": -1}),
+        serde_json::json!({"missed_cleavages": 256}),
+        serde_json::json!({"max_len": 1.5}),
+    ] {
+        assert!(
+            serde_json::from_value::<EnzymeBuilder>(bad.clone()).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn unlimited_length_warns_only_without_another_length_bound() {
+    let parameters = |enzyme: serde_json::Value| {
+        Builder {
+            enzyme: Some(serde_json::from_value(enzyme).unwrap()),
+            ..Default::default()
+        }
+        .make_parameters()
+    };
+    for enzyme in [
+        serde_json::json!({"cleave_at": "KR", "missed_cleavages": "unlimited", "max_len": "unlimited"}),
+        serde_json::json!({"cleave_at": "", "missed_cleavages": 0, "max_len": "unlimited"}),
+    ] {
+        assert!(parameters(enzyme).unbounded_length_warning().is_some());
+    }
+    for enzyme in [
+        serde_json::json!({"cleave_at": "KR", "missed_cleavages": 2, "max_len": "unlimited"}),
+        serde_json::json!({"cleave_at": "KR", "missed_cleavages": "unlimited", "max_len": 50}),
+        serde_json::json!({"cleave_at": "", "missed_cleavages": 0, "max_len": 30}),
+    ] {
+        assert!(parameters(enzyme).unbounded_length_warning().is_none());
     }
 }

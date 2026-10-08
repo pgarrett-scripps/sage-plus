@@ -1,22 +1,23 @@
 # Sage Plus benchmark pipeline
 
-The [development and benchmark report](../paper/README.md) brings together the
-released-software comparison, analytical diagnostics, limitations, and source
-provenance. A [readable PDF](../paper/report.pdf) is included. It is independent
-Sage Plus project documentation with explicit upstream attribution.
+This directory holds the benchmark harness and the evaluations behind Sage Plus defaults. The
+harness is for development checks and README-sized performance summaries; it is not a scientific
+validation suite.
 
+Current evaluations:
 
-This directory contains a small repeatable benchmark harness for Sage Plus. It is intended for
-development checks and README-sized performance summaries. It is not a scientific validation
-suite.
+- [Head-to-head](HEADTOHEAD.md): Beta 16 against upstream Sage v0.15.0-beta.2 on PXD028735 HYE.
+- [Results](RESULTS.md): runtime and memory against upstream Sage and earlier betas.
+- [Prefilter](PREFILTER.md), [mass-offset modifications](MASS_OFFSET.md),
+  [picked FDR](PICKED_FDR.md), [site-level FDR](SITE_FDR.md), [immonium ions](IMMONIUM.md) and
+  [fragment losses](FRAGMENT_LOSSES.md).
+- [Grounding rules](GROUNDING.md): which tests and benchmarks check each hard constraint.
 
-The [September 2026 hardening results](HARDENING_RESULTS.md) record fresh paired workloads,
-runtime follow-up, entrapment checks, and the remaining release gates. The
-[scientific protocol](SCIENTIFIC_PROTOCOL.md) defines the next validation milestone.
-The [public scientific pilot](SCIENTIFIC_PILOT.md) documents the separate beta.3
-validation runs, data provenance, analysis tools and interpretation limits.
-The [pilot report and figures](scientific-results/20260914/SCIENTIFIC_REPORT.md)
-retain the measured results and unresolved PTM and MBR confidence questions.
+The [development and evaluation report](../paper/README.md) compares released upstream Sage with
+a released Sage Plus; build its PDF with `just paper` in `paper/`. Release checklists, the
+September 2026 hardening results, and the beta.3 scientific pilot and protocol are kept for
+reference in [`archive/`](archive/); the pilot's retained results are in
+[`scientific-results/20260914/`](scientific-results/20260914/SCIENTIFIC_REPORT.md).
 
 The harness compares the current working tree with a pinned baseline. By default the baseline is
 the `v0.1.0-beta.1` release. The candidate build includes uncommitted working-tree changes. Set
@@ -112,11 +113,11 @@ The one-spectrum test fixture must not be used for benchmark timing.
 
 ## Integrated memory design records
 
-Two benchmark-backed design records document the compact database representations now integrated
-into Sage Plus:
+Two archived, benchmark-backed design records document the compact database representations now
+integrated into Sage Plus:
 
-- [Protein-backed peptide sequences](PEPTIDE_INDEX_EXPERIMENT.md)
-- [Lossless packed fragment index](FRAGMENT_INDEX_EXPERIMENT.md)
+- [Protein-backed peptide sequences](archive/PEPTIDE_INDEX_EXPERIMENT.md)
+- [Lossless packed fragment index](archive/FRAGMENT_INDEX_EXPERIMENT.md)
 
 These records describe the alternatives considered, exactness checks, code tradeoffs, and the
 benchmarks used before integration.
@@ -248,7 +249,7 @@ Defaults can also be placed in a repository-root `.env` file because the Justfil
 
 Use `MEMORY_PEPTIDES=2000000 just bench-memory` to resize the optional generated database workload.
 
-Every search uses the requested Rayon thread count, `--batch-size 1`, disabled telemetry, a fresh
+Every search uses the requested Rayon thread count, `--batch-size 1`, a fresh
 output directory, and a release build made with `--locked`. Builds are completed before timing.
 
 ## Results

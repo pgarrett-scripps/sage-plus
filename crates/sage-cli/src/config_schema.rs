@@ -31,6 +31,26 @@ pub fn generate_config_schema() -> String {
     value["$defs"]["SiteMap"]["anyOf"][1]["propertyNames"] =
         serde_json::json!({"pattern": explicit});
 
+    // Mandatory settings (Beta 16). The enzyme is required only when a FASTA
+    // is digested; `--fasta` on the command line cannot be checked here.
+    let database = &mut value["properties"]["database"];
+    database["required"] = serde_json::json!(["static_mods", "ion_kinds"]);
+    database["dependentSchemas"] = serde_json::json!({
+        "fasta": {
+            "required": ["enzyme"],
+            "properties": {
+                "enzyme": {
+                    "type": "object",
+                    "required": ["cleave_at", "restrict", "missed_cleavages", "semi_enzymatic"]
+                }
+            }
+        }
+    });
+
+    // `max_len` is a positive length or "unlimited".
+    value["$defs"]["EnzymeBuilder"]["properties"]["max_len"]["anyOf"][0]["anyOf"][0]["minimum"] =
+        1.into();
+
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
     value["$defs"]["NamedVariableModification"]["properties"]["max_total_count"]["minimum"] =
         1.into();

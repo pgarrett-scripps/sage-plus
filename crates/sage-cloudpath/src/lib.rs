@@ -48,7 +48,10 @@ pub fn to_url(s: &str) -> Result<Url, Error> {
         return Ok(url);
     }
     let path = std::path::Path::new(s);
-    let canonical = path.canonicalize()?;
+    let canonical = path.canonicalize().map_err(|error| Error::Open {
+        path: s.to_string(),
+        error,
+    })?;
     Url::from_file_path(&canonical).map_err(|_| Error::InvalidUri)
 }
 
@@ -286,6 +289,8 @@ pub enum Error {
          Use a local path, or build with the `cloud` feature (enabled by default)"
     )]
     CloudDisabled(String),
+    #[error("cannot open `{path}`: {error}")]
+    Open { path: String, error: std::io::Error },
     #[error(transparent)]
     IO(#[from] tokio::io::Error),
     #[error(transparent)]

@@ -8,30 +8,72 @@ Sage Plus is a fork of the [Sage proteomics search engine](https://github.com/la
 people who need more than a standard closed search: very large or PTM-heavy databases, site
 localization, Thermo RAW input without conversion, and machine-readable outputs. It keeps Sage's
 workflow and configuration style, and most additions are opt-in. The current release is
-**v0.1.0-beta.15**, a prerelease.
+**v0.1.0-beta.16**, a prerelease.
+
+## Why Sage Plus
+
+Each of these was measured on the dataset named. With the streamed prefilter, a human reference
+plus a 100x gut-microbiome catalog searches in 19 GiB (14,459 PSMs in 451 s,
+[Beta 11](CHANGELOG.md#v010-beta11---2026-09-26)). Per-type false-localization rates give 7,231
+phospho localizations at 1% FLR on PXD007058 ([details](DOCS.md#ptm-site-localization)).
+Nonlinear retention-time alignment raised LFQ precursors at 1% q-value from 24,038 to 31,418 on
+five PXD028735 runs ([Beta 9](CHANGELOG.md#v010-beta9---2026-09-25)). `z_dot` fragment ions find
+43% more ETD PSMs than `z` on PXD018176 ([details](DOCS.md#fragment-settings)), and initiator
+methionine clipping adds 3.4% PSMs at 1% FDR on HEK SILAC when protein N-terminal acetylation is
+searched
+([details](DOCS.md#initiator-methionine-clipping)).
+
+Against upstream Sage v0.15.0-beta.2 on four PXD028735 HYE runs with the same settings, Sage Plus
+finds 1.2% more PSMs and peptides and 1.6% more protein groups at 1% FDR, uses 18% less peak
+memory (6.2 vs 7.5 GiB), and quantifies the species ratios as accurately
+([head-to-head](benchmarks/HEADTOHEAD.md)). For a standard search the two are close; the
+differences are in the features above.
+
+![Sage Plus vs upstream Sage on PXD028735](figures/headtohead/fig1_ids_resources.png)
+
+> [!NOTE]
+> Sage Plus is a beta, maintained independently of upstream Sage. Behavior can change between
+> betas: pin a release, and validate results on your own data before publishing them.
+
+## Install
+
+Prebuilt binaries for every release are on the
+[releases page](https://github.com/pgarrett-scripps/sage-plus/releases): Linux x86_64 and aarch64
+(glibc and static musl builds), macOS x86_64 and arm64, and Windows x86_64. Each archive also
+contains the documentation and output schemas. A Linux x86_64 container is published for each
+release tag:
 
 ```shell
-# Download a binary from the releases page, or build from source (Rust 1.88+):
+docker run --rm -v "$PWD":/data ghcr.io/pgarrett-scripps/sage-plus:<tag> sage -o /data /data/config.json
+```
+
+To build from source (Rust 1.88+):
+
+```shell
 git clone https://github.com/pgarrett-scripps/sage-plus.git && cd sage-plus
 cargo build --release --workspace
 ./target/release/sage config.json
 ```
 
-> [!WARNING]
-> Experimental and independently maintained, not an official Sage release. Behavior can change
-> between betas: pin a release and validate results. Most users should use [upstream Sage](https://github.com/lazear/sage).
+Quickstart (from Beta 16): write a preset configuration, then search a FASTA and spectrum files.
+
+```shell
+sage --write-config trypsin-hcd > config.json
+sage -f proteins.fasta config.json run1.mzML run2.mzML
+```
 
 ## Highlights
 
 **Search very large databases in bounded memory.** With `prefilter` on, proteins stream through an
 index of the spectra, and only peptides that could match a spectrum enter the search index. A human
 reference plus a 100x gut-microbiome catalog, which ran out of memory before Beta 11, now finishes
-in 19 GiB (14,459 PSMs in 451 s). See [settings](DOCS.md#fasta) and [benchmark](benchmarks/PREFILTER.md).
+in 19 GiB (14,459 PSMs in 451 s). See [settings](DOCS.md#fasta) and the
+[Beta 11 measurements](CHANGELOG.md#v010-beta11---2026-09-26).
 
 **Localize PTM sites with a false-localization rate.** `ptm_localization` rescores each arrangement
 of a PSM's modifications on site-determining ions against impossible-site decoys, with a separate
-false-localization rate per modification type (6,973 phospho localizations at 1% on PXD007058, up
-from 303 when all types were pooled). It writes site
+false-localization rate per modification type (7,231 phospho localizations at 1% on PXD007058
+with the Beta 15 defaults; 303 when all types were pooled before Beta 14). It writes site
 probabilities and localization q-values to PSM-level and protein-level site tables, a site-level
 target-decoy q-value (`site_q_value`), and a reusable site library. See [PTM site localization](DOCS.md#ptm-site-localization).
 
@@ -53,7 +95,7 @@ ETD, EThcD, ETciD), so recalibration never mixes scan types. See [inputs](DOCS.m
 ### Find more, and more trustworthy, identifications
 
 Better defaults and scoring for the spectra you already have.
-- Initiator methionine clipping, on by default: 3.2% more PSMs at 1% FDR on HEK SILAC ([details](DOCS.md#initiator-methionine-clipping)).
+- Initiator methionine clipping, on by default: 3.4% more PSMs at 1% FDR on HEK SILAC with protein N-terminal acetylation searched ([details](DOCS.md#initiator-methionine-clipping)).
 - `z_dot` fragment ions for ETD and EThcD: 43% more ETD PSMs than Sage's `z` on PXD018176 ([details](DOCS.md#fragment-settings)).
 - Search-time mass recalibration per file and per analyzer, kept only when it improves held-out error ([details](DOCS.md#other-settings)).
 - Ambiguous residues: J scored as I/L, opt-in B/Z/X expansion with a `substitutions` column, I/L twins merged ([details](DOCS.md#ambiguous-residues)).
@@ -76,7 +118,7 @@ Say exactly where a modification can go, and check it before searching.
 
 Most useful for large databases, many modifications, or many files.
 - Streamed prefilter (above); `prefilter_min_matched_peaks` (default 4) trades a few weak PSMs for memory ([details](DOCS.md#fasta)).
-- Compact peptide, fragment-index, and spectrum storage: 29.5% less peak memory on a conventional search ([results](benchmarks/RESULTS.md)).
+- Compact peptide, fragment-index, and spectrum storage: 22-37% less peak memory than upstream Sage `v0.15.0-beta.2` on three HEK workloads, with 2-20% longer wall time (Beta 2, [results](benchmarks/RESULTS.md#upstream-sage-versus-sage-plus)).
 - Interleaved fragment-bucket search: 19-27% faster search phase with identical PSMs ([changelog](CHANGELOG.md)).
 - `max_memory_gb` stops a run at a measured memory limit, and `--estimate` previews database size ([details](DOCS.md#memory-guard)).
 
@@ -106,12 +148,11 @@ For pipelines and agents that launch searches without a person watching.
 - JSONL progress events (`--events-jsonl`), a Rust runner API with cancellation, and no output replaced without `--overwrite`.
 - Pre-digested peptide lists and custom cleavage sites extend the database ([details](DOCS.md#fasta)).
 
-## Build and run
+## Build notes
 
-Binaries: [releases page](https://github.com/pgarrett-scripps/sage-plus/releases). Linux AMD64
-images: `ghcr.io/pgarrett-scripps/sage-plus:<release-tag>`. From source, use the commands at the
-top (Rust 1.88+); `cargo run --release tests/config.json` searches a bundled example spectrum.
-Standard builds include mzMLb and S3/GCS/Azure paths; `--no-default-features` drops both.
+`cargo run --release tests/config.json` searches a bundled example spectrum. Standard builds
+include mzMLb and S3/GCS/Azure paths; `--no-default-features` drops both. See [Install](#install)
+for binaries and the container.
 
 ## Documentation
 

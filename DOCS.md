@@ -82,37 +82,69 @@ In that build, an `s3://`, `gs://`, or `az://` path fails with an error naming t
 ## Usage 
 
 ```shell
-Usage: sage [OPTIONS] <parameters> [mzml_paths]...
+Usage: sage [OPTIONS] [parameters] [mzml_paths]...
 
 🔮 Sage 🧙 - Proteomics searching so fast it feels like magic!
 
 Arguments:
-  <parameters>     Path to configuration parameters (JSON file)
-  [mzml_paths]...  Paths to mzML, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the configuration file.
+  [parameters]     Path to configuration parameters (JSON file)
+  [mzml_paths]...  Paths to mzML, mzMLb, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the configuration file.
 
 Options:
+      --write-config-schema <PATH>
+          Write the Sage JSON configuration schema to PATH, or '-' for stdout
   -f, --fasta <fasta>
           Path to FASTA database. Overrides the FASTA file specified in the configuration file.
   -o, --output_directory <output_directory>
           Path where search and quant results will be written. Overrides the directory specified in the configuration file.
+      --overwrite
+          Replace known Sage artifacts in an existing local output directory
       --batch-size <batch-size>
-          Number of files to search in parallel (default = number of CPUs/2)
+          Number of files to load and search at once; overrides `batch_size` from the configuration file (default = # of CPUs/2)
+      --dia <dia>
+          DIA search mode; overrides `dia.mode` from the configuration file. `pseudo` searches MS1-anchored pseudo-MS2 spectra built from co-eluting fragment hills. [possible values: off, pseudo]
+      --annotate-matches
+          Write matched fragments output file.
+      --spectral-library
+          Write an empirical spectral library using configured/default settings.
       --write-pin
           Write percolator-compatible `.pin` output files
+      --localize
+          Compute PTM site localization and write site-level reports
+      --write-report
+          Write `.html` report file
       --threads <N>
-          Number of worker threads; overrides `threads` from the configuration file
-          (default: all cores, or RAYON_NUM_THREADS when set)
-      --max-memory <GiB>
-          Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
-          (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
+          Number of worker threads; overrides `threads` from the configuration file (default: all cores, or RAYON_NUM_THREADS when set)
+      --stack-size <stack-size>
+          Set Rayon worker thread stack size in MiB (default: 2 MiB)
+      --max-memory <max-memory>
+          Override `max_memory_gb` from the parameter file. Sage aborts if its measured memory reaches this many GiB; 0 disables the limit.
       --events-jsonl <PATH>
           Stream versioned JSONL job events to PATH (use '-' for stdout)
+      --preview-modifications <PEPTIDE>
+          Print eligible modification sites and bounded peptide variants as JSON
+      --preview-protein <ACCESSION>
+
+      --preview-start <POSITION>
+
+      --preview-before <RESIDUES>
+          Protein residues immediately before the preview peptide, for motif sites
+      --preview-after <RESIDUES>
+          Protein residues immediately after the preview peptide, for motif sites
+      --peptide-position <peptide-position>
+          Protein boundary context for the preview peptide [default: internal] [possible values: internal, nterm, cterm, full]
+      --preview-limit <preview-limit>
+          Maximum variants returned by the modification preview [default: 100]
+      --estimate
+          Print a rough database memory estimate and exit without searching. Estimates never stop a run; `max_memory_gb` is enforced on measured memory
       --validate-only
           Validate the configuration and overrides without running a search
+      --write-config <NAME> [PATH]
+          Write a starting configuration (`list` shows the presets); stdout without PATH
   -h, --help
-          Print help information
+          Print help
   -V, --version
-          Print version information
+          Print version
 ```
 
 Sage is called from the command line using and requires a path to a JSON-encoded parameter file as an argument (see below). 
@@ -190,7 +222,7 @@ keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage
 | Key | Value |
 | --- | --- |
 | `sage.provenance.version` | Version of this key set, currently `1`. |
-| `sage.version` | Sage Plus version, such as `0.1.0-beta.14`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.16`. |
 | `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
 | `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
 | `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
@@ -239,12 +271,9 @@ FROM parquet_kv_metadata('results.sage.parquet');
 
 #### Memory guard
 
-A search can balloon in memory — most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To prevent a runaway search from exhausting RAM and freezing the host, Sage runs a lightweight background watchdog that terminates the process **cleanly** (exit code 137) if either:
+A search can balloon in memory, most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To stop a runaway search before it exhausts RAM, set `max_memory_gb` in the configuration or pass `--max-memory <GiB>`. A background thread then samples Sage's own resident memory every 250 ms and, if it reaches the limit, stops the search with a message suggesting a smaller `batch_size`, a less complex database, or a higher limit. The command line exits with code 137; through the library API the job is cancelled instead unless `JobOptions.terminate_on_memory_limit` is true. The limit is off by default, and `0` disables it.
 
-- Sage's own resident memory exceeds a ceiling (default: 90% of total system RAM), or
-- system-wide available memory drops below a small safety floor (max of 1 GiB or 2% of RAM).
-
-The ceiling is set with `--max-memory <GiB>` (or the `SAGE_MAX_MEMORY_GB` environment variable); `--max-memory 0` disables the guard entirely. The watchdog polls a few times per second from a single thread and adds no overhead to the allocation hot path. When it trips it prints how to reduce the search size (e.g. lower `max_variable_mods` / `max_peff_variable_mods`, use a smaller FASTA, narrow tolerances, or enable `prefilter`).
+Only measured memory is checked. Memory estimates never refuse or stop a search; `sage config.json --estimate` prints one without searching. Since Beta 11 there is no default limit based on total RAM, no free-memory floor, and no `SAGE_MAX_MEMORY_GB` environment variable; `min_free_memory_gb` is still accepted but ignored with a warning (see [Other Settings](#other-settings) and the [changelog](CHANGELOG.md#v010-beta11---2026-09-26)).
 
 #### Sequence-ambiguity annotation
 
@@ -276,6 +305,26 @@ sage --write-config-schema sage-config.schema.json
 sage --write-config-schema -
 ```
 
+`--write-config <NAME> [PATH]` writes a starting configuration. Without `PATH` it prints to
+standard output; it will not replace an existing file unless `--overwrite` is given. Each preset
+uses `proteome.fasta` and `sample.mzML` as placeholders, ±10 ppm precursor and ±20 ppm fragment
+tolerances.
+
+| Preset | Search |
+|---|---|
+| `minimal` | Only the required settings: trypsin (2 missed cleavages), carbamidomethyl C, b/y ions |
+| `full` | Every option, set to the value Sage uses when it is left out |
+| `trypsin-hcd` | `minimal` plus variable Met oxidation, 7-50 residues, isotope errors -1..3 |
+| `trypsin-hcd-tmt` | TMTpro on K and peptide N-termini, MS2 TMTpro 18-plex quant |
+| `phospho` | Variable STY phosphorylation with site localization |
+| `etd` | c and z-dot ions (add `"b"` and `"y"` for EThcD) |
+| `nonspecific` | Non-specific digest of 8-15 residues, no alkylation, with the prefilter |
+
+```shell
+sage --write-config list
+sage --write-config trypsin-hcd config.json
+```
+
 Use `--events-jsonl <path>` to stream versioned, newline-delimited JSON events while a
 search runs. `--events-jsonl -` writes events to standard output. Human-readable logs remain
 on standard error, so standard output can be consumed directly by workflow engines and other
@@ -293,14 +342,16 @@ that compatible events can be added to schema version 1.
 
 Rust callers can use `sage_cli::api::SageRunner` rather than invoking the CLI. `JobOptions`
 accepts an `EventEmitter` and a cloneable `CancellationToken`; `run` returns a structured
-`RunSummary` alongside telemetry. This application layer is intended to be shared by other
+`RunSummary`. This application layer is intended to be shared by other
 front ends.
 
 ## Configuration file schema
 
 ### Notes
 
-- The majority of parameters are optional - only "database.fasta", "precursor_tol", and "fragment_tol" are required. Sage will try and use reasonable defaults for any parameters not supplied
+- Most parameters are optional. Required: `precursor_tol`, `fragment_tol`, a FASTA (`database.fasta` or `--fasta`) or peptide list, `database.static_mods` (may be `{}`), `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`, `restrict`, `missed_cleavages` and `semi_enzymatic`. A missing setting is an error that names it and gives a snippet to paste. `sage --write-config minimal` prints a configuration with exactly these settings.
+- At startup Sage logs, at info level, the defaults it used for search-space settings left unset (peptide length and mass range, missed-cleavage handling, decoys, peak limits, precursor charge, isotope errors and similar).
+- **Breaking (Beta 16):** `enzyme`, `static_mods` and `ion_kinds` no longer have defaults. Before Beta 16 an absent `enzyme` meant trypsin with 0 missed cleavages and `restrict: "P"`, a partial `enzyme` block meant 1 missed cleavage and `restrict: ""`, absent `static_mods` meant none, and absent `ion_kinds` meant b and y. To keep an old result, write those values out explicitly.
 - Tolerances are specified on the *experimental* m/z values. To perform a -100 to +500 Da open search (mass window applied to *theoretical*), you would use `"da": [-500, 100]`
 
 ### Decoys
@@ -348,6 +399,11 @@ were gone. Clipping is often incomplete, so the unclipped peptides stay; only
 peptides starting at residue 2 are added. For `MSDEREVAEAK` with trypsin and one
 missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
 `MSDEREVAEAK`.
+
+On a HEK SILAC K6R6 search with variable Met oxidation and protein N-terminal acetylation,
+turning clipping on gave 3.4% more PSMs (3,362 to 3,475), 3.4% more peptides and 2.3% more
+proteins at 1% FDR (measured for Beta 16). Most clipped protein N-termini are acetylated, so
+without protein N-terminal acetylation in the search the gain on the same file is 0.2%.
 
 - Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
   sites and PTM-library `protein_n_term` records apply to them (for example,
@@ -450,20 +506,20 @@ For additional information about configuration options and output file formats, 
 {
   "database": {
     "bucket_size": 32768,           // Maximum fragments in each internal search bucket
-    "enzyme": {               // Optional. Default is trypsin, using the parameters below
-      "missed_cleavages": 2,  // Optional[int], Number of missed cleavages for tryptic digest
+    "enzyme": {               // Required when a FASTA is digested
+      "missed_cleavages": 2,  // Required[int | "unlimited"], Number of missed cleavages
       "min_len": 5,           // Optional[int] {default=5}, Minimum AA length of peptides to search
-      "max_len": 50,          // Optional[int] {default=50}, Maximum AA length of peptides to search
-      "cleave_at": "KR",      // Optional[str] {default='KR'}. Amino acids to cleave at
-      "restrict": "P",        // Optional[str] {default='P'}. Do not cleave if one of these AAs follows the cleavage site
+      "max_len": 50,          // Optional[int | "unlimited"] {default=50}, Maximum AA length of peptides to search
+      "cleave_at": "KR",      // Required[str]. Amino acids to cleave at ("" non-specific, "$" no digestion)
+      "restrict": "P",        // Required[str]. Do not cleave if one of these AAs follows the cleavage site
       "c_terminal": false,      // Optional[bool] {default=true}. Cleave at c terminus of matching amino acid
-      "semi_enzymatic": false      // Optional[bool] {default=false}. Generate semi-enzymatic peptides
+      "semi_enzymatic": false      // Required[bool]. Generate semi-enzymatic peptides
     },
     "peptide_min_mass": 500.0,      // Optional[float] {default=500.0}, Minimum monoisotopic mass of peptides to fragment
     "peptide_max_mass": 5000.0,     // Optional[float] {default=5000.0}, Maximum monoisotopic mass of peptides to fragment
-    "ion_kinds": ["b", "y"],        // Optional[List[str]] {default=["b","y"]} Which fragment ions to generate and search?
+    "ion_kinds": ["b", "y"],        // Required[List[str]]. Which fragment ions to generate and search?
     "min_ion_index": 2,     // Optional[int] {default=2}, Do not generate b1/b2/y1/y2 ions for preliminary searching. Does not affect full scoring of PSMs
-    "static_mods": {
+    "static_mods": {                // Required; {} for none
       "TMT": {"mass": 304.207, "sites": ["peptide_n_term", "K"]},
       "Carbamidomethyl": {"mass": 57.0215, "sites": ["C"]}
     },
@@ -559,8 +615,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.16
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.16 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -587,13 +643,16 @@ stored.
 
 ### Enzyme
 
-The enzyme section contains parameters related to the enzyme used for digestion. The default enzyme is trypsin, with the parameters specified below.
+The enzyme section describes the digestion. It is required whenever a FASTA is digested; a
+peptide-list-only search does not need it. `cleave_at`, `restrict`, `missed_cleavages` and
+`semi_enzymatic` have no defaults and must be stated.
 
-- **missed_cleavages**: Integer. The number of missed cleavages for tryptic digest (default: 1).
+- **missed_cleavages**: Required. Integer, or `"unlimited"` to keep every peptide within the length and mass limits regardless of internal cleavage sites.
 - **min_len**: Integer. The minimum amino acid (AA) length of peptides to search (default: 5).
-- **max_len**: Integer. The maximum AA length of peptides to search (default: 50).
-- **cleave_at**: String. Amino acids to cleave at (default: 'KR').
-- **restrict**: String. Do not cleave if one of these amino acids follows the cleavage site (default: 'P').
+- **max_len**: Integer, or `"unlimited"`. The maximum AA length of peptides to search (default: 50). `"unlimited"` leaves length bounded only by `peptide_max_mass` and the 255-residue limit of Sage's peptide encoding. Combined with `"missed_cleavages": "unlimited"` or `"cleave_at": ""`, every residue can start hundreds of peptides and the digest can be very large; Sage logs one warning in that case.
+- **cleave_at**: Required. String. Amino acids to cleave at, `""` for a non-specific digest, or `"$"` for no digestion.
+- **restrict**: Required. String. Do not cleave if one of these amino acids follows the cleavage site; `""` for none.
+- **semi_enzymatic**: Required. Boolean. Also generate semi-enzymatic peptides.
 - Both accept only the uppercase one-letter codes `ACDEFGHIKLMNPQRSTVWYUO`; `cleave_at` also accepts `""` and `"$"`. Ambiguity codes such as `B`, `Z`, `J` and `X`, lowercase letters and other symbols are configuration errors.
 - **c_terminal**: Boolean. Cleave at the C-terminus of matching amino acids (default:true).
 
@@ -601,12 +660,13 @@ Example:
 ```json
 "database": {
   "enzyme": {
-    "missed_cleavages": 1,
+    "missed_cleavages": 2,
     "min_len": 5,
     "max_len": 50,
     "cleave_at": "KR",
     "restrict": "P",
-    "c_terminal": true
+    "c_terminal": true,
+    "semi_enzymatic": false
   }
 }
 ```
@@ -615,7 +675,7 @@ Example:
 
 - **peptide_min_mass**: Float. The minimum monoisotopic mass of peptides to fragment *in silico* (default: 500.0).
 - **peptide_max_mass**: Float. The maximum monoisotopic mass of peptides to fragment *in silico* (default: 5000.0).
-- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. (default: ["b", "y"])
+- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. On the dual HCD/ETD dataset PXD018176, `["b", "y", "c", "z_dot"]` gave 5,832 ETD PSMs at 1% FDR against 4,067 with `["b", "y", "c", "z"]` (+43%), with HCD scans unchanged and EThcD flat (measured for Beta 9). Required; there is no default.
 - **min_ion_index**: Integer. Do not generate b1/bN/y1/yN ions for preliminary searching if `min_ion_index = N`. Does not affect full scoring of PSMs (default: 2).
 
 Example:
@@ -688,6 +748,7 @@ setting is therefore optional and not part of the default configuration.
 Define each modification once under its stable name in `static_mods` or
 `variable_mods`. Each definition contains `mass` and a nonempty `sites` list.
 The same site syntax works for static, indexed variable, and mass-offset search.
+`static_mods` is required; use `{}` for a search without fixed modifications.
 
 ```json
 {
@@ -1111,7 +1172,8 @@ output. Do not silently discard attachment when merging libraries.
 
 With localization enabled, FASTA searches emit
 `results.sage.ptm-library.tsv` and `results.sage.ptm-library.parquet`.
-Typed Parquet library and site reports embed schema version 2. Equal-scoring or
+The typed Parquet library embeds schema version 2, and the site reports
+(`ptm_sites`, `protein_sites`) embed version 3. Equal-scoring or
 indistinguishable attachment alternatives are excluded from the reusable library,
 even with a permissive localization threshold. Preserve the named definitions
 alongside the library, because the location table does not embed chemical masses.
@@ -1637,7 +1699,7 @@ seven `immonium_*` columns, then `localized_peptide`.
 - `stripped_peptide`: Peptide sequence without modifications.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
-- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 4).
+- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 6).
 - `proteins`: Proteins containing the peptide sequence, joined by `;`.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
 - `protein_groups`: Protein groups for the peptide, joined by `;`. With `protein_grouping` on, these are the IDPicker groups; with it off, the peptide's proteins. See [Protein inference](#protein-inference).

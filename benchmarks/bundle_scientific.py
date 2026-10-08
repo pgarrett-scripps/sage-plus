@@ -38,10 +38,11 @@ def select_files(root):
         included["code/benchmarks/" + path.name] = path
     for path in sorted((REPO / "benchmarks/tests").glob("test_*.py")):
         included["code/benchmarks/tests/" + path.name] = path
-    for name in ("SCIENTIFIC_PROTOCOL.md", "SCIENTIFIC_PILOT.md", "datasets.json"):
-        path = REPO / "benchmarks" / name
+    # The protocol and pilot notes moved to benchmarks/archive/; the bundle keeps their old names.
+    for relative in ("archive/SCIENTIFIC_PROTOCOL.md", "archive/SCIENTIFIC_PILOT.md", "datasets.json"):
+        path = REPO / "benchmarks" / relative
         if path.exists():
-            included["code/benchmarks/" + name] = path
+            included["code/benchmarks/" + path.name] = path
     for path in sorted((REPO / "benchmarks/results/dissertation-20260914").rglob("*")):
         if path.is_file():
             # This preliminary page fetch is an unrelated drug-pipeline article.

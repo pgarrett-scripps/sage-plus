@@ -1,8 +1,12 @@
 {
     "database": {
+        "ion_kinds": ["b", "y"],
         "bucket_size": 16384,
         "peptide_max_mass": 5000.0,
         "enzyme": {
+            "cleave_at": "KR",
+            "restrict": "",
+            "semi_enzymatic": false,
             "missed_cleavages": 1
         },
         "static_mods": {

@@ -66,7 +66,7 @@ fn parameters(offset: bool) -> Parameters {
         )])),
         enzyme: Some(EnzymeBuilder {
             min_len: Some(5),
-            missed_cleavages: Some(2),
+            missed_cleavages: Some(2.into()),
             ..Default::default()
         }),
         ..Builder::default()

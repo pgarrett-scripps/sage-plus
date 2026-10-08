@@ -3,7 +3,6 @@ use crate::input::Input;
 use crate::memory;
 use crate::runner::estimate::{estimate_memory, MemoryEstimateReport};
 use crate::runner::{RunSummary, Runner};
-use crate::telemetry::Telemetry;
 
 /// Execution controls shared by CLI, GUI, TUI, and protocol adapters.
 pub struct JobOptions {
@@ -28,7 +27,6 @@ impl Default for JobOptions {
 
 pub struct JobResult {
     pub summary: RunSummary,
-    pub telemetry: Telemetry,
 }
 
 /// Stable application-layer entry point for validating and running Sage jobs.
@@ -111,8 +109,8 @@ impl SageRunner {
             let batch_size = search.batch_size;
             let runner =
                 Runner::new_with_control(search, batch_size, events.clone(), cancellation.clone())?;
-            let (telemetry, summary) = runner.run_with_summary(batch_size)?;
-            Ok(JobResult { telemetry, summary })
+            let summary = runner.run_with_summary(batch_size)?;
+            Ok(JobResult { summary })
         };
         // The CLI sizes the global pool; library callers get a dedicated pool
         // when the configured `threads` differs from the current one.

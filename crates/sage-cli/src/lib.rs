@@ -1,4 +1,5 @@
 pub mod api;
+pub mod config_presets;
 pub mod config_schema;
 pub mod events;
 pub mod input;
@@ -7,4 +8,3 @@ pub mod modification_preview;
 pub mod output;
 pub mod provenance;
 pub mod runner;
-pub mod telemetry;

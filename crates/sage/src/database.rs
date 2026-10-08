@@ -29,29 +29,156 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::Arc;
 
+/// A count or length that is a number or `"unlimited"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Limit<T> {
+    Limited(T),
+    Unlimited,
+}
+
+impl<T: Copy> Limit<T> {
+    /// The number, or `None` when unlimited.
+    pub fn limited(self) -> Option<T> {
+        match self {
+            Limit::Limited(value) => Some(value),
+            Limit::Unlimited => None,
+        }
+    }
+}
+
+impl<T> From<T> for Limit<T> {
+    fn from(value: T) -> Self {
+        Limit::Limited(value)
+    }
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for Limit<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Limit::Limited(value) => value.fmt(f),
+            Limit::Unlimited => f.write_str("unlimited"),
+        }
+    }
+}
+
+impl<T: Serialize> Serialize for Limit<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Limit::Limited(value) => value.serialize(serializer),
+            Limit::Unlimited => serializer.serialize_str("unlimited"),
+        }
+    }
+}
+
+impl<'de, T: TryFrom<u64>> Deserialize<'de> for Limit<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor<T>(std::marker::PhantomData<T>);
+        impl<T: TryFrom<u64>> serde::de::Visitor<'_> for Visitor<T> {
+            type Value = Limit<T>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a nonnegative integer or \"unlimited\"")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+                T::try_from(value)
+                    .map(Limit::Limited)
+                    .map_err(|_| E::custom(format!("{value} is too large; use \"unlimited\"")))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+                match u64::try_from(value) {
+                    Ok(value) => self.visit_u64(value),
+                    Err(_) => Err(E::invalid_value(
+                        serde::de::Unexpected::Signed(value),
+                        &self,
+                    )),
+                }
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                match value {
+                    "unlimited" => Ok(Limit::Unlimited),
+                    _ => Err(E::invalid_value(serde::de::Unexpected::Str(value), &self)),
+                }
+            }
+        }
+        deserializer.deserialize_any(Visitor(std::marker::PhantomData))
+    }
+}
+
+impl<T: schemars::JsonSchema> schemars::JsonSchema for Limit<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> Cow<'static, str> {
+        format!("Limit_{}", T::schema_name()).into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "anyOf": [generator.subschema_for::<T>(), {"const": "unlimited"}]
+        })
+    }
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EnzymeBuilder {
-    /// How many missed cleavages to use
-    pub missed_cleavages: Option<u8>,
+    /// How many missed cleavages to use, or `"unlimited"` to keep every
+    /// peptide within the length limits. Required when a FASTA is digested.
+    pub missed_cleavages: Option<Limit<u8>>,
     /// Minimum peptide length that will be fragmented
     #[schemars(range(min = 1))]
     pub min_len: Option<usize>,
-    /// Maximum peptide length that will be fragmented
-    #[schemars(range(min = 1))]
-    pub max_len: Option<usize>,
+    /// Maximum peptide length that will be fragmented, or `"unlimited"` for
+    /// no length limit beyond the peptide mass range and the
+    /// 255-residue encoding limit.
+    pub max_len: Option<Limit<usize>>,
+    /// Residues the enzyme cleaves at, `$` for no digestion (whole proteins),
+    /// or an empty string for a non-specific digest. Required when a FASTA is
+    /// digested.
     pub cleave_at: Option<String>,
+    /// Residues that block cleavage when they follow a cleavage site (`""`
+    /// for none). Required when a FASTA is digested.
     pub restrict: Option<String>,
     pub c_terminal: Option<bool>,
+    /// Also generate semi-enzymatic peptides. Required when a FASTA is
+    /// digested.
     pub semi_enzymatic: Option<bool>,
+}
+
+impl EnzymeBuilder {
+    /// Enzyme fields every FASTA search must set.
+    pub fn missing_required_fields(&self) -> Vec<&'static str> {
+        [
+            ("cleave_at", self.cleave_at.is_none()),
+            ("restrict", self.restrict.is_none()),
+            ("missed_cleavages", self.missed_cleavages.is_none()),
+            ("semi_enzymatic", self.semi_enzymatic.is_none()),
+        ]
+        .into_iter()
+        .filter_map(|(name, missing)| missing.then_some(name))
+        .collect()
+    }
+
+    /// Effective maximum peptide length: `max_len`, or the 255-residue
+    /// encoding limit when it is `"unlimited"`.
+    pub fn effective_max_len(&self) -> usize {
+        match self.max_len.unwrap_or(Limit::Limited(50)) {
+            Limit::Limited(value) => value,
+            Limit::Unlimited => crate::enzyme::MAX_PEPTIDE_LEN,
+        }
+    }
 }
 
 impl Default for EnzymeBuilder {
     fn default() -> Self {
         Self {
-            missed_cleavages: Some(0),
+            missed_cleavages: Some(Limit::Limited(0)),
             min_len: Some(5),
-            max_len: Some(50),
+            max_len: Some(Limit::Limited(50)),
             cleave_at: Some("KR".into()),
             restrict: Some("P".into()),
             c_terminal: Some(true),
@@ -62,11 +189,12 @@ impl Default for EnzymeBuilder {
 
 impl From<EnzymeBuilder> for EnzymeParameters {
     fn from(en: EnzymeBuilder) -> EnzymeParameters {
+        let max_len = en.effective_max_len();
         EnzymeParameters {
             clip_n_term_met: false,
-            missed_cleavages: en.missed_cleavages.unwrap_or(1),
+            missed_cleavages: en.missed_cleavages.unwrap_or(Limit::Limited(1)).limited(),
             min_len: en.min_len.unwrap_or(5),
-            max_len: en.max_len.unwrap_or(50),
+            max_len,
             enzyme: Enzyme::new(
                 &en.cleave_at.unwrap_or_else(|| "KR".into()),
                 &en.restrict.unwrap_or_else(|| "".into()),
@@ -182,6 +310,29 @@ impl Builder {
             enzyme.cleave_at.as_deref().unwrap_or("KR"),
             enzyme.restrict.as_deref().unwrap_or(""),
         )
+    }
+
+    /// Reject peptide length and mass ranges that cannot contain a peptide.
+    pub fn validate_peptide_ranges(&self) -> Result<(), String> {
+        let enzyme = self.enzyme.clone().unwrap_or_default();
+        let (min_len, max_len) = (enzyme.min_len.unwrap_or(5), enzyme.effective_max_len());
+        if min_len > max_len {
+            return Err(format!(
+                "`database.enzyme.min_len` ({min_len}) is greater than `max_len` ({max_len})"
+            ));
+        }
+        let min_mass = self.peptide_min_mass.unwrap_or(500.0);
+        let max_mass = self.peptide_max_mass.unwrap_or(5000.0);
+        if min_mass
+            .partial_cmp(&max_mass)
+            .is_none_or(|order| order.is_gt())
+        {
+            return Err(format!(
+                "`database.peptide_min_mass` ({min_mass}) must not exceed \
+                 `peptide_max_mass` ({max_mass})"
+            ));
+        }
+        Ok(())
     }
 
     pub fn validate_modification_keys(&self) -> Result<(), String> {
@@ -446,8 +597,29 @@ impl Parameters {
         }
     }
 
+    /// Warning for a digest whose peptide length is bounded only by peptide
+    /// mass: `max_len` is `"unlimited"` together with unlimited missed
+    /// cleavages or a non-specific digest.
+    pub fn unbounded_length_warning(&self) -> Option<String> {
+        let enzyme = &self.enzyme;
+        let unbounded_sites = enzyme.missed_cleavages == Some(Limit::Unlimited)
+            || enzyme.cleave_at.as_deref() == Some("");
+        (enzyme.max_len == Some(Limit::Unlimited) && unbounded_sites).then(|| {
+            format!(
+                "database.enzyme.max_len is \"unlimited\" with {}: only the peptide mass range \
+                 and the {}-residue encoding limit bound peptide length, so every residue can \
+                 start hundreds of peptides and the digest can be very large",
+                match enzyme.cleave_at.as_deref() {
+                    Some("") => "a non-specific digest",
+                    _ => "unlimited missed cleavages",
+                },
+                crate::enzyme::MAX_PEPTIDE_LEN
+            )
+        })
+    }
+
     pub fn validate_compact_modifications(&self) -> Result<(), String> {
-        let max_len = self.enzyme.max_len.unwrap_or(50);
+        let max_len = self.enzyme.effective_max_len();
         if max_len > u8::MAX as usize {
             return Err(format!(
                 "database.enzyme.max_len must not exceed {} residues for compact modification encoding, but is {max_len}",
@@ -2203,8 +2375,8 @@ impl PackedFragment {
 #[derive(Copy, Clone)]
 struct FragmentBucket {
     mass_prefix: u32,
-    start: u32,
-    end: u32,
+    start: usize,
+    end: usize,
 }
 
 #[derive(Default)]
@@ -2303,9 +2475,8 @@ impl FragmentIndex {
                 let bucket_end = (bucket_start + bucket_size).min(total);
                 buckets.push(FragmentBucket {
                     mass_prefix: prefix << suffix_bits,
-                    start: u32::try_from(bucket_start)
-                        .expect("fragment index exceeds 32-bit offsets"),
-                    end: u32::try_from(bucket_end).expect("fragment index exceeds 32-bit offsets"),
+                    start: bucket_start,
+                    end: bucket_end,
                 });
             }
         }
@@ -2386,7 +2557,7 @@ impl FragmentIndex {
         peptide_hi: u32,
     ) -> FragmentIter<'_> {
         let bucket = self.buckets[bucket_index];
-        let fragments = &self.fragments[bucket.start as usize..bucket.end as usize];
+        let fragments = &self.fragments[bucket.start..bucket.end];
         let first = fragments.partition_point(|fragment| fragment.peptide_index() < peptide_lo);
         let last = fragments.partition_point(|fragment| fragment.peptide_index() <= peptide_hi);
         FragmentIter {
@@ -2415,7 +2586,7 @@ impl FragmentIndex {
         buckets: &[u32],
         peptide_lo: u32,
         peptide_hi: u32,
-        out: &mut Vec<(u32, u32)>,
+        out: &mut Vec<(usize, usize)>,
     ) {
         /// Buckets resolved together. Two searches each, sized against the
         /// core's outstanding-miss capacity rather than a vector width.
@@ -2441,7 +2612,7 @@ impl FragmentIndex {
             let mut longest = 0usize;
             for (lane, &bucket) in chunk.iter().enumerate() {
                 let bucket = self.buckets[bucket as usize];
-                let (start, len) = (bucket.start as usize, (bucket.end - bucket.start) as usize);
+                let (start, len) = (bucket.start, bucket.end - bucket.start);
                 // An empty bucket probes index 0 (always valid here) without
                 // moving; its result is taken from `start` below.
                 let start = if len == 0 { 0 } else { start };
@@ -2483,15 +2654,15 @@ impl FragmentIndex {
                 let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
                 let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
                 let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
-                out.push((first as u32, last as u32));
+                out.push((first, last));
             }
         }
     }
 
     #[inline(always)]
-    fn range_iter(&self, bucket: usize, first: u32, last: u32) -> FragmentIter<'_> {
+    fn range_iter(&self, bucket: usize, first: usize, last: usize) -> FragmentIter<'_> {
         FragmentIter {
-            fragments: &self.fragments[first as usize..last as usize],
+            fragments: &self.fragments[first..last],
             mass_prefix: self.buckets[bucket].mass_prefix,
             next: 0,
         }
@@ -2510,9 +2681,9 @@ struct BatchSearchScratch {
     order: Vec<(u32, u32)>,
     /// Distinct buckets and their resolved ranges.
     distinct: Vec<u32>,
-    resolved: Vec<(u32, u32)>,
+    resolved: Vec<(usize, usize)>,
     /// Resolved range per entry.
-    ranges: Vec<(u32, u32)>,
+    ranges: Vec<(usize, usize)>,
 }
 
 thread_local! {

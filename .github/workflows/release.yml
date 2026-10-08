@@ -53,7 +53,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
@@ -107,7 +107,7 @@ jobs:
           persist-credentials: false
       - name: Install Rust
         if: matrix.builder == 'native'
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
@@ -218,7 +218,7 @@ jobs:
           cp crates/sage/data/LICENSE-unimod.txt .release/docker/crates/sage/data/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Log in to GHCR
         if: github.event_name == 'push'
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -235,7 +235,7 @@ jobs:
             type=raw,value=${{ needs.version.outputs.release_tag }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(needs.version.outputs.release_tag, '-') }}
       - name: Build and optionally push container
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .release/docker
           push: ${{ github.event_name == 'push' }}

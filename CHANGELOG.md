@@ -9,6 +9,57 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.16] - 2026-10-08
+
+### Changed
+- **Breaking:** search-space settings must be stated. `database.static_mods` (may be `{}`),
+  `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`,
+  `restrict`, `missed_cleavages` and `semi_enzymatic` no longer have defaults. A missing setting
+  is an error naming it, with a snippet to paste. The old implicit values were: no enzyme block =
+  trypsin, 0 missed cleavages, `restrict: "P"`; partial block = 1 missed cleavage, `restrict: ""`;
+  no static mods; b and y ions. The JSON Schema marks the same fields required.
+- Committed configurations, tests and benchmark generators state these settings explicitly.
+
+### Added
+- `sage --write-config <NAME> [PATH]` writes a starting configuration: `minimal`, `full`,
+  `trypsin-hcd`, `trypsin-hcd-tmt`, `phospho`, `etd` or `nonspecific` (`list` shows them).
+  Without `PATH` it prints to standard output; an existing file is replaced only with
+  `--overwrite`. Every preset is tested to pass validation.
+- `"missed_cleavages": "unlimited"` keeps every peptide within the length and mass limits.
+- `"max_len": "unlimited"` bounds peptide length only by `peptide_max_mass` and the 255-residue
+  encoding limit. Sage logs one warning when it is combined with unlimited missed cleavages or a
+  non-specific digest (`cleave_at: ""`).
+- Startup logs, at info level, the defaults used for search-space settings left unset.
+
+### Fixed
+- The fragment index no longer panics past 4,294,967,295 fragments. Bucket offsets are 64-bit
+  (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
+  32-bit peptide index inherited from Sage.
+- A missing input file or FASTA names the path: ``cannot open `/x/y.mzML`: No such file or
+  directory``. An output directory that cannot be created is named the same way.
+- A search whose database has no target peptides fails instead of exiting 0 with empty results.
+  The error names the length and mass ranges in force. `enzyme.min_len` above `max_len`, or
+  `peptide_min_mass` above `peptide_max_mass`, is rejected when the configuration is validated.
+
+- `missed_cleavages` above 254 no longer overflows. In a release build 255 wrapped and searched
+  as 0 missed cleavages.
+
+### Removed
+- Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the
+  `reqwest` dependency is gone. `--disable-telemetry-i-dont-want-to-improve-sage` is still
+  accepted as a hidden no-op so existing scripts keep working. `Runner::run` and
+  `run_with_summary` return the `RunSummary`, and `JobResult` has no `telemetry` field.
+- `min_free_memory_gb` from seven benchmark configurations; Sage already ignored it.
+
+### Documentation
+- `benchmarks/HEADTOHEAD.md`: Beta 16 against upstream Sage v0.15.0-beta.2 on four PXD028735 HYE
+  runs with one shared config. Sage Plus finds 1.2% more PSMs and peptides and 1.6% more protein
+  groups at 1%, peaks at 6.2 vs 7.5 GiB, and matches upstream's LFQ species-ratio accuracy.
+- Initiator Met clipping re-measured on HEK SILAC: +3.4% PSMs at 1% when protein N-terminal
+  acetylation is searched, +0.2% when it is not. README and DOCS state the condition.
+- README rewritten for new users: measured results, install options and a quickstart.
+  Internal design notes moved to `docs/design/` and old benchmark notes to `benchmarks/archive/`.
+
 ## [v0.1.0-beta.15] - 2026-09-29
 
 ### Documentation
@@ -785,7 +836,7 @@ entries are retained below for provenance.
 - mzML binary arrays containing XML entity references now fail explicitly. Literal base64 arrays remain supported.
 
 ### Validation scope
-- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/HARDENING_RESULTS.md` and `benchmarks/BETA3_RELEASE.md` for evidence and release status.
+- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/archive/HARDENING_RESULTS.md` and `benchmarks/archive/BETA3_RELEASE.md` for evidence and release status.
 
 ## [v0.1.0-beta.2] - 2026-08-28
 

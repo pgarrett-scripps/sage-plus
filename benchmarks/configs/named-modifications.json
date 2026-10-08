@@ -1,5 +1,7 @@
 {
   "database": {
+    "ion_kinds": ["b", "y"],
+    "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
     "static_mods": {
       "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}
     },

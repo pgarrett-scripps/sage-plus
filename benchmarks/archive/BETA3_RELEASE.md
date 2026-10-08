@@ -196,6 +196,6 @@ the [scientific protocol](SCIENTIFIC_PROTOCOL.md).
 
 Reproduce the local experiments with [the hardening commands](HARDENING_USAGE.md).
 
-See the [security review](SECURITY_REVIEW.md), [changelog](../CHANGELOG.md), and
-[maintainer release procedure](../RELEASING.md) for the dependency disposition,
+See the [security review](SECURITY_REVIEW.md), [changelog](../../CHANGELOG.md), and
+[maintainer release procedure](../../RELEASING.md) for the dependency disposition,
 compatibility changes, and publication commands.

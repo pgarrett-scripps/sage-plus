@@ -36,8 +36,15 @@ const TRUTHS: [&str; 5] = [
 fn database(fasta: &std::path::Path, library: &std::path::Path) -> serde_json::Value {
     serde_json::json!({
         "fasta": fasta,
-        "enzyme": {"min_len": 5, "semi_enzymatic": true},
+        "enzyme": {
+            "cleave_at": "KR",
+            "restrict": "",
+            "missed_cleavages": 1,
+            "semi_enzymatic": true,
+            "min_len": 5
+        },
         "static_mods": {},
+        "ion_kinds": ["b", "y"],
         "clip_n_term_met": true,
         "expand_ambiguous_residues": true,
         "generate_decoys": true,

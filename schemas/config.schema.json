@@ -580,19 +580,31 @@
           ]
         },
         "cleave_at": {
+          "description": "Residues the enzyme cleaves at, `$` for no digestion (whole proteins),\nor an empty string for a non-specific digest. Required when a FASTA is\ndigested.",
           "type": [
             "string",
             "null"
           ]
         },
         "max_len": {
-          "description": "Maximum peptide length that will be fragmented",
-          "format": "uint",
-          "minimum": 1,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "format": "uint",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "const": "unlimited"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Maximum peptide length that will be fragmented, or `\"unlimited\"` for\nno length limit beyond the peptide mass range and the\n255-residue encoding limit."
         },
         "min_len": {
           "description": "Minimum peptide length that will be fragmented",
@@ -604,22 +616,35 @@
           ]
         },
         "missed_cleavages": {
-          "description": "How many missed cleavages to use",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "const": "unlimited"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How many missed cleavages to use, or `\"unlimited\"` to keep every\npeptide within the length limits. Required when a FASTA is digested."
         },
         "restrict": {
+          "description": "Residues that block cleavage when they follow a cleavage site (`\"\"`\nfor none). Required when a FASTA is digested.",
           "type": [
             "string",
             "null"
           ]
         },
         "semi_enzymatic": {
+          "description": "Also generate semi-enzymatic peptides. Required when a FASTA is\ndigested.",
           "type": [
             "boolean",
             "null"
@@ -1687,6 +1712,24 @@
     },
     "database": {
       "additionalProperties": false,
+      "dependentSchemas": {
+        "fasta": {
+          "properties": {
+            "enzyme": {
+              "required": [
+                "cleave_at",
+                "restrict",
+                "missed_cleavages",
+                "semi_enzymatic"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enzyme"
+          ]
+        }
+      },
       "description": "Parameters used for generating the fragment database",
       "properties": {
         "bucket_size": {
@@ -1933,6 +1976,10 @@
           "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
         }
       },
+      "required": [
+        "static_mods",
+        "ion_kinds"
+      ],
       "type": "object"
     },
     "deisotope": {

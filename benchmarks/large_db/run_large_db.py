@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from provenance import atomic_json, sha256  # noqa: E402
 
 TIME = "/usr/bin/time"
-GATE = "/mnt/data1/explore-data/memgate.sh"
+# Optional memory-gate wrapper, called as `GATE GB COMMAND...`; runs go direct when unset.
+GATE = os.environ.get("SAGE_MEMGATE")
 
 PATTERNS = {
     "preflight": re.compile(
@@ -73,7 +74,8 @@ def parse_log(log: str) -> dict:
 
 
 def run(executable: Path, config: Path, output: Path, gate_gb: int, env: dict) -> dict:
-    command = [GATE, str(gate_gb), TIME, "-v", str(executable), str(config), "-o",
+    gate = [GATE, str(gate_gb)] if GATE else []
+    command = [*gate, TIME, "-v", str(executable), str(config), "-o",
                str(output), "--overwrite", "--disable-telemetry-i-dont-want-to-improve-sage"]
     process = subprocess.run(command, capture_output=True, text=True,
                              env={**os.environ, **env})

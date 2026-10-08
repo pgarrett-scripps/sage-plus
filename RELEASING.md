@@ -16,20 +16,14 @@ under CMake 4. The macOS builds predefine `fdopen` to itself while compiling the
 source. This avoids an obsolete classic Mac compatibility branch that Xcode 16.3 and newer expose
 through `TARGET_OS_MAC`.
 
-## One-time repository setup
+## Repository settings
 
 Keep the repository's default Actions token permission read-only. The release workflow grants
 `contents: write` and `packages: write` only to the jobs that need them.
 
-Protect `main` and require these Rust workflow checks before merging:
-
-- `Format and release build`
-- `Coverage`
-- `Test Rust 1.88.0`
-- `Test Rust 1.97.1`
-
-Do not require the release workflow on ordinary branches. It is intended for manual packaging
-checks and release tags.
+Branch protection on `main` blocks force-pushes and deletion but does not require status checks,
+so release branches are merged locally and pushed. The Rust workflow runs on every push to `main`
+and on pull requests; check its result after pushing rather than waiting on it before merging.
 
 ## Account and destination check
 
@@ -48,44 +42,38 @@ as a workaround for an inactive maintainer account.
 
 ## Prepare a release
 
-The beta.3 security dependency gate passes, as recorded in
-[`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
-validation and publication gates for the current release in
-[`benchmarks/BETA7_RELEASE.md`](benchmarks/BETA7_RELEASE.md), and the previous release's in
-[`benchmarks/BETA6_RELEASE.md`](benchmarks/BETA6_RELEASE.md).
 The workflow audits the complete lockfile and runs the storage patch compatibility tests before
 packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 
-1. Set `[workspace.package].version` in `Cargo.toml`. All Sage Plus crates inherit this version.
-2. Add a matching `## [vX.Y.Z]` or prerelease section to `CHANGELOG.md`, leaving a new empty
-   `## [Unreleased]` section above it.
-3. Update release-specific documentation, then regenerate and verify the lockfile:
+1. On a release branch, set `[workspace.package].version` in `Cargo.toml`. All Sage Plus crates
+   inherit this version.
+2. Move the `## [Unreleased]` entries in `CHANGELOG.md` into a matching `## [vX.Y.Z]` or
+   prerelease section, leaving a new empty `## [Unreleased]` section above it.
+3. Update release-specific documentation, such as version examples in `README.md` and `DOCS.md`.
+4. Merge the release branch into `main` locally and run the checks there:
 
    ```shell
-   cargo check --workspace
+   git switch main
+   git pull --ff-only origin main
+   git merge --no-ff release-branch
    bash scripts/check-release-version.sh
    cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
    cargo test --workspace --locked
    cargo build --release --workspace --locked
    ```
 
-4. Open a release preparation pull request against `main`. If it comes from a fork, a maintainer
-   must approve the pending workflow runs in Actions. Wait for every required Rust and dependency
-   check to pass, review the evidence, and merge the preparation into `main`.
-5. Run `Release Sage Plus` manually from the Actions page. A manual run builds and retains all
-   archives and validates the Docker build, but does not publish a release or container.
-6. Download the `release-dist` artifact and inspect at least the archive for the maintainer's
-   native platform.
+5. Push `main`. The Rust workflow runs on the push. Optionally, run `Release Sage Plus` manually
+   from the Actions page: a manual run builds and retains all archives and validates the Docker
+   build, but does not publish a release or container.
 
 ## Publish
 
-Create and push exactly one annotated tag after the preparation commit is on `main`:
+Create and push exactly one annotated tag on the release commit on `main`:
 
 ```shell
-git switch main
-git pull --ff-only origin main
-git tag -a v0.1.0-beta.14 -m "Sage Plus v0.1.0-beta.14"
-git push origin v0.1.0-beta.14
+git tag -a vX.Y.Z-beta.N -m "Sage Plus vX.Y.Z-beta.N"
+git push origin vX.Y.Z-beta.N
 ```
 
 The tag starts the release workflow. Prerelease identifiers such as `-beta.1` cause GitHub to mark
@@ -93,4 +81,5 @@ the release as a prerelease. Stable versions are marked as the latest release an
 container's `latest` tag.
 
 If any job fails, fix the cause and publish a new version. Never move or overwrite a tag that users
-may already have fetched.
+may already have fetched. Release checklists from earlier betas are kept in
+[`benchmarks/archive/`](benchmarks/archive/).
