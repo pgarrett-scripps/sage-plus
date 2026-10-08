@@ -115,7 +115,7 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
         .all(|bucket| database.fragments.bucket(bucket).count() <= bucket_size));
     assert_eq!(
         database.fragments.allocated_bytes(),
-        expected.len() * 6 + database.buckets().len() * 12
+        expected.len() * 6 + database.buckets().len() * 24
     );
 }
 
@@ -2693,7 +2693,7 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
                 .map(|_| rng.below(u64::from(max_id)) as u32)
                 .collect::<Vec<_>>();
             ids.sort_unstable();
-            let start = fragments.len() as u32;
+            let start = fragments.len();
             fragments.extend(ids.into_iter().map(|peptide_index| PackedFragment {
                 peptide_index,
                 mass_suffix: rng.below(1 << FRAGMENT_MASS_SUFFIX_BITS) as u16,
@@ -2701,7 +2701,7 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             buckets.push(FragmentBucket {
                 mass_prefix: (bucket as u32 + 0x4000) << FRAGMENT_MASS_SUFFIX_BITS,
                 start,
-                end: fragments.len() as u32,
+                end: fragments.len(),
             });
         }
         let index = FragmentIndex { buckets, fragments };
@@ -2734,6 +2734,31 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             }
         }
     }
+}
+
+#[test]
+fn bucket_ranges_keep_offsets_above_32_bits() {
+    // Offsets past u32::MAX would need billions of fragments, so this checks
+    // the empty-index path, which reports bucket starts without reading them.
+    let base = u32::MAX as usize + 7;
+    let index = FragmentIndex {
+        buckets: vec![
+            FragmentBucket {
+                mass_prefix: 0x4000 << FRAGMENT_MASS_SUFFIX_BITS,
+                start: base,
+                end: base,
+            },
+            FragmentBucket {
+                mass_prefix: 0x4001 << FRAGMENT_MASS_SUFFIX_BITS,
+                start: base + (1 << 32),
+                end: base + (1 << 32),
+            },
+        ],
+        fragments: Vec::new(),
+    };
+    let mut out = Vec::new();
+    index.resolve_bucket_ranges(&[1, 0], 0, u32::MAX, &mut out);
+    assert_eq!(out, [(base + (1 << 32), base + (1 << 32)), (base, base)]);
 }
 
 #[test]

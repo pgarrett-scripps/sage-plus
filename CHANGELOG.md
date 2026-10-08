@@ -9,6 +9,11 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Fixed
+- The fragment index no longer panics past 4,294,967,295 fragments. Bucket offsets are 64-bit
+  (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
+  32-bit peptide index inherited from Sage.
+
 ## [v0.1.0-beta.15] - 2026-09-29
 
 ### Documentation
