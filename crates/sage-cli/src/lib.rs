@@ -1,4 +1,5 @@
 pub mod api;
+pub mod config_presets;
 pub mod config_schema;
 pub mod events;
 pub mod input;

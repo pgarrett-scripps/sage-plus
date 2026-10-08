@@ -62,10 +62,11 @@ TEMPLATE = {
     "database": {
         "bucket_size": 16384,
         "enzyme": {"missed_cleavages": 1, "min_len": 7, "max_len": 50,
-                   "cleave_at": "KR", "restrict": "P"},
+                   "cleave_at": "KR", "restrict": "P", "semi_enzymatic": False},
         "peptide_min_mass": 500.0,
         "peptide_max_mass": 5000.0,
         "static_mods": {"C": 57.021464},
+        "ion_kinds": ["b", "y"],
         "variable_mods": {"M": [15.994915]},
         "max_variable_mods": 2,
         "decoy_tag": "rev_",

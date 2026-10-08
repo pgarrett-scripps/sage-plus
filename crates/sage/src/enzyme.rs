@@ -256,10 +256,15 @@ impl std::hash::Hash for Digest {
     }
 }
 
+/// Longest peptide Sage can search: modification sites are stored as one
+/// byte per residue position.
+pub const MAX_PEPTIDE_LEN: usize = u8::MAX as usize;
+
 #[derive(Clone)]
 pub struct EnzymeParameters {
-    /// Number of missed cleavages to produce
-    pub missed_cleavages: u8,
+    /// Number of missed cleavages to produce; `None` for unlimited, bounded
+    /// only by `max_len`
+    pub missed_cleavages: Option<u8>,
     /// Inclusive
     pub min_len: usize,
     /// Inclusive
@@ -454,7 +459,7 @@ impl EnzymeParameters {
             None => {
                 // Perform a non-specific digest
                 let mut v = Vec::new();
-                for len in self.min_len..=self.max_len {
+                for len in self.min_len..=self.max_len.min(sequence.len()) {
                     for i in 0..=sequence.len().saturating_sub(len) {
                         v.push(DigestSite {
                             site: i..i + len,
@@ -468,19 +473,48 @@ impl EnzymeParameters {
         }
     }
 
-    fn missed_cleavage_sites(&self, sites: &mut Vec<DigestSite>, missed_cleavages: u8) {
+    /// Longest span a digest site may have and still produce a peptide of at
+    /// most `max_len` residues: initiator methionine clipping shortens
+    /// N-terminal spans by one residue.
+    fn max_span(&self) -> usize {
+        self.max_len.saturating_add(self.clip_n_term_met as usize)
+    }
+
+    /// Join runs of adjacent cleavage sites into missed-cleavage sites, in
+    /// order of increasing run length and then start. Each run grows one site
+    /// at a time and stops once it can no longer yield a peptide within
+    /// [`Self::max_span`]; a semi-enzymatic run can, while either its newly
+    /// added end or its newly added start half still fits.
+    fn missed_cleavage_sites(&self, sites: &mut Vec<DigestSite>, missed_cleavages: Option<u8>) {
+        let max_span = self.max_span();
+        let semi_enzymatic = self.is_semi_enzymatic();
+        let limit = missed_cleavages.map_or(usize::MAX, usize::from);
         let mut missed_cleavage_sites = Vec::new();
-        for cleavage in 1..=(1 + missed_cleavages) {
-            // Generate missed cleavages
-            for win in sites.windows(cleavage as usize) {
-                let start = win[0].site.start;
-                let end = win[cleavage as usize - 1].site.end;
-                missed_cleavage_sites.push(DigestSite {
-                    site: start..end,
-                    missed_cleavages: cleavage - 1,
-                    semi_enzymatic: false,
-                });
-            }
+        let mut open = (0..sites.len()).collect::<Vec<_>>();
+        let mut missed = 0;
+        while !open.is_empty() && missed <= limit {
+            open.retain(|&first| {
+                let Some(last) = sites.get(first + missed) else {
+                    return false;
+                };
+                let (start, end) = (sites[first].site.start, last.site.end);
+                let fits = match semi_enzymatic {
+                    true => {
+                        last.site.start - start <= max_span
+                            || end - sites[first].site.end <= max_span
+                    }
+                    false => end - start <= max_span,
+                };
+                if fits {
+                    missed_cleavage_sites.push(DigestSite {
+                        site: start..end,
+                        missed_cleavages: u8::try_from(missed).unwrap_or(u8::MAX),
+                        semi_enzymatic: false,
+                    });
+                }
+                fits
+            });
+            missed += 1;
         }
         sites.append(&mut missed_cleavage_sites);
     }
@@ -555,11 +589,11 @@ impl EnzymeParameters {
         // Allowing missed_cleavages with non-specific digest causes OOB panics
         // in the below indexing code
         let missed_cleavages = match self.enzyme {
-            None => 0,
+            None => Some(0),
             _ => self.missed_cleavages,
         };
 
-        if missed_cleavages > 0 {
+        if missed_cleavages != Some(0) {
             self.missed_cleavage_sites(&mut sites, missed_cleavages);
         }
 
@@ -571,6 +605,10 @@ impl EnzymeParameters {
         // enzymatic and no-digest modes, add only peptides that terminate at a
         // nominated custom boundary and an ordinary enzyme/protein boundary.
         if !enzyme_boundaries.is_empty() {
+            let max_span = self.max_span();
+            let runs = self
+                .missed_cleavages
+                .map_or(usize::MAX, |missed| usize::from(missed) + 1);
             for &boundary in custom_boundaries {
                 if boundary == 0 || boundary >= n {
                     continue;
@@ -580,24 +618,26 @@ impl EnzymeParameters {
                     .iter()
                     .rev()
                     .filter(|&&candidate| candidate < boundary)
-                    .take(self.missed_cleavages as usize + 1)
+                    .take_while(|&&candidate| boundary - candidate <= max_span)
+                    .take(runs)
                     .enumerate()
                 {
                     sites.push(DigestSite {
                         site: start..boundary,
-                        missed_cleavages: missed as u8,
+                        missed_cleavages: u8::try_from(missed).unwrap_or(u8::MAX),
                         semi_enzymatic,
                     });
                 }
                 for (missed, &end) in enzyme_boundaries
                     .iter()
                     .filter(|&&candidate| candidate > boundary)
-                    .take(self.missed_cleavages as usize + 1)
+                    .take_while(|&&candidate| candidate - boundary <= max_span)
+                    .take(runs)
                     .enumerate()
                 {
                     sites.push(DigestSite {
                         site: boundary..end,
-                        missed_cleavages: missed as u8,
+                        missed_cleavages: u8::try_from(missed).unwrap_or(u8::MAX),
                         semi_enzymatic,
                     });
                 }

@@ -18,9 +18,23 @@ fn main() -> anyhow::Result<()> {
         .about("\u{1F52E} Sage \u{1F9D9} - Proteomics searching so fast it feels like magic!")
         .arg(
             Arg::new("parameters")
-                .required_unless_present("write-config-schema")
+                .required_unless_present_any(["write-config-schema", "write-config"])
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .help("Path to configuration parameters (JSON file)")
+                .value_hint(ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("write-config")
+                .long("write-config")
+                .num_args(1..=2)
+                .value_names(["NAME", "PATH"])
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .conflicts_with("write-config-schema")
+                .help(
+                    "Write the starting configuration NAME to PATH, or to stdout without PATH. \
+                     An existing PATH is replaced only with --overwrite. \
+                     `--write-config list` names the presets",
+                )
                 .value_hint(ValueHint::FilePath),
         )
         .arg(
@@ -208,6 +222,16 @@ fn main() -> anyhow::Result<()> {
         } else {
             std::fs::write(path, schema)?;
         }
+        return Ok(());
+    }
+
+    if let Some(mut values) = matches.get_many::<String>("write-config") {
+        let name = values.next().expect("NAME is required");
+        sage_cli::config_presets::write(
+            name,
+            values.next().map(String::as_str),
+            matches.get_flag("overwrite"),
+        )?;
         return Ok(());
     }
 

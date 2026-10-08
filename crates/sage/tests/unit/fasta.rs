@@ -3,7 +3,7 @@ use super::*;
 fn whole_protein_digest(length: usize) -> EnzymeParameters {
     EnzymeParameters {
         clip_n_term_met: false,
-        missed_cleavages: 0,
+        missed_cleavages: Some(0),
         min_len: length,
         max_len: length,
         enzyme: None,
@@ -172,7 +172,7 @@ fn rejects_invalid_residue_with_line_number() {
 
 fn trypsin(ambiguous_variants: Option<usize>) -> EnzymeParameters {
     EnzymeParameters {
-        missed_cleavages: 0,
+        missed_cleavages: Some(0),
         min_len: 2,
         max_len: 50,
         enzyme: crate::enzyme::Enzyme::new("KR", "P", true, false),

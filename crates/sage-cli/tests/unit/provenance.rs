@@ -111,7 +111,12 @@ fn spectrum_hashing_is_off_by_default() {
             .as_nanos()
     ));
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": FASTA },
+        "database": {
+            "fasta": FASTA,
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "output_directory": output.to_string_lossy(),
