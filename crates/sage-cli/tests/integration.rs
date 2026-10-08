@@ -1480,3 +1480,32 @@ fn legacy_telemetry_flag_is_a_hidden_no_op() -> anyhow::Result<()> {
     assert!(output.stdout.is_empty());
     Ok(())
 }
+
+#[test]
+fn unusable_output_directory_error_names_the_path() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let blocker = std::env::temp_dir().join(format!(
+        "sage-plus-output-blocker-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::write(&blocker, b"")?;
+    let output_directory = blocker.join("results");
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config.json"))
+        .arg("--output_directory")
+        .arg(&output_directory)
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(
+        stderr.contains(&format!(
+            "cannot create output directory `{}`",
+            output_directory.display()
+        )),
+        "{stderr}"
+    );
+    std::fs::remove_file(blocker)?;
+    Ok(())
+}

@@ -13,6 +13,8 @@ entries are retained below for provenance.
 - The fragment index no longer panics past 4,294,967,295 fragments. Bucket offsets are 64-bit
   (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
   32-bit peptide index inherited from Sage.
+- A missing input file or FASTA names the path: ``cannot open `/x/y.mzML`: No such file or
+  directory``. An output directory that cannot be created is named the same way.
 
 ### Removed
 - Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the
