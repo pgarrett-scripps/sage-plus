@@ -15,6 +15,9 @@ entries are retained below for provenance.
   32-bit peptide index inherited from Sage.
 - A missing input file or FASTA names the path: ``cannot open `/x/y.mzML`: No such file or
   directory``. An output directory that cannot be created is named the same way.
+- A search whose database has no target peptides fails instead of exiting 0 with empty results.
+  The error names the length and mass ranges in force. `enzyme.min_len` above `max_len`, or
+  `peptide_min_mass` above `peptide_max_mass`, is rejected when the configuration is validated.
 
 ### Removed
 - Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the

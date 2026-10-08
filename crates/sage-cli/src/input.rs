@@ -524,6 +524,9 @@ impl Input {
                 .map_err(anyhow::Error::msg)?;
             database.validate_enzyme().map_err(anyhow::Error::msg)?;
             database
+                .validate_peptide_ranges()
+                .map_err(anyhow::Error::msg)?;
+            database
                 .validate_fragment_losses()
                 .map_err(anyhow::Error::msg)?;
             ensure!(

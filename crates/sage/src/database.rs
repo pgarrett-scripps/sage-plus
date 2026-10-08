@@ -184,6 +184,29 @@ impl Builder {
         )
     }
 
+    /// Reject peptide length and mass ranges that cannot contain a peptide.
+    pub fn validate_peptide_ranges(&self) -> Result<(), String> {
+        let enzyme = self.enzyme.clone().unwrap_or_default();
+        let (min_len, max_len) = (enzyme.min_len.unwrap_or(5), enzyme.max_len.unwrap_or(50));
+        if min_len > max_len {
+            return Err(format!(
+                "`database.enzyme.min_len` ({min_len}) is greater than `max_len` ({max_len})"
+            ));
+        }
+        let min_mass = self.peptide_min_mass.unwrap_or(500.0);
+        let max_mass = self.peptide_max_mass.unwrap_or(5000.0);
+        if min_mass
+            .partial_cmp(&max_mass)
+            .is_none_or(|order| order.is_gt())
+        {
+            return Err(format!(
+                "`database.peptide_min_mass` ({min_mass}) must not exceed \
+                 `peptide_max_mass` ({max_mass})"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate_modification_keys(&self) -> Result<(), String> {
         for key in self
             .static_mods

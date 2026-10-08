@@ -1509,3 +1509,63 @@ fn unusable_output_directory_error_names_the_path() -> anyhow::Result<()> {
     std::fs::remove_file(blocker)?;
     Ok(())
 }
+
+#[test]
+fn empty_search_spaces_fail_with_the_likely_cause() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "sage-plus-empty-search-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let empty_tsv = root.join("empty.tsv");
+    std::fs::write(&empty_tsv, "sequence\n")?;
+    let base: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+
+    let mut lengths = base.clone();
+    lengths["database"]["enzyme"]["min_len"] = 30.into();
+    lengths["database"]["enzyme"]["max_len"] = 5.into();
+    let mut masses = base.clone();
+    masses["database"]["peptide_min_mass"] = 5000.0.into();
+    masses["database"]["peptide_max_mass"] = 500.0.into();
+    let mut peptides = base.clone();
+    peptides["database"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fasta");
+    peptides["database"]["peptides"] = empty_tsv.to_string_lossy().as_ref().into();
+
+    for (name, config, expected) in [
+        (
+            "lengths",
+            lengths,
+            "`database.enzyme.min_len` (30) is greater than `max_len` (5)",
+        ),
+        (
+            "masses",
+            masses,
+            "`database.peptide_min_mass` (5000) must not exceed",
+        ),
+        (
+            "peptides",
+            peptides,
+            "the database contains no target peptides",
+        ),
+    ] {
+        let path = root.join(format!("{name}.json"));
+        std::fs::write(&path, serde_json::to_vec(&config)?)?;
+        let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+            .current_dir(&workspace)
+            .arg(&path)
+            .arg("--output_directory")
+            .arg(root.join(format!("output-{name}")))
+            .output()?;
+        let stderr = String::from_utf8(output.stderr)?;
+        assert!(!output.status.success(), "{name}: {stderr}");
+        assert!(stderr.contains(expected), "{name}: {stderr}");
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
