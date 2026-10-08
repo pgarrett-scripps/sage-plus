@@ -1003,3 +1003,46 @@ fn search_space_settings_are_required() {
     object.insert("peptides".into(), "p.tsv".into());
     assert_eq!(validate(peptides), None);
 }
+
+#[test]
+fn startup_log_lists_defaults_only_for_unset_settings() {
+    let builder: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+        "fasta": "test.fasta",
+        "enzyme": {
+            "cleave_at": "KR", "restrict": "P", "missed_cleavages": 2,
+            "semi_enzymatic": false, "max_len": 30
+        },
+        "static_mods": {},
+        "ion_kinds": ["b", "y"],
+        "generate_decoys": false
+    }))
+    .unwrap();
+    let unset = super::UnsetSearchSpace::from(&builder);
+    let described = unset.describe(
+        &builder.make_parameters(),
+        [
+            ("min_peaks", true, "15".into()),
+            ("max_peaks", false, "150".into()),
+        ],
+    );
+    for expected in [
+        "min_len=5",
+        "peptide_min_mass=500",
+        "peptide_max_mass=5000",
+        "max_variable_mods=2",
+        "decoy_tag=\"rev_\"",
+        "clip_n_term_met=true",
+        "min_peaks=15",
+    ] {
+        assert!(
+            described.iter().any(|item| item == expected),
+            "{described:?}"
+        );
+    }
+    for set in ["max_len", "generate_decoys", "max_peaks"] {
+        assert!(
+            !described.iter().any(|item| item.starts_with(set)),
+            "{described:?}"
+        );
+    }
+}
