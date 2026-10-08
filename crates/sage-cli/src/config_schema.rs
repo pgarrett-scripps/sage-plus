@@ -31,6 +31,10 @@ pub fn generate_config_schema() -> String {
     value["$defs"]["SiteMap"]["anyOf"][1]["propertyNames"] =
         serde_json::json!({"pattern": explicit});
 
+    // `max_len` is a positive length or "unlimited".
+    value["$defs"]["EnzymeBuilder"]["properties"]["max_len"]["anyOf"][0]["anyOf"][0]["minimum"] =
+        1.into();
+
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
     value["$defs"]["NamedVariableModification"]["properties"]["max_total_count"]["minimum"] =
         1.into();

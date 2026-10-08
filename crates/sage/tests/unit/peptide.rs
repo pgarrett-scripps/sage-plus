@@ -195,7 +195,7 @@ fn full() {
         clip_n_term_met: false,
         min_len: 0,
         max_len: 50,
-        missed_cleavages: 0,
+        missed_cleavages: Some(0),
         enzyme: Enzyme::new("KR", "P", true, false),
         ambiguous_variants: None,
     };
@@ -387,7 +387,7 @@ fn test_variable_mods_multi() {
 fn test_psuedo_forward() {
     let trypsin = crate::enzyme::EnzymeParameters {
         clip_n_term_met: false,
-        missed_cleavages: 0,
+        missed_cleavages: Some(0),
         min_len: 3,
         max_len: 30,
         enzyme: Enzyme::new("KR", "P", true, false),

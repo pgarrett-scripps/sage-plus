@@ -737,6 +737,9 @@ impl Input {
             .map_err(anyhow::Error::msg)?;
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
+        if let Some(warning) = database.unbounded_length_warning() {
+            log::warn!("{warning}");
+        }
 
         let mzml_paths = self
             .mzml_paths
