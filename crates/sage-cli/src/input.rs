@@ -534,6 +534,7 @@ impl Input {
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
+            validate_required_settings(database)?;
             let parameters = database.clone().make_parameters();
             parameters.validate_channels().map_err(anyhow::Error::msg)?;
             parameters
@@ -879,6 +880,68 @@ impl Input {
     pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
         MemoryLimits::from_gib(self.max_memory_gb)
     }
+}
+
+/// Paste-ready trypsin/HCD values for each mandatory database setting.
+const REQUIRED_SNIPPETS: [(&str, &str); 3] = [
+    (
+        "enzyme",
+        r#""enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 2, "semi_enzymatic": false}"#,
+    ),
+    ("static_mods", r#""static_mods": {"C": 57.021464}"#),
+    ("ion_kinds", r#""ion_kinds": ["b", "y"]"#),
+];
+
+/// Settings a configuration must state because they define the search
+/// space: `static_mods`, `ion_kinds`, and, when a FASTA is digested, the
+/// enzyme's `cleave_at`, `restrict`, `missed_cleavages` and
+/// `semi_enzymatic`. A peptide-list-only search needs no enzyme.
+fn validate_required_settings(database: &Builder) -> anyhow::Result<()> {
+    let mut missing = Vec::new();
+    let mut blocks = Vec::new();
+    if database.fasta.is_some() {
+        match &database.enzyme {
+            None => {
+                missing.push("database.enzyme".to_string());
+                blocks.push("enzyme");
+            }
+            Some(enzyme) => {
+                let fields = enzyme.missing_required_fields();
+                if !fields.is_empty() {
+                    missing.extend(
+                        fields
+                            .iter()
+                            .map(|field| format!("database.enzyme.{field}")),
+                    );
+                    blocks.push("enzyme");
+                }
+            }
+        }
+    }
+    if database.static_mods.is_none() {
+        missing.push("database.static_mods".into());
+        blocks.push("static_mods");
+    }
+    if database.ion_kinds.is_none() {
+        missing.push("database.ion_kinds".into());
+        blocks.push("ion_kinds");
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let snippets = REQUIRED_SNIPPETS
+        .iter()
+        .filter(|(block, _)| blocks.contains(block))
+        .map(|(_, snippet)| format!("  {snippet}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    anyhow::bail!(
+        "missing required setting(s): {}. Since Beta 16 these have no defaults \
+         (`static_mods` may be `{{}}`). For a standard trypsin/HCD search, add to \
+         \"database\" (use only the keys you are missing):\n{snippets}\n\
+         `sage --write-config minimal` prints a complete starting configuration.",
+        missing.join(", ")
+    )
 }
 
 /// Worker thread count: the `--threads` flag wins over the configuration's

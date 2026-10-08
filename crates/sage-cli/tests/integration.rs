@@ -743,8 +743,15 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     std::fs::write(root.join("proteins.fasta"), fasta)?;
     let database = serde_json::json!({
         "fasta": root.join("proteins.fasta"),
-        "enzyme": {"min_len": 5},
+        "enzyme": {
+            "cleave_at": "KR",
+            "restrict": "",
+            "missed_cleavages": 1,
+            "semi_enzymatic": false,
+            "min_len": 5
+        },
         "static_mods": {},
+        "ion_kinds": ["b", "y"],
         "variable_mods": {
             "HexNAc": {"mass": 203.079373, "sites": ["motif:N*-{P}-[ST]"], "max_count": 1}
         }

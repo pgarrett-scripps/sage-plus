@@ -1712,6 +1712,24 @@
     },
     "database": {
       "additionalProperties": false,
+      "dependentSchemas": {
+        "fasta": {
+          "properties": {
+            "enzyme": {
+              "required": [
+                "cleave_at",
+                "restrict",
+                "missed_cleavages",
+                "semi_enzymatic"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enzyme"
+          ]
+        }
+      },
       "description": "Parameters used for generating the fragment database",
       "properties": {
         "bucket_size": {
@@ -1958,6 +1976,10 @@
           "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
         }
       },
+      "required": [
+        "static_mods",
+        "ion_kinds"
+      ],
       "type": "object"
     },
     "deisotope": {

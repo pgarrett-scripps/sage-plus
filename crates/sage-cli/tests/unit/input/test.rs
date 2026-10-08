@@ -11,7 +11,12 @@ use sage_core::{
 #[test]
 fn invalid_numeric_settings_fail_logical_validation() {
     let fixture = serde_json::json!({
-        "database": {"fasta": "missing.fasta"},
+        "database": {
+            "fasta": "missing.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "mzml_paths": ["missing.mzML"],
         "precursor_tol": {"ppm": [-10, 10]},
         "fragment_tol": {"ppm": [-20, 20]}
@@ -114,7 +119,12 @@ fn deserialize_spectral_library_settings() -> Result<(), serde_json::Error> {
 #[test]
 fn spectral_library_settings_are_validated() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -128,7 +138,12 @@ fn spectral_library_settings_are_validated() {
 #[test]
 fn deisotope_boolean_uses_scored_defaults() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -144,7 +159,12 @@ fn deisotope_boolean_uses_scored_defaults() {
 #[test]
 fn deisotope_object_uses_scored_defaults_and_overrides() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -166,7 +186,12 @@ fn deisotope_object_uses_scored_defaults_and_overrides() {
 #[test]
 fn deisotope_settings_are_validated() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -181,7 +206,19 @@ fn deisotope_settings_are_validated() {
     assert!(error.contains("min_envelope_peaks"));
 }
 
-fn base_search_space(value: serde_json::Value) -> Input {
+fn base_search_space(mut value: serde_json::Value) -> Input {
+    let database = value.as_object_mut().unwrap();
+    database
+        .entry("static_mods")
+        .or_insert(serde_json::json!({}));
+    database
+        .entry("ion_kinds")
+        .or_insert(serde_json::json!(["b", "y"]));
+    if database.contains_key("fasta") {
+        database.entry("enzyme").or_insert(serde_json::json!({
+            "cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false
+        }));
+    }
     serde_json::from_value(serde_json::json!({
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
@@ -261,7 +298,12 @@ fn output_filter_defaults_and_deserializes() -> Result<(), serde_json::Error> {
 #[test]
 fn output_filter_q_value_must_be_a_probability() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -283,7 +325,12 @@ fn lfq_numeric_settings_are_validated_before_search() {
         ("peptide_q_value", -0.1),
     ] {
         let input: Input = serde_json::from_value(serde_json::json!({
-            "database": { "fasta": "test.fasta" },
+            "database": {
+                "fasta": "test.fasta",
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {},
+                "ion_kinds": ["b", "y"]
+            },
             "precursor_tol": { "ppm": [-10, 10] },
             "fragment_tol": { "ppm": [-10, 10] },
             "mzml_paths": ["test.mzML"],
@@ -332,6 +379,9 @@ fn deserialize_enzyme_builder() -> Result<(), serde_json::Error> {
 fn deserialize_custom_cleavage_site_path() -> Result<(), serde_json::Error> {
     let input: Input = serde_json::from_value(serde_json::json!({
         "database": {
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"],
             "fasta": "proteome.fasta",
             "custom_cleavage_sites": "cleavage-sites.tsv"
         },
@@ -372,7 +422,12 @@ fn deserialize_runtime_memory_settings() -> Result<(), serde_json::Error> {
 #[test]
 fn threads_config_parses_and_cli_takes_precedence() -> Result<(), serde_json::Error> {
     let base = serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10.0, 10.0] },
         "fragment_tol": { "ppm": [-20.0, 20.0] },
         "mzml_paths": ["test.mzML"],
@@ -411,7 +466,12 @@ fn deserialize_nonlinear_retention_time_alignment() -> Result<(), serde_json::Er
 #[test]
 fn validation_returns_range_errors_instead_of_exiting() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "isotope_errors": [3, -1],
@@ -459,7 +519,12 @@ fn predict_rt_default_matches_documentation() {
 #[test]
 fn bruker_denoise_settings_are_validated() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.d"],
@@ -485,7 +550,12 @@ fn build_lqsr(dia: Option<serde_json::Value>, name: &str) -> super::Search {
             .as_nanos()
     ));
     let mut config = serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "wide_window": true,
@@ -535,7 +605,12 @@ fn dia_pseudo_searches_closed_and_is_recorded() {
 #[test]
 fn dia_settings_are_validated() {
     let input: Input = serde_json::from_value(serde_json::json!({
-        "database": { "fasta": "test.fasta" },
+        "database": {
+            "fasta": "test.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "precursor_tol": { "ppm": [-10, 10] },
         "fragment_tol": { "ppm": [-10, 10] },
         "mzml_paths": ["test.mzML"],
@@ -555,7 +630,12 @@ fn dia_settings_are_validated() {
 #[test]
 fn each_logical_constraint_reports_its_own_message() {
     let fixture = serde_json::json!({
-        "database": {"fasta": "missing.fasta"},
+        "database": {
+            "fasta": "missing.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "mzml_paths": ["missing.mzML"],
         "precursor_tol": {"ppm": [-10, 10]},
         "fragment_tol": {"ppm": [-20, 20]}
@@ -638,7 +718,11 @@ fn each_logical_constraint_reports_its_own_message() {
 
     // A peptide list stands in for a FASTA.
     let mut config = fixture;
-    config["database"] = serde_json::json!({"peptides": "p.tsv"});
+    config["database"] = serde_json::json!({
+        "peptides": "p.tsv",
+        "static_mods": {},
+        "ion_kinds": ["b", "y"]
+    });
     let input: Input = serde_json::from_value(config).unwrap();
     assert!(input.validate().is_ok());
 }
@@ -684,11 +768,22 @@ fn quant_options_fill_unset_fields_from_defaults() {
 #[test]
 fn unsupported_enzyme_residues_fail_validation() {
     for (enzyme, expected) in [
-        (serde_json::json!({"cleave_at": "KRB"}), "cleave_at"),
-        (serde_json::json!({"restrict": "X"}), "restrict"),
+        (
+            serde_json::json!({"cleave_at": "KRB", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false}),
+            "cleave_at",
+        ),
+        (
+            serde_json::json!({"cleave_at": "KR", "restrict": "X", "missed_cleavages": 0, "semi_enzymatic": false}),
+            "restrict",
+        ),
     ] {
         let input: Input = serde_json::from_value(serde_json::json!({
-            "database": { "fasta": "test.fasta", "enzyme": enzyme },
+            "database": {
+                "fasta": "test.fasta",
+                "enzyme": enzyme,
+                "static_mods": {},
+                "ion_kinds": ["b", "y"]
+            },
             "precursor_tol": { "ppm": [-10, 10] },
             "fragment_tol": { "ppm": [-10, 10] },
             "mzml_paths": ["test.mzML"]
@@ -703,7 +798,12 @@ fn unsupported_enzyme_residues_fail_validation() {
 #[test]
 fn diagnostic_ions_config() -> anyhow::Result<()> {
     let fixture = serde_json::json!({
-        "database": {"fasta": "tests/Q99536.fasta"},
+        "database": {
+            "fasta": "tests/Q99536.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"],
         "precursor_tol": {"ppm": [-10, 10]},
         "fragment_tol": {"ppm": [-20, 20]}
@@ -764,7 +864,12 @@ fn diagnostic_ions_config() -> anyhow::Result<()> {
 #[test]
 fn immonium_config() -> anyhow::Result<()> {
     let fixture = serde_json::json!({
-        "database": {"fasta": "tests/Q99536.fasta"},
+        "database": {
+            "fasta": "tests/Q99536.fasta",
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
         "mzml_paths": ["tests/LQSRPAAPPAPGPGQLTLR.mzML"],
         "precursor_tol": {"ppm": [-10, 10]},
         "fragment_tol": {"ppm": [-20, 20]}
@@ -838,4 +943,63 @@ fn immonium_config() -> anyhow::Result<()> {
         assert!(parse(Some(unknown.clone()), None).is_err(), "{unknown}");
     }
     Ok(())
+}
+
+#[test]
+fn search_space_settings_are_required() {
+    let complete = serde_json::json!({
+        "fasta": "test.fasta",
+        "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 2, "semi_enzymatic": false},
+        "static_mods": {},
+        "ion_kinds": ["b", "y"]
+    });
+    let validate = |database: serde_json::Value| {
+        let input: Input = serde_json::from_value(serde_json::json!({
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": ["test.mzML"],
+            "database": database
+        }))
+        .unwrap();
+        input.validate().err().map(|error| error.to_string())
+    };
+    assert_eq!(validate(complete.clone()), None);
+
+    for (key, snippet) in [
+        ("static_mods", r#""static_mods": {"C": 57.021464}"#),
+        ("ion_kinds", r#""ion_kinds": ["b", "y"]"#),
+        (
+            "enzyme",
+            r#""missed_cleavages": 2, "semi_enzymatic": false}"#,
+        ),
+    ] {
+        let mut database = complete.clone();
+        database.as_object_mut().unwrap().remove(key);
+        let error = validate(database).unwrap();
+        assert!(error.contains(&format!("database.{key}")), "{error}");
+        assert!(error.contains(snippet), "{error}");
+    }
+    for field in [
+        "cleave_at",
+        "restrict",
+        "missed_cleavages",
+        "semi_enzymatic",
+    ] {
+        let mut database = complete.clone();
+        database["enzyme"].as_object_mut().unwrap().remove(field);
+        let error = validate(database).unwrap();
+        assert!(
+            error.contains(&format!("database.enzyme.{field}")),
+            "{error}"
+        );
+        assert!(!error.contains("database.static_mods"), "{error}");
+    }
+
+    // A peptide list is not digested, so it needs no enzyme.
+    let mut peptides = complete;
+    let object = peptides.as_object_mut().unwrap();
+    object.remove("fasta");
+    object.remove("enzyme");
+    object.insert("peptides".into(), "p.tsv".into());
+    assert_eq!(validate(peptides), None);
 }

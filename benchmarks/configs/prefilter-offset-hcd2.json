@@ -2,9 +2,11 @@
   "batch_size": 1,
   "chimera": false,
   "database": {
+    "ion_kinds": ["b", "y"],
     "bucket_size": 16384,
     "decoy_tag": "rev_",
     "enzyme": {
+      "semi_enzymatic": false,
       "cleave_at": "$",
       "max_len": 50,
       "min_len": 7,

@@ -1,7 +1,9 @@
 {
   "database": {
+    "ion_kinds": ["b", "y"],
     "bucket_size": 16384,
     "enzyme": {
+      "semi_enzymatic": false,
       "missed_cleavages": 0,
       "cleave_at": "$",
       "restrict": "",

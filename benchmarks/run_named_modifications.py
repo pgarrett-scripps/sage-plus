@@ -47,7 +47,9 @@ def run(binary, work):
             config = {
                 "database": {
                     "fasta": str(fasta), "generate_decoys": True,
-                    "enzyme": {"cleave_at": "$", "min_len": 5, "max_len": 50},
+                    "enzyme": {"cleave_at": "$", "restrict": "", "missed_cleavages": 1,
+                               "semi_enzymatic": False, "min_len": 5, "max_len": 50},
+                    "static_mods": {}, "ion_kinds": ["b", "y"],
                     "variable_mods": {"TestMod": {"mass": 42.010565, "sites": sites,
                         "max_count": len(attachments), "search_mode": mode}},
                     "max_variable_mods": len(attachments), "max_total_variable_mods": len(attachments),

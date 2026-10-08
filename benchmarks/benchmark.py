@@ -608,6 +608,8 @@ def make_memory_config(session: BenchmarkSession, count: int) -> Path:
     config = {
         "database": {
             "peptides": str(peptides.resolve()),
+            "static_mods": {},
+            "ion_kinds": ["b", "y"],
             "generate_decoys": True,
             "decoy_tag": "rev_",
             "bucket_size": 8192,
