@@ -315,7 +315,7 @@ impl Builder {
     /// Reject peptide length and mass ranges that cannot contain a peptide.
     pub fn validate_peptide_ranges(&self) -> Result<(), String> {
         let enzyme = self.enzyme.clone().unwrap_or_default();
-        let (min_len, max_len) = (enzyme.min_len.unwrap_or(5), enzyme.max_len.unwrap_or(50));
+        let (min_len, max_len) = (enzyme.min_len.unwrap_or(5), enzyme.effective_max_len());
         if min_len > max_len {
             return Err(format!(
                 "`database.enzyme.min_len` ({min_len}) is greater than `max_len` ({max_len})"

@@ -858,7 +858,7 @@ fn empty_database_message(parameters: &sage_core::database::Parameters) -> Strin
          `database.peptides` contains target sequences, and that peptides of length {}-{} \
          and mass {}-{} Da can be digested from them",
         enzyme.min_len.unwrap_or(5),
-        enzyme.max_len.unwrap_or(50),
+        enzyme.effective_max_len(),
         parameters.peptide_min_mass,
         parameters.peptide_max_mass,
     );
