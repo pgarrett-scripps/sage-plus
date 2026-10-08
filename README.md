@@ -8,7 +8,7 @@ Sage Plus is a fork of the [Sage proteomics search engine](https://github.com/la
 people who need more than a standard closed search: very large or PTM-heavy databases, site
 localization, Thermo RAW input without conversion, and machine-readable outputs. It keeps Sage's
 workflow and configuration style, and most additions are opt-in. The current release is
-**v0.1.0-beta.15**, a prerelease.
+**v0.1.0-beta.16**, a prerelease.
 
 ## Why Sage Plus
 

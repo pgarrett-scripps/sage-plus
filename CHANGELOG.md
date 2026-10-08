@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.16] - 2026-10-08
+
 ### Changed
 - **Breaking:** search-space settings must be stated. `database.static_mods` (may be `{}`),
   `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`,
@@ -48,6 +50,15 @@ entries are retained below for provenance.
   accepted as a hidden no-op so existing scripts keep working. `Runner::run` and
   `run_with_summary` return the `RunSummary`, and `JobResult` has no `telemetry` field.
 - `min_free_memory_gb` from seven benchmark configurations; Sage already ignored it.
+
+### Documentation
+- `benchmarks/HEADTOHEAD.md`: Beta 16 against upstream Sage v0.15.0-beta.2 on four PXD028735 HYE
+  runs with one shared config. Sage Plus finds 1.2% more PSMs and peptides and 1.6% more protein
+  groups at 1%, peaks at 6.2 vs 7.5 GiB, and matches upstream's LFQ species-ratio accuracy.
+- Initiator Met clipping re-measured on HEK SILAC: +3.4% PSMs at 1% when protein N-terminal
+  acetylation is searched, +0.2% when it is not. README and DOCS state the condition.
+- README rewritten for new users: measured results, install options and a quickstart.
+  Internal design notes moved to `docs/design/` and old benchmark notes to `benchmarks/archive/`.
 
 ## [v0.1.0-beta.15] - 2026-09-29
 
