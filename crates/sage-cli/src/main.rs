@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
 
     let matches = Command::new("sage")
         .version(clap::crate_version!())
-        .author("Michael Lazear <michaellazear92@gmail.com>")
+        .author("Sage Plus maintainers; Sage by Michael Lazear <michaellazear92@gmail.com>")
         .about("\u{1F52E} Sage \u{1F9D9} - Proteomics searching so fast it feels like magic!")
         .arg(
             Arg::new("parameters")
@@ -121,8 +121,8 @@ fn main() -> anyhow::Result<()> {
         .arg(
             Arg::new("disable-telemetry")
                 .long("disable-telemetry-i-dont-want-to-improve-sage")
-                .action(clap::ArgAction::SetFalse)
-                .help("Disable sending telemetry data"),
+                .action(clap::ArgAction::SetTrue)
+                .hide(true),
         )
         .arg(
             Arg::new("threads")
@@ -237,10 +237,6 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let send_telemetry = matches
-        .get_one::<bool>("disable-telemetry")
-        .copied()
-        .unwrap_or(true);
     let validate_only = matches
         .get_one::<bool>("validate-only")
         .copied()
@@ -301,11 +297,6 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let result = runner.run()?;
-
-    if send_telemetry {
-        result.telemetry.send();
-    }
-
+    runner.run()?;
     Ok(())
 }

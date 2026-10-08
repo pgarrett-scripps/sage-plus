@@ -1456,3 +1456,27 @@ fn fragment_loss_columns_are_filled_only_when_configured() -> anyhow::Result<()>
     std::fs::remove_dir_all(root)?;
     Ok(())
 }
+
+#[test]
+fn legacy_telemetry_flag_is_a_hidden_no_op() -> anyhow::Result<()> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let help = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .arg("--help")
+        .output()?;
+    assert!(help.status.success());
+    assert!(!String::from_utf8(help.stdout)?.contains("telemetry"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_sage"))
+        .current_dir(&workspace)
+        .arg(workspace.join("tests/config.json"))
+        .arg("--validate-only")
+        .arg("--disable-telemetry-i-dont-want-to-improve-sage")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty());
+    Ok(())
+}

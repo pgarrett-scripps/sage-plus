@@ -14,6 +14,12 @@ entries are retained below for provenance.
   (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
   32-bit peptide index inherited from Sage.
 
+### Removed
+- Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the
+  `reqwest` dependency is gone. `--disable-telemetry-i-dont-want-to-improve-sage` is still
+  accepted as a hidden no-op so existing scripts keep working. `Runner::run` and
+  `run_with_summary` return the `RunSummary`, and `JobResult` has no `telemetry` field.
+
 ## [v0.1.0-beta.15] - 2026-09-29
 
 ### Documentation

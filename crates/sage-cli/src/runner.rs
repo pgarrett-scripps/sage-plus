@@ -1,7 +1,6 @@
 use super::input::Search;
 use super::memory::{trim_allocator, AllocatorTrimResult, MemoryLimits};
 use super::output::SageResults;
-use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
 use log::{info, warn};
