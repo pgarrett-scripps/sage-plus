@@ -10,10 +10,10 @@ This directory contains a small repeatable benchmark harness for Sage Plus. It i
 development checks and README-sized performance summaries. It is not a scientific validation
 suite.
 
-The [September 2026 hardening results](HARDENING_RESULTS.md) record fresh paired workloads,
+The [September 2026 hardening results](archive/HARDENING_RESULTS.md) record fresh paired workloads,
 runtime follow-up, entrapment checks, and the remaining release gates. The
-[scientific protocol](SCIENTIFIC_PROTOCOL.md) defines the next validation milestone.
-The [public scientific pilot](SCIENTIFIC_PILOT.md) documents the separate beta.3
+[scientific protocol](archive/SCIENTIFIC_PROTOCOL.md) defines the next validation milestone.
+The [public scientific pilot](archive/SCIENTIFIC_PILOT.md) documents the separate beta.3
 validation runs, data provenance, analysis tools and interpretation limits.
 The [pilot report and figures](scientific-results/20260914/SCIENTIFIC_REPORT.md)
 retain the measured results and unresolved PTM and MBR confidence questions.
@@ -115,8 +115,8 @@ The one-spectrum test fixture must not be used for benchmark timing.
 Two benchmark-backed design records document the compact database representations now integrated
 into Sage Plus:
 
-- [Protein-backed peptide sequences](PEPTIDE_INDEX_EXPERIMENT.md)
-- [Lossless packed fragment index](FRAGMENT_INDEX_EXPERIMENT.md)
+- [Protein-backed peptide sequences](archive/PEPTIDE_INDEX_EXPERIMENT.md)
+- [Lossless packed fragment index](archive/FRAGMENT_INDEX_EXPERIMENT.md)
 
 These records describe the alternatives considered, exactness checks, code tradeoffs, and the
 benchmarks used before integration.

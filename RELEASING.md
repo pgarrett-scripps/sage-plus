@@ -49,10 +49,10 @@ as a workaround for an inactive maintainer account.
 ## Prepare a release
 
 The beta.3 security dependency gate passes, as recorded in
-[`benchmarks/SECURITY_REVIEW.md`](benchmarks/SECURITY_REVIEW.md). Track the remaining hosted
+[`benchmarks/archive/SECURITY_REVIEW.md`](benchmarks/archive/SECURITY_REVIEW.md). Track the remaining hosted
 validation and publication gates for the current release in
-[`benchmarks/BETA7_RELEASE.md`](benchmarks/BETA7_RELEASE.md), and the previous release's in
-[`benchmarks/BETA6_RELEASE.md`](benchmarks/BETA6_RELEASE.md).
+[`benchmarks/archive/BETA7_RELEASE.md`](benchmarks/archive/BETA7_RELEASE.md), and the previous release's in
+[`benchmarks/archive/BETA6_RELEASE.md`](benchmarks/archive/BETA6_RELEASE.md).
 The workflow audits the complete lockfile and runs the storage patch compatibility tests before
 packaging. Archives include analytical schemas, the changelog, and third-party notices and licenses.
 

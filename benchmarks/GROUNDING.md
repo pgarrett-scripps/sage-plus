@@ -31,6 +31,6 @@ into the `sage-core` crate. `integration.rs` means `crates/sage-cli/tests/integr
 | HC-INTER-03 database identity | `sage-cli` unit `provenance.rs`: `fasta_hash_is_stable_and_matches_sha256sum`, `headers_count_decoys_sources_and_organisms`; `integration.rs`: `parquet_footers_and_run_summary_record_provenance` | No release is recorded; UniProt FASTA headers carry none. |
 | HC-INTER-04 documented API | `sage-cli` unit `api.rs`. | Error conditions are not systematically documented; no published rustdoc. |
 | HC-TEST-01 rules mapped to tests | This file. | Failure-mode tests are missing for HC-QUANT-02 (TMT) and HC-FDR-06. |
-| HC-TEST-02 FDR validated by entrapment | `benchmarks/HARDENING_RESULTS.md` (FDRBench, 20 seeds, peptide level) | One file and a 2,000-protein subset. Protein groups, PTM sites, MBR transfers and DIA are not certified. |
+| HC-TEST-02 FDR validated by entrapment | `benchmarks/archive/HARDENING_RESULTS.md` (FDRBench, 20 seeds, peptide level) | One file and a 2,000-protein subset. Protein groups, PTM sites, MBR transfers and DIA are not certified. |
 | HC-TEST-03 quantification validated on known ratios | `benchmarks/scientific-results/20260914/SCIENTIFIC_REPORT.md` (three-species LFQ) | Run on Beta 3, not rerun since. No TMT known-ratio set. |
 | HC-TEST-04 end-to-end on open data | `integration.rs` (open mzML and FASTA in `tests/`); CI synthetic smoke run in `.github/workflows/rust.yml` | None known. |

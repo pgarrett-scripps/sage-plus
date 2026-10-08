@@ -785,7 +785,7 @@ entries are retained below for provenance.
 - mzML binary arrays containing XML entity references now fail explicitly. Literal base64 arrays remain supported.
 
 ### Validation scope
-- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/HARDENING_RESULTS.md` and `benchmarks/BETA3_RELEASE.md` for evidence and release status.
+- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/archive/HARDENING_RESULTS.md` and `benchmarks/archive/BETA3_RELEASE.md` for evidence and release status.
 
 ## [v0.1.0-beta.2] - 2026-08-28
 
