@@ -26,7 +26,7 @@ cargo run --locked -p sage-cli --bin sage -- benchmarks/configs/positional-modif
 The eight synthetic scoring and localization cases pass in both indexed and
 offset modes. Each mode recovers the specified peptide and site with 16 matched
 peaks. Retained results are in
-[POSITIONAL_MODIFICATIONS_RESULTS.json](POSITIONAL_MODIFICATIONS_RESULTS.json).
+[POSITIONAL_MODIFICATIONS_RESULTS.json](../POSITIONAL_MODIFICATIONS_RESULTS.json).
 These are regression fixtures, not empirical calibration or a performance claim.
 
 Core tests additionally cover lengths one through three, shared occurrence limits,

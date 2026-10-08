@@ -80,7 +80,7 @@ The audit updates resolve the direct parser findings and the crossbeam-epoch, h2
 
 Local output reuse now requires explicit overwrite and removes known Sage artifacts while preserving unrelated files. Use separate directories for concurrent jobs and fresh remote prefixes. Run-summary schema 9 records actual model outcomes, structured warnings, workers, and explicitly labeled metadata identity. Ordinary input metadata does not replace content hashes. mzML entity references inside binary arrays now fail explicitly, with literal base64 arrays supported.
 
-Publication and a beta.3 version bump remain pending. The next science milestone starts with [the draft protocol](SCIENTIFIC_PROTOCOL.md) and [candidate dataset inventory](datasets.json). Dataset reuse terms, exact external files, final estimator review, and pilot-based power/resource planning remain open. Held-out RT and rescoring experiments have not been implemented or evaluated.
+Publication and a beta.3 version bump remain pending. The next science milestone starts with [the draft protocol](SCIENTIFIC_PROTOCOL.md) and [candidate dataset inventory](../datasets.json). Dataset reuse terms, exact external files, final estimator review, and pilot-based power/resource planning remain open. Held-out RT and rescoring experiments have not been implemented or evaluated.
 
 **Evidence inventory**
 

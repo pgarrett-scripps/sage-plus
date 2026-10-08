@@ -22,6 +22,14 @@ commits named in FRAGMENT_LOSSES.md; later binaries ignore them and run C.
 usage: run_fragment_losses.py --base BIN --candidate BIN --output DIR
        [--datasets NAME ...] [--variants NAME ...]
 Requires the `duckdb` Python package.
+
+Input locations come from environment variables:
+  SAGE_SCIENTIFIC_DIR  scientific pilot root (references/, converted/), for the
+                       PXD028735 and PXD001468 datasets and the HYE FASTA
+  SAGE_PROFILE_DIR     scan-profile benchmark root, for PXD011070 and PXD004447
+  SAGE_SILAC_DIR       HEK SILAC K6R6 inputs (default: data/silac-k6r6 in the repository)
+  SAGE_MEMGATE         optional memory-gate wrapper, called as `GATE 6 COMMAND...`;
+                       searches run directly when unset
 """
 
 from __future__ import annotations
@@ -42,11 +50,13 @@ from picked_fdr_entrapment import is_target_list, ratios  # noqa: E402
 from provenance import sha256  # noqa: E402
 
 TIME = "/usr/bin/time"
-MEMGATE = "/mnt/data1/explore-data/memgate.sh"
-SCI = "/mnt/data1/sage-plus-scientific/20260914"
+MEMGATE = os.environ.get("SAGE_MEMGATE")
+# Unset directories become a placeholder that check_inputs() reports by name.
+SCI = os.environ.get("SAGE_SCIENTIFIC_DIR", "$SAGE_SCIENTIFIC_DIR")
 HYE = f"{SCI}/references/hye-irt-defined.fasta"
-PROFILE = "/mnt/data1/scan-profile-bench"
-REPO_DATA = "/home/ty/Repos/sage-plus/data/silac-k6r6"
+PROFILE = os.environ.get("SAGE_PROFILE_DIR", "$SAGE_PROFILE_DIR")
+REPO_DATA = os.environ.get(
+    "SAGE_SILAC_DIR", str(Path(__file__).resolve().parents[1] / "data/silac-k6r6"))
 
 # Configuration approved for Beta 14.
 LOSSES = {
@@ -192,7 +202,8 @@ def run(binary: str, cfg_path: Path, out: Path, hook: dict) -> dict:
     env = {k: v for k, v in os.environ.items() if not k.startswith(S)}
     env.update(hook)
     # Time inside the memory gate so queueing for memory is not counted.
-    cmd = [MEMGATE, "6", TIME, "-v", binary, str(cfg_path), "-o", str(out), "--overwrite",
+    gate = [MEMGATE, "6"] if MEMGATE else []
+    cmd = [*gate, TIME, "-v", binary, str(cfg_path), "-o", str(out), "--overwrite",
            "--disable-telemetry-i-dont-want-to-improve-sage"]
     proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
     (out.parent / f"{out.name}.log").write_text(proc.stderr)
@@ -239,6 +250,20 @@ def metrics(parquet: Path, fasta: str, entrapment: bool, r: dict | None) -> dict
     return out
 
 
+def check_inputs(datasets: list[str]) -> None:
+    """Stop before any search if a selected dataset's input files are missing."""
+    missing = []
+    for dataset in datasets:
+        cfg = config(dataset, "base")
+        for path in [cfg["database"]["fasta"], *cfg["mzml_paths"]]:
+            if not Path(path).exists():
+                missing.append(f"{dataset}: {path}")
+    if missing:
+        raise SystemExit(
+            "input files not found (set SAGE_SCIENTIFIC_DIR, SAGE_PROFILE_DIR or "
+            "SAGE_SILAC_DIR):\n  " + "\n  ".join(missing))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
@@ -247,6 +272,7 @@ def main() -> None:
     ap.add_argument("--datasets", nargs="+", default=list(DATASETS))
     ap.add_argument("--variants", nargs="+", default=["base", "A", "B", "C"])
     args = ap.parse_args()
+    check_inputs(args.datasets)
     engines = {"base": args.base, "candidate": args.candidate}
     args.output.mkdir(parents=True, exist_ok=True)
     summary_path = args.output / "summary.json"

@@ -135,12 +135,12 @@ Defer reusable database indexes, broad module rewrites, major scoring-default ch
 
 The hardening implementation has passed local default and minimal-feature tests, strict Clippy,
 Rust 1.88 checks, and the workspace line-coverage gate. Fresh representative and entrapment runs
-are recorded in [the hardening results](benchmarks/HARDENING_RESULTS.md). A scientific protocol and candidate dataset inventory are
-available in `benchmarks/SCIENTIFIC_PROTOCOL.md` and `benchmarks/datasets.json`. Their pending
+are recorded in [the hardening results](../../benchmarks/archive/HARDENING_RESULTS.md). A scientific protocol and candidate dataset inventory are
+available in `benchmarks/archive/SCIENTIFIC_PROTOCOL.md` and `benchmarks/datasets.json`. Their pending
 fields deliberately keep B1 open.
 
 The September 10 dependency patch resolves the XML findings and the fresh online audit passes.
 Local validation, hosted Rust CI, all seven release archive builds, and the container build pass.
 The preparation is now in the existing repository under the configured owner account.
-Current repository PR checks, the final dry run, review and merge, and tagging remain release gates. Follow [the beta.3 checklist](benchmarks/BETA3_RELEASE.md).
+Current repository PR checks, the final dry run, review and merge, and tagging remain release gates. Follow [the beta.3 checklist](../../benchmarks/archive/BETA3_RELEASE.md).
 No scoring-default change or external dataset calibration claim has been made.

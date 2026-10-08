@@ -78,7 +78,7 @@ expected to increase identifications.
 Unit tests compare the spectrum-indexed survivors with the Beta 6 `exact_prefilter` for closed
 ppm and Da tolerances, unknown and overridden charges, wide windows, open searches, and mass
 offsets with required neutral losses. Each case runs both lookup paths and batched indexes.
-Results and interpretation are in [PREFILTER.md](PREFILTER.md).
+Results and interpretation are in [PREFILTER.md](../PREFILTER.md).
 
 ## Release gates
 

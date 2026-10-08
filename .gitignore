@@ -21,3 +21,4 @@ spectral_library.mzspeclib.txt
 /coverage/
 /foo/
 **/*.DS_Store
+/runs/
