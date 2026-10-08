@@ -1,0 +1,208 @@
+{
+  "upstream": {
+    "timings": {
+      "run1": {
+        "wall_s": 106.3,
+        "peak_rss_gib": 7.551868438720703,
+        "exit": 0
+      },
+      "run2": {
+        "wall_s": 106.41,
+        "peak_rss_gib": 7.456947326660156,
+        "exit": 0
+      },
+      "run3": {
+        "wall_s": 101.87,
+        "peak_rss_gib": 7.5267333984375,
+        "exit": 0
+      }
+    },
+    "wall_s_median": 106.3,
+    "peak_rss_gib_median": 7.5267333984375,
+    "ids": {
+      "total": {
+        "psms": 247102,
+        "peptides": 57009,
+        "proteins": 6888,
+        "protein_groups": 6916
+      },
+      "per_file": {
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML": {
+          "psms": 59535,
+          "peptides": 41268,
+          "proteins": 5932,
+          "protein_groups": 6016
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML": {
+          "psms": 60678,
+          "peptides": 41685,
+          "proteins": 5865,
+          "protein_groups": 5955
+        },
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML": {
+          "psms": 63358,
+          "peptides": 42422,
+          "proteins": 6041,
+          "protein_groups": 6110
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML": {
+          "psms": 63531,
+          "peptides": 42713,
+          "proteins": 5970,
+          "protein_groups": 6048
+        }
+      }
+    },
+    "ids_from": "run1",
+    "repeat_run_totals": {
+      "run2": {
+        "psms": 247102,
+        "peptides": 57009,
+        "proteins": 6888,
+        "protein_groups": 6916
+      },
+      "run3": {
+        "psms": 247102,
+        "peptides": 57009,
+        "proteins": 6888,
+        "protein_groups": 6916
+      }
+    },
+    "lfq": {
+      "precursors_q01": 35127,
+      "precursors_q01_all4": 35119,
+      "species": {
+        "human": {
+          "n": 26077,
+          "expected": 0.0,
+          "median": 0.00936527316375825,
+          "median_error": 0.00936527316375825,
+          "iqr": 0.36685201270350765,
+          "mad": 0.18017246319377445,
+          "median_error_human_centered": 0.0
+        },
+        "yeast": {
+          "n": 7427,
+          "expected": 1.0,
+          "median": 1.1173218672815386,
+          "median_error": 0.1173218672815386,
+          "iqr": 0.4481270901450787,
+          "mad": 0.22380604879003685,
+          "median_error_human_centered": 0.10795659411778025
+        },
+        "ecoli": {
+          "n": 1370,
+          "expected": -2.0,
+          "median": -2.2191971596388926,
+          "median_error": -0.21919715963889264,
+          "iqr": 0.8659217927109508,
+          "mad": 0.43549176683799373,
+          "median_error_human_centered": -0.22856243280265076
+        }
+      }
+    }
+  },
+  "plus": {
+    "timings": {
+      "run1": {
+        "wall_s": 100.93,
+        "peak_rss_gib": 6.158329010009766,
+        "exit": 0
+      },
+      "run2": {
+        "wall_s": 100.41,
+        "peak_rss_gib": 6.211811065673828,
+        "exit": 0
+      },
+      "run3": {
+        "wall_s": 100.78999999999999,
+        "peak_rss_gib": 6.152671813964844,
+        "exit": 0
+      }
+    },
+    "wall_s_median": 100.78999999999999,
+    "peak_rss_gib_median": 6.158329010009766,
+    "ids": {
+      "total": {
+        "psms": 250060,
+        "peptides": 57700,
+        "proteins": 6893,
+        "protein_groups": 7028
+      },
+      "per_file": {
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Alpha_01.mzML": {
+          "psms": 60235,
+          "peptides": 41592,
+          "proteins": 5940,
+          "protein_groups": 6067
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Alpha_01.mzML": {
+          "psms": 61497,
+          "peptides": 42084,
+          "proteins": 5878,
+          "protein_groups": 6005
+        },
+        "LFQ_Orbitrap_DDA_Condition_A_Sample_Beta_01.mzML": {
+          "psms": 64074,
+          "peptides": 42736,
+          "proteins": 6058,
+          "protein_groups": 6189
+        },
+        "LFQ_Orbitrap_DDA_Condition_B_Sample_Beta_01.mzML": {
+          "psms": 64254,
+          "peptides": 43071,
+          "proteins": 5977,
+          "protein_groups": 6106
+        }
+      }
+    },
+    "ids_from": "run1",
+    "repeat_run_totals": {
+      "run2": {
+        "psms": 250060,
+        "peptides": 57700,
+        "proteins": 6893,
+        "protein_groups": 7028
+      },
+      "run3": {
+        "psms": 250060,
+        "peptides": 57700,
+        "proteins": 6893,
+        "protein_groups": 7028
+      }
+    },
+    "lfq": {
+      "precursors_q01": 35990,
+      "precursors_q01_all4": 35981,
+      "species": {
+        "human": {
+          "n": 26676,
+          "expected": 0.0,
+          "median": 0.016885887308753202,
+          "median_error": 0.016885887308753202,
+          "iqr": 0.3512436643810453,
+          "mad": 0.16949556934216517,
+          "median_error_human_centered": 0.0
+        },
+        "yeast": {
+          "n": 7585,
+          "expected": 1.0,
+          "median": 1.1139551553459976,
+          "median_error": 0.11395515534599765,
+          "iqr": 0.41308029414490055,
+          "mad": 0.20504749151550306,
+          "median_error_human_centered": 0.09706926803724447
+        },
+        "ecoli": {
+          "n": 1400,
+          "expected": -2.0,
+          "median": -2.214980906049512,
+          "median_error": -0.21498090604951203,
+          "iqr": 0.848586823770916,
+          "mad": 0.4208546740374317,
+          "median_error_human_centered": -0.23186679335826543
+        }
+      }
+    }
+  }
+}

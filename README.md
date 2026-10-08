@@ -23,6 +23,14 @@ methionine clipping adds 3.4% PSMs at 1% FDR on HEK SILAC when protein N-termina
 searched
 ([details](DOCS.md#initiator-methionine-clipping)).
 
+Against upstream Sage v0.15.0-beta.2 on four PXD028735 HYE runs with the same settings, Sage Plus
+finds 1.2% more PSMs and peptides and 1.6% more protein groups at 1% FDR, uses 18% less peak
+memory (6.2 vs 7.5 GiB), and quantifies the species ratios as accurately
+([head-to-head](benchmarks/HEADTOHEAD.md)). For a standard search the two are close; the
+differences are in the features above.
+
+![Sage Plus vs upstream Sage on PXD028735](figures/headtohead/fig1_ids_resources.png)
+
 > [!NOTE]
 > Sage Plus is a beta, maintained independently of upstream Sage. Behavior can change between
 > betas: pin a release, and validate results on your own data before publishing them.
