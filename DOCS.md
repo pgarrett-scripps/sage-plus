@@ -82,37 +82,67 @@ In that build, an `s3://`, `gs://`, or `az://` path fails with an error naming t
 ## Usage 
 
 ```shell
-Usage: sage [OPTIONS] <parameters> [mzml_paths]...
+Usage: sage [OPTIONS] [parameters] [mzml_paths]...
 
 🔮 Sage 🧙 - Proteomics searching so fast it feels like magic!
 
 Arguments:
-  <parameters>     Path to configuration parameters (JSON file)
-  [mzml_paths]...  Paths to mzML, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the configuration file.
+  [parameters]     Path to configuration parameters (JSON file)
+  [mzml_paths]...  Paths to mzML, mzMLb, MGF, Bruker TDF, or Thermo RAW files to process. Overrides files listed in the configuration file.
 
 Options:
+      --write-config-schema <PATH>
+          Write the Sage JSON configuration schema to PATH, or '-' for stdout
   -f, --fasta <fasta>
           Path to FASTA database. Overrides the FASTA file specified in the configuration file.
   -o, --output_directory <output_directory>
           Path where search and quant results will be written. Overrides the directory specified in the configuration file.
+      --overwrite
+          Replace known Sage artifacts in an existing local output directory
       --batch-size <batch-size>
-          Number of files to search in parallel (default = number of CPUs/2)
+          Number of files to load and search at once; overrides `batch_size` from the configuration file (default = # of CPUs/2)
+      --dia <dia>
+          DIA search mode; overrides `dia.mode` from the configuration file. `pseudo` searches MS1-anchored pseudo-MS2 spectra built from co-eluting fragment hills. [possible values: off, pseudo]
+      --annotate-matches
+          Write matched fragments output file.
+      --spectral-library
+          Write an empirical spectral library using configured/default settings.
       --write-pin
           Write percolator-compatible `.pin` output files
+      --localize
+          Compute PTM site localization and write site-level reports
+      --write-report
+          Write `.html` report file
       --threads <N>
-          Number of worker threads; overrides `threads` from the configuration file
-          (default: all cores, or RAYON_NUM_THREADS when set)
-      --max-memory <GiB>
-          Abort if Sage's memory use exceeds this many GiB, to keep the system responsive
-          (default: 90% of total RAM; 0 disables). Also settable via SAGE_MAX_MEMORY_GB.
+          Number of worker threads; overrides `threads` from the configuration file (default: all cores, or RAYON_NUM_THREADS when set)
+      --stack-size <stack-size>
+          Set Rayon worker thread stack size in MiB (default: 2 MiB)
+      --max-memory <max-memory>
+          Override `max_memory_gb` from the parameter file. Sage aborts if its measured memory reaches this many GiB; 0 disables the limit.
       --events-jsonl <PATH>
           Stream versioned JSONL job events to PATH (use '-' for stdout)
+      --preview-modifications <PEPTIDE>
+          Print eligible modification sites and bounded peptide variants as JSON
+      --preview-protein <ACCESSION>
+
+      --preview-start <POSITION>
+
+      --preview-before <RESIDUES>
+          Protein residues immediately before the preview peptide, for motif sites
+      --preview-after <RESIDUES>
+          Protein residues immediately after the preview peptide, for motif sites
+      --peptide-position <peptide-position>
+          Protein boundary context for the preview peptide [default: internal] [possible values: internal, nterm, cterm, full]
+      --preview-limit <preview-limit>
+          Maximum variants returned by the modification preview [default: 100]
+      --estimate
+          Print a rough database memory estimate and exit without searching. Estimates never stop a run; `max_memory_gb` is enforced on measured memory
       --validate-only
           Validate the configuration and overrides without running a search
   -h, --help
-          Print help information
+          Print help
   -V, --version
-          Print version information
+          Print version
 ```
 
 Sage is called from the command line using and requires a path to a JSON-encoded parameter file as an argument (see below). 
@@ -190,7 +220,7 @@ keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage
 | Key | Value |
 | --- | --- |
 | `sage.provenance.version` | Version of this key set, currently `1`. |
-| `sage.version` | Sage Plus version, such as `0.1.0-beta.14`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.15`. |
 | `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
 | `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
 | `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
@@ -239,12 +269,9 @@ FROM parquet_kv_metadata('results.sage.parquet');
 
 #### Memory guard
 
-A search can balloon in memory — most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To prevent a runaway search from exhausting RAM and freezing the host, Sage runs a lightweight background watchdog that terminates the process **cleanly** (exit code 137) if either:
+A search can balloon in memory, most often during database generation, where the number of modified peptide variants grows combinatorially with `max_variable_mods` / `max_peff_variable_mods`, the FASTA size, and enzyme settings. To stop a runaway search before it exhausts RAM, set `max_memory_gb` in the configuration or pass `--max-memory <GiB>`. A background thread then samples Sage's own resident memory every 250 ms and, if it reaches the limit, stops the search with a message suggesting a smaller `batch_size`, a less complex database, or a higher limit. The command line exits with code 137; through the library API the job is cancelled instead unless `JobOptions.terminate_on_memory_limit` is true. The limit is off by default, and `0` disables it.
 
-- Sage's own resident memory exceeds a ceiling (default: 90% of total system RAM), or
-- system-wide available memory drops below a small safety floor (max of 1 GiB or 2% of RAM).
-
-The ceiling is set with `--max-memory <GiB>` (or the `SAGE_MAX_MEMORY_GB` environment variable); `--max-memory 0` disables the guard entirely. The watchdog polls a few times per second from a single thread and adds no overhead to the allocation hot path. When it trips it prints how to reduce the search size (e.g. lower `max_variable_mods` / `max_peff_variable_mods`, use a smaller FASTA, narrow tolerances, or enable `prefilter`).
+Only measured memory is checked. Memory estimates never refuse or stop a search; `sage config.json --estimate` prints one without searching. Since Beta 11 there is no default limit based on total RAM, no free-memory floor, and no `SAGE_MAX_MEMORY_GB` environment variable; `min_free_memory_gb` is still accepted but ignored with a warning (see [Other Settings](#other-settings) and the [changelog](CHANGELOG.md#v010-beta11---2026-09-26)).
 
 #### Sequence-ambiguity annotation
 
@@ -561,8 +588,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.14 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.15
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.15 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -1113,7 +1140,8 @@ output. Do not silently discard attachment when merging libraries.
 
 With localization enabled, FASTA searches emit
 `results.sage.ptm-library.tsv` and `results.sage.ptm-library.parquet`.
-Typed Parquet library and site reports embed schema version 2. Equal-scoring or
+The typed Parquet library embeds schema version 2, and the site reports
+(`ptm_sites`, `protein_sites`) embed version 3. Equal-scoring or
 indistinguishable attachment alternatives are excluded from the reusable library,
 even with a permissive localization threshold. Preserve the named definitions
 alongside the library, because the location table does not embed chemical masses.
@@ -1639,7 +1667,7 @@ seven `immonium_*` columns, then `localized_peptide`.
 - `stripped_peptide`: Peptide sequence without modifications.
 - `database_peptide`: The peptide as written in the FASTA when it was expanded from ambiguous residues (e.g. `PEPXIDE` for a `PEPTIDE` match; see `database.expand_ambiguous_residues`), or null. Distinct FASTA spans are joined by `;`. A generated decoy reports its target span reversed the same way as the decoy. Always present; null when expansion is off.
 - `substitutions`: The ambiguous FASTA residues replaced to make the peptide, as `X4K;B7D`: the residue as written, its one-based position in the peptide and the residue searched, in position order and joined by `;`. Empty when there are none, including whenever expansion is off. J is never listed: it is scored as I/L, not substituted. For a peptide in several proteins, the occurrences are read in protein order (the order of `proteins` and `protein_sites`). If any occurrence has the residues as written (a FASTA span without B, Z or X, a merged I/L/J twin, or a peptide TSV row without B, Z or X), the column is empty; otherwise the first expanded occurrence gives it. A generated decoy reports its target's residues at the decoy positions.
-- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 4).
+- `label_channel`, `label_group`: Precursor label channel and the group joining a peptide's channels. Only in labeled searches (schema version 6).
 - `proteins`: Proteins containing the peptide sequence, joined by `;`.
 - `protein_sites`: Typed list of protein occurrences. Each item contains `protein`, one-based inclusive `start` and `end`, plus nullable `prev_aa` and `next_aa` flanking residues.
 - `protein_groups`: Protein groups for the peptide, joined by `;`. With `protein_grouping` on, these are the IDPicker groups; with it off, the peptide's proteins. See [Protein inference](#protein-inference).

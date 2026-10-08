@@ -42,7 +42,8 @@ The fragment index is in `database.rs`, and spectrum storage and isotope
 processing are in `spectrum.rs`. Resource estimation and limits are in
 `crates/sage-cli/src/memory.rs` and the runner modules. API events and summaries
 are defined by `api.rs`, `events.rs`, and `runner/artifacts.rs`. Persistent
-worker orchestration is in `crates/sage-mcp/src/lib.rs`.
+worker orchestration was in `crates/sage-mcp/src/lib.rs`, which was removed
+after the evaluated release, in Sage Plus Beta 10.
 
 Scientific extensions are implemented in `crates/sage/src/mass_calibration.rs`,
 `scoring.rs`, and the retention and mobility modules under `ml/`. Modification
