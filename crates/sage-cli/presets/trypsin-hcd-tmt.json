@@ -1,0 +1,28 @@
+{
+  "database": {
+    "fasta": "proteome.fasta",
+    "enzyme": {
+      "cleave_at": "KR",
+      "restrict": "P",
+      "missed_cleavages": 2,
+      "semi_enzymatic": false,
+      "min_len": 7,
+      "max_len": 50
+    },
+    "static_mods": {
+      "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
+      "TMTpro": {"mass": 304.207146, "sites": ["K", "peptide_n_term"]}
+    },
+    "variable_mods": {"Oxidation": {"mass": 15.994915, "sites": ["M"]}},
+    "max_variable_mods": 2,
+    "ion_kinds": ["b", "y"]
+  },
+  "quant": {
+    "tmt": "Tmt18",
+    "tmt_settings": {"level": 2, "sn": false}
+  },
+  "precursor_tol": {"ppm": [-10, 10]},
+  "fragment_tol": {"ppm": [-20, 20]},
+  "isotope_errors": [-1, 3],
+  "mzml_paths": ["sample.mzML"]
+}

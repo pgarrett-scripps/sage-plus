@@ -1,0 +1,11 @@
+{
+  "database": {
+    "fasta": "proteome.fasta",
+    "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 2, "semi_enzymatic": false},
+    "static_mods": {"C": 57.021464},
+    "ion_kinds": ["b", "y"]
+  },
+  "precursor_tol": {"ppm": [-10, 10]},
+  "fragment_tol": {"ppm": [-20, 20]},
+  "mzml_paths": ["sample.mzML"]
+}
