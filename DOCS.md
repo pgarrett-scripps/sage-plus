@@ -400,7 +400,10 @@ peptides starting at residue 2 are added. For `MSDEREVAEAK` with trypsin and one
 missed cleavage, the digest gains `SDER` and `SDEREVAEAK` next to `MSDER` and
 `MSDEREVAEAK`.
 
-On a HEK SILAC search, turning clipping on gave 3.2% more PSMs at 1% FDR (measured for Beta 12).
+On a HEK SILAC K6R6 search with variable Met oxidation and protein N-terminal acetylation,
+turning clipping on gave 3.4% more PSMs (3,362 to 3,475), 3.4% more peptides and 2.3% more
+proteins at 1% FDR (measured for Beta 16). Most clipped protein N-termini are acetylated, so
+without protein N-terminal acetylation in the search the gain on the same file is 0.2%.
 
 - Clipped peptides are protein N-terminal: `protein_n_term` and `protein_first:X`
   sites and PTM-library `protein_n_term` records apply to them (for example,

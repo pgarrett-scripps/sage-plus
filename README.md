@@ -19,7 +19,8 @@ phospho localizations at 1% FLR on PXD007058 ([details](DOCS.md#ptm-site-localiz
 Nonlinear retention-time alignment raised LFQ precursors at 1% q-value from 24,038 to 31,418 on
 five PXD028735 runs ([Beta 9](CHANGELOG.md#v010-beta9---2026-09-25)). `z_dot` fragment ions find
 43% more ETD PSMs than `z` on PXD018176 ([details](DOCS.md#fragment-settings)), and initiator
-methionine clipping adds 3.2% PSMs at 1% FDR on HEK SILAC
+methionine clipping adds 3.4% PSMs at 1% FDR on HEK SILAC when protein N-terminal acetylation is
+searched
 ([details](DOCS.md#initiator-methionine-clipping)).
 
 > [!NOTE]
@@ -86,7 +87,7 @@ ETD, EThcD, ETciD), so recalibration never mixes scan types. See [inputs](DOCS.m
 ### Find more, and more trustworthy, identifications
 
 Better defaults and scoring for the spectra you already have.
-- Initiator methionine clipping, on by default: 3.2% more PSMs at 1% FDR on HEK SILAC ([details](DOCS.md#initiator-methionine-clipping)).
+- Initiator methionine clipping, on by default: 3.4% more PSMs at 1% FDR on HEK SILAC with protein N-terminal acetylation searched ([details](DOCS.md#initiator-methionine-clipping)).
 - `z_dot` fragment ions for ETD and EThcD: 43% more ETD PSMs than Sage's `z` on PXD018176 ([details](DOCS.md#fragment-settings)).
 - Search-time mass recalibration per file and per analyzer, kept only when it improves held-out error ([details](DOCS.md#other-settings)).
 - Ambiguous residues: J scored as I/L, opt-in B/Z/X expansion with a `substitutions` column, I/L twins merged ([details](DOCS.md#ambiguous-residues)).
