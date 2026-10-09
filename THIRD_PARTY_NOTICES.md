@@ -1,10 +1,9 @@
 # Third-party notices
 
-Sage Plus reads Bruker TDF files with `sage-plus-tdf`, which derives its frame
-decompression from MannLabs TimsRust 0.6.6. That crate is licensed
-`Apache-2.0 AND MIT` and carries the upstream MIT text, the Apache 2.0 text and its
-source attribution (`LICENSE`, `LICENSE-APACHE` and `NOTICE.md`) in its own
-repository.
+Sage Plus reads Bruker TDF files with `sage-plus-tdf`, a fork of MannLabs TimsRust 0.6.6
+licensed `Apache-2.0 AND MIT`. It reads Thermo RAW files with `sage-plus-raw`, a fork of
+Sigilweaver OpenTFRaw licensed Apache-2.0. Their license texts, notices and source
+attribution are shipped in `licenses/sage-plus-tdf/` and `licenses/sage-plus-raw/`.
 The Sage Plus license remains in the root `LICENSE` file.
 
 ## Unimod

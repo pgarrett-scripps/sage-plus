@@ -47,7 +47,7 @@ release tag:
 docker run --rm -v "$PWD":/data ghcr.io/pgarrett-scripps/sage-plus:<tag> sage -o /data /data/config.json
 ```
 
-To build from source (Rust 1.88+):
+To build from source (Rust 1.97+):
 
 ```shell
 git clone https://github.com/pgarrett-scripps/sage-plus.git && cd sage-plus

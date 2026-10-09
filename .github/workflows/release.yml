@@ -137,6 +137,7 @@ jobs:
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
+          cp -R licenses "$archive/"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage" "$archive/"
           tar czf "$archive.tar.gz" "$archive"
@@ -149,6 +150,7 @@ jobs:
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
+          cp -R licenses "$archive/"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$archive/"
           7z a "$archive.zip" "$archive"
@@ -205,7 +207,7 @@ jobs:
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-x86_64-unknown-linux-musl"
           tar xzf ".release/input/$archive.tar.gz" -C .release/input
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
-          cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
+          cp -R Dockerfile THIRD_PARTY_NOTICES.md licenses .release/docker/
           mkdir -p .release/docker/crates/sage/data
           cp crates/sage/data/LICENSE-unimod.txt .release/docker/crates/sage/data/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/

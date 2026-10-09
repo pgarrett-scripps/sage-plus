@@ -18,6 +18,17 @@ entries are retained below for provenance.
   fragment recalibration instead of `unknown/unknown`. The SPS-MS3 TMT reporter link is the
   reader's master scan number, taken from the "Master Scan Number" trailer or, when that is
   missing, the nearest earlier scan of the parent level.
+- Bruker TDF input is read by sage-plus-tdf, Sage Plus's fork of MannLabs TimsRust, in place
+  of TimsRust 0.6.6. Sage Plus now assembles ddaPASEF and diaPASEF spectra itself; spectra are
+  bit-identical to Beta 16 apart from MS1 spectrum order, which now follows frame Id. Peak
+  memory while reading is lower (LFQ diaPASEF 6.8 → 4.1 GB). A ddaPASEF spectrum whose
+  precursor cannot be resolved is skipped with one aggregated warning instead of failing the run.
+- The timsTOF mobility code reads `analysis.tdf` through sage-plus-tdf instead of SQLite. Only the
+  opt-in denoiser still uses rusqlite.
+- miniTDF, TSF and parquet spectrum inputs, which came from TimsRust, are no longer read and
+  return an error naming the format.
+- Building from source needs Rust 1.97 or newer (was 1.88).
+- Release archives and the container ship the reader licenses under `licenses/`.
 - A Thermo RAW scan that cannot be decoded is skipped with one warning per file giving the
   count and the first error; it no longer stops the file. Peaks with an invalid m/z or
   intensity are dropped with a warning.
