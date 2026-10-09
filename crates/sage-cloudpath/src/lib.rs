@@ -11,6 +11,7 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 
 pub use url::Url;
 
+pub mod bruker_formats;
 pub mod denoise;
 pub mod hash;
 pub mod mgf;

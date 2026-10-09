@@ -30,7 +30,7 @@ tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 quick-xml = { version = "0.41.0", features = ["async-tokio"] }
 # Bruker TDF reader (pure Rust, no SQLite C library).
-sage-plus-tdf = { path = "/home/ty/Repos/timsrust-reader" }  # TODO(b17): switch to git rev after push
+sage-plus-tdf = { path = "/home/ty/Repos/timsrust-reader", features = ["minitdf"] }  # TODO(b17): switch to git rev after push
 # Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.
 rusqlite = { version = "0.35", features = ["bundled"] }
 # TODO(b17): switch to git rev after push

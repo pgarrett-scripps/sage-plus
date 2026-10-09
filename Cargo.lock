@@ -2607,6 +2607,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "seq-macro",
+ "snap",
  "twox-hash",
  "zstd",
 ]
@@ -3198,6 +3199,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "roxmltree"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3451,6 +3461,7 @@ dependencies = [
 name = "sage-plus-raw"
 version = "0.1.0"
 dependencies = [
+ "roxmltree",
  "thiserror 2.0.18",
 ]
 
@@ -3459,6 +3470,7 @@ name = "sage-plus-tdf"
 version = "0.2.0"
 dependencies = [
  "lzf",
+ "parquet",
  "ruzstd",
  "thiserror 2.0.18",
  "turso_core",
@@ -3787,6 +3799,12 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "snap"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "199905e6153d6405f9728fe44daace35f8f837bbf830bb6e85fbd5828709a886"
 
 [[package]]
 name = "socket2"

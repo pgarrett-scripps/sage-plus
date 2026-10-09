@@ -50,7 +50,16 @@ impl From<&str> for FileFormat {
     }
 }
 
-const BRUKER_EXTENSIONS: [&str; 4] = [".d", ".tdf", ".tdf_bin", "ms2"];
+const BRUKER_EXTENSIONS: [&str; 8] = [
+    ".d",
+    ".tdf",
+    ".tdf_bin",
+    ".tsf",
+    ".tsf_bin",
+    "ms2",
+    ".ms2spectrum.bin",
+    ".ms2spectrum.parquet",
+];
 
 fn is_bruker(path: &str) -> bool {
     BRUKER_EXTENSIONS.iter().any(|ext| {
