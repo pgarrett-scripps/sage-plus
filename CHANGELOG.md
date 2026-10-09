@@ -9,6 +9,19 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Thermo RAW input is read by sage-plus-raw, Sage Plus's fork of OpenTFRaw, in place of
+  OpenTFRaw 1.4.1. The fork decodes scan events in step with the scans on the Orbitrap Fusion
+  and Lumos files where 1.4.1 did not, so the trailer-based workarounds are removed: MS levels,
+  precursors and filter strings come straight from the reader. Those files keep their filter
+  strings, so their scans get real acquisition groups (analyzer and activation) for per-group
+  fragment recalibration instead of `unknown/unknown`. The SPS-MS3 TMT reporter link is the
+  reader's master scan number, taken from the "Master Scan Number" trailer or, when that is
+  missing, the nearest earlier scan of the parent level.
+- A Thermo RAW scan that cannot be decoded is skipped with one warning per file giving the
+  count and the first error; it no longer stops the file. Peaks with an invalid m/z or
+  intensity are dropped with a warning.
+
 ## [v0.1.0-beta.16] - 2026-10-08
 
 ### Changed
