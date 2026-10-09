@@ -2466,31 +2466,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
-name = "openmassspec-core"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ff14ab1fb4227689a34adac26485b770381d39f3c7d09019037b610d696a63e"
-dependencies = [
- "flate2",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "openssl-probe"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
-
-[[package]]
-name = "opentfraw"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef587c26e732a3178c3acb194eece1f8c8e6bebba81c6b16b743291af4288d13"
-dependencies = [
- "openmassspec-core",
- "thiserror 2.0.18",
-]
 
 [[package]]
 name = "outref"
@@ -3272,13 +3251,13 @@ dependencies = [
  "log",
  "mzdata",
  "object_store",
- "opentfraw",
  "parquet",
  "quick-xml",
  "rayon",
  "regex",
  "rusqlite",
  "sage-core",
+ "sage-plus-raw",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -3324,6 +3303,13 @@ dependencies = [
  "serde",
  "serde_json",
  "timsrust",
+]
+
+[[package]]
+name = "sage-plus-raw"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
 ]
 
 [[package]]

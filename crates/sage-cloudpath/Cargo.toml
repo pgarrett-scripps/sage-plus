@@ -32,7 +32,8 @@ quick-xml = { version = "0.41.0", features = ["async-tokio"] }
 timsrust = { version = "0.6.6" }
 # Same version and features as timsrust; reads TimsCalibration from analysis.tdf.
 rusqlite = { version = "0.35", features = ["bundled"] }
-opentfraw = "1.4.1"
+# TODO(b17): switch to git rev after push
+sage-plus-raw = { path = "/home/ty/Repos/opentfraw/crates/sage-plus-raw" }
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
 dnoise-core = "0.5.0"
 rayon = "1.5"
