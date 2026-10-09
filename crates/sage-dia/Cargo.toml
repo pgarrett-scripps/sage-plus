@@ -14,8 +14,8 @@ sage-core = { path = "../sage" }
 #   koth-core = "0.11"
 koth-core = { git = "https://github.com/pgarrett-scripps/koth", tag = "v0.11.0" }
 rayon = "1.5"
-# timsTOF diaPASEF: same versions as sage-cloudpath.
-timsrust = { version = "0.6.6" }
+# timsTOF diaPASEF: same reader as sage-cloudpath.
+sage-plus-tdf = { path = "/home/ty/Repos/timsrust-reader" }  # TODO(b17): switch to git rev after push
 dnoise-core = "0.5.0"
 anyhow = "1.0"
 log = "0.4.0"

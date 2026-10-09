@@ -18,6 +18,7 @@ pub mod mzml;
 #[cfg(feature = "mzmlb")]
 pub mod mzmlb;
 pub mod tdf;
+pub mod tdf_spectra;
 pub mod thermoraw;
 pub mod tims_mobility;
 pub mod util;
@@ -298,7 +299,7 @@ pub enum Error {
     #[error("MzML error: {0}")]
     MzML(#[from] mzml::MzMLError),
     #[error("TDF error: {0}")]
-    TDF(#[from] timsrust::TimsRustError),
+    TDF(#[from] sage_plus_tdf::Error),
     #[error(transparent)]
     MobilityCalibration(#[from] tims_mobility::MobilityCalibrationError),
     #[error(transparent)]
