@@ -304,7 +304,7 @@ pub enum Error {
     #[error(transparent)]
     Denoise(#[from] denoise::DenoiseError),
     #[error("Thermo RAW error: {0}")]
-    ThermoRaw(#[from] opentfraw::Error),
+    ThermoRaw(#[from] sage_plus_raw::Error),
     #[error("MGF error: {0}")]
     MGF(#[from] mgf::MgfError),
     #[error("FASTA error: {0}")]
