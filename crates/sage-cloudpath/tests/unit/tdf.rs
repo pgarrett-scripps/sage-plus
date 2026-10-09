@@ -17,26 +17,30 @@ fn buffer(peaks: Vec<ImsPeak>) -> PeakBuffer {
 }
 
 #[test]
-fn parses_precursor_metadata_without_losing_optional_values() {
-    use timsrust::core::{Charge, FrameIndex, Im, Mz, Rt, ScanIndex};
-
-    let precursor = timsrust::core::Precursor::new(
-        Mz::from(500.25),
-        Im::from(1.15),
-        Rt::from(12.0),
-        ScanIndex::try_from(5).unwrap(),
-        Some(Charge::try_from(3).unwrap()),
-        Some(1234.5),
-        7,
-        FrameIndex::try_from(42).unwrap(),
+fn scan_slice_takes_the_scan_range_and_rejects_short_frames() {
+    let frame = Frame {
+        id: 7,
+        scan_offsets: vec![0, 2, 2, 5],
+        tof_indices: vec![10, 11, 12, 13, 14],
+        intensities: vec![1, 2, 3, 4, 5],
+    };
+    assert_eq!(
+        scan_slice(&frame, 1, 3).unwrap(),
+        (&[12u32, 13, 14][..], &[3u32, 4, 5][..])
     );
-    let parsed = TdfReader::parse_precursor(&precursor);
+    assert_eq!(scan_slice(&frame, 0, 1).unwrap().0, &[10u32, 11][..]);
+    assert!(scan_slice(&frame, 2, 4).is_err());
+}
 
-    assert_eq!(parsed.mz, 500.25);
-    assert_eq!(parsed.charge, Some(3));
-    assert_eq!(parsed.intensity, Some(1234.5));
-    assert_eq!(parsed.spectrum_ref.as_deref(), Some("42"));
-    assert_eq!(parsed.inverse_ion_mobility, Some(1.15));
+#[test]
+fn directories_without_analysis_tdf_are_unsupported() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("run.d");
+    std::fs::create_dir(&path).unwrap();
+    let error = TdfReader
+        .parse(&path, 0, BrukerProcessingConfig::default(), true)
+        .unwrap_err();
+    assert!(matches!(error, crate::Error::Unsupported(_)), "{error}");
 }
 
 #[test]
@@ -239,10 +243,6 @@ fn calibrated_mobility_falls_back_to_linear_without_analysis_tdf() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("run.ms2");
     std::fs::create_dir(&path).unwrap();
-    assert!(matches!(
-        MobilityScale::new(&path, BrukerMobilityScale::Calibrated).unwrap(),
-        MobilityScale::Linear(None)
-    ));
     assert_eq!(
         BrukerMobilityScale::Calibrated.effective_for(&path),
         BrukerMobilityScale::Linear
@@ -273,7 +273,7 @@ fn linear_scale_keeps_the_beta6_conversion() {
     }
     assert!(matches!(
         MobilityScale::new(&path, BrukerMobilityScale::Linear).unwrap(),
-        MobilityScale::Linear(Some(scale)) if scale == linear
+        MobilityScale::Linear(scale) if scale == linear
     ));
 }
 

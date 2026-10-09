@@ -18,6 +18,7 @@
 //! Bruker SDK to within floating-point rounding, including fractional scans
 //! and scans beyond both limits.
 
+use sage_plus_tdf::{MetadataDatabase, MetadataRow, SqlValue};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -55,9 +56,9 @@ impl BrukerMobilityScale {
     }
 }
 
-/// The `analysis.tdf` timsrust reads for a Bruker input.
+/// The `analysis.tdf` of a Bruker input.
 ///
-/// timsrust accepts the `.d` directory or any path inside it, such as
+/// Sage accepts the `.d` directory or any path inside it, such as
 /// `analysis.tdf_bin`, and walks up to the first directory containing both
 /// `analysis.tdf` and `analysis.tdf_bin`. Returns `None` for inputs that are
 /// not TDF acquisitions, such as miniTDF `.ms2` directories.
@@ -83,10 +84,10 @@ fn analysis_tdf_or_guess(path: &Path) -> PathBuf {
 #[derive(Debug, thiserror::Error)]
 pub enum MobilityCalibrationError {
     #[error("failed to read ion mobility calibration from {path}: {source}")]
-    Sql {
+    Tdf {
         path: PathBuf,
         #[source]
-        source: rusqlite::Error,
+        source: sage_plus_tdf::Error,
     },
     #[error(
         "{path}: TimsCalibration {id} uses unsupported ModelType {model}; set \
@@ -103,6 +104,85 @@ pub enum MobilityCalibrationError {
         key: String,
         value: String,
     },
+    #[error("{path}: {table}.{column} is missing or has the wrong type")]
+    InvalidColumn {
+        path: PathBuf,
+        table: &'static str,
+        column: &'static str,
+    },
+}
+
+/// The metadata tables of one `analysis.tdf`, read without the SQLite C library.
+struct Tables {
+    path: PathBuf,
+    database: MetadataDatabase,
+}
+
+impl Tables {
+    fn open(path: &Path) -> Result<Self, MobilityCalibrationError> {
+        let path = analysis_tdf_or_guess(path);
+        let database =
+            MetadataDatabase::open(&path).map_err(|source| MobilityCalibrationError::Tdf {
+                path: path.clone(),
+                source,
+            })?;
+        Ok(Self { path, database })
+    }
+
+    fn error(&self, source: sage_plus_tdf::Error) -> MobilityCalibrationError {
+        MobilityCalibrationError::Tdf {
+            path: self.path.clone(),
+            source,
+        }
+    }
+
+    fn table(&self, name: &str) -> Result<Vec<MetadataRow>, MobilityCalibrationError> {
+        self.database.table(name).map_err(|error| self.error(error))
+    }
+
+    fn has_table(&self, name: &str) -> Result<bool, MobilityCalibrationError> {
+        self.database
+            .has_table(name)
+            .map_err(|error| self.error(error))
+    }
+
+    fn column<T>(
+        &self,
+        row: &MetadataRow,
+        table: &'static str,
+        column: &'static str,
+        read: impl Fn(&SqlValue) -> Option<T>,
+    ) -> Result<T, MobilityCalibrationError> {
+        row.get(column)
+            .and_then(read)
+            .ok_or_else(|| MobilityCalibrationError::InvalidColumn {
+                path: self.path.clone(),
+                table,
+                column,
+            })
+    }
+
+    fn metadata(&self, key: &str) -> Result<f64, MobilityCalibrationError> {
+        let rows = self.table("GlobalMetadata")?;
+        let value = rows
+            .iter()
+            .find(|row| row.get("Key").and_then(SqlValue::as_str) == Some(key))
+            .and_then(|row| row.get("Value"))
+            .ok_or_else(|| MobilityCalibrationError::InvalidMetadata {
+                path: self.path.clone(),
+                key: key.to_string(),
+                value: String::new(),
+            })?;
+        match value {
+            SqlValue::Text(text) => text.parse().ok(),
+            value => value.as_f64(),
+        }
+        .ok_or_else(|| MobilityCalibrationError::InvalidMetadata {
+            path: self.path.clone(),
+            key: key.to_string(),
+            value: format!("{value:?}"),
+        })
+    }
 }
 
 /// The uncalibrated scale reported by Sage Plus Beta 6 and earlier.
@@ -110,7 +190,7 @@ pub enum MobilityCalibrationError {
 /// Scan numbers are interpolated between `OneOverK0AcqRangeUpper` (scan 0) and
 /// `OneOverK0AcqRangeLower` (the largest `Frames.NumScans`), linearly in
 /// `sqrt(1/K0)`. This is the conversion of timsrust 0.6.5, kept here with the
-/// same floating-point operations so the scale does not change with timsrust.
+/// same floating-point operations so the scale does not change with the reader.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinearMobilityScale {
     intercept: f64,
@@ -128,35 +208,13 @@ impl LinearMobilityScale {
 
     /// Read the acquisition range of a `.d` directory or a file inside it.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, MobilityCalibrationError> {
-        let tdf = analysis_tdf_or_guess(path.as_ref());
-        let sql = |source| MobilityCalibrationError::Sql {
-            path: tdf.clone(),
-            source,
-        };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
-        let metadata = |key: &str| -> Result<f64, MobilityCalibrationError> {
-            let value: String = connection
-                .query_row(
-                    "SELECT Value FROM GlobalMetadata WHERE Key = ?1",
-                    [key],
-                    |row| row.get(0),
-                )
-                .map_err(sql)?;
-            value
-                .parse()
-                .map_err(|_| MobilityCalibrationError::InvalidMetadata {
-                    path: tdf.clone(),
-                    key: key.to_string(),
-                    value,
-                })
-        };
-        let lower = metadata("OneOverK0AcqRangeLower")?;
-        let upper = metadata("OneOverK0AcqRangeUpper")?;
-        let scans: i64 = connection
-            .query_row("SELECT max(NumScans) FROM Frames", [], |row| row.get(0))
-            .map_err(sql)?;
+        let tables = Tables::open(path.as_ref())?;
+        let lower = tables.metadata("OneOverK0AcqRangeLower")?;
+        let upper = tables.metadata("OneOverK0AcqRangeUpper")?;
+        let mut scans = 0i64;
+        for row in tables.table("Frames")? {
+            scans = scans.max(tables.column(&row, "Frames", "NumScans", SqlValue::as_i64)?);
+        }
         Ok(Self::new(lower, upper, scans as u64))
     }
 
@@ -205,34 +263,24 @@ pub struct MobilityCalibration {
 impl MobilityCalibration {
     /// Read the calibration of a `.d` directory or a file inside it.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, MobilityCalibrationError> {
-        let tdf = analysis_tdf_or_guess(path.as_ref());
-        let sql = |source| MobilityCalibrationError::Sql {
-            path: tdf.clone(),
-            source,
-        };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
+        let tables = Tables::open(path.as_ref())?;
+        let tdf = tables.path.clone();
 
+        let mut rows = Vec::new();
+        for row in tables.table("TimsCalibration")? {
+            let id = tables.column(&row, "TimsCalibration", "Id", SqlValue::as_i64)?;
+            let model = tables.column(&row, "TimsCalibration", "ModelType", SqlValue::as_i64)?;
+            const NAMES: [&str; 10] = ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"];
+            let mut coefficients = [0.0; 10];
+            for (value, name) in coefficients.iter_mut().zip(NAMES) {
+                *value = tables.column(&row, "TimsCalibration", name, SqlValue::as_f64)?;
+            }
+            rows.push((id, model, coefficients));
+        }
+        rows.sort_by_key(|&(id, _, _)| id);
         let mut ids = HashMap::new();
         let mut models = Vec::new();
-        let mut statement = connection
-            .prepare(
-                "SELECT Id, ModelType, C0, C1, C2, C3, C4, C5, C6, C7, C8, C9 \
-                 FROM TimsCalibration ORDER BY Id",
-            )
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| {
-                let mut coefficients = [0.0; 10];
-                for (index, value) in coefficients.iter_mut().enumerate() {
-                    *value = row.get(index + 2)?;
-                }
-                Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, coefficients))
-            })
-            .map_err(sql)?;
-        for row in rows {
-            let (id, model, coefficients) = row.map_err(sql)?;
+        for (id, model, coefficients) in rows {
             if model != 2 {
                 return Err(MobilityCalibrationError::UnsupportedModel {
                     path: tdf.clone(),
@@ -249,14 +297,9 @@ impl MobilityCalibration {
 
         let mut frame_models = HashMap::new();
         let mut counts = vec![0usize; models.len()];
-        let mut statement = connection
-            .prepare("SELECT Id, TimsCalibration FROM Frames")
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
-            .map_err(sql)?;
-        for row in rows {
-            let (frame, id) = row.map_err(sql)?;
+        for row in tables.table("Frames")? {
+            let frame = tables.column(&row, "Frames", "Id", SqlValue::as_i64)?;
+            let id = tables.column(&row, "Frames", "TimsCalibration", SqlValue::as_i64)?;
             let model =
                 *ids.get(&id)
                     .ok_or_else(|| MobilityCalibrationError::MissingCalibration {
@@ -294,39 +337,26 @@ impl MobilityCalibration {
     }
 
     /// Precursor `Id` to `(Parent frame, fractional ScanNumber)` for DDA runs.
+    /// Precursors without a `ScanNumber` or `Parent` are left out.
     pub fn dda_precursor_scans(
         path: impl AsRef<Path>,
     ) -> Result<HashMap<usize, (usize, f64)>, MobilityCalibrationError> {
-        let tdf = analysis_tdf_or_guess(path.as_ref());
-        let sql = |source| MobilityCalibrationError::Sql {
-            path: tdf.clone(),
-            source,
-        };
-        let connection =
-            rusqlite::Connection::open_with_flags(&tdf, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                .map_err(sql)?;
-        let exists: bool = connection
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Precursors')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(sql)?;
-        if !exists {
+        let tables = Tables::open(path.as_ref())?;
+        if !tables.has_table("Precursors")? {
             return Ok(HashMap::new());
         }
-        let mut statement = connection
-            .prepare("SELECT Id, Parent, ScanNumber FROM Precursors WHERE ScanNumber IS NOT NULL")
-            .map_err(sql)?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)? as usize,
-                    (row.get::<_, i64>(1)? as usize, row.get::<_, f64>(2)?),
-                ))
-            })
-            .map_err(sql)?;
-        rows.collect::<Result<_, _>>().map_err(sql)
+        let mut scans = HashMap::new();
+        for row in tables.table("Precursors")? {
+            let (Some(scan), Some(parent)) = (
+                row.get("ScanNumber").and_then(SqlValue::as_f64),
+                row.get("Parent").and_then(SqlValue::as_i64),
+            ) else {
+                continue;
+            };
+            let id = tables.column(&row, "Precursors", "Id", SqlValue::as_i64)?;
+            scans.insert(id as usize, (parent as usize, scan));
+        }
+        Ok(scans)
     }
 }
 
