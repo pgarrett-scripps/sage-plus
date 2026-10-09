@@ -6,8 +6,6 @@ members = [
     "crates/sage-dia",
 ]
 
-exclude = ["vendor/filemanager"]
-
 resolver = "2"
 
 [workspace.package]
@@ -27,9 +25,6 @@ inherits = "release"
 lto = "thin"
 codegen-units = 16
 incremental = true
-
-[patch.crates-io]
-filemanager = { path = "vendor/filemanager" }
 
 # Debug test builds run real searches and Bruker decoding; unoptimized
 # dependencies made those tests minutes long.

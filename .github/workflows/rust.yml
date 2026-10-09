@@ -71,9 +71,6 @@ jobs:
         run: cargo build --workspace --all-targets --locked
       - name: Run tests
         run: cargo test --workspace --locked
-      - name: Test patched storage compatibility
-        if: matrix.rust == '1.97.1'
-        run: cargo test -p filemanager --locked
       - name: Test benchmark tooling
         if: matrix.rust == '1.97.1'
         run: python3 -m unittest discover -s benchmarks/tests -v

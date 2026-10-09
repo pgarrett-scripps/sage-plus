@@ -61,8 +61,6 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Run tests
         run: cargo test --workspace --locked
-      - name: Test patched storage compatibility
-        run: cargo test -p filemanager --locked
       - name: Install pinned dependency scanner
         run: cargo install cargo-audit --version 0.22.2 --locked
       - name: Require a clean vulnerability audit before packaging
@@ -138,8 +136,6 @@ jobs:
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
-          cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
-          cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage" "$archive/"
@@ -152,8 +148,6 @@ jobs:
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
           cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
-          cp vendor/filemanager/LICENSE "$archive/LICENSE-filemanager"
-          cp vendor/filemanager/LICENSE-APACHE "$archive/LICENSE-filemanager-APACHE"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R schemas "$archive/"
           cp "target/${{ matrix.target }}/release/sage.exe" "$archive/"
@@ -212,8 +206,6 @@ jobs:
           tar xzf ".release/input/$archive.tar.gz" -C .release/input
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
           cp Dockerfile THIRD_PARTY_NOTICES.md .release/docker/
-          mkdir -p .release/docker/vendor/filemanager
-          cp vendor/filemanager/LICENSE vendor/filemanager/LICENSE-APACHE .release/docker/vendor/filemanager/
           mkdir -p .release/docker/crates/sage/data
           cp crates/sage/data/LICENSE-unimod.txt .release/docker/crates/sage/data/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
