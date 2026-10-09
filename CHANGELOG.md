@@ -25,8 +25,13 @@ entries are retained below for provenance.
   precursor cannot be resolved is skipped with one aggregated warning instead of failing the run.
 - The timsTOF mobility code reads `analysis.tdf` through sage-plus-tdf instead of SQLite. Only the
   opt-in denoiser still uses rusqlite.
-- miniTDF, TSF and parquet spectrum inputs, which came from TimsRust, are no longer read and
-  return an error naming the format.
+- Bruker TSF and ProteoScape miniTDF inputs are read by sage-plus-tdf. TSF MS/MS spectra now
+  carry their precursor from `FrameMsMsInfo` and are searched (TimsRust gave them none, so
+  Beta 16 searched no TSF MS/MS spectra), with m/z from the calibrated model instead of the
+  linear scale (up to about 30 ppm off). miniTDF spectra match TimsRust 0.6.6 exactly and are
+  now found under the `<name>.ms2spectrum.*` names ProteoScape writes, which TimsRust missed.
+  miniTDF with LFQ is an error, since its MS1 frames are not read. TimsRust parquet spectrum
+  inputs are no longer read and return an error naming the format.
 - Building from source needs Rust 1.97 or newer (was 1.88).
 - Release archives and the container ship the reader licenses under `licenses/`.
 - A Thermo RAW scan that cannot be decoded is skipped with one warning per file giving the

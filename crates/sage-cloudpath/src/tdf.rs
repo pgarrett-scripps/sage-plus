@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use std::{cmp::Ordering, collections::HashMap, path::Path};
 
 /// timsTOF spectra are all measured by the TOF analyzer after CID.
-const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
+pub(crate) const TIMS_TOF: AcquisitionGroup = AcquisitionGroup {
     analyzer: MassAnalyzer::Tof,
     activation: Activation::Cid,
 };
@@ -229,13 +229,27 @@ impl TdfReader {
         requires_ms1: bool,
     ) -> Result<Vec<RawSpectrum>, crate::Error> {
         let path = path_name.as_ref();
-        let tdf = analysis_tdf(path).ok_or_else(|| {
-            crate::Error::Unsupported(format!(
-                "{}: not a Bruker TDF acquisition (a .d directory with analysis.tdf and \
-                 analysis.tdf_bin); miniTDF, TSF and parquet spectra are not supported",
+        // timsrust's detection order: TDF, then TSF, then miniTDF.
+        let Some(tdf) = analysis_tdf(path) else {
+            if let Some(directory) = crate::bruker_formats::tsf_directory(path) {
+                return crate::bruker_formats::read_tsf(path, &directory, file_id, requires_ms1);
+            }
+            if let Some(directory) = crate::bruker_formats::minitdf_directory(path)? {
+                return crate::bruker_formats::read_minitdf(
+                    path,
+                    &directory,
+                    file_id,
+                    requires_ms1,
+                );
+            }
+            return Err(crate::Error::Unsupported(format!(
+                "{}: not a Bruker TDF, TSF or miniTDF acquisition (a .d directory with \
+                 analysis.tdf and analysis.tdf_bin, or analysis.tsf and analysis.tsf_bin, or a \
+                 directory with ms2spectrum.bin and ms2spectrum.parquet); timsrust parquet \
+                 spectra are not supported",
                 path.display()
-            ))
-        })?;
+            )));
+        };
         let directory = tdf.parent().expect("analysis.tdf lives in a .d directory");
         let reader = sage_plus_tdf::TdfReader::open(directory)?;
         let scale = MobilityScale::new(path, config.ion_mobility_scale)?;
