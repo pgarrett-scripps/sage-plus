@@ -3457,6 +3457,7 @@ dependencies = [
 [[package]]
 name = "sage-plus-tdf"
 version = "0.2.0"
+source = "git+https://github.com/pgarrett-scripps/sage-plus-tdf?rev=2120893d3ef0e2744176a4da72651473a1504ad5#2120893d3ef0e2744176a4da72651473a1504ad5"
 dependencies = [
  "lzf",
  "ruzstd",
