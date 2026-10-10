@@ -575,6 +575,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-oid"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
 name = "const-random"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -896,6 +902,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.1",
+ "const-oid",
  "crypto-common 0.2.2",
 ]
 
@@ -2299,9 +2306,9 @@ dependencies = [
 
 [[package]]
 name = "mzdata"
-version = "0.65.5"
+version = "0.67.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e7697a8414ad3cab0f89d1aa344844eb96d1b154426bc7d427a49c44419dac9"
+checksum = "da3fcbc26224f0d36115a025e6086c8dc8a12ec36cb48e9c518db8ef03d5f169"
 dependencies = [
  "base64-simd",
  "bitflags 2.11.0",
@@ -2311,17 +2318,81 @@ dependencies = [
  "flate2",
  "hdf5",
  "hdf5-sys",
+ "hex",
  "identity-hash",
  "indexmap 2.13.0",
  "libz-sys",
  "log",
- "memchr",
+ "mzdata-bindata",
+ "mzdata-meta",
+ "mzdata-param",
+ "mzdata-spectrum",
  "mzpeaks",
  "ndarray",
  "num-traits",
+ "phf",
  "quick-xml 0.41.0",
  "regex",
  "sha1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mzdata-bindata"
+version = "0.67.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a3d97e0bb0a6b9769627856bcc3408d41da2f6a0957e6f024842dc838804b56"
+dependencies = [
+ "base64-simd",
+ "bytemuck",
+ "flate2",
+ "identity-hash",
+ "log",
+ "mzdata-param",
+ "mzpeaks",
+ "num-traits",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mzdata-meta"
+version = "0.67.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2188a19b9ed17ed3e088f8d3cf19f980f2e7ee1e31d194657728c8e53f3bdaa"
+dependencies = [
+ "bitflags 2.11.0",
+ "chrono",
+ "log",
+ "mzdata-bindata",
+ "mzdata-param",
+ "num-traits",
+ "regex",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mzdata-param"
+version = "0.67.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bef4e24fd09ecf3b802e0fd09f2db98d584b010b7c931bef3f5505c5bbf9980"
+dependencies = [
+ "log",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mzdata-spectrum"
+version = "0.67.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "595958b3717b58f5b0ff6f3c47e108c89e220dd1a2df8236dfef77c644a550e7"
+dependencies = [
+ "identity-hash",
+ "log",
+ "mzdata-bindata",
+ "mzdata-meta",
+ "mzdata-param",
+ "mzpeaks",
+ "num-traits",
  "thiserror 2.0.18",
 ]
 
@@ -2651,7 +2722,26 @@ dependencies = [
  "seq-macro",
  "snap",
  "twox-hash",
- "zstd",
+ "zstd 0.13.3",
+]
+
+[[package]]
+name = "parquet"
+version = "60.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8af83d2940bc0510f9aef86d865f56fdc6095f87ab115ac885a80b7c5226d3ba"
+dependencies = [
+ "ahash",
+ "bytes",
+ "chrono",
+ "half",
+ "hashbrown 0.17.1",
+ "num-bigint 0.5.1",
+ "num-integer",
+ "num-traits",
+ "seq-macro",
+ "twox-hash",
+ "zstd 0.14.2",
 ]
 
 [[package]]
@@ -2671,6 +2761,49 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "phf"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
+dependencies = [
+ "phf_macros",
+ "phf_shared",
+ "serde",
+]
+
+[[package]]
+name = "phf_generator"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
+dependencies = [
+ "fastrand",
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085"
+dependencies = [
+ "phf_generator",
+ "phf_shared",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6fd9027e2d9319be6349febd1db4e8d02aa544921200c9b777720ac34a3aa89"
+dependencies = [
+ "siphasher",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -3426,7 +3559,7 @@ dependencies = [
  "libc",
  "log",
  "maud",
- "parquet",
+ "parquet 60.0.0",
  "rayon",
  "regex",
  "report-builder",
@@ -3453,7 +3586,7 @@ dependencies = [
  "log",
  "mzdata",
  "object_store",
- "parquet",
+ "parquet 60.0.0",
  "quick-xml 0.42.0",
  "rayon",
  "regex",
@@ -3522,7 +3655,7 @@ version = "0.2.0"
 source = "git+https://github.com/pgarrett-scripps/sage-plus-tdf?rev=586d06fc3d1cf13900db8602ac1f67d56bbfa4ba#586d06fc3d1cf13900db8602ac1f67d56bbfa4ba"
 dependencies = [
  "lzf",
- "parquet",
+ "parquet 59.2.0",
  "ruzstd",
  "thiserror 2.0.18",
  "turso_core",
@@ -3751,13 +3884,13 @@ dependencies = [
 
 [[package]]
 name = "sha1"
-version = "0.10.7"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+checksum = "aacc4cc499359472b4abe1bf11d0b12e688af9a805fa5e3016f9a386dc2d0214"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.2.17",
- "digest 0.10.7",
+ "cpufeatures 0.3.0",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -5306,7 +5439,16 @@ version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 7.2.1",
+]
+
+[[package]]
+name = "zstd"
+version = "0.14.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "057cfd910cfac363a0ada849592624b4c9ff2e10bef504c3433810d78ed96f93"
+dependencies = [
+ "zstd-safe 8.1.0",
 ]
 
 [[package]]
@@ -5319,10 +5461,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "zstd-sys"
-version = "2.0.13+zstd.1.5.6"
+name = "zstd-safe"
+version = "8.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38ff0f21cfee8f97d94cef41359e0c89aa6113028ab0291aa8ca0038995a95aa"
+checksum = "bdd44c6a7284e91f3717755b24315a302edd9153a01f753c3cba3d765e8eafac"
+dependencies = [
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.1.1+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
 dependencies = [
  "cc",
  "pkg-config",
