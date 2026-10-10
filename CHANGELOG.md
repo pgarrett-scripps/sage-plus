@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.17] - 2026-10-09
+
 ### Changed
 - Thermo RAW input is read by sage-plus-raw, Sage Plus's fork of OpenTFRaw, in place of
   OpenTFRaw 1.4.1. The fork decodes scan events in step with the scans on the Orbitrap Fusion
@@ -37,6 +39,8 @@ entries are retained below for provenance.
 - A Thermo RAW scan that cannot be decoded is skipped with one warning per file giving the
   count and the first error; it no longer stops the file. Peaks with an invalid m/z or
   intensity are dropped with a warning.
+- Dependencies: tokio 1.53.2, sysinfo 0.39, quick-xml 0.42 (the mzML parser now matches tag
+  and attribute names as strings).
 
 ## [v0.1.0-beta.16] - 2026-10-08
 
