@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use sysinfo::{ProcessExt, System, SystemExt};
+use sysinfo::{ProcessesToUpdate, System};
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -159,7 +159,7 @@ impl MemoryLimits {
             return true;
         };
         let mut system = System::new();
-        system.refresh_process(pid);
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         system
             .process(pid)
             .map(|process| process.memory().saturating_add(additional_bytes) < limit)
@@ -240,7 +240,7 @@ fn guard_loop(
     let mut system = System::new();
     while !stop.load(Ordering::Acquire) {
         system.refresh_memory();
-        system.refresh_process(pid);
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
 
         let rss = match system.process(pid) {
             Some(process) => process.memory(),

@@ -28,7 +28,7 @@ log = "0.4.0"
 object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"], optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
-quick-xml = { version = "0.41.0", features = ["async-tokio"] }
+quick-xml = { version = "0.42.0", features = ["async-tokio"] }
 # Bruker TDF reader (pure Rust, no SQLite C library).
 sage-plus-tdf = { git = "https://github.com/pgarrett-scripps/sage-plus-tdf", rev = "586d06fc3d1cf13900db8602ac1f67d56bbfa4ba", features = ["minitdf"] }
 # Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.

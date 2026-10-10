@@ -107,17 +107,17 @@ struct CvParam {
 impl CvParam {
     fn from_event(ev: &quick_xml::events::BytesStart<'_>) -> Result<Self, MzMLError> {
         let accession = ev
-            .try_get_attribute(b"accession")?
+            .try_get_attribute("accession")?
             .ok_or(MzMLError::Malformed)?
             .value
-            .into_owned();
+            .into_owned()
+            .into_bytes();
         let value = ev
-            .try_get_attribute(b"value")?
-            .map(|attribute| std::str::from_utf8(&attribute.value).map(str::to_owned))
-            .transpose()?;
-        let unit_accession = ev
-            .try_get_attribute(b"unitAccession")?
+            .try_get_attribute("value")?
             .map(|attribute| attribute.value.into_owned());
+        let unit_accession = ev
+            .try_get_attribute("unitAccession")?
+            .map(|attribute| attribute.value.into_owned().into_bytes());
         Ok(Self {
             accession,
             value,
@@ -370,55 +370,54 @@ impl MzMLReader {
                 Ok(Event::Start(ref ev)) => {
                     // State transition into child tag
                     state = match (ev.name().into_inner(), state) {
-                        (b"spectrum", _) => Some(State::Spectrum),
-                        (b"scan", Some(State::Spectrum)) => Some(State::Scan),
-                        (b"binaryDataArray", Some(State::Spectrum)) => Some(State::BinaryDataArray),
-                        (b"binary", Some(State::BinaryDataArray)) => Some(State::Binary),
-                        (b"precursor", Some(State::Spectrum)) => Some(State::Precursor),
-                        (b"selectedIon", Some(State::Precursor)) => Some(State::SelectedIon),
+                        ("spectrum", _) => Some(State::Spectrum),
+                        ("scan", Some(State::Spectrum)) => Some(State::Scan),
+                        ("binaryDataArray", Some(State::Spectrum)) => Some(State::BinaryDataArray),
+                        ("binary", Some(State::BinaryDataArray)) => Some(State::Binary),
+                        ("precursor", Some(State::Spectrum)) => Some(State::Precursor),
+                        ("selectedIon", Some(State::Precursor)) => Some(State::SelectedIon),
                         _ => state,
                     };
                     match ev.name().into_inner() {
-                        b"spectrum" => {
-                            let id = extract!(ev, b"id");
-                            let id = std::str::from_utf8(&id)?;
+                        "spectrum" => {
+                            let id = extract!(ev, "id");
+                            let id = &*id;
                             spectrum.id = id.to_string();
                         }
-                        b"binaryDataArray" => {
+                        "binaryDataArray" => {
                             // Each array declares its own kind, compression, and
                             // dtype. Unknown or empty arrays must not inherit them.
                             binary_array = None;
                             compression = false;
                             binary_dtype = Dtype::F64;
                         }
-                        b"precursor" => {
+                        "precursor" => {
                             // Not all precursor fields have a spectrumRef
-                            if let Some(scan) = ev.try_get_attribute(b"spectrumRef")? {
-                                let scan = std::str::from_utf8(&scan.value)?;
+                            if let Some(scan) = ev.try_get_attribute("spectrumRef")? {
+                                let scan = &*scan.value;
                                 precursor.spectrum_ref = Some(scan.to_string())
                             }
                         }
-                        b"instrumentConfiguration" => {
-                            let id = extract!(ev, b"id");
-                            current_instrument = Some(std::str::from_utf8(&id)?.to_owned());
+                        "instrumentConfiguration" => {
+                            let id = extract!(ev, "id");
+                            current_instrument = Some(id.to_string());
                         }
-                        b"analyzer" => in_analyzer = current_instrument.is_some(),
-                        b"run" => {
+                        "analyzer" => in_analyzer = current_instrument.is_some(),
+                        "run" => {
                             if let Some(id) =
-                                ev.try_get_attribute(b"defaultInstrumentConfigurationRef")?
+                                ev.try_get_attribute("defaultInstrumentConfigurationRef")?
                             {
-                                default_instrument =
-                                    Some(std::str::from_utf8(&id.value)?.to_owned());
+                                default_instrument = Some(id.value.to_string());
                             }
                         }
-                        b"scan" => {
-                            if let Some(id) = ev.try_get_attribute(b"instrumentConfigurationRef")? {
-                                scan_instrument = Some(std::str::from_utf8(&id.value)?.to_owned());
+                        "scan" => {
+                            if let Some(id) = ev.try_get_attribute("instrumentConfigurationRef")? {
+                                scan_instrument = Some(id.value.to_string());
                             }
                         }
-                        b"referenceableParamGroup" => {
-                            let id = extract!(ev, b"id");
-                            let id = std::str::from_utf8(&id)?.to_owned();
+                        "referenceableParamGroup" => {
+                            let id = extract!(ev, "id");
+                            let id = id.to_string();
                             referenceable_params.entry(id.clone()).or_default();
                             current_referenceable_group = Some(id);
                         }
@@ -426,7 +425,7 @@ impl MzMLReader {
                     }
                 }
                 Ok(Event::Empty(ref ev)) => {
-                    if ev.name().into_inner() == b"cvParam" {
+                    if ev.name().into_inner() == "cvParam" {
                         let param = CvParam::from_event(ev)?;
                         if in_analyzer {
                             if let (Some(id), Some(analyzer)) =
@@ -443,9 +442,9 @@ impl MzMLReader {
                         } else {
                             apply_cv_param!(&param);
                         }
-                    } else if ev.name().into_inner() == b"referenceableParamGroupRef" {
-                        let id = extract!(ev, b"ref");
-                        let id = std::str::from_utf8(&id)?;
+                    } else if ev.name().into_inner() == "referenceableParamGroupRef" {
+                        let id = extract!(ev, "ref");
+                        let id = &*id;
                         let params = referenceable_params
                             .get(id)
                             .ok_or_else(|| MzMLError::UnknownReferenceableParamGroup(id.into()))?
@@ -462,7 +461,7 @@ impl MzMLReader {
                                 continue;
                             }
                         }
-                        let raw = text.decode()?;
+                        let raw = text.into_inner();
                         // There are occasionally empty binary data arrays, or unknown CVs
                         if raw.is_empty() || binary_array.is_none() {
                             continue;
@@ -503,10 +502,10 @@ impl MzMLReader {
                 }
                 Ok(Event::End(ev)) => {
                     state = match (state, ev.name().into_inner()) {
-                        (Some(State::Binary), b"binary") => Some(State::BinaryDataArray),
-                        (Some(State::BinaryDataArray), b"binaryDataArray") => Some(State::Spectrum),
-                        (Some(State::SelectedIon), b"selectedIon") => Some(State::Precursor),
-                        (Some(State::Precursor), b"precursor") => {
+                        (Some(State::Binary), "binary") => Some(State::BinaryDataArray),
+                        (Some(State::BinaryDataArray), "binaryDataArray") => Some(State::Spectrum),
+                        (Some(State::SelectedIon), "selectedIon") => Some(State::Precursor),
+                        (Some(State::Precursor), "precursor") => {
                             if precursor.mz != 0.0 {
                                 precursor.isolation_window = match (iso_window_lo, iso_window_hi) {
                                     (Some(lo), Some(hi)) => Some(Tolerance::Da(-lo, hi)),
@@ -521,20 +520,20 @@ impl MzMLReader {
                             iso_window_hi = None;
                             Some(State::Spectrum)
                         }
-                        (Some(State::Scan), b"scan") => Some(State::Spectrum),
-                        (_, b"referenceableParamGroup") => {
+                        (Some(State::Scan), "scan") => Some(State::Spectrum),
+                        (_, "referenceableParamGroup") => {
                             current_referenceable_group = None;
                             state
                         }
-                        (_, b"analyzer") => {
+                        (_, "analyzer") => {
                             in_analyzer = false;
                             state
                         }
-                        (_, b"instrumentConfiguration") => {
+                        (_, "instrumentConfiguration") => {
                             current_instrument = None;
                             state
                         }
-                        (_, b"spectrum") => {
+                        (_, "spectrum") => {
                             let configured = scan_instrument
                                 .take()
                                 .or_else(|| default_instrument.clone())
