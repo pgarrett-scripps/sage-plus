@@ -15,6 +15,8 @@ entries are retained below for provenance.
   the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
   are kept when they come before the target m/z (pwiz Waters files), and a window with no
   offsets or limits gets correct bounds.
+- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.0, `sage-plus-raw`
+  0.1.0) instead of git revisions, so Sage Plus builds with one parquet version.
 
 ### Fixed
 - `localized_peptide` gives each copy of a multi-copy ambiguous modification its own ProForma group

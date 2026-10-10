@@ -15,7 +15,7 @@ sage-core = { path = "../sage" }
 koth-core = { git = "https://github.com/pgarrett-scripps/koth", tag = "v0.11.0" }
 rayon = "1.5"
 # timsTOF diaPASEF: same reader as sage-cloudpath.
-sage-plus-tdf = { git = "https://github.com/pgarrett-scripps/sage-plus-tdf", rev = "586d06fc3d1cf13900db8602ac1f67d56bbfa4ba" }
+sage-plus-tdf = "0.2.0"
 dnoise-core = "0.5.0"
 anyhow = "1.0"
 log = "0.4.0"

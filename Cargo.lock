@@ -127,7 +127,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -138,7 +138,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1022,7 +1022,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2455,7 +2455,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2707,26 +2707,6 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "59.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7065842956a20c2a536924ce8e4d9955f7422451511b9eb7500d7bfe5077e59c"
-dependencies = [
- "ahash",
- "bytes",
- "chrono",
- "half",
- "hashbrown 0.17.1",
- "num-bigint 0.5.1",
- "num-integer",
- "num-traits",
- "seq-macro",
- "snap",
- "twox-hash",
- "zstd 0.13.3",
-]
-
-[[package]]
-name = "parquet"
 version = "60.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8af83d2940bc0510f9aef86d865f56fdc6095f87ab115ac885a80b7c5226d3ba"
@@ -2740,8 +2720,9 @@ dependencies = [
  "num-integer",
  "num-traits",
  "seq-macro",
+ "snap",
  "twox-hash",
- "zstd 0.14.2",
+ "zstd",
 ]
 
 [[package]]
@@ -3446,7 +3427,7 @@ dependencies = [
  "errno 0.3.14",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3503,7 +3484,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3559,7 +3540,7 @@ dependencies = [
  "libc",
  "log",
  "maud",
- "parquet 60.0.0",
+ "parquet",
  "rayon",
  "regex",
  "report-builder",
@@ -3586,7 +3567,7 @@ dependencies = [
  "log",
  "mzdata",
  "object_store",
- "parquet 60.0.0",
+ "parquet",
  "quick-xml 0.42.0",
  "rayon",
  "regex",
@@ -3643,7 +3624,8 @@ dependencies = [
 [[package]]
 name = "sage-plus-raw"
 version = "0.1.0"
-source = "git+https://github.com/pgarrett-scripps/sage-plus-raw?rev=729608b8f7ebd32ef926934ea22caea9ddc4df2d#729608b8f7ebd32ef926934ea22caea9ddc4df2d"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af00c7a3d2fee2670f2a3afe8d63391ced195d392af2413d2b941d14b8f01cf2"
 dependencies = [
  "roxmltree",
  "thiserror 2.0.18",
@@ -3652,10 +3634,11 @@ dependencies = [
 [[package]]
 name = "sage-plus-tdf"
 version = "0.2.0"
-source = "git+https://github.com/pgarrett-scripps/sage-plus-tdf?rev=586d06fc3d1cf13900db8602ac1f67d56bbfa4ba#586d06fc3d1cf13900db8602ac1f67d56bbfa4ba"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fa02b3da184ffb7c7f2bb1f2c17bcfb9d40231f8c2d7839122694611f80dbfd"
 dependencies = [
  "lzf",
- "parquet 59.2.0",
+ "parquet",
  "ruzstd",
  "thiserror 2.0.18",
  "turso_core",
@@ -3998,7 +3981,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4148,7 +4131,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4470,9 +4453,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "turso_core"
-version = "0.8.0-pre.13"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a0510a64778a94db770833e5c9ed893134e805fedc8a86399c718cdb61c381b"
+checksum = "4fa832d4ab648bf139f1b18b29bef6d653b18fbd4a77b0e4846c57aaf28c215c"
 dependencies = [
  "aegis",
  "aes",
@@ -4919,7 +4902,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5435,29 +5418,11 @@ checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe 7.2.1",
-]
-
-[[package]]
-name = "zstd"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "057cfd910cfac363a0ada849592624b4c9ff2e10bef504c3433810d78ed96f93"
 dependencies = [
- "zstd-safe 8.1.0",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a3ab4db68cea366acc5c897c7b4d4d1b8994a9cd6e6f841f8964566a419059"
-dependencies = [
- "zstd-sys",
+ "zstd-safe",
 ]
 
 [[package]]

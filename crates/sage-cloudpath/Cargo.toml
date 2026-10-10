@@ -30,11 +30,11 @@ tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
 quick-xml = { version = "0.42.0", features = ["async-tokio"] }
 # Bruker TDF reader (pure Rust, no SQLite C library).
-sage-plus-tdf = { git = "https://github.com/pgarrett-scripps/sage-plus-tdf", rev = "586d06fc3d1cf13900db8602ac1f67d56bbfa4ba", features = ["minitdf"] }
+sage-plus-tdf = { version = "0.2.0", features = ["minitdf"] }
 # Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.
 rusqlite = { version = "0.35", features = ["bundled"] }
 # Thermo RAW reader.
-sage-plus-raw = { git = "https://github.com/pgarrett-scripps/sage-plus-raw", rev = "729608b8f7ebd32ef926934ea22caea9ddc4df2d" }
+sage-plus-raw = "0.1.0"
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
 dnoise-core = "0.5.0"
 rayon = "1.5"
