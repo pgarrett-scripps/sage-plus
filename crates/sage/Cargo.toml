@@ -23,6 +23,13 @@ schemars = "1"
 serde = { version="1.0", features = ["derive"] }
 serde_json = "1"
 smallvec = { version = "1", features = ["union"] }
+mzcore = { version = "0.2.0", optional = true }
+mzannotate = { version = "0.2.0", optional = true }
+
+[features]
+# Scoping probe only (b18/rustyms-scope); off by default.
+rustyms = ["dep:mzcore"]
+rustyms-fragments = ["rustyms", "dep:mzannotate"]
 
 [dev-dependencies]
 quickcheck = "1"

@@ -13,6 +13,9 @@ publish = false
 default = ["mzmlb", "cloud"]
 mzmlb = ["sage-cloudpath/mzmlb"]
 cloud = ["sage-cloudpath/cloud"]
+# Scoping probe only (b18/rustyms-scope).
+rustyms = ["sage-core/rustyms"]
+rustyms-fragments = ["rustyms", "sage-core/rustyms-fragments"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -20,6 +20,8 @@ pub mod ml;
 pub mod modification;
 pub mod motif;
 pub mod peff;
+#[cfg(feature = "rustyms")]
+pub mod rustyms_probe;
 pub mod peptide;
 pub mod polymer;
 pub mod protein_grouping;

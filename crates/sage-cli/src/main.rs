@@ -12,6 +12,18 @@ fn main() -> anyhow::Result<()> {
         .parse_env(env_logger::Env::default().filter_or("SAGE_LOG", "error,sage=info"))
         .init();
 
+    // Scoping probe (b18/rustyms-scope): keeps mzcore linked into the binary.
+    #[cfg(feature = "rustyms")]
+    if let Ok(proforma) = std::env::var("SAGE_RUSTYMS_PROBE") {
+        println!("{}", sage_core::rustyms_probe::probe(&proforma, "Phospho"));
+        #[cfg(feature = "rustyms-fragments")]
+        println!(
+            "b/y fragments: {:?}",
+            sage_core::rustyms_probe::by_fragment_count(&proforma)
+        );
+        return Ok(());
+    }
+
     let matches = Command::new("sage")
         .version(clap::crate_version!())
         .author("Sage Plus maintainers; Sage by Michael Lazear <michaellazear92@gmail.com>")
