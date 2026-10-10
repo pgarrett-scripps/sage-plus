@@ -12,6 +12,8 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 pub use url::Url;
 
 pub mod bruker_formats;
+#[cfg(feature = "mzdeisotope")]
+pub mod deconv;
 pub mod denoise;
 pub mod hash;
 pub mod mgf;

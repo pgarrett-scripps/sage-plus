@@ -153,10 +153,14 @@ pub fn read_mzml(
     signal_to_noise: Option<u8>,
 ) -> Result<Vec<RawSpectrum>, Error> {
     read_and_execute(url, |bf| async move {
-        Ok(crate::mzml::MzMLReader::with_file_id(file_id)
+        #[allow(unused_mut)]
+        let mut spectra = crate::mzml::MzMLReader::with_file_id(file_id)
             .set_signal_to_noise(signal_to_noise)
             .parse(bf)
-            .await?)
+            .await?;
+        #[cfg(feature = "mzdeisotope")]
+        crate::deconv::apply_from_env(&mut spectra);
+        Ok(spectra)
     })
 }
 
