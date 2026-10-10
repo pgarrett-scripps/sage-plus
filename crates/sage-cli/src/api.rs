@@ -17,7 +17,7 @@ pub struct JobOptions {
 impl Default for JobOptions {
     fn default() -> Self {
         Self {
-            parallel: (num_cpus::get() / 2).max(1),
+            parallel: crate::input::default_batch_size(),
             events: EventEmitter::disabled(),
             cancellation: CancellationToken::default(),
             terminate_on_memory_limit: false,

@@ -1111,13 +1111,19 @@ pub fn resolve_threads(cli: Option<usize>, config: Option<usize>) -> Option<usiz
     cli.or(config)
 }
 
+/// Default number of files processed at once: half the available cores, at
+/// least one.
+pub fn default_batch_size() -> usize {
+    (std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) / 2).max(1)
+}
+
 fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
     match batch_size {
         Some(batch_size) => {
             ensure!(batch_size > 0, "`batch_size` must be greater than zero");
             Ok(batch_size)
         }
-        None => Ok((num_cpus::get() / 2).max(1)),
+        None => Ok(default_batch_size()),
     }
 }
 

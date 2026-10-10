@@ -1,10 +1,19 @@
 use async_compression::tokio::bufread::ZlibDecoder;
+use base64::engine::{general_purpose, DecodePaddingMode, GeneralPurpose};
+use base64::Engine;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use sage_core::spectrum::{AcquisitionGroup, Activation, MassAnalyzer, Precursor, Representation};
 use sage_core::{mass::Tolerance, spectrum::RawSpectrum};
 use std::collections::HashMap;
 use tokio::io::{AsyncBufRead, AsyncReadExt};
+
+/// Standard alphabet that accepts padded and unpadded input, as base64 0.13
+/// `decode` did.
+const BASE64: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    general_purpose::PAD.with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// Which tag are we inside?
@@ -466,7 +475,7 @@ impl MzMLReader {
                         if raw.is_empty() || binary_array.is_none() {
                             continue;
                         }
-                        let decoded = base64::decode(raw.as_bytes())?;
+                        let decoded = BASE64.decode(raw.as_bytes())?;
                         let bytes = match compression {
                             false => &decoded,
                             true => {
