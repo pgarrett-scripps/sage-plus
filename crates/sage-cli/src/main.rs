@@ -6,6 +6,9 @@ use sage_cli::input::Input;
 use std::fs::File;
 use std::io::BufWriter;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::default()
         .filter_level(log::LevelFilter::Error)
