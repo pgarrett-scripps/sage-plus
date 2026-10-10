@@ -22,6 +22,9 @@ entries are retained below for provenance.
   `PES[Phospho#g1(0.95)]PT[#g1(0.20)][#g2(0.20)]IS[Phospho#g2(0.85)]K`. Beta 17 put every copy in one
   group, which ProForma 2.0 reads as a single modification, so conforming parsers (mzcore) read those
   peptides one modification light. Single-copy groups are unchanged.
+- Localization output is the same from run to run. Modifications were numbered in hash-map order,
+  so `#g1`/`#g2` in `localized_peptide` and the row order of `results.sage.ptm-sites.parquet` could
+  change between two runs of the same search.
 
 ## [v0.1.0-beta.17] - 2026-10-09
 

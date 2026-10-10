@@ -3382,3 +3382,31 @@ fn unlimited_length_warns_only_without_another_length_bound() {
         assert!(parameters(enzyme).unbounded_length_warning().is_none());
     }
 }
+
+#[test]
+fn localization_rules_come_in_a_fixed_order() {
+    // `variable_mods` is a HashMap; the localizer numbers modifications in
+    // rule order, so the rules must be sorted rather than hash-ordered.
+    let params = serde_json::from_value::<Builder>(serde_json::json!({
+        "variable_mods":{"M":[15.9949],"S":[79.96633],"T":[79.96633],"Y":[79.96633],"K":[42.010565],"^":[42.010565]},
+        "generate_decoys":false,"peptide_min_mass":0
+    }))
+    .unwrap()
+    .make_parameters();
+    let peptide = Peptide::try_from(Digest {
+        sequence: "KMSTYK".into(),
+        protein: "P1".into(),
+        position: Position::Internal,
+        ..Default::default()
+    })
+    .unwrap();
+    let rules = params.localization_rules(&peptide);
+    let keys = rules
+        .iter()
+        .map(|rule| (rule.specificity, rule.definition.clone()))
+        .collect::<Vec<_>>();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted);
+    assert_eq!(rules.len(), 6);
+}

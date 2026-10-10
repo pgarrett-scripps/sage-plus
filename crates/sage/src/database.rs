@@ -823,7 +823,11 @@ impl Parameters {
         &self,
         peptide: &Peptide,
     ) -> Vec<crate::ptm::ResolvedLocalizationRule> {
-        self.variable_mods
+        // `variable_mods` is a HashMap, so sort the rules: the localizer numbers
+        // modifications (ProForma `#g1`, `#g2`, site rows) in rule order, which
+        // must not change from run to run.
+        let mut rules = self
+            .variable_mods
             .iter()
             .flat_map(|(specificity, entries)| {
                 entries.iter().map(move |entry| {
@@ -861,7 +865,13 @@ impl Parameters {
                     }
                 })
             })
-            .collect()
+            .collect::<Vec<_>>();
+        rules.sort_by(|a, b| {
+            a.specificity
+                .cmp(&b.specificity)
+                .then_with(|| a.definition.cmp(&b.definition))
+        });
+        rules
     }
 
     pub fn validate_ptm_library(&self, library: &PtmLibrary) -> Result<(), String> {
