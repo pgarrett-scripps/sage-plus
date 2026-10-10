@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Dependencies: parquet 60 (was 59), mzdata 0.67.4 (was 0.65.5; reads mzMLb input), base64
+  0.22, itertools 0.15, thiserror 2; num_cpus is replaced by the standard library. Results and
+  the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
+  are kept when they come before the target m/z (pwiz Waters files), and a window with no
+  offsets or limits gets correct bounds.
+
 ## [v0.1.0-beta.17] - 2026-10-09
 
 ### Changed

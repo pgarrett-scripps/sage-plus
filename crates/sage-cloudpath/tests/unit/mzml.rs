@@ -46,6 +46,62 @@ async fn reads_fragment_charge_binary_array() -> Result<(), MzMLError> {
 }
 
 #[tokio::test]
+async fn accepts_padded_and_unpadded_base64_arrays() -> Result<(), MzMLError> {
+    // base64 0.13 `decode` ignored padding; keep accepting both forms.
+    let input = r#"
+    <mzML><run><spectrumList count="2">
+      <spectrum id="scan=padded">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000127"/>
+        <cvParam accession="MS:1000285" value="10"/>
+        <binaryDataArrayList count="2">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUA=</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQ==</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+      <spectrum id="scan=unpadded">
+        <cvParam accession="MS:1000511" value="2"/>
+        <cvParam accession="MS:1000127"/>
+        <cvParam accession="MS:1000285" value="10"/>
+        <binaryDataArrayList count="2">
+          <binaryDataArray>
+            <cvParam accession="MS:1000514"/>
+            <cvParam accession="MS:1000523"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAAAAAAeUA</binary>
+          </binaryDataArray>
+          <binaryDataArray>
+            <cvParam accession="MS:1000515"/>
+            <cvParam accession="MS:1000521"/>
+            <cvParam accession="MS:1000576"/>
+            <binary>AAAgQQ</binary>
+          </binaryDataArray>
+        </binaryDataArrayList>
+      </spectrum>
+    </spectrumList></run></mzML>
+    "#;
+
+    let spectra = MzMLReader::with_file_id(0).parse(input.as_bytes()).await?;
+
+    assert_eq!(spectra.len(), 2);
+    for spectrum in &spectra {
+        assert_eq!(spectrum.mz, [400.0]);
+        assert_eq!(spectrum.intensity, [10.0]);
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn resolves_referenceable_param_groups_in_all_supported_scopes() -> Result<(), MzMLError> {
     let input = r#"
     <mzML>

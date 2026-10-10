@@ -19,9 +19,9 @@ cloud = ["dep:object_store"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2"
 async-compression = { version = "0.3", features = ["tokio", "gzip", "zlib"] }
-base64 = "0.13"
+base64 = "0.22"
 bytes = "1.0"
 futures = "0.3"
 log = "0.4.0"
@@ -48,8 +48,8 @@ serde_json = "1.0"
 sha2 = "0.10"
 
 sage-core = { path = "../sage" }
-parquet = { version = "59.2.0", optional = true, default-features = false, features = ["zstd"] }
-mzdata = { version = "0.65.5", optional = true, default-features = false, features = ["mzmlb", "hdf5_static", "zlib"] }
+parquet = { version = "60.0.0", optional = true, default-features = false, features = ["zstd"] }
+mzdata = { version = "0.67.4", optional = true, default-features = false, features = ["mzmlb", "hdf5_static", "zlib"] }
 
 [dev-dependencies]
 tempfile = "3"

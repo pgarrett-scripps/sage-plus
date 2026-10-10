@@ -36,7 +36,6 @@ env_logger = "0.11.11"
 fnv = "1.0"
 log = "0.4.0"
 itoa = "1.0"
-num_cpus = "1.13"
 rayon = "1.5"
 regex = "1.0"
 ryu = "1.0"
@@ -50,7 +49,7 @@ report-builder = "0.1.1"
 
 [dev-dependencies]
 boon = "0.6"
-parquet = { version = "59.2.0", default-features = false, features = ["zstd"] }
+parquet = { version = "60.0.0", default-features = false, features = ["zstd"] }
 
 # malloc_trim (glibc) and getrusage (peak RSS fallback).
 [target.'cfg(unix)'.dependencies]
