@@ -299,7 +299,7 @@ fn main() -> anyhow::Result<()> {
 
     let parallel = input
         .batch_size
-        .unwrap_or_else(|| (num_cpus::get() / 2).max(1));
+        .unwrap_or_else(sage_cli::input::default_batch_size);
     let runner = SageRunner::new(
         input,
         JobOptions {

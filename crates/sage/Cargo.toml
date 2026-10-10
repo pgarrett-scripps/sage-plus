@@ -15,7 +15,7 @@ publish = false
 csv = "1"
 dashmap = { version = "6.2.1", features = ["rayon"] }
 fnv = "1.0"
-itertools = "0.10"
+itertools = "0.15"
 log = "0.4.0"
 rayon = "1.5"
 regex = "1.6"
