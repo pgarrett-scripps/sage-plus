@@ -588,3 +588,132 @@ fn proforma_writes_fully_occupied_sites_plainly() {
         "AAAS[+79.96633]AAA"
     );
 }
+
+/// A non-confident localization of `PHOSPHO` (or `mass`) with the given
+/// `(attachment, position, probability)` candidates; the `copies` most
+/// probable are the best sites.
+fn ambiguous(
+    peptide: &Peptide,
+    mass: f32,
+    copies: usize,
+    sites: &[(crate::ptm_library::Attachment, usize, f32)],
+) -> Localization {
+    let all_sites = sites
+        .iter()
+        .map(|&(attachment, position, probability)| SiteScore {
+            attachment,
+            position,
+            residue: peptide.sequence[position.min(peptide.sequence.len() - 1)],
+            probability,
+        })
+        .collect::<Vec<_>>();
+    let mut best_sites = all_sites.clone();
+    best_sites.sort_by(|a, b| b.probability.total_cmp(&a.probability));
+    best_sites.truncate(copies);
+    best_sites.sort_by_key(|site| site.position);
+    Localization {
+        mods: vec![ModLocalization {
+            mass,
+            label: None,
+            site_count: copies,
+            candidate_sites: all_sites.len(),
+            site_determining_ions: 0,
+            site_determining_matched: 0,
+            delta_score: 0.0,
+            target_decoy_score: 0.0,
+            decoy_winner: false,
+            competition_eligible: true,
+            separating_margin: 0,
+            localization_q_value: 1.0,
+            best_sites,
+            all_sites,
+        }],
+    }
+}
+
+use crate::ptm_library::Attachment::{PeptideNTerm, Residue};
+
+#[test]
+fn proforma_gives_each_ambiguous_copy_its_own_group() {
+    // k = 2 over 3 sites: Sage reported S2 and S4; the best sites are S4 and T6.
+    let mut scored = peptide("AASASATAK");
+    scored.modifications = CompactModifications::from_sparse([(2, PHOSPHO), (4, PHOSPHO)]);
+    let localization = ambiguous(
+        &scored,
+        PHOSPHO,
+        2,
+        &[(Residue, 2, 0.20), (Residue, 4, 0.95), (Residue, 6, 0.85)],
+    );
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AAS[#g1(0.20)][#g2(0.20)]AS[+79.96633#g1(0.95)]AT[+79.96633#g2(0.85)]AK"
+    );
+
+    // k = 2 over 4 sites, best sites S0 and S2; the low-scoring Y6 is still
+    // listed in both groups, a site under 0.005 in neither.
+    let mut scored = peptide("SASATAYAK");
+    scored.modifications = CompactModifications::from_sparse([(4, PHOSPHO), (6, PHOSPHO)]);
+    let localization = ambiguous(
+        &scored,
+        PHOSPHO,
+        2,
+        &[
+            (Residue, 0, 0.60),
+            (Residue, 2, 0.90),
+            (Residue, 4, 0.49),
+            (Residue, 6, 0.01),
+        ],
+    );
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "S[+79.96633#g1(0.60)]AS[+79.96633#g2(0.90)]AT[#g1(0.49)][#g2(0.49)]AY[#g1(0.01)][#g2(0.01)]AK"
+    );
+    let mut localization = localization;
+    localization.mods[0].all_sites[3].probability = 0.001;
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "S[+79.96633#g1(0.60)]AS[+79.96633#g2(0.90)]AT[#g1(0.49)][#g2(0.49)]AYAK"
+    );
+}
+
+#[test]
+fn proforma_single_copy_group_is_unchanged() {
+    // k = 1 over 3 sites keeps the Beta 17 single-group form byte for byte.
+    let mut scored = peptide("AASASATAK");
+    scored.modifications = CompactModifications::from_sparse([(6, PHOSPHO)]);
+    let localization = ambiguous(
+        &scored,
+        PHOSPHO,
+        1,
+        &[(Residue, 2, 0.10), (Residue, 4, 0.80), (Residue, 6, 0.10)],
+    );
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AAS[#g1(0.10)]AS[+79.96633#g1(0.80)]AT[#g1(0.10)]AK"
+    );
+}
+
+#[test]
+fn proforma_terminal_candidates_stay_plain_with_two_copies() {
+    // Candidates include the peptide N-terminus, so no group is written: both
+    // copies move to their best sites and are written plainly.
+    let mass = 42.010565;
+    let mut scored = peptide("AKAKAK");
+    scored.nterm = Some(mass);
+    scored.modifications = CompactModifications::from_sparse([(1, mass)]);
+    let localization = ambiguous(
+        &scored,
+        mass,
+        2,
+        &[
+            (PeptideNTerm, 0, 0.30),
+            (Residue, 1, 0.40),
+            (Residue, 3, 0.90),
+            (Residue, 5, 0.40),
+        ],
+    );
+    assert_eq!(
+        localization.proforma(&scored, 0.01),
+        "AK[+42.010567]AK[+42.010567]AK"
+    );
+}

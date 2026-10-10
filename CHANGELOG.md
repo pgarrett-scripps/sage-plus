@@ -16,6 +16,13 @@ entries are retained below for provenance.
   are kept when they come before the target m/z (pwiz Waters files), and a window with no
   offsets or limits gets correct bounds.
 
+### Fixed
+- `localized_peptide` gives each copy of a multi-copy ambiguous modification its own ProForma group
+  (`#g1`, `#g2`, ...), with every other candidate tagged in each group:
+  `PES[Phospho#g1(0.95)]PT[#g1(0.20)][#g2(0.20)]IS[Phospho#g2(0.85)]K`. Beta 17 put every copy in one
+  group, which ProForma 2.0 reads as a single modification, so conforming parsers (mzcore) read those
+  peptides one modification light. Single-copy groups are unchanged.
+
 ## [v0.1.0-beta.17] - 2026-10-09
 
 ### Changed

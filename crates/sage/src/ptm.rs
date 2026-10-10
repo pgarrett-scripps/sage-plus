@@ -204,10 +204,21 @@ impl Localization {
     /// with more candidates than copies is written as a scored position group
     /// (ProForma 2.0, LeDuc et al. 2022): the modification on each best site
     /// with its label and score, `S[Phospho#g1(0.90)]`, and every other
-    /// candidate scoring at least 0.005 as `T[#g1(0.09)]`. With `k` copies the
-    /// group names `k` sites. Scores are the site probabilities, rounded to two
-    /// decimals. Groups are not written for terminal candidates, which
-    /// ProForma position groups do not cover; those stay on their best sites.
+    /// candidate scoring at least 0.005 as `T[#g1(0.09)]`. Scores are the
+    /// site probabilities, rounded to two decimals. Groups are not written for
+    /// terminal candidates, which ProForma position groups do not cover; those
+    /// stay on their best sites.
+    ///
+    /// A ProForma group label stands for one modification instance with one
+    /// preferred location (section 4.4.2), so `k` copies get `k` groups, one
+    /// per best site in sequence order: `S[Phospho#g1(0.95)]` and
+    /// `S[Phospho#g2(0.90)]`. Every other candidate could hold any copy, so it
+    /// carries one tag per group, `T[#g1(0.15)][#g2(0.15)]` (several bracketed
+    /// tags on one residue are allowed by section 4.5). Each tag shows the
+    /// site's own marginal probability, so the per-site probabilities read the
+    /// same from any group and the full mass is written once per copy. A best
+    /// site is not listed in the other copies' groups: one residue holds at
+    /// most one copy. One copy gives the single-group output unchanged.
     pub fn proforma(&self, peptide: &Peptide, q_cutoff: f32) -> String {
         let length = peptide.sequence.len();
         let encode = |site: &SiteScore| match site.attachment {
@@ -246,14 +257,21 @@ impl Localization {
             if confident || candidates.iter().any(|&index| index >= length) {
                 continue;
             }
-            group += 1;
+            // One group per copy, numbered by best site in sequence order.
+            let mut copies = chosen.clone();
+            copies.sort_unstable();
+            copies.dedup();
+            let first = group + 1;
+            group += copies.len();
             for (site, &index) in modification.all_sites.iter().zip(&candidates) {
-                let label = format!("#g{group}({:.2})", site.probability);
+                let score = format!("({:.2})", site.probability);
                 let entry = annotations.entry(index).or_default();
-                if chosen.contains(&index) {
-                    entry.0 = Some(label);
+                if let Some(copy) = copies.iter().position(|&c| c == index) {
+                    entry.0 = Some(format!("#g{}{score}", first + copy));
                 } else if site.probability >= 0.005 {
-                    entry.1.push(format!("[{label}]"));
+                    entry
+                        .1
+                        .extend((first..=group).map(|label| format!("[#g{label}{score}]")));
                 }
             }
         }
