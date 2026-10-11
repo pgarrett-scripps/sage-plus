@@ -1,7 +1,9 @@
 {
   "database": {
+    "ion_kinds": ["b", "y"],
     "bucket_size": 16384,
     "enzyme": {
+      "semi_enzymatic": false,
       "missed_cleavages": 0,
       "cleave_at": "$",
       "restrict": "",
@@ -31,7 +33,6 @@
     "psm_q_value": 0.2
   },
   "max_memory_gb": 8.0,
-  "min_free_memory_gb": 8.0,
   "batch_size": 1,
   "mzml_paths": [
     "data/silac-k6r6/HEK_SILAC-K6R6.mzML"

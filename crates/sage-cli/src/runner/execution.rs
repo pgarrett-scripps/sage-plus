@@ -43,6 +43,32 @@ impl Runner {
         }
     }
 
+    /// Explain where `bruker_config.denoise` has no effect: it denoises MS1
+    /// frames of TDF inputs, which are read only for LFQ.
+    pub(super) fn denoise_warnings(&self) -> Vec<String> {
+        if !self.parameters.bruker_config.denoise.enabled {
+            return Vec::new();
+        }
+        let mut warnings = Vec::new();
+        let others = self
+            .parameters
+            .mzml_paths
+            .iter()
+            .filter(|path| !matches!(FileFormat::from(path.as_ref()), FileFormat::TDF))
+            .count();
+        if others > 0 {
+            warnings.push(format!(
+                "bruker_config.denoise only applies to Bruker TDF input; ignoring it for {others} other input file(s)"
+            ));
+        }
+        if !self.requires_ms1() {
+            warnings.push(
+                "bruker_config.denoise denoises MS1 frames, which are only read for LFQ; it has no effect without `quant.lfq`".into(),
+            );
+        }
+        warnings
+    }
+
     pub(super) fn scorer(&self) -> Scorer<'_> {
         Scorer {
             db: &self.database,
@@ -65,16 +91,15 @@ impl Runner {
         }
     }
 
-    pub fn run(self, parallel: usize) -> anyhow::Result<telemetry::Telemetry> {
+    pub fn run(self, parallel: usize) -> anyhow::Result<RunSummary> {
         self.run_with_summary(parallel)
-            .map(|(telemetry, _summary)| telemetry)
     }
 
-    pub fn run_with_summary(
-        mut self,
-        parallel: usize,
-    ) -> anyhow::Result<(telemetry::Telemetry, RunSummary)> {
+    pub fn run_with_summary(mut self, parallel: usize) -> anyhow::Result<RunSummary> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        for warning in self.denoise_warnings() {
+            log::warn!("{warning}");
+        }
         self.cancellation.check()?;
         self.events.check()?;
         //Collect all results into a single container
@@ -302,6 +327,11 @@ impl Runner {
                 });
 
                 log::info!("discovered {} target MS1 peaks at 5% FDR", q_precursor);
+                let q_extraction = sage_core::fdr::extraction_q_values(&mut areas);
+                log::info!(
+                    "{} target LFQ precursor/file rows pass 1% extraction FDR",
+                    q_extraction
+                );
                 Some(areas)
             } else {
                 None
@@ -316,6 +346,12 @@ impl Runner {
         }
         let lfq_features = areas.as_ref().map(|areas| areas.len()).unwrap_or_default();
         let tmt_features = outputs.quant.len();
+        let tmt_channels = match &self.parameters.quant.tmt {
+            Some(isobaric) if !outputs.quant.is_empty() => {
+                sage_core::tmt::summarize_channels(&outputs.quant, &isobaric.headers())
+            }
+            _ => Vec::new(),
+        };
         self.cancellation.check()?;
         self.events.check()?;
 
@@ -332,6 +368,8 @@ impl Runner {
             "discovered {} target protein groups (supported by proteotypic peptides only) at 1% FDR",
             q_protein_group
         );
+        let recommended_tolerances = ToleranceRecommendation::from_features(&outputs.features);
+        log::info!("{}", recommended_tolerances.log_line());
         log::trace!("writing outputs");
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
@@ -347,6 +385,13 @@ impl Runner {
             output_psm_q_value
         );
 
+        let provenance = crate::provenance::Provenance::collect(
+            &self.parameters,
+            &self.database_parameters,
+            &self.database,
+        );
+        self.parquet_provenance = provenance.parquet_metadata();
+
         let bytes = sage_cloudpath::parquet::serialize_features(
             &output_features,
             &outputs.quant,
@@ -354,16 +399,32 @@ impl Runner {
             &filenames,
             &self.database,
             output_psm_q_value,
+            &self.parquet_provenance,
+            self.parameters.immonium.as_ref(),
+            self.parameters
+                .ptm_localization
+                .enabled
+                .then_some(self.parameters.ptm_localization.localization_q_value),
         )?;
 
         let path = self.make_path("results.sage.parquet");
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         self.parameters.output_paths.push(path);
 
+        let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let polymers = self.polymer_stats(&filenames);
+        let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
+        if let Some(path) = self.write_diagnostic_ions(&filenames)? {
+            self.parameters.output_paths.push(path);
+        }
+        let path = self.write_digestion(&digestion)?;
+        self.parameters.output_paths.push(path);
+
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
                 &output_features,
                 output_psm_q_value,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("matched_fragments.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -378,6 +439,7 @@ impl Runner {
             let bytes = sage_cloudpath::parquet::serialize_spectral_library(
                 &library_entries,
                 &self.parameters.spectral_library,
+                &self.parquet_provenance,
             )?;
             let path = self.make_path("spectral_library.sage.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
@@ -406,24 +468,46 @@ impl Runner {
         }
 
         if let Some(areas) = &areas {
-            let bytes = sage_cloudpath::parquet::serialize_lfq(areas, &filenames, &self.database)?;
+            let bytes = sage_cloudpath::parquet::serialize_lfq(
+                areas,
+                &filenames,
+                &self.database,
+                &self.parquet_provenance,
+                if self.parameters.quant.lfq_settings.recenter_on_apex {
+                    "elution_apex"
+                } else {
+                    "identification_rt"
+                },
+            )?;
 
             let path = self.make_path("lfq.parquet");
             sage_cloudpath::write_bytes_sync(&path, bytes)?;
             self.parameters.output_paths.push(path);
         }
 
-        // PTM site reports follow the selected main output format.
+        // PTM site reports follow the selected main output format. Site-level
+        // FDR is estimated once, on the final site set, after every PSM and
+        // localization filter has been applied to targets and decoys alike.
+        let mut site_stats = SiteFdrRunStats::default();
         if self.parameters.ptm_localization.enabled {
+            let site_rows = self.collect_site_rows(&outputs.features, &filenames);
+            let protein_sites = artifacts::aggregate_protein_sites(&site_rows);
+            site_stats = SiteFdrRunStats::from_sites(&protein_sites);
+            log::info!(
+                "discovered {} target protein sites at 1% site FDR ({} target and {} decoy sites competed)",
+                site_stats.protein_sites_at_one_percent_fdr,
+                site_stats.target_protein_sites,
+                site_stats.decoy_protein_sites,
+            );
             self.parameters
                 .output_paths
-                .push(self.write_ptm_sites(&outputs.features, &filenames)?);
+                .push(self.write_ptm_sites(&site_rows, &protein_sites)?);
             self.parameters
                 .output_paths
-                .push(self.write_protein_sites(&outputs.features, &filenames)?);
+                .push(self.write_protein_sites(&protein_sites)?);
             self.parameters
                 .output_paths
-                .extend(self.write_ptm_library(&outputs.features, &filenames)?);
+                .extend(self.write_ptm_library(&site_rows)?);
         }
 
         // Write percolator input file if requested
@@ -443,10 +527,8 @@ impl Runner {
         }
 
         if let Some(glyco) = &self.glyco {
-            let bytes = glyco.finish(&filenames)?;
-            let path = self.make_path(crate::glyco::FILE_NAME);
-            sage_cloudpath::write_bytes_sync(&path, bytes)?;
-            self.parameters.output_paths.push(path);
+            let bytes = glyco.finish(&filenames, &self.parquet_provenance)?;
+            self.write_sidecar(crate::glyco::FILE_NAME, bytes)?;
         }
 
         let path = self.make_path("results.json");
@@ -460,6 +542,14 @@ impl Runner {
 
         let run_time = (Instant::now() - self.start).as_secs();
         info!("finished in {}s", run_time);
+        let peak_rss_bytes = crate::memory::peak_rss_bytes();
+        match peak_rss_bytes {
+            Some(bytes) => info!(
+                "peak memory (RSS): {:.2} GiB",
+                bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+            ),
+            None => info!("peak memory (RSS): unavailable on this platform"),
+        }
         info!("cite: \"Sage: An Open-Source Tool for Fast Proteomics Searching and Quantification at Scale\" https://doi.org/10.1021/acs.jproteome.3c00486");
 
         let summary_path = self.make_path("run-summary.json");
@@ -502,12 +592,14 @@ impl Runner {
         }
         let summary = RunSummary {
             schema_version: 9,
+            recommended_tolerances,
             warnings: self.events.warnings(),
             provenance: RunProvenance {
                 software_version: self.parameters.version.clone(),
                 mzmlb_enabled: cfg!(feature = "mzmlb"),
                 input_identity_mode: "path_size_mtime".into(),
                 inputs: input_identities,
+                metadata: Some(provenance),
             },
             runtime_secs: run_time,
             files: self.parameters.mzml_paths.len(),
@@ -522,6 +614,10 @@ impl Runner {
                 localized_psms,
                 psm_q_value: self.parameters.ptm_localization.psm_q_value,
                 localization_q_value: self.parameters.ptm_localization.localization_q_value,
+                min_separating_margin: self.parameters.ptm_localization.min_separating_margin,
+                target_protein_sites: site_stats.target_protein_sites,
+                decoy_protein_sites: site_stats.decoy_protein_sites,
+                protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,
             },
             models: ModelRunStats {
                 mass_alignment_applied: mass_alignment_files
@@ -560,6 +656,7 @@ impl Runner {
                     .as_ref()
                     .map(|tmt| format!("{tmt:?}").to_lowercase()),
                 tmt_features,
+                tmt_channels,
                 ms1_label_channels: self.database.label_channels.len(),
                 ms1_label_reference: self.database.label_reference.as_deref().map(str::to_owned),
             },
@@ -568,7 +665,6 @@ impl Runner {
                 parallelism: parallel,
                 rayon_threads: rayon::current_num_threads(),
                 max_memory_gb: self.parameters.max_memory_gb,
-                min_free_memory_gb: self.parameters.min_free_memory_gb,
             },
             inputs: input_stats,
             modifications: ModificationRunStats {
@@ -619,7 +715,13 @@ impl Runner {
                     })
                     .collect(),
             },
+            qc: super::qc::QcRunStats {
+                digestion,
+                polymers,
+                diagnostic_ions,
+            },
             output_paths,
+            peak_rss_bytes,
         };
         self.cancellation.check()?;
         self.events.check()?;
@@ -632,19 +734,12 @@ impl Runner {
             });
         }
 
-        let telemetry = telemetry::Telemetry::new(
-            self.parameters,
-            self.database.peptides.len(),
-            self.database.fragments.len(),
-            run_time,
-        );
-
         self.events.emit(EventKind::JobCompleted {
             runtime_secs: run_time,
             outputs: summary.output_paths.len(),
         });
         self.events.check()?;
 
-        Ok((telemetry, summary))
+        Ok(summary)
     }
 }

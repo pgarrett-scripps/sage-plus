@@ -2,10 +2,21 @@
 
 ## PSM output
 
+Directions: "larger is better" or "smaller is better". Columns not listed here are descriptive;
+DOCS.md ("Interpreting Sage Output") gives the direction for every PSM column.
+
 - `hyperscore`: X!Tandem-style fragment-match score for the candidate PSM; larger is better.
+- `delta_next`: hyperscore minus the next-ranked candidate's hyperscore; larger is better.
+- `delta_best`: best candidate's hyperscore minus this candidate's, 0 for rank 1; smaller is better.
+- `matched_peaks`, `longest_b`, `longest_y`, `longest_y_pct`, `matched_intensity_pct`, `ms2_intensity`: fragment-match evidence; larger is better. `longest_y_pct` is a fraction from 0 to 1. `ms2_intensity` is the summed intensity of matched fragments.
+- `matched_loss_peaks`, `loss_intensity_pct`: nullable; null unless `database.fragment_losses` is configured (results schema v3/v4, before the `immonium_*` columns). The number of cleavage and charge pairs whose generic-loss form (for example b-H2O or y-NH3) matched a peak, and the percent of MS2 intensity those loss peaks carry. They do not count toward `matched_peaks`, `matched_intensity_pct` or the hyperscore; they are separate rescoring features. Larger is better.
+- `precursor_ppm`, `fragment_ppm`, `calibrated_precursor_ppm`, `calibrated_fragment_ppm`: mass errors; closer to zero is better.
+- `delta_rt_model`, `delta_mobility`: absolute differences from the predicted value; smaller is better.
+- `poisson`: log10 of the Poisson probability mass of the PSM's matched-peak count, with the expected count set to the mean over the spectrum's scored candidates. Always 0 or negative. It is a point probability, not a tail p-value. For top-ranked PSMs, which match more peaks than the mean, smaller (more negative) is better.
 - `sage_discriminant_score`: linear-discriminant score used to order PSMs for spectrum-level target-decoy competition; larger is better.
-- `posterior_error`: estimated local false-identification probability for the PSM; smaller is better.
-- `spectrum_q`, `peptide_q`, `protein_q`, `protein_group_q`: monotonic minimum estimated false-discovery rates at the named aggregation level; smaller is better.
+- `posterior_error`: log10 of the estimated posterior error probability (local false-identification probability) for the PSM. Always 0 or negative; -324 marks a probability that underflows to zero. Smaller is better.
+- `spectrum_q`, `peptide_q`, `protein_q`, `protein_group_q`: monotonic minimum estimated false-discovery rates at the named aggregation level; smaller is better. `protein_q` and `protein_group_q` use only peptides unique to one protein or one group; shared peptides are assigned 1.
+- `spectral_angle`, `explained_library_intensity`, `explained_query_intensity` in PSM output: retained for schema compatibility and always 0.
 
 ## LFQ output
 
@@ -15,7 +26,7 @@
 - `intensity`: integrated MS1 signal for the precursor/file row. Null means no positive finite signal was integrated; zero is not used as a missing-value sentinel.
 - `ms2_confirmed`: whether the same precursor has an accepted target PSM in that acquisition file at `lfq_settings.peptide_q_value`. This is direct-identification evidence, not a statement that a different LFQ algorithm was used. Every LFQ intensity is produced by the same cross-run feature-tracing workflow.
 
-## LFQ file evidence in schemas 3 and 4
+## LFQ file evidence in schemas 3 to 6
 
 - `ms2_confirmed_strict`: direct target evidence passing both PSM and peptide q-values at `lfq_settings.peptide_q_value`. The original `ms2_confirmed` field continues to require only peptide acceptance.
 - `file_spectral_angle`: isotope agreement in this file at the selected shared apex.
@@ -24,4 +35,8 @@
 - `file_score`: experimental ranking score combining isotope agreement, trace similarity and warp proximity. It is not a probability or q-value and is not used to filter output.
 - `transfer_candidate`: MBR is enabled and the underlying target precursor lacks strict direct evidence in this file. Shifted decoys use the underlying target's eligibility. Null indicates no integrated signal.
 
-All file diagnostics are null when intensity is null. Metadata identifies the precursor q-value scope and marks the file score as experimental and uncalibrated. The exact score definition and development validation are documented in `benchmarks/SCIENTIFIC_HARDENING.md`.
+- `extraction_q_value` (schemas 5 and 6): target-decoy q-value of this precursor/file extraction, computed for every target row with an integrated signal, MS2-backed rows and transfers alike. Each target precursor's shifted decoy is evaluated at the target's own peak (same apex, integration window and reference trace), with the same per-file warp search towards that reference; the resulting paired decoy rows compete with target rows by `file_score` in one pool across files, with cumulative counts, a +1 correction and monotonic q-values. Decoy precursor rows are null. It does not replace the precursor-level `q_value`, is not used to filter output, and is not calibrated for transfers (see `benchmarks/archive/SCIENTIFIC_HARDENING.md`).
+
+- `apex_rt`, `peak_start_rt`, `peak_end_rt`, `fwhm`, `id_apex_offset` (schemas 7 and 8): peak geometry in the file's own RT units (minutes). `apex_rt` is the selected apex in this file after its local warp, `peak_start_rt` and `peak_end_rt` the first and last integrated points, `fwhm` the full width at half maximum of the file's trace (null when it does not fall to half height inside the window), and `id_apex_offset` the RT of the file's best accepted PSM minus `apex_rt` (null without one). Consensus positions are mapped back to each file with the inverse of its RT alignment. The Parquet metadata key `sage.lfq.peak_center` is `identification_rt` or `elution_apex` (`lfq_settings.recenter_on_apex`).
+
+All file diagnostics are null when intensity is null. Metadata identifies the precursor q-value scope and marks the file score as experimental and uncalibrated. The exact score definition and development validation are documented in `benchmarks/archive/SCIENTIFIC_HARDENING.md`.

@@ -107,7 +107,11 @@ mod imp {
         }
 
         /// Run glyco FDR and serialize `glyco.sage.parquet`.
-        pub fn finish(&self, filenames: &[String]) -> anyhow::Result<Vec<u8>> {
+        pub fn finish(
+            &self,
+            filenames: &[String],
+            provenance: &[(String, String)],
+        ) -> anyhow::Result<Vec<u8>> {
             let start = Instant::now();
             let (candidates, counts, elapsed) =
                 std::mem::take(&mut *self.candidates.lock().expect("glyco candidates lock"));
@@ -148,6 +152,7 @@ mod imp {
                 &self.search.db,
                 &self.search.library,
                 filenames,
+                provenance,
             )?;
             log::debug!("glyco: FDR and output in {:#?}", start.elapsed());
             Ok(bytes)
@@ -178,7 +183,7 @@ mod imp {
             match *self {}
         }
 
-        pub fn finish(&self, _: &[String]) -> anyhow::Result<Vec<u8>> {
+        pub fn finish(&self, _: &[String], _: &[(String, String)]) -> anyhow::Result<Vec<u8>> {
             match *self {}
         }
     }

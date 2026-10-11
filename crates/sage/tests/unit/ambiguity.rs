@@ -102,15 +102,15 @@ fn equal_mass_labels_keep_their_site_specific_names() {
     let builder: crate::database::Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "K": {
+            "Lys6": {
                 "mass": 0.0,
-                "name": "Lys6",
-                "channel_offsets": {"light": 0.0, "heavy": 6.020129}
+                "channel_offsets": {"light": 0.0, "heavy": 6.020129},
+                "sites": ["K"]
             },
-            "R": {
+            "Arg6": {
                 "mass": 0.0,
-                "name": "Arg6",
-                "channel_offsets": {"light": 0.0, "heavy": 6.020129}
+                "channel_offsets": {"light": 0.0, "heavy": 6.020129},
+                "sites": ["R"]
             }
         }
     }))

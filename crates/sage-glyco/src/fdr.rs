@@ -545,10 +545,17 @@ fn fit(rows: &[[f64; PEPTIDE_FEATURES]], decoy: &[bool]) -> Option<(Discriminant
         (1e-2, "lda_ridge_1e-2"),
         (1e-1, "lda_ridge_1e-1"),
     ] {
-        let Some(lda) =
-            LinearDiscriminantAnalysis::train_regularized(rows, decoy, standardize, regularization)
-        else {
-            continue;
+        let lda = match LinearDiscriminantAnalysis::train_regularized(
+            rows,
+            decoy,
+            standardize,
+            regularization,
+        ) {
+            Ok(lda) => lda,
+            Err(failure) => {
+                log::debug!("glyco: peptide model `{name}` failed: {failure}");
+                continue;
+            }
         };
         if rows
             .iter()

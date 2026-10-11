@@ -15,7 +15,7 @@ fn result(index: usize) -> SageResults {
             file_id: index,
             occurrence: 0,
             ion_injection_time: index as f32,
-            peaks: vec![index as f32],
+            peaks: vec![Some(index as f32)],
         }],
         repeated_spectrum_psms: HashMap::from([(index, index + 1)]),
     }
@@ -97,5 +97,28 @@ fn existing_artifacts_require_explicit_overwrite_and_unrelated_files_survive() {
         std::fs::read_to_string(path.join("notes.md")).unwrap(),
         "user notes"
     );
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn stale_sidecar_outputs_block_a_fresh_run_and_clear_on_overwrite() {
+    let path = std::env::temp_dir().join(format!(
+        "sage-sidecar-overwrite-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).unwrap();
+    for name in SIDECAR_OUTPUTS {
+        std::fs::write(path.join(name), "old sidecar").unwrap();
+    }
+    let url = sage_cloudpath::Url::from_directory_path(&path).unwrap();
+    assert!(super::prepare_local_directory(&url, false).is_err());
+    super::prepare_local_directory(&url, true).unwrap();
+    for name in SIDECAR_OUTPUTS {
+        assert!(!path.join(name).exists(), "{name} survived --overwrite");
+    }
     std::fs::remove_dir_all(path).unwrap();
 }

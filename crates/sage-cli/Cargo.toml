@@ -3,15 +3,16 @@ name = "sage-cli"
 version.workspace = true
 authors = ["Michael Lazear <michaellazear92@gmail.com"]
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.97"
 description = "A very fast proteomics database search tool"
 readme = "README.md"
 license = "MIT"
 publish = false
 
 [features]
-default = ["mzmlb"]
+default = ["mzmlb", "cloud"]
 mzmlb = ["sage-cloudpath/mzmlb"]
+cloud = ["sage-cloudpath/cloud"]
 # Experimental intact N-glycopeptide search (`"glyco": {...}` in the config).
 glyco = ["dep:sage-glyco"]
 
@@ -27,6 +28,7 @@ path = "src/main.rs"
 
 [dependencies]
 sage-core = { path = "../sage" }
+sage-dia = { path = "../sage-dia" }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 sage-glyco = { path = "../sage-glyco", optional = true }
 
@@ -37,17 +39,21 @@ env_logger = "0.11.11"
 fnv = "1.0"
 log = "0.4.0"
 itoa = "1.0"
-num_cpus = "1.13"
 rayon = "1.5"
 regex = "1.0"
 ryu = "1.0"
 schemars = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sysinfo = "0.29"
+sysinfo = "0.39"
 url = "2.0"
 maud = "0.27.0"
 report-builder = "0.1.1"
 
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+[dev-dependencies]
+boon = "0.6"
+parquet = { version = "60.0.0", default-features = false, features = ["zstd"] }
+
+# malloc_trim (glibc) and getrusage (peak RSS fallback).
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"

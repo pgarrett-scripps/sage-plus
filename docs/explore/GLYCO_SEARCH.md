@@ -1,7 +1,8 @@
 # Intact glycopeptide search: design exploration
 
 Status: milestone 1 is implemented on branch `feat/glyco` as the opt-in `glyco` Cargo
-feature (section 7). Nothing here is released. Based on `release/beta9` at `0ebb881`.
+feature (section 7). Nothing here is released. Branched from `release/beta9` at `0ebb881`;
+caught up with main at `cbc6969` (Beta 17 plus unreleased work) on 2026-10-11 (section 17).
 
 The README roadmap already lists "Glycopeptide search ... builds on mass offsets,
 neutral losses, and motif modification sites". This document checks that claim against
@@ -827,9 +828,8 @@ consistency for its long high-mannose chains), not candidate choice.
 
 ### Output path
 
-PR #49 adds `Runner::write_sidecar` for per-feature output files. When it lands on main,
-`glyco.sage.parquet` should be written through it instead of the glyco-specific path in
-`sage-cli`.
+PR #49 adds `Runner::write_sidecar` for per-feature output files. Since the catch-up with
+main (section 17), `glyco.sage.parquet` is written through it.
 
 ## 14. Milestone 8: Hex-ladder and sibling evidence (2026-09-25)
 
@@ -1012,6 +1012,73 @@ the gate intact, or fail it:
 
 The next yeast gain probably needs new spectrum evidence, not more features from the
 same Y-ion and sibling counts.
+
+## 17. Caught up with main `cbc6969`, 2026-10-11
+
+`origin/main` (Beta 10 to Beta 17 and the unreleased work after it) was merged into
+`feat/glyco`, not rebased.
+
+### What changed in the glyco code
+
+- `glyco.sage.parquet` goes through `Runner::write_sidecar` (it was already listed in
+  `SIDECAR_OUTPUTS`), so `--overwrite` clears it and it is listed in `output_paths`.
+- The glyco Parquet footer carries the run provenance that main adds to every Parquet
+  output (Beta 13). The schema stays `glyco` v1, experimental.
+- `sage-glyco` uses parquet 60 like the rest of the workspace.
+- `LinearDiscriminantAnalysis::train_regularized` now returns `Result`. The ridge
+  fallback is unchanged and logs each failed fit at debug level.
+- Main's database preflight replaced the branch's copy; the glyco index is still built
+  before the main index. `glyco` is exempt from the `full` preset test, since only
+  `glyco` builds accept it.
+- Configs must now state `database.ion_kinds` and the enzyme's `cleave_at`, `restrict`,
+  `missed_cleavages` and `semi_enzymatic` (Beta 16). The benchmark configs use
+  `["b", "y"]`, `"KR"`, `""`, 2 and false, which is what the beta.8 builds used.
+
+### Re-run
+
+Fast-release build of the merge, same files and glyco settings as section 16. `old`
+sets `clip_n_term_met` and `merge_isoleucine_leucine` to false (the beta.8 behaviour);
+`new` uses main's defaults (both on). Configs and outputs are in
+`/mnt/data1/explore-data/glyco/runs/catchup/`. Wall times were measured with another
+agent's builds running and are not comparable.
+
+| run | yeast | non-HM | yeast pep-q targets | yeast mouse-protein hits | mouse (plain) | mouse+pombe | pombe hits (FDP) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| M9 release (section 16) | 1,367 | 2.8% | 1,930 | 23 | 9,305 | 9,021 | 12 (0.6%) |
+| merge, `old` | 1,586 | 9.7% | 2,278 | 36 | 9,305 | 9,021 | 12 (0.6%) |
+| merge, `new` (defaults) | 1,578 | 9.7% | 2,280 | 33 | 9,328 | 9,079 | 14 (0.7%) |
+| merge, `old`, M9 scans only | 1,359 | 3.2% | 1,942 | 26 | | | |
+| merge, `new`, M9 scans only | 1,354 | 3.2% | 1,947 | 24 | | | |
+
+1. **The glyco code is unchanged by the merge.** With the beta.8 database settings, both
+   mouse searches reproduce M9 exactly (9,305 glycoPSMs; 9,021 with 12 pombe hits).
+2. **Yeast changes because the Thermo reader changed, not glyco.** Beta 17's own
+   reader (`sage-plus-raw`) finds a precursor m/z for the 10,662 yeast MS2 scans that
+   OpenTFRaw dropped ("no plausible precursor m/z"). Glyco now sees 70,271 MS2 spectra
+   instead of 59,609. On the scans M9 already searched, the result is within noise
+   (1,359 against 1,367; 26 against 23 mouse-protein hits). The recovered scans add 227
+   glycoPSMs, but 49% of them are non-high-mannose and 10 hit mouse proteins. Their
+   explanations need a nonzero isotope error in 70% of cases (18% for the other scans),
+   an NH4 adduct in 70% (36%), and have a median 3.8 ppm glycan error (1.1 ppm). Their
+   precursor m/z is probably the isolation target rather than a monoisotopic peak, and
+   the glyco explainer fits a wrong composition through isotope and adduct freedom.
+   The mouse file had no dropped scans, so mouse is unaffected.
+3. **Met clipping and the I/L merge do not hurt glyco.** `new` against `old`: yeast
+   −8 and 3 fewer mouse-protein hits, plain mouse +23, mouse+pombe +58 with 2 more
+   pombe hits. All are within the ±9 yeast noise floor or the 0.1-point FDP noise seen
+   in earlier milestones. The glyco configs therefore keep main's defaults.
+4. **Prefilter.** These configs do not use the prefilter, so the Beta 11 change of
+   `prefilter_min_matched_peaks` to 4 does not apply. The glyco index never used it.
+
+Plain non-glyco yeast search, for reference: 8,009 PSMs at 1% (7,940 at M9), again
+from the recovered scans.
+
+### Open issue from the re-run
+
+The whole-file yeast gate (non-HM ≤ 2.8%) now fails because of the recovered scans.
+Glyco needs to know when a precursor m/z is the isolation target, not a selected
+monoisotopic peak. It could then restrict those spectra to isotope error 0 and no
+adducts, or fit them as their own FDR subgroup.
 
 ## Appendix: code and measurements
 

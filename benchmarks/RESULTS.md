@@ -144,9 +144,9 @@ checksums and PSM counts across all three trials.
 ## Integrated compact database indexes
 
 Target peptides share immutable source-protein storage where possible, as documented in
-[PEPTIDE_INDEX_EXPERIMENT.md](PEPTIDE_INDEX_EXPERIMENT.md). The preliminary fragment index stores
+[PEPTIDE_INDEX_EXPERIMENT.md](archive/PEPTIDE_INDEX_EXPERIMENT.md). The preliminary fragment index stores
 lossless six-byte records and caps every search bucket at `database.bucket_size`, as documented in
-[FRAGMENT_INDEX_EXPERIMENT.md](FRAGMENT_INDEX_EXPERIMENT.md).
+[FRAGMENT_INDEX_EXPERIMENT.md](archive/FRAGMENT_INDEX_EXPERIMENT.md).
 
 ## Raw local reports
 

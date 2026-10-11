@@ -1,8 +1,8 @@
 use super::*;
-use opentfraw::{PrecursorInfo, ScanMode, SpectrumRecord};
+use sage_plus_raw::{PrecursorInfo, ScanMode, SpectrumRecord};
 
 #[test]
-fn converts_open_tf_raw_record() {
+fn converts_raw_record() {
     let record = SpectrumRecord {
         index: 41,
         scan_number: 42,
@@ -11,7 +11,7 @@ fn converts_open_tf_raw_record() {
         is_dia: false,
         is_wideband: false,
         polarity: None,
-        // OpenTFRaw retains the nominal instrument mode even when asked
+        // The reader retains the nominal instrument mode even when asked
         // to return the centroid list.
         scan_mode: Some(ScanMode::Profile),
         filter: None,
@@ -33,6 +33,7 @@ fn converts_open_tf_raw_record() {
         }),
         mz: vec![100.1, 200.2],
         intensity: vec![10.0, 20.0],
+        dropped_peaks: 0,
     };
 
     let spectrum = ThermoRawReader::with_file_id(7).convert(record);
@@ -77,9 +78,10 @@ fn implausible_precursor_mz_is_not_searched() {
         }),
         mz: vec![200.0],
         intensity: vec![1.0],
+        dropped_peaks: 0,
     };
     let reader = ThermoRawReader::with_file_id(0);
-    // Misdecoded events can carry denormal precursor m/z values.
+    // A denormal precursor m/z is not searched.
     assert!(reader.convert(record(2.1e-314, None)).precursors.is_empty());
     // A plausible isolation target is used when the selected m/z is not.
     let spectrum = reader.convert(record(0.0, Some(810.16)));
@@ -140,39 +142,34 @@ fn record(scan_number: u32, ms_level: u32) -> SpectrumRecord {
         precursor: None,
         mz: Vec::new(),
         intensity: Vec::new(),
+        dropped_peaks: 0,
     }
 }
 
 #[test]
-fn trailer_levels_follow_master_scans() {
-    // MS1, MS2 of scan 1, MS3 of scan 2, MS2 of scan 1, missing trailer,
-    // and a master that is not an earlier scan.
-    let masters = [Some(0), Some(1), Some(2), Some(1), None, Some(9)];
+fn undecodable_scans_are_skipped() {
+    let results = vec![
+        Ok(record(1, 1)),
+        Err(sage_plus_raw::Error::CorruptData("scan 2")),
+        Ok(record(3, 2)),
+        Err(sage_plus_raw::Error::CorruptData("scan 4")),
+    ];
+    let (records, skipped) = decoded_scans(4, results.into_iter());
     assert_eq!(
-        trailer_levels(1, &masters),
-        vec![Some(1), Some(2), Some(3), Some(2), None, None]
+        records.iter().map(|r| r.scan_number).collect::<Vec<_>>(),
+        vec![1, 3]
     );
+    let (failed, error) = skipped.unwrap();
+    assert_eq!(failed, 2);
+    assert_eq!(error.to_string(), "corrupt data: scan 2");
+
+    let (records, skipped) = decoded_scans(1, std::iter::once(Ok(record(1, 1))));
+    assert_eq!(records.len(), 1);
+    assert!(skipped.is_none());
 }
 
 #[test]
-fn dependent_scans_follow_their_master_scan() {
-    // Events decoded out of step on an Orbitrap Fusion file.
-    assert_eq!(corrected_level(1, Some(2), false), Some(2));
-    assert_eq!(corrected_level(1, Some(3), false), Some(3));
-    assert_eq!(corrected_level(4, Some(2), true), Some(2));
-    assert_eq!(corrected_level(2, Some(2), true), None);
-    assert_eq!(corrected_level(3, Some(3), false), None);
-}
-
-#[test]
-fn scans_without_a_master_keep_plausible_msn_events() {
-    // DIA and targeted MS2 scans have no master scan.
-    assert_eq!(corrected_level(2, Some(1), true), None);
-    // A garbled event on an MS1 scan.
-    assert_eq!(corrected_level(4, Some(1), false), Some(1));
-    assert_eq!(corrected_level(1, Some(1), false), None);
-    // No trailer master scan number at all.
-    assert_eq!(corrected_level(2, None, false), None);
+fn plausible_precursor_bounds() {
     assert!(plausible_precursor_mz(806.96));
     assert!(!plausible_precursor_mz(7.7e-304));
     assert!(!plausible_precursor_mz(f64::NAN));
@@ -200,19 +197,6 @@ fn ms3_without_precursor_mz_keeps_its_parent_scan() {
         .convert(ms2)
         .precursors
         .is_empty());
-}
-
-#[test]
-fn trailer_level_replaces_event_precursor() {
-    let mut ms1 = record(5, 2);
-    ms1.precursor = Some(PrecursorInfo {
-        selected_mz: Some(600.0),
-        ..Default::default()
-    });
-    apply_trailer_level(&mut ms1, 1, None);
-    assert_eq!(ms1.ms_level, 1);
-    assert!(ms1.is_ms1);
-    assert!(ms1.precursor.is_none());
 }
 
 /// Checks MS level counts on local files that are too large for the
@@ -267,8 +251,8 @@ fn raw_ms_levels_match_vendor_conversion() {
 #[test]
 fn records_without_a_filter_have_an_unknown_acquisition_group() {
     use sage_core::spectrum::{AcquisitionGroup, MassAnalyzer};
-    // Misaligned files drop their event filters; the group must then be
-    // unknown rather than a guess, and unknown is not low accuracy.
+    // A scan without a filter has an unknown group rather than a guess,
+    // and unknown is not low accuracy.
     let spectrum = ThermoRawReader::with_file_id(0).convert(record(5, 2));
     assert_eq!(spectrum.acquisition, AcquisitionGroup::default());
     assert_eq!(spectrum.acquisition.analyzer, MassAnalyzer::Unknown);

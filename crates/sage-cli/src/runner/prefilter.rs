@@ -1,5 +1,8 @@
 use super::*;
-use sage_core::enzyme::DigestGroup;
+use sage_core::database::{canonical_sequence_hashes, DigestExpander};
+use sage_core::enzyme::{
+    group_protein_digests, Digest, DigestGroup, EnzymeParameters, ProteinOccurrence,
+};
 use sage_core::spectrum_index::{SpectrumIndex, SpectrumIndexBuilder, SpectrumIndexSettings};
 
 /// Spectrum index size, as a fraction of `max_memory_gb`, at which a batch of
@@ -9,11 +12,11 @@ const DEFAULT_INDEX_BUDGET_GIB: f64 = 8.0;
 
 impl Runner {
     /// Retain every peptide that can contribute a preliminary fragment match
-    /// to any spectrum. Spectra are indexed, and each sequence-coherent digest
-    /// chunk is expanded and streamed through the spectrum index, so no
-    /// fragment index is built until the final survivor database. When the
+    /// to any spectrum. Spectra are indexed, then proteins are streamed in
+    /// parallel: each protein is digested, modified, and checked against the
+    /// spectrum index on its own, and only its survivors are kept. When the
     /// spectra exceed the index budget, they are indexed in batches and the
-    /// database is streamed once per batch.
+    /// proteins are streamed once per batch.
     ///
     /// Processed spectra are also returned for the search, from the first
     /// file batch until they would exceed the index budget.
@@ -24,32 +27,31 @@ impl Runner {
         custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
     ) -> anyhow::Result<(Vec<Peptide>, RetainedSpectra)> {
         let db_params = self.database_parameters.clone();
-        let digests =
-            db_params.digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-        let target_sequences = digests
-            .iter()
-            .filter(|digest| !digest.reference.decoy)
-            .map(|digest| digest.reference.sequence.clone())
-            .collect::<HashSet<_>>();
-        let requested_chunks = fasta
-            .targets
-            .len()
-            .div_ceil(db_params.prefilter_chunk_size.max(1))
-            .max(1);
-        let digest_chunk_size = digests.len().div_ceil(requested_chunks).max(1);
-        let mut digest_chunks =
-            Parameters::partition_digests_by_sequence(digests, digest_chunk_size);
-        info!(
-            "using {} sequence-coherent prefilter chunks",
-            digest_chunks.len()
+        let started = Instant::now();
+        let enzyme = db_params.enzyme_parameters();
+        let shared = SharedSequences::scan(
+            &fasta,
+            &enzyme,
+            custom_cleavages.as_ref(),
+            db_params.generate_decoys,
+            db_params.merge_isoleucine_leucine,
         );
+        let scanned = started.elapsed();
 
-        let budget = self.spectrum_index_budget();
-        let mut pass = SurvivorPass {
+        let budget = PrefilterBudgets::for_search(&self.parameters).index_bytes;
+        let mut stream = ProteinStream {
             db_params: &db_params,
-            target_sequences: &target_sequences,
-            keeps: Vec::new(),
+            fasta: &fasta,
+            enzyme: &enzyme,
+            custom_cleavages: custom_cleavages.as_ref(),
+            shared,
+            keeps: (0..fasta.targets.len())
+                .map(|_| AtomicBitSet::new(0))
+                .collect(),
+            units: None,
             peptides: Vec::new(),
+            checked: 0,
+            deferred_digests: 0,
         };
         let mut builder = self.spectrum_index_builder(&db_params);
         let batches = self
@@ -63,6 +65,7 @@ impl Runner {
         };
         let mut retained_bytes = 0u64;
         let mut retaining = true;
+        let mut spectrum_batches = 0usize;
         for (batch_idx, batch) in batches.iter().enumerate() {
             // The search reports per-file progress when it takes these spectra
             // or reads them again.
@@ -93,15 +96,27 @@ impl Runner {
                 continue;
             }
             let index = Self::finish_spectrum_index(builder);
-            match last {
-                true => pass.run(&index, std::mem::take(&mut digest_chunks), true),
-                false => pass.run(&index, digest_chunks.clone(), false),
-            }
+            stream.run(&index, last);
+            spectrum_batches += 1;
             builder = self.spectrum_index_builder(&db_params);
         }
 
-        let mut all_peptides = pass.peptides;
-        Parameters::reorder_peptides(&mut all_peptides);
+        let (checked, deferred_digests) = (stream.checked, stream.deferred_digests);
+        let mut all_peptides = stream.peptides;
+        db_params.reorder_peptides_with_labels(&mut all_peptides);
+        info!(
+            "- prefilter search:  {:8} ms ({} proteins streamed{}, {} peptides checked, {} kept; {} shared sequences handled together; sharing scan {}ms)",
+            started.elapsed().as_millis(),
+            fasta.targets.len(),
+            match spectrum_batches {
+                1 => String::new(),
+                n => format!(" {n} times"),
+            },
+            checked,
+            all_peptides.len(),
+            deferred_digests,
+            scanned.as_millis(),
+        );
         let kept = retained.batches.iter().flatten().count();
         if kept > 0 {
             info!(
@@ -114,18 +129,43 @@ impl Runner {
         Ok((all_peptides, retained))
     }
 
-    fn spectrum_index_budget(&self) -> u64 {
-        let gib = std::env::var("SAGE_PREFILTER_INDEX_GB")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .or_else(|| {
-                self.parameters
-                    .max_memory_gb
-                    .filter(|gib| *gib > 0.0)
-                    .map(|gib| gib * INDEX_MEMORY_FRACTION)
-            })
-            .unwrap_or(DEFAULT_INDEX_BUDGET_GIB);
-        (gib * 1024.0 * 1024.0 * 1024.0) as u64
+    /// Whole-digest prefilter the streamed one must reproduce: every
+    /// spectrum in one index, the whole database digested and expanded at
+    /// once, then filtered and closed.
+    #[cfg(test)]
+    pub(crate) fn prefilter_whole_digest(
+        &self,
+        parallel: usize,
+        fasta: &Fasta,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+    ) -> anyhow::Result<Vec<Peptide>> {
+        let db_params = &self.database_parameters;
+        let mut builder = self.spectrum_index_builder(db_params);
+        for (batch_idx, batch) in self.parameters.mzml_paths.chunks(parallel).enumerate() {
+            let spectra = self.read_processed_spectra_with_ms1(
+                batch,
+                batch_idx,
+                parallel,
+                self.requires_ms1(),
+                false,
+            )?;
+            builder.add(&spectra.1);
+        }
+        let index = Self::finish_spectrum_index(builder);
+        let groups = db_params.digest_unmodified_with_custom_cleavages(fasta, custom_cleavages);
+        let db = db_params
+            .clone()
+            .build_peptide_table(db_params.modify_digests(groups));
+        let keep = AtomicBitSet::new(db.peptides.len());
+        index.filter(db_params, &db.peptides, &keep);
+        LabelGroupIndex::new(&db.peptides).close(&keep);
+        close_prefilter_pairs(&db, &keep);
+        Ok(db
+            .peptides
+            .into_iter()
+            .enumerate()
+            .filter_map(|(ix, peptide)| keep.contains(ix).then_some(peptide))
+            .collect())
     }
 
     fn spectrum_index_builder(&self, db_params: &Parameters) -> SpectrumIndexBuilder {
@@ -151,6 +191,11 @@ impl Runner {
             max_fragment_charge: self.parameters.max_fragment_charge,
             wide_window: self.parameters.wide_window,
             min_peaks: self.parameters.min_peaks,
+            // Never stricter than the search itself.
+            min_matched_peaks: db_params
+                .prefilter_min_matched_peaks
+                .min(self.parameters.min_matched_peaks.max(1)),
+            max_peaks: db_params.prefilter_max_peaks,
         };
         SpectrumIndexBuilder::new(settings, &db_params.mass_offset_modifications())
     }
@@ -188,92 +233,393 @@ fn spectrum_bytes(spectrum: &ProcessedSpectrum) -> u64 {
         + spectrum.mobilities.capacity() * std::mem::size_of::<f32>()) as u64
 }
 
-/// Survivor state shared by every spectrum batch.
-struct SurvivorPass<'a> {
-    db_params: &'a Parameters,
-    target_sequences: &'a HashSet<sage_core::sequence::PeptideSequence>,
-    /// One survivor set per digest chunk. Chunk expansion is deterministic,
-    /// so peptide positions agree between batches.
-    keeps: Vec<AtomicBitSet>,
-    peptides: Vec<Peptide>,
+/// Byte budget the prefilter works within, derived from `max_memory_gb`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrefilterBudgets {
+    /// Spectrum index built from one batch of files.
+    pub index_bytes: u64,
 }
 
-impl SurvivorPass<'_> {
-    /// Stream every digest chunk through `index`. The final batch also closes
-    /// label and decoy partners and collects the survivors.
-    fn run(&mut self, index: &SpectrumIndex, digest_chunks: Vec<Vec<DigestGroup>>, last: bool) {
-        let search_start = Instant::now();
-        let mut streamed = 0usize;
-        let mut retained = 0usize;
-        for (chunk_id, digest_chunk) in digest_chunks.into_iter().enumerate() {
-            let start = Instant::now();
-            let peptides = self
-                .db_params
-                .clone()
-                .modify_digests_with_target_sequences(digest_chunk, self.target_sequences);
-            let generated = Instant::now();
-            if self.keeps.len() == chunk_id {
-                self.keeps.push(AtomicBitSet::new(peptides.len()));
-            }
-            let keep = &self.keeps[chunk_id];
-            assert_eq!(
-                keep.len(),
-                peptides.len(),
-                "prefilter chunk expansion changed between spectrum batches"
-            );
-            index.filter(self.db_params, &peptides, keep);
-            streamed += peptides.len();
-            let filtered = Instant::now();
-            if !last {
-                info!(
-                    "prefilter chunk {}: streamed {} peptides (generate {}ms, stream {}ms)",
-                    chunk_id,
-                    peptides.len(),
-                    (generated - start).as_millis(),
-                    (filtered - generated).as_millis(),
-                );
-                continue;
-            }
-
-            // Closure needs mass-ordered peptides and decoy pairing, but no
-            // fragment index.
-            let db = self.db_params.clone().build_peptide_table(peptides);
-            LabelGroupIndex::new(&db.peptides).close(keep);
-            close_prefilter_pairs(&db, keep);
-
-            // Discarded peptides are released in parallel.
-            let total = db.peptides.len();
-            let peptides = db
-                .peptides
-                .into_par_iter()
-                .enumerate()
-                .filter_map(|(ix, peptide)| keep.contains(ix).then_some(peptide))
-                .collect::<Vec<_>>();
-
-            info!(
-                "prefilter chunk {}: kept {} of {} peptides (generate {}ms, stream {}ms, closure {}ms)",
-                chunk_id,
-                peptides.len(),
-                total,
-                (generated - start).as_millis(),
-                (filtered - generated).as_millis(),
-                filtered.elapsed().as_millis(),
-            );
-            retained += peptides.len();
-            self.peptides.extend(peptides);
+impl PrefilterBudgets {
+    pub(crate) fn from_max_memory(max_memory_gb: Option<f64>) -> Self {
+        let limit = max_memory_gb.filter(|gib| *gib > 0.0);
+        let gib = limit.map_or(DEFAULT_INDEX_BUDGET_GIB, |gib| gib * INDEX_MEMORY_FRACTION);
+        Self {
+            index_bytes: ((gib * 1024.0 * 1024.0 * 1024.0) as u64).max(1),
         }
-        match last {
-            true => info!(
-                "- prefilter search:  {:8} ms ({} peptides streamed, {} retained)",
-                search_start.elapsed().as_millis(),
-                streamed,
-                retained,
-            ),
-            false => info!(
-                "- prefilter batch:   {:8} ms ({} peptides streamed)",
-                search_start.elapsed().as_millis(),
-                streamed,
-            ),
+    }
+
+    /// Budget for `parameters`, honoring a test override.
+    pub(crate) fn for_search(parameters: &Search) -> Self {
+        parameters
+            .prefilter_budgets
+            .unwrap_or_else(|| Self::from_max_memory(parameters.max_memory_gb))
+    }
+}
+
+/// Canonical keys of digest sequences that occur more than once in the
+/// database, counting each generated decoy's sequence as an occurrence too.
+///
+/// A digest's key is the smaller hash of its sequence and, with generated
+/// decoys, of its decoy sequence (`reversed_internal` is an involution). A
+/// sequence, its decoy, and any target equal to that decoy share a key.
+/// With `merge_isoleucine_leucine`, I, L and J hash as one residue, so
+/// equality here is up to I/L/J.
+///
+/// A digest whose key is unique yields peptides that no other digest shares:
+/// no other protein merges into them, no decoy collides with them, and their
+/// decoy and label partners come from the same digest. Such digests are
+/// expanded and filtered one protein at a time. The rest are grouped by key;
+/// each key is an independent small database, filtered exactly as the whole
+/// database digest would filter it. A hash collision only moves a digest to
+/// the shared set or merges two keys.
+struct SharedSequences {
+    keys: Vec<u64>,
+    generate_decoys: bool,
+    /// Hash I, L and J as one residue, so I/L/J twins, which merge into
+    /// one peptide, share a key.
+    merge_isoleucine_leucine: bool,
+}
+
+impl SharedSequences {
+    fn scan(
+        fasta: &Fasta,
+        enzyme: &EnzymeParameters,
+        custom_cleavages: Option<&ValidatedCustomCleavageLibrary>,
+        generate_decoys: bool,
+        merge_isoleucine_leucine: bool,
+    ) -> Self {
+        let mut keys = (0..fasta.targets.len())
+            .into_par_iter()
+            .flat_map_iter(|index| {
+                fasta
+                    .digest_protein(index, enzyme, custom_cleavages)
+                    .into_iter()
+                    .map(|digest| {
+                        let (forward, reversed) = canonical_sequence_hashes(
+                            digest.sequence.as_bytes(),
+                            merge_isoleucine_leucine,
+                        );
+                        match generate_decoys {
+                            // A palindrome's decoy collides with itself.
+                            true if forward == reversed => PALINDROME,
+                            true => forward.min(reversed),
+                            false => forward,
+                        }
+                    })
+            })
+            .collect::<Vec<_>>();
+        keys.par_sort_unstable();
+        let mut shared = keys
+            .windows(2)
+            .filter(|pair| pair[0] == pair[1])
+            .map(|pair| pair[0])
+            .collect::<Vec<_>>();
+        drop(keys);
+        shared.dedup();
+        Self {
+            keys: shared,
+            generate_decoys,
+            merge_isoleucine_leucine,
+        }
+    }
+
+    /// Canonical key of `digest`, when it is shared.
+    fn shared_key(&self, digest: &Digest) -> Option<u64> {
+        let (forward, reversed) =
+            canonical_sequence_hashes(digest.sequence.as_bytes(), self.merge_isoleucine_leucine);
+        let key = match self.generate_decoys {
+            true if forward == reversed => return Some(PALINDROME),
+            true => forward.min(reversed),
+            false => forward,
+        };
+        self.keys.binary_search(&key).is_ok().then_some(key)
+    }
+}
+
+/// Key under which palindromic digests are always shared.
+const PALINDROME: u64 = u64::MAX;
+
+/// Digests sharing one canonical key, with the peptides they kept so far.
+struct SharedUnit {
+    groups: Vec<DigestGroup>,
+    keep: AtomicBitSet,
+}
+
+/// Survivor state shared by every spectrum batch.
+struct ProteinStream<'a> {
+    db_params: &'a Parameters,
+    fasta: &'a Fasta,
+    enzyme: &'a EnzymeParameters,
+    custom_cleavages: Option<&'a ValidatedCustomCleavageLibrary>,
+    shared: SharedSequences,
+    /// Survivors of each protein's own peptides. Expansion is deterministic,
+    /// so peptide positions agree between spectrum batches.
+    keeps: Vec<AtomicBitSet>,
+    /// Shared digests by key, collected while streaming the first batch.
+    units: Option<Vec<SharedUnit>>,
+    peptides: Vec<Peptide>,
+    checked: usize,
+    deferred_digests: usize,
+}
+
+impl ProteinStream<'_> {
+    /// Stream every protein through `index`. The final batch also closes
+    /// label and decoy partners and collects the survivors.
+    fn run(&mut self, index: &SpectrumIndex, last: bool) {
+        let collect_shared = self.units.is_none();
+        let (fasta, enzyme, custom_cleavages, shared) =
+            (self.fasta, self.enzyme, self.custom_cleavages, &self.shared);
+        let generate_decoys = self.db_params.generate_decoys;
+        let results = self.db_params.with_digest_expander(|expander| {
+            self.keeps
+                .par_iter_mut()
+                .enumerate()
+                .map_init(
+                    || index.scratch(),
+                    |scratch, (protein, keep)| {
+                        let mut deferred = Vec::new();
+                        let mut peptides = Vec::new();
+                        let first = keep.is_empty();
+                        for digest in fasta.digest_protein(protein, enzyme, custom_cleavages) {
+                            if let Some(key) = shared.shared_key(&digest) {
+                                if collect_shared {
+                                    deferred.push((key, digest));
+                                }
+                                continue;
+                            }
+                            let group = DigestGroup {
+                                origins: vec![ProteinOccurrence::of_protein_digest(&digest)],
+                                reference: digest,
+                            };
+                            peptides.extend(expander.expand(group, None));
+                        }
+                        let checked = filter_unit(
+                            expander,
+                            index,
+                            scratch,
+                            &mut peptides,
+                            keep,
+                            last,
+                            generate_decoys,
+                        );
+                        (peptides, deferred, if first { checked } else { 0 })
+                    },
+                )
+                .collect::<Vec<_>>()
+        });
+
+        let mut deferred = Vec::new();
+        for (peptides, protein_deferred, checked) in results {
+            self.peptides.extend(peptides);
+            deferred.extend(protein_deferred);
+            self.checked += checked;
+        }
+        if collect_shared {
+            self.deferred_digests = deferred.len();
+            self.units = Some(shared_units(deferred));
+        }
+        self.run_shared(index, last);
+    }
+
+    /// Filter each shared key's digests as their own small database, as the
+    /// whole-database digest would.
+    fn run_shared(&mut self, index: &SpectrumIndex, last: bool) {
+        let generate_decoys = self.db_params.generate_decoys;
+        let units = self.units.as_mut().expect("shared digests are collected");
+        let results = self.db_params.with_digest_expander(|expander| {
+            units
+                .par_iter_mut()
+                .map_init(
+                    || index.scratch(),
+                    |scratch, unit| {
+                        let first = unit.keep.is_empty();
+                        let targets = unit
+                            .groups
+                            .iter()
+                            .filter(|group| !group.reference.decoy)
+                            .map(|group| {
+                                expander
+                                    .parameters()
+                                    .decoy_collision_key(&group.reference.sequence)
+                            })
+                            .collect::<HashSet<_>>();
+                        let groups = match last {
+                            true => std::mem::take(&mut unit.groups),
+                            false => unit.groups.clone(),
+                        };
+                        let mut peptides = groups
+                            .into_iter()
+                            .flat_map(|group| expander.expand(group, Some(&targets)))
+                            .collect::<Vec<_>>();
+                        let checked = filter_unit(
+                            expander,
+                            index,
+                            scratch,
+                            &mut peptides,
+                            &mut unit.keep,
+                            last,
+                            generate_decoys,
+                        );
+                        (peptides, if first { checked } else { 0 })
+                    },
+                )
+                .collect::<Vec<_>>()
+        });
+        for (peptides, checked) in results {
+            self.peptides.extend(peptides);
+            self.checked += checked;
+        }
+        if last {
+            self.units = Some(Vec::new());
+        }
+    }
+}
+
+/// Group shared digests into one unit per canonical key.
+fn shared_units(mut deferred: Vec<(u64, Digest)>) -> Vec<SharedUnit> {
+    deferred.par_sort_unstable_by_key(|(key, _)| *key);
+    let mut units = Vec::new();
+    let mut digests = deferred.into_iter().peekable();
+    while let Some((key, digest)) = digests.next() {
+        let mut unit = vec![digest];
+        while let Some((_, digest)) = digests.next_if(|(next, _)| *next == key) {
+            unit.push(digest);
+        }
+        units.push(unit);
+    }
+    units
+        .into_par_iter()
+        .map(|digests| SharedUnit {
+            groups: group_protein_digests(digests),
+            keep: AtomicBitSet::new(0),
+        })
+        .collect()
+}
+
+/// Mark the peptides of one protein or shared unit that match `index`,
+/// adding to `keep` from earlier batches. On the last batch, close label
+/// groups and decoy pairs and leave only the survivors in `peptides`;
+/// otherwise leave it empty. Returns the number of peptides checked.
+fn filter_unit(
+    expander: &DigestExpander,
+    index: &SpectrumIndex,
+    scratch: &mut sage_core::spectrum_index::Scratch,
+    peptides: &mut Vec<Peptide>,
+    keep: &mut AtomicBitSet,
+    last: bool,
+    generate_decoys: bool,
+) -> usize {
+    expander.reorder(peptides);
+    let checked = peptides.len();
+    if keep.is_empty() {
+        *keep = AtomicBitSet::new(peptides.len());
+    }
+    assert_eq!(
+        keep.len(),
+        peptides.len(),
+        "prefilter expansion changed between spectrum batches"
+    );
+    for (ix, peptide) in peptides.iter().enumerate() {
+        if !keep.contains(ix) && index.matches(expander.parameters(), peptide, scratch) {
+            keep.insert(ix);
+        }
+    }
+    if !last {
+        // Drop the buffer too; only the keep bits outlive this batch.
+        *peptides = Vec::new();
+        return checked;
+    }
+    LabelGroupIndex::new(peptides).close(keep);
+    if generate_decoys {
+        // A partner's partner is the peptide itself, so one pass closes pairs.
+        let partners = (0..peptides.len())
+            .filter(|&ix| keep.contains(ix))
+            .filter_map(|ix| sorted_pair(peptides, ix))
+            .collect::<Vec<_>>();
+        for ix in partners {
+            keep.insert(ix);
+        }
+    }
+    let mut ix = 0;
+    peptides.retain(|_| {
+        ix += 1;
+        keep.contains(ix - 1)
+    });
+    // Survivors are held until the whole database is streamed.
+    peptides.shrink_to_fit();
+    // Release the survivor set; it is not needed after the last batch.
+    *keep = AtomicBitSet::new(0);
+    checked
+}
+
+/// Index of the generated target or decoy partner of `peptides[index]` in
+/// mass-sorted `peptides`, as [`IndexedDatabase::paired_peptide_index`] finds
+/// it.
+fn sorted_pair(peptides: &[Peptide], index: usize) -> Option<usize> {
+    let peptide = &peptides[index];
+    let paired = peptide.reverse();
+    let found = peptides
+        .binary_search_by(|candidate| {
+            candidate
+                .monoisotopic
+                .total_cmp(&paired.monoisotopic)
+                .then_with(|| candidate.initial_sort(&paired))
+        })
+        .ok()?;
+    (peptides[found].decoy != peptide.decoy).then_some(found)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn index_budget_follows_max_memory() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        // A quarter of 16 GiB indexes spectra; 8 GiB without a limit.
+        assert_eq!(
+            PrefilterBudgets::from_max_memory(Some(16.0)).index_bytes,
+            4 * GIB
+        );
+        assert_eq!(PrefilterBudgets::from_max_memory(None).index_bytes, 8 * GIB);
+        assert_eq!(
+            PrefilterBudgets::from_max_memory(Some(0.0)).index_bytes,
+            8 * GIB
+        );
+    }
+    #[test]
+    fn isoleucine_leucine_twins_share_a_prefilter_key() {
+        // APEPIDEK and APEPJDEK are twins; DFNEEGIK is a twin of the decoy
+        // of DLGEENFK. Each digest is unique as written.
+        let fasta = Fasta::parse(
+            ">a\nGGRAPEPIDEKR\n>b\nWWKAPEPJDEKR\n>c\nDLGEENFKR\n>d\nMSSRDFNEEGIKR\n".into(),
+            "rev_",
+            true,
+        )
+        .unwrap();
+        let enzyme = sage_core::database::Builder::default()
+            .make_parameters()
+            .enzyme_parameters();
+        for merge in [false, true] {
+            let shared = SharedSequences::scan(&fasta, &enzyme, None, true, merge);
+            let key = |protein: usize, sequence: &str| {
+                let digest = fasta
+                    .digest_protein(protein, &enzyme, None)
+                    .into_iter()
+                    .find(|digest| digest.sequence.as_str() == sequence)
+                    .unwrap();
+                shared.shared_key(&digest)
+            };
+            let (i, j) = (key(0, "APEPIDEK"), key(1, "APEPJDEK"));
+            let (target, collision) = (key(2, "DLGEENFK"), key(3, "DFNEEGIK"));
+            match merge {
+                true => {
+                    assert!(i.is_some() && i == j);
+                    assert!(target.is_some() && target == collision);
+                }
+                false => assert_eq!([i, j, target, collision], [None; 4]),
+            }
         }
     }
 }

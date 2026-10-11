@@ -20,13 +20,13 @@ env:
 jobs:
   quality:
     name: Format and release build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Install Rust 1.97.1
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
@@ -46,18 +46,18 @@ jobs:
 
   test:
     name: Test Rust ${{ matrix.rust }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        rust: ["1.88.0", "1.97.1"]
+        rust: ["1.97.1"]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Install Rust ${{ matrix.rust }}
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ matrix.rust }}
       - name: Cache Rust build
@@ -71,9 +71,6 @@ jobs:
         run: cargo build --workspace --all-targets --locked
       - name: Run tests
         run: cargo test --workspace --locked
-      - name: Test patched storage compatibility
-        if: matrix.rust == '1.97.1'
-        run: cargo test -p filemanager --locked
       - name: Test benchmark tooling
         if: matrix.rust == '1.97.1'
         run: python3 -m unittest discover -s benchmarks/tests -v
@@ -98,13 +95,13 @@ jobs:
 
   minimal:
     name: Test minimal features
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Install Rust 1.97.1
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.97.1
       - name: Cache Rust build
@@ -117,13 +114,13 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - name: Install Rust 1.97.1 with coverage tools
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.97.1
           components: llvm-tools-preview
@@ -152,14 +149,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-15]
+        os: [windows-2025, macos-15]
     env:
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: 1.97.1
       - name: Cache Rust build
@@ -167,13 +164,13 @@ jobs:
         with:
           key: smoke-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build and test minimal CLI and isolated MCP workers
-        run: cargo test --locked --no-default-features -p sage-cli -p sage-mcp
+      - name: Build and test minimal CLI
+        run: cargo test --locked --no-default-features -p sage-cli
 
   dependency-review:
     name: Dependency review
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

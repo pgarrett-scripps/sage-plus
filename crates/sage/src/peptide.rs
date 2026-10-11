@@ -481,10 +481,20 @@ pub trait ModificationSource {
 pub(crate) struct VariableRule {
     pub specificity: ModificationSpecificity,
     pub modification: Arc<ModificationDefinition>,
+    /// Per-peptide limit on new (non-library) placements of this modification.
     pub max_count: Option<usize>,
+    /// Per-peptide limit on all placements, library-supported included.
+    /// Defaults to `max_count`.
+    pub max_total_count: Option<usize>,
     pub site_mode: SiteMode,
     /// Rules with the same named modification share one occurrence counter.
     pub count_group: usize,
+}
+
+impl VariableRule {
+    pub(crate) fn total_limit(&self) -> Option<usize> {
+        self.max_total_count.or(self.max_count)
+    }
 }
 
 /// Channel-resolved modification definitions shared by every peptide produced
@@ -764,6 +774,13 @@ impl Peptide {
     pub fn initial_sort(&self, other: &Self) -> std::cmp::Ordering {
         self.sequence
             .cmp(&other.sequence)
+            .then_with(|| self.modification_sort(other))
+    }
+
+    /// The part of [`Self::initial_sort`] after the sequence: modifications
+    /// by position, termini, then label channel.
+    pub fn modification_sort(&self, other: &Self) -> std::cmp::Ordering {
+        std::cmp::Ordering::Equal
             .then_with(|| {
                 (0..self.sequence.len())
                     .find_map(|index| {
@@ -834,6 +851,90 @@ impl Peptide {
         } else {
             self.proteins.iter().join(";")
         }
+    }
+
+    /// FASTA spans, as written, that this peptide was expanded from when they
+    /// contain ambiguous residues (B, X or Z), joined by `;`. A generated
+    /// decoy reports its target's span reversed the same way. `None` when no
+    /// occurrence was expanded.
+    pub fn database_peptide(&self) -> Option<String> {
+        use crate::ambiguous_residues::{is_ambiguous, is_expansion_of};
+        let len = self.sequence.len();
+        let mut spans = self
+            .protein_sites
+            .iter()
+            .filter_map(|site| {
+                let start = site.start? as usize;
+                let span = site.source.as_ref()?.as_bytes().get(start..start + len)?;
+                if !is_ambiguous(span) {
+                    return None;
+                }
+                if is_expansion_of(span, &self.sequence) {
+                    return Some(span.to_vec());
+                }
+                let reversed = crate::sequence::reverse_interior(span);
+                is_expansion_of(&reversed, &self.sequence).then_some(reversed)
+            })
+            .collect::<Vec<_>>();
+        if spans.is_empty() {
+            return None;
+        }
+        spans.sort_unstable();
+        spans.dedup();
+        Some(
+            spans
+                .iter()
+                .map(|span| String::from_utf8_lossy(span))
+                .join(";"),
+        )
+    }
+
+    /// Ambiguous FASTA residues (B, Z or X) replaced to make this peptide,
+    /// formatted as `X4K;B7D` (see
+    /// [`crate::ambiguous_residues::format_substitutions`]); empty when there
+    /// are none.
+    ///
+    /// Occurrences are read in protein order, the order of `proteins` and
+    /// `protein_sites`, which also picks the displayed sequence of merged
+    /// I/L twins. If any occurrence has the peptide's residues as written,
+    /// the result is empty: a FASTA span without B, Z or X, a site without a
+    /// FASTA span, or a protein listed without a site (a peptide TSV row
+    /// without B, Z or X). Otherwise the first expanded
+    /// occurrence gives the substitutions. A generated decoy reports its
+    /// target span reversed like the decoy, at decoy positions.
+    pub fn substitutions(&self) -> String {
+        use crate::ambiguous_residues::{format_substitutions, is_ambiguous, oriented_span};
+        let len = self.sequence.len();
+        let mut expanded = None;
+        for site in self.protein_sites.iter() {
+            // A site without a start is an expanded peptide TSV row, whose
+            // source is the row as written.
+            let span = site.source.as_ref().and_then(|source| match site.start {
+                Some(start) => source.as_bytes().get(start as usize..start as usize + len),
+                None => Some(source.as_bytes()).filter(|row| row.len() == len),
+            });
+            match span {
+                Some(span) if is_ambiguous(span) => {
+                    if expanded.is_none() {
+                        expanded = oriented_span(span, &self.sequence);
+                    }
+                }
+                _ => return String::new(),
+            }
+        }
+        let Some(written) = expanded else {
+            return String::new();
+        };
+        let listed_without_site = self.proteins.iter().any(|protein| {
+            !self
+                .protein_sites
+                .iter()
+                .any(|site| site.protein == *protein)
+        });
+        if listed_without_site {
+            return String::new();
+        }
+        format_substitutions(&written, &self.sequence)
     }
 
     pub fn modification_count(&self, target: ModificationSpecificity, mass: f32) -> usize {
@@ -1068,6 +1169,7 @@ impl Peptide {
                     specificity: *specificity,
                     modification: modification.definition(),
                     max_count: *max_count,
+                    max_total_count: None,
                     site_mode: SiteMode::Exhaustive,
                     count_group,
                 },
@@ -1099,8 +1201,8 @@ impl Peptide {
 
     /// Apply config-defined and library-supported variable modifications in a
     /// single enumeration. Library-supported placements do not consume the
-    /// exhaustive budget, but all placements consume the total budget and the
-    /// named modification's shared `max_count`.
+    /// exhaustive budget or the named modification's `max_count`; all
+    /// placements consume the total budget and its `max_total_count`.
     pub(crate) fn apply_rules(
         mut self,
         plan: &ModificationPlan<'_>,
@@ -1240,7 +1342,8 @@ struct ModificationEnumeration<'a, 'p> {
     plan: &'p ModificationPlan<'a>,
     occupied: FnvHashSet<Site>,
     selected: Vec<ModificationCandidate>,
-    mod_counts: Vec<usize>,
+    new_counts: Vec<usize>,
+    total_counts: Vec<usize>,
     output: Vec<Peptide>,
 }
 
@@ -1257,7 +1360,8 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
             plan,
             occupied: FnvHashSet::default(),
             selected: Vec::new(),
-            mod_counts: vec![0; group_count],
+            new_counts: vec![0; group_count],
+            total_counts: vec![0; group_count],
             output: vec![peptide.clone()],
         }
     }
@@ -1271,17 +1375,23 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
 
             let rule = &self.plan.variable_mods[modification.rule];
             let group = rule.count_group;
-            let next_exhaustive = exhaustive_count + usize::from(!modification.library_supported);
+            let is_new = !modification.library_supported;
+            let next_exhaustive = exhaustive_count + usize::from(is_new);
             let exceeds_limit = next_exhaustive > self.plan.max_exhaustive_mods
+                || (is_new
+                    && rule
+                        .max_count
+                        .is_some_and(|limit| self.new_counts[group] >= limit))
                 || rule
-                    .max_count
-                    .is_some_and(|limit| self.mod_counts[group] >= limit);
+                    .total_limit()
+                    .is_some_and(|limit| self.total_counts[group] >= limit);
             if exceeds_limit {
                 self.occupied.remove(&modification.site);
                 continue;
             }
 
-            self.mod_counts[group] += 1;
+            self.new_counts[group] += usize::from(is_new);
+            self.total_counts[group] += 1;
             self.selected.push(modification);
             let should_continue = if remaining == 1 {
                 self.push_variant()
@@ -1289,7 +1399,8 @@ impl<'a, 'p> ModificationEnumeration<'a, 'p> {
                 self.enumerate(idx + 1, remaining - 1, next_exhaustive)
             };
             self.selected.pop();
-            self.mod_counts[group] -= 1;
+            self.new_counts[group] -= usize::from(is_new);
+            self.total_counts[group] -= 1;
             self.occupied.remove(&modification.site);
             if !should_continue {
                 return false;

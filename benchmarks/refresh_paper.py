@@ -1,6 +1,7 @@
 """Refresh the manuscript comparison using the published Sage Plus executable."""
 import copy
 import json
+import os
 import platform
 import sys
 from pathlib import Path
@@ -10,12 +11,17 @@ import run_scientific as runner
 from scientific_entrapment import evaluate
 
 BASE = Path(__file__).resolve().parents[2]
-OLD = Path('/data/sage-plus-scientific/20260914')
-OLD_EXT = Path('/data/sage-plus-scientific/report-extension-20260915')
+# The earlier evaluation trees; override with SAGE_SCIENTIFIC_DIR and SAGE_EXTENSION_DIR.
+OLD = Path(os.environ.get('SAGE_SCIENTIFIC_DIR', '/data/sage-plus-scientific/20260914'))
+OLD_EXT = Path(os.environ.get('SAGE_EXTENSION_DIR',
+                              '/data/sage-plus-scientific/report-extension-20260915'))
 ROOT = BASE / 'evidence'
 EXT = BASE / 'extension'
 PLUS = BASE / 'bin/sage-plus-v0.1.0-beta.6-x86_64-unknown-linux-gnu/sage'
-UPSTREAM = Path('/home/ty/Repos/sage-plus/benchmarks/.work/targets/baseline-df9219951cc9a54c/release/sage')
+# Upstream Sage build used as the baseline; override with SAGE_UPSTREAM_BINARY.
+UPSTREAM = Path(os.environ.get(
+    'SAGE_UPSTREAM_BINARY',
+    Path(__file__).resolve().parent / '.work/targets/baseline-df9219951cc9a54c/release/sage'))
 runner.BASELINE = UPSTREAM
 runner.CANDIDATE = PLUS
 
@@ -51,6 +57,9 @@ def matrix(name, jobs, destination):
 
 
 def main():
+    for label, path in (('SAGE_UPSTREAM_BINARY', UPSTREAM), ('SAGE_SCIENTIFIC_DIR', OLD)):
+        if not path.exists():
+            raise SystemExit(f'{path} not found; set {label}')
     ROOT.mkdir(parents=True, exist_ok=True)
     for name in ('references', 'ptm-truth', 'inputs', 'converted'):
         target = ROOT / name

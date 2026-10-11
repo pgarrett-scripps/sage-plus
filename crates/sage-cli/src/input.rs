@@ -6,6 +6,8 @@ use sage_cloudpath::Url;
 use sage_core::scoring::ScoreType;
 use sage_core::{
     database::{Builder, Parameters},
+    diagnostic::{DiagnosticIon, DiagnosticIonsConfig},
+    immonium::{ImmoniumConfig, ImmoniumSettings},
     lfq::LfqSettings,
     mass::Tolerance,
     mass_recalibration::MassRecalibrationMode,
@@ -16,6 +18,7 @@ use sage_core::{
     spectrum::{DeisotopeConfig, DeisotopeSettings},
     tmt::Isobaric,
 };
+use sage_dia::DiaSettings;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, schemars::JsonSchema)]
@@ -30,6 +33,12 @@ pub struct PtmLocalizationSettings {
     /// Arrangement-level false-localization-rate q-value cutoff.
     #[schemars(range(min = 0.0, max = 1.0))]
     pub localization_q_value: f32,
+    /// Fewest matched separating ions (fragments whose mass differs between the
+    /// best and runner-up arrangements) by which the best arrangement must win
+    /// to enter the false-localization-rate competition. Localizations below
+    /// the margin keep q-value 1. Use 0 to let tied arrangements compete, 2 for
+    /// fewer localizations with fewer wrong sites.
+    pub min_separating_margin: u32,
 }
 
 impl Default for PtmLocalizationSettings {
@@ -38,6 +47,7 @@ impl Default for PtmLocalizationSettings {
             enabled: false,
             psm_q_value: 0.01,
             localization_q_value: 0.01,
+            min_separating_margin: sage_core::ptm::DEFAULT_MIN_SEPARATING_MARGIN,
         }
     }
 }
@@ -74,10 +84,12 @@ pub struct Search {
     pub protein_grouping_peptide_fdr: f32,
     /// Maximum resident memory Sage may use, in GiB. `None` or zero disables the limit.
     pub max_memory_gb: Option<f64>,
-    /// Minimum system memory Sage must leave available, in GiB. `None` or zero disables the limit.
-    pub min_free_memory_gb: Option<f64>,
     /// Number of input files to load and search at once.
     pub batch_size: usize,
+    /// Configured Rayon worker threads; omitted when unset (all cores, or
+    /// `RAYON_NUM_THREADS`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threads: Option<usize>,
 
     pub ptm_localization: PtmLocalizationSettings,
     pub spectral_library: SpectralLibrarySettings,
@@ -88,6 +100,14 @@ pub struct Search {
 
     /// Search-time precursor and fragment mass recalibration.
     pub mass_recalibration: MassRecalibrationMode,
+
+    /// Diagnostic ions searched in raw MS2 spectra; omitted when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_ions: Option<Vec<DiagnosticIon>>,
+
+    /// Per-PSM immonium-ion evidence; omitted when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub immonium: Option<ImmoniumSettings>,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -101,7 +121,19 @@ pub struct Search {
     #[serde(skip_serializing)]
     pub annotate_matches: bool,
 
+    /// Hash every local spectrum file (SHA-256) into the output provenance.
+    pub record_input_hashes: bool,
+
     pub score_type: ScoreType,
+
+    /// DIA search mode; omitted from results.json when off.
+    #[serde(skip_serializing_if = "DiaSettings::is_off")]
+    pub dia: DiaSettings,
+
+    /// Prefilter budgets overriding those from `max_memory_gb`, so tests can
+    /// force streaming on tiny inputs. Not configurable.
+    #[serde(skip)]
+    pub(crate) prefilter_budgets: Option<crate::runner::prefilter::PrefilterBudgets>,
 
     /// Experimental glycopeptide pass, written to `glyco.sage.parquet`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,10 +185,16 @@ pub struct Input {
     pub protein_grouping_peptide_fdr: Option<f32>,
     #[schemars(range(min = 0.0))]
     pub max_memory_gb: Option<f64>,
+    /// Ignored since Beta 11: Sage enforces only `max_memory_gb`. Still
+    /// accepted so older configurations parse.
     #[schemars(range(min = 0.0))]
     pub min_free_memory_gb: Option<f64>,
     #[schemars(range(min = 1))]
     pub batch_size: Option<usize>,
+    /// Worker threads for parallel work (default: all cores, or
+    /// `RAYON_NUM_THREADS` when set). The `--threads` flag overrides it.
+    #[schemars(range(min = 1))]
+    pub threads: Option<usize>,
 
     pub ptm_localization: Option<PtmLocalizationSettings>,
     pub spectral_library: Option<SpectralLibrarySettings>,
@@ -168,11 +206,33 @@ pub struct Input {
     /// models are fitted, and the file is searched again with corrected
     /// masses. Ignored for wide-window searches.
     pub mass_recalibration: Option<MassRecalibrationMode>,
+    /// Diagnostic-ion scan of MS2 spectra, written to `diagnostic_ions.tsv`.
+    /// `true` searches the built-in glycan oxonium, acetyl-lysine and
+    /// phosphotyrosine immonium ions; a list of `{name, mz, tolerance}`
+    /// replaces them (tolerance defaults to 20 ppm). Default off.
+    pub diagnostic_ions: Option<DiagnosticIonsConfig>,
+    /// Per-PSM immonium-ion evidence, written to `results.sage.parquet` and
+    /// the PIN file and added to the linear discriminant. `true` looks for the
+    /// unmodified P, V, L/I, H, F, Y and W ions and for the modified-residue
+    /// ions that modifications declare in `immonium_ions`. An object sets
+    /// `rescore` (default true; false only reports the counts),
+    /// `residue_ions` (the global switch for the unmodified-residue ions,
+    /// default true) and `tolerance` (default `fragment_tol`). Default off.
+    pub immonium: Option<ImmoniumConfig>,
 
     pub annotate_matches: Option<bool>,
+    /// Record the SHA-256 of every local spectrum file in the Parquet footers
+    /// and `run-summary.json` (default false). Each file is read once more after
+    /// the search, at disk speed; remote files are never hashed. The FASTA and
+    /// other database files are always hashed.
+    pub record_input_hashes: Option<bool>,
     pub write_pin: Option<bool>,
     pub write_report: Option<bool>,
     pub score_type: Option<ScoreType>,
+    /// DIA search. `{"mode": "pseudo"}` builds MS1-anchored pseudo-MS2
+    /// spectra from co-eluting fragment hills and searches them closed (like
+    /// DDA); `wide_window` and `chimera` are ignored in that mode. Default off.
+    pub dia: Option<DiaSettings>,
     /// Experimental intact N-glycopeptide search, written to
     /// `glyco.sage.parquet` next to the normal results. Requires a Sage build
     /// with the `glyco` feature; see `docs/explore/GLYCO_SEARCH.md` for the
@@ -211,6 +271,9 @@ pub struct LfqOptions {
     #[schemars(range(min = 0.0, max = 1.0))]
     pub peptide_q_value: Option<f32>,
     pub mbr: Option<bool>,
+    /// Center extraction on the MS1 elution apex rather than the MS2
+    /// identification RT.
+    pub recenter_on_apex: Option<bool>,
 }
 
 impl From<LfqOptions> for LfqSettings {
@@ -224,6 +287,7 @@ impl From<LfqOptions> for LfqSettings {
             rt_pct_tolerance: value.rt_pct_tolerance.unwrap_or(default.rt_pct_tolerance),
             peptide_q_value: value.peptide_q_value.unwrap_or(default.peptide_q_value),
             mbr: value.mbr.unwrap_or(default.mbr),
+            recenter_on_apex: value.recenter_on_apex.unwrap_or(default.recenter_on_apex),
             mobility_pct_tolerance: value
                 .mobility_pct_tolerance
                 .unwrap_or(default.mobility_pct_tolerance),
@@ -370,9 +434,23 @@ impl Input {
         if let Some(batch_size) = matches.get_one::<u16>("batch-size").copied() {
             input.batch_size = Some(batch_size as usize);
         }
+        if let Some(mode) = matches.try_get_one::<String>("dia").ok().flatten() {
+            input.dia.get_or_insert_default().mode = match mode.as_str() {
+                "pseudo" => sage_dia::DiaMode::Pseudo,
+                _ => sage_dia::DiaMode::Off,
+            };
+        }
         if let Some(max_memory_gb) = matches.get_one::<f64>("max-memory").copied() {
             input.max_memory_gb = Some(max_memory_gb);
         }
+        input.threads = resolve_threads(
+            matches
+                .try_get_one::<usize>("threads")
+                .ok()
+                .flatten()
+                .copied(),
+            input.threads,
+        );
 
         // Only override the config-file value when the flag is explicitly set.
         if matches.get_flag("localize") {
@@ -426,6 +504,9 @@ impl Input {
 
     /// Validate logical configuration constraints without reading inputs or writing outputs.
     pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(dia) = &self.dia {
+            dia.validate().map_err(anyhow::Error::msg)?;
+        }
         for (name, tolerance) in [
             ("precursor_tol", self.precursor_tol),
             ("fragment_tol", self.fragment_tol),
@@ -450,6 +531,13 @@ impl Input {
             database
                 .validate_modification_keys()
                 .map_err(anyhow::Error::msg)?;
+            database.validate_enzyme().map_err(anyhow::Error::msg)?;
+            database
+                .validate_peptide_ranges()
+                .map_err(anyhow::Error::msg)?;
+            database
+                .validate_fragment_losses()
+                .map_err(anyhow::Error::msg)?;
             ensure!(
                 database.fasta.is_some() || database.peptides.is_some(),
                 "Either `database.fasta` or `database.peptides` must be set"
@@ -458,6 +546,7 @@ impl Input {
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
+            validate_required_settings(database)?;
             let parameters = database.clone().make_parameters();
             parameters.validate_channels().map_err(anyhow::Error::msg)?;
             parameters
@@ -492,7 +581,8 @@ impl Input {
             "`max_fragment_charge` must be greater than zero"
         );
         ensure!(
-            self.min_peaks.unwrap_or(15) <= self.max_peaks.unwrap_or(150),
+            self.min_peaks.unwrap_or(DEFAULT_MIN_PEAKS)
+                <= self.max_peaks.unwrap_or(DEFAULT_MAX_PEAKS),
             "`min_peaks` cannot exceed `max_peaks`, including defaults"
         );
         if let Some(value) = self.protein_grouping_peptide_fdr {
@@ -549,6 +639,13 @@ impl Input {
         );
         self.memory_limits()?;
         resolve_batch_size(self.batch_size)?;
+        ensure!(
+            self.threads != Some(0),
+            "`threads` must be greater than zero"
+        );
+        if let Some(bruker) = &self.bruker_config {
+            bruker.denoise.validate()?;
+        }
         if let Some(lfq) = self
             .quant
             .as_ref()
@@ -599,18 +696,54 @@ impl Input {
         if let Some(settings) = &self.spectral_library {
             settings.validate().map_err(anyhow::Error::msg)?;
         }
+        if let Some(DiagnosticIonsConfig::Ions(ions)) = &self.diagnostic_ions {
+            ensure!(
+                !ions.is_empty(),
+                "`diagnostic_ions` must be `true`, `false`, or a non-empty list of ions"
+            );
+            for ion in ions {
+                ensure!(
+                    !ion.name.is_empty() && !ion.name.contains(['\t', '\n', '\r']),
+                    "diagnostic ion names must be non-empty and free of tabs and newlines"
+                );
+                ensure!(
+                    ion.mz.is_finite() && ion.mz > 0.0,
+                    "diagnostic ion `{}` must have a positive m/z",
+                    ion.name
+                );
+                let (low, high) = ion.tolerance().bounds(ion.mz);
+                ensure!(
+                    low.is_finite() && high.is_finite() && low <= ion.mz && ion.mz <= high,
+                    "diagnostic ion `{}` needs a tolerance window that contains its m/z",
+                    ion.name
+                );
+            }
+        }
+        if let (Some(config), Some(database)) = (&self.immonium, &self.database) {
+            let modified = sage_core::immonium::modified_ions(
+                &sage_core::modification::validate_mods(database.static_mods.clone()),
+                &sage_core::modification::validate_var_mods(database.variable_mods.clone()),
+            );
+            if let Some(settings) = config.clone().resolve(self.fragment_tol, modified) {
+                settings.validate().map_err(anyhow::Error::msg)?;
+            }
+        }
         Ok(())
     }
 
     pub fn build(self) -> anyhow::Result<Search> {
         self.validate()?;
         let memory_limits = self.memory_limits()?;
+        if self.min_free_memory_gb.is_some() {
+            log::warn!("`min_free_memory_gb` is ignored; Sage enforces only `max_memory_gb`");
+        }
         let batch_size = resolve_batch_size(self.batch_size)?;
         let builder = self.database.expect("validated database configuration");
         let glyco = self
             .glyco
             .map(|value| crate::glyco::GlycoSetup::new(value, &builder))
             .transpose()?;
+        let unset_database = UnsetSearchSpace::from(&builder);
         let database = builder.make_parameters();
         database.validate_channels().map_err(anyhow::Error::msg)?;
         database
@@ -621,6 +754,48 @@ impl Input {
             .map_err(anyhow::Error::msg)?;
         Self::check_mass_tolerances(&self.fragment_tol);
         Self::check_mass_tolerances(&self.precursor_tol);
+        if let Some(warning) = database.unbounded_length_warning() {
+            log::warn!("{warning}");
+        }
+        let defaults = unset_database.describe(
+            &database,
+            [
+                (
+                    "min_peaks",
+                    self.min_peaks.is_none(),
+                    DEFAULT_MIN_PEAKS.to_string(),
+                ),
+                (
+                    "max_peaks",
+                    self.max_peaks.is_none(),
+                    DEFAULT_MAX_PEAKS.to_string(),
+                ),
+                (
+                    "min_matched_peaks",
+                    self.min_matched_peaks.is_none(),
+                    DEFAULT_MIN_MATCHED_PEAKS.to_string(),
+                ),
+                (
+                    "precursor_charge",
+                    self.precursor_charge.is_none(),
+                    format!(
+                        "[{}, {}]",
+                        DEFAULT_PRECURSOR_CHARGE.0, DEFAULT_PRECURSOR_CHARGE.1
+                    ),
+                ),
+                (
+                    "isotope_errors",
+                    self.isotope_errors.is_none(),
+                    format!(
+                        "[{}, {}]",
+                        DEFAULT_ISOTOPE_ERRORS.0, DEFAULT_ISOTOPE_ERRORS.1
+                    ),
+                ),
+            ],
+        );
+        if !defaults.is_empty() {
+            log::info!("defaults used for unset settings: {}", defaults.join(", "));
+        }
 
         let mzml_paths = self
             .mzml_paths
@@ -636,7 +811,9 @@ impl Input {
                         // Valid URL, might still be a local directory that doesn't exist
                         if url.scheme() == "file" {
                             let path = url.to_file_path().expect("url scheme is file");
-                            std::fs::create_dir_all(path)?;
+                            std::fs::create_dir_all(&path).with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?;
                         }
 
                         if !url.path().ends_with("/") {
@@ -648,8 +825,12 @@ impl Input {
                         // Treat as a local path (covers Windows `C:\...` which
                         // otherwise parses as a URL with scheme `c`).
                         let path = std::path::Path::new(&path);
-                        std::fs::create_dir_all(path)?;
-                        Url::from_directory_path(path.canonicalize()?).expect("valid path")
+                        std::fs::create_dir_all(path)
+                            .and_then(|_| path.canonicalize())
+                            .map(|path| Url::from_directory_path(path).expect("valid path"))
+                            .with_context(|| {
+                                format!("cannot create output directory `{}`", path.display())
+                            })?
                     }
                 }
             }
@@ -676,6 +857,27 @@ impl Input {
         let spectral_library = self.spectral_library.unwrap_or_default();
         spectral_library.validate().map_err(anyhow::Error::msg)?;
 
+        let dia = self.dia.unwrap_or_default();
+        let pseudo = !dia.is_off();
+        if pseudo && self.wide_window == Some(true) {
+            log::warn!("`dia.mode = \"pseudo\"` searches closed; ignoring `wide_window`");
+        }
+        if pseudo && self.chimera == Some(true) {
+            log::warn!("`dia.mode = \"pseudo\"` ignores `chimera`");
+        }
+
+        let diagnostic_ions = self.diagnostic_ions.and_then(DiagnosticIonsConfig::resolve);
+        let modified_immonium_ions =
+            sage_core::immonium::modified_ions(&database.static_mods, &database.variable_mods);
+        let immonium = self
+            .immonium
+            .and_then(|config| config.resolve(self.fragment_tol, modified_immonium_ions.clone()));
+        if immonium.is_none() && !modified_immonium_ions.is_empty() {
+            log::warn!(
+                "modifications declare `immonium_ions` but `immonium` is off; the ions are not used"
+            );
+        }
+
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
         // Record the alignment method that will run, so results.json states it.
@@ -693,20 +895,21 @@ impl Input {
             fragment_tol: self.fragment_tol,
             report_psms: self.report_psms.unwrap_or(1),
             output_filter: self.output_filter.unwrap_or_default(),
-            max_peaks: self.max_peaks.unwrap_or(150),
-            min_peaks: self.min_peaks.unwrap_or(15),
-            min_matched_peaks: self.min_matched_peaks.unwrap_or(4),
+            max_peaks: self.max_peaks.unwrap_or(DEFAULT_MAX_PEAKS),
+            min_peaks: self.min_peaks.unwrap_or(DEFAULT_MIN_PEAKS),
+            min_matched_peaks: self.min_matched_peaks.unwrap_or(DEFAULT_MIN_MATCHED_PEAKS),
             max_fragment_charge: self.max_fragment_charge,
             annotate_matches: self.annotate_matches.unwrap_or(false),
-            precursor_charge: self.precursor_charge.unwrap_or((2, 4)),
+            record_input_hashes: self.record_input_hashes.unwrap_or(false),
+            precursor_charge: self.precursor_charge.unwrap_or(DEFAULT_PRECURSOR_CHARGE),
             override_precursor_charge: self.override_precursor_charge.unwrap_or(false),
-            isotope_errors: self.isotope_errors.unwrap_or((0, 0)),
+            isotope_errors: self.isotope_errors.unwrap_or(DEFAULT_ISOTOPE_ERRORS),
             deisotope: self
                 .deisotope
                 .unwrap_or(DeisotopeConfig::Enabled(true))
                 .resolve(),
-            chimera: self.chimera.unwrap_or(false),
-            wide_window: self.wide_window.unwrap_or(false),
+            chimera: self.chimera.unwrap_or(false) && !pseudo,
+            wide_window: self.wide_window.unwrap_or(false) && !pseudo,
             predict_rt,
             retention_time_model: self.retention_time_model.unwrap_or_default(),
             retention_time_alignment,
@@ -718,23 +921,214 @@ impl Input {
             protein_grouping: self.protein_grouping.unwrap_or(true),
             protein_grouping_peptide_fdr: self.protein_grouping_peptide_fdr.unwrap_or(0.01),
             max_memory_gb: memory_limits.max_gib(),
-            min_free_memory_gb: memory_limits.min_free_gib(),
             batch_size,
+            threads: self.threads,
             ptm_localization,
             spectral_library,
             mass_shift_ppm: self
                 .mass_shift_ppm
                 .unwrap_or(sage_core::ambiguity::DEFAULT_MASS_SHIFT_PPM),
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
+            diagnostic_ions,
+            immonium,
             score_type,
             glyco,
+            dia,
+            prefilter_budgets: None,
         })
     }
 
     /// Validate and convert the configured memory limits.
     pub fn memory_limits(&self) -> anyhow::Result<MemoryLimits> {
-        MemoryLimits::from_gib(self.max_memory_gb, self.min_free_memory_gb)
+        MemoryLimits::from_gib(self.max_memory_gb)
     }
+}
+
+const DEFAULT_MIN_PEAKS: usize = 15;
+const DEFAULT_MAX_PEAKS: usize = 150;
+const DEFAULT_MIN_MATCHED_PEAKS: u16 = 4;
+const DEFAULT_PRECURSOR_CHARGE: (u8, u8) = (2, 4);
+const DEFAULT_ISOTOPE_ERRORS: (i8, i8) = (0, 0);
+
+/// Search-space settings a configuration left unset, so the startup log
+/// can state the defaults the search uses for them.
+struct UnsetSearchSpace {
+    min_len: bool,
+    max_len: bool,
+    peptide_min_mass: bool,
+    peptide_max_mass: bool,
+    max_variable_mods: bool,
+    max_total_variable_mods: bool,
+    generate_decoys: bool,
+    decoy_tag: bool,
+    clip_n_term_met: bool,
+    min_ion_index: bool,
+    merge_isoleucine_leucine: bool,
+}
+
+impl From<&Builder> for UnsetSearchSpace {
+    fn from(builder: &Builder) -> Self {
+        let enzyme = builder.enzyme.as_ref();
+        Self {
+            min_len: enzyme.and_then(|enzyme| enzyme.min_len).is_none(),
+            max_len: enzyme.and_then(|enzyme| enzyme.max_len).is_none(),
+            peptide_min_mass: builder.peptide_min_mass.is_none(),
+            peptide_max_mass: builder.peptide_max_mass.is_none(),
+            max_variable_mods: builder.max_variable_mods.is_none(),
+            max_total_variable_mods: builder.max_total_variable_mods.is_none(),
+            generate_decoys: builder.generate_decoys.is_none(),
+            decoy_tag: builder.decoy_tag.is_none(),
+            clip_n_term_met: builder.clip_n_term_met.is_none(),
+            min_ion_index: builder.min_ion_index.is_none(),
+            merge_isoleucine_leucine: builder.merge_isoleucine_leucine.is_none(),
+        }
+    }
+}
+
+impl UnsetSearchSpace {
+    /// `name=value` for each unset setting, database settings first, then
+    /// the given search-level ones.
+    fn describe<const N: usize>(
+        &self,
+        database: &Parameters,
+        search: [(&str, bool, String); N],
+    ) -> Vec<String> {
+        let enzyme = &database.enzyme;
+        let decoys = database.generate_decoys;
+        [
+            (
+                "min_len",
+                self.min_len,
+                enzyme.min_len.unwrap_or(5).to_string(),
+            ),
+            (
+                "max_len",
+                self.max_len,
+                enzyme.effective_max_len().to_string(),
+            ),
+            (
+                "peptide_min_mass",
+                self.peptide_min_mass,
+                database.peptide_min_mass.to_string(),
+            ),
+            (
+                "peptide_max_mass",
+                self.peptide_max_mass,
+                database.peptide_max_mass.to_string(),
+            ),
+            (
+                "max_variable_mods",
+                self.max_variable_mods,
+                database.max_variable_mods.to_string(),
+            ),
+            (
+                "max_total_variable_mods",
+                self.max_total_variable_mods,
+                database.max_total_variable_mods.to_string(),
+            ),
+            ("generate_decoys", self.generate_decoys, decoys.to_string()),
+            (
+                "decoy_tag",
+                self.decoy_tag,
+                format!("{:?}", database.decoy_tag),
+            ),
+            (
+                "clip_n_term_met",
+                self.clip_n_term_met,
+                database.clip_n_term_met.to_string(),
+            ),
+            (
+                "min_ion_index",
+                self.min_ion_index,
+                database.min_ion_index.to_string(),
+            ),
+            (
+                "merge_isoleucine_leucine",
+                self.merge_isoleucine_leucine,
+                database.merge_isoleucine_leucine.to_string(),
+            ),
+        ]
+        .into_iter()
+        .chain(search)
+        .filter(|(_, unset, _)| *unset)
+        .map(|(name, _, value)| format!("{name}={value}"))
+        .collect()
+    }
+}
+
+/// Paste-ready trypsin/HCD values for each mandatory database setting.
+const REQUIRED_SNIPPETS: [(&str, &str); 3] = [
+    (
+        "enzyme",
+        r#""enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 2, "semi_enzymatic": false}"#,
+    ),
+    ("static_mods", r#""static_mods": {"C": 57.021464}"#),
+    ("ion_kinds", r#""ion_kinds": ["b", "y"]"#),
+];
+
+/// Settings a configuration must state because they define the search
+/// space: `static_mods`, `ion_kinds`, and, when a FASTA is digested, the
+/// enzyme's `cleave_at`, `restrict`, `missed_cleavages` and
+/// `semi_enzymatic`. A peptide-list-only search needs no enzyme.
+fn validate_required_settings(database: &Builder) -> anyhow::Result<()> {
+    let mut missing = Vec::new();
+    let mut blocks = Vec::new();
+    if database.fasta.is_some() {
+        match &database.enzyme {
+            None => {
+                missing.push("database.enzyme".to_string());
+                blocks.push("enzyme");
+            }
+            Some(enzyme) => {
+                let fields = enzyme.missing_required_fields();
+                if !fields.is_empty() {
+                    missing.extend(
+                        fields
+                            .iter()
+                            .map(|field| format!("database.enzyme.{field}")),
+                    );
+                    blocks.push("enzyme");
+                }
+            }
+        }
+    }
+    if database.static_mods.is_none() {
+        missing.push("database.static_mods".into());
+        blocks.push("static_mods");
+    }
+    if database.ion_kinds.is_none() {
+        missing.push("database.ion_kinds".into());
+        blocks.push("ion_kinds");
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let snippets = REQUIRED_SNIPPETS
+        .iter()
+        .filter(|(block, _)| blocks.contains(block))
+        .map(|(_, snippet)| format!("  {snippet}"))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    anyhow::bail!(
+        "missing required setting(s): {}. Since Beta 16 these have no defaults \
+         (`static_mods` may be `{{}}`). For a standard trypsin/HCD search, add to \
+         \"database\" (use only the keys you are missing):\n{snippets}\n\
+         `sage --write-config minimal` prints a complete starting configuration.",
+        missing.join(", ")
+    )
+}
+
+/// Worker thread count: the `--threads` flag wins over the configuration's
+/// `threads`. `None` leaves the choice to Rayon, which honours
+/// `RAYON_NUM_THREADS` and otherwise uses every core.
+pub fn resolve_threads(cli: Option<usize>, config: Option<usize>) -> Option<usize> {
+    cli.or(config)
+}
+
+/// Default number of files processed at once: half the available cores, at
+/// least one.
+pub fn default_batch_size() -> usize {
+    (std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) / 2).max(1)
 }
 
 fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
@@ -743,7 +1137,7 @@ fn resolve_batch_size(batch_size: Option<usize>) -> anyhow::Result<usize> {
             ensure!(batch_size > 0, "`batch_size` must be greater than zero");
             Ok(batch_size)
         }
-        None => Ok((num_cpus::get() / 2).max(1)),
+        None => Ok(default_batch_size()),
     }
 }
 

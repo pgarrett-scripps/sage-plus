@@ -60,10 +60,13 @@ impl Mul<f32> for Tolerance {
 
 pub const VALID_AA: [u8; 22] = *b"ACDEFGHIKLMNPQRSTVWYUO";
 
+/// Residue masses indexed by one-letter code. J (Ile or Leu) carries the
+/// shared I/L mass, so peptides with J are scored and reported as written.
+/// B, X and Z have no single mass; see [`crate::ambiguous_residues`].
 pub const MONOISOTOPIC_MASSES: [f32; 26] = [
-    71.03711, 0.0, 103.00919, 115.02694, 129.04259, 147.0684, 57.02146, 137.05891, 113.08406, 0.0,
-    128.09496, 113.08406, 131.0405, 114.04293, 237.14774, 97.05276, 128.05858, 156.1011, 87.03203,
-    101.04768, 150.95363, 99.06841, 186.07932, 0.0, 163.06332, 0.0,
+    71.03711, 0.0, 103.00919, 115.02694, 129.04259, 147.0684, 57.02146, 137.05891, 113.08406,
+    113.08406, 128.09496, 113.08406, 131.0405, 114.04293, 237.14774, 97.05276, 128.05858, 156.1011,
+    87.03203, 101.04768, 150.95363, 99.06841, 186.07932, 0.0, 163.06332, 0.0,
 ];
 
 pub const fn monoisotopic(aa: u8) -> f32 {
@@ -86,7 +89,7 @@ pub const fn composition(aa: u8) -> Composition {
         b'G' => Composition::new(2, 2, 0),
         b'H' => Composition::new(6, 2, 0),
         b'I' => Composition::new(6, 2, 0),
-        b'L' => Composition::new(6, 2, 0),
+        b'L' | b'J' => Composition::new(6, 2, 0),
         b'K' => Composition::new(6, 2, 0),
         b'M' => Composition::new(5, 2, 1),
         b'F' => Composition::new(9, 2, 0),

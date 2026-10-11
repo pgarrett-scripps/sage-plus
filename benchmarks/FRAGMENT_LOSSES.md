@@ -1,0 +1,623 @@
+# Generic fragment losses (Beta 14)
+
+`database.fragment_losses` adds residue-dependent loss ions (b-H2O, y-NH3 and
+so on) to full candidate scoring. This page records how the integration was
+chosen and why the setting is optional rather than on by default.
+
+## What is published practice and what is ours
+
+| Item | Source |
+| --- | --- |
+| Considering -H2O and -NH3 forms of b and y ions during scoring | Published practice, handled differently by each engine (next table). |
+| Water from S, T, E, D and ammonia from R, K, N, Q | Published practice: Mascot's fragmentation rules ("b-H2O if b significant and fragment includes STED", "b-NH3 ... includes RKNQ"). |
+| Water and ammonia losses are more prominent in low-energy ion-trap CID than in beam-type HCD | Common expectation, not a published comparison we could find. Tabb et al. (Anal. Chem. 2003, 75:1155) quantify losses in ion-trap CID only (b-NH3 about half of b; y about 5 times y-NH3; ammonia loss enriched with N/Q, water loss only mildly with S/T/E). Tested below. |
+| Losses never enter the preliminary fragment index | Our design choice: keeps first-pass speed and memory unchanged. |
+| Losses as two separate rescoring features rather than hyperscore alternatives | Our design choice, selected by the benchmark below. |
+| Parent-supported losses (a loss peak counts only when its intact fragment matched) | Our design here, tested below. Andromeda reportedly offers loss peaks only when the main b/y ion is present (Cox et al., J. Proteome Res. 2011, 10:1794; wording not verified, the full text was not accessible). |
+| Default off | Our decision from the benchmark below. |
+
+How published engines score water and ammonia losses:
+
+| Engine | Default | Residue rule | How loss peaks enter the score | Source |
+| --- | --- | --- | --- | --- |
+| Comet | off (`use_NL_ions = 0`) | none | For 1+ a, b and y ions only, the processed spectrum's values at the -H2O and -NH3 bins are added at weight 0.2 (main peak 1.0) into the XCorr lookup, independent of the parent peak. XCorr has no matched-ion count, so the contribution is count-free | `CometPreprocess.cpp` (the `pfFastXcorrDataNL` loop, `iMinus17`/`iMinus18`), `CometSearch.cpp` (`ctCharge == 1 && bUseWaterAmmoniaNLPeaks` selects the NL array); checked at UWPR/Comet 603fdca, 2026-09-17 |
+| Mascot | by instrument type (ESI-TRAP, ESI-QUAD-TOF, ESI-FTICR and others; none for ETD-TRAP) | NH3: R, K, N, Q; H2O: S, T, E, D | A separate ion series, used only "if b significant" (or y); a series at the random level is dropped | matrixscience.com/help/search_field_help.html#INSTRUMENT, fragmentation_help.html |
+| X!Tandem | no loss series | - | Hyperscore uses a/b/c/x/y/z only | thegpm.org/TANDEM api docs |
+| MS-GF+ | learned per parameter file | none | Ion types (-H2O, -NH3 and stacks) kept if seen in at least 15% of training spectra, scored by a learned rank log-likelihood | `ScoringParameterGeneratorWithErrors.java`, `NewScoredSpectrum` (github.com/MSGFPlus/msgfplus); Kim & Pevzner, Nat. Commun. 2014 |
+| Andromeda | on (`IncludeWater`, `IncludeAmmonia`, `DependentLosses`) | amine, amide and hydroxyl side chains (reported) | Reportedly 1+ only and only when the main b/y ion is present (not verified) | MaxQuant mqpar.xml defaults; Cox et al. 2011 |
+
+So no engine in this list adds loss forms as full-weight alternatives that
+fill a cleavage in a matched-ion count. Each one either down-weights them
+(Comet), gates them on the parent series or ion (Mascot, reportedly
+Andromeda), learns their weight (MS-GF+), or leaves them out (X!Tandem).
+
+## Variants
+
+- **base**: the `b14/per-mod-flr` binary (ad1b86f), no `fragment_losses` key.
+- **A**: the candidate binary without the key. Must be identical to base.
+- **B**: loss forms are alternatives of their cleavage inside the hyperscore
+  and `matched_peaks` (at most one form per cleavage and charge, as for
+  modification `neutral_losses`).
+- **C**: the hyperscore and `matched_peaks` ignore loss forms. Each PSM gets
+  `matched_loss_peaks` (cleavage and charge pairs whose best loss form
+  matched) and `loss_intensity_pct` as two extra linear-discriminant features.
+  Chimeric peak removal removes the loss peaks of the preceding rank.
+- **D**: as C, but chimeric peak removal keeps peaks matched only by loss
+  forms. Only meaningful with `chimera: true`, so it is compared against base
+  and C with `chimera: true, report_psms: 2`.
+
+Every variant used the approved loss configuration:
+
+```json
+"fragment_losses": {
+  "Water":   {"mass": 18.010565, "sites": ["S","T","E","D"], "ion_kinds": ["b","y"], "allow_modified": false},
+  "Ammonia": {"mass": 17.026549, "sites": ["R","K","N","Q"], "ion_kinds": ["y"]}
+},
+"max_fragment_losses": 1
+```
+
+B, C and D were run from experiment commit `6aa89ff`, which selected the
+variant with the environment variable `SAGE_PLUS_FRAGMENT_LOSS_SCORING`. The
+final commit hard-codes C and removes the variable; its binary reproduces the
+experiment's C results row for row (checked on PXD028735 Human_01, PXD011070
+and PXD004447).
+
+## Datasets
+
+All searches: tryptic, 1 missed cleavage, 7-50 residues, Cys carbamidomethyl,
+Met oxidation, 10 ppm precursor, isotope errors -1 to 3, generated reversed
+decoys, `predict_rt` and `protein_grouping` on, `report_psms: 1`.
+
+| Dataset | Instrument / activation | Fragment tolerance | FASTA |
+| --- | --- | --- | --- |
+| HEK SILAC K6R6 (repository sample) | Orbitrap HCD | 20 ppm | human reviewed |
+| PXD028735 `LFQ_Orbitrap_DDA_Human_01` | Orbitrap HCD | 20 ppm | human + yeast + E. coli + iRT |
+| PXD001468 HEK293T (01A and 01B) | Q Exactive HCD | 20 ppm | human + yeast + E. coli + iRT |
+| PXD011070 `ch_23Aug2018_HeLa_Std_1` | ion-trap CID (ITMS) | 0.5 Da, no deisotoping | human + yeast + E. coli + iRT |
+| PXD004447 `F1_..._JurTryp_ETciD30_2_2` | Orbitrap ETciD, b/c/y/z-dot | 20 ppm | human + yeast + E. coli + iRT |
+
+The four human-only samples are searched against the multi-species FASTA, so
+yeast and E. coli matches are false. FDP is the combined entrapment estimate
+N_e(1 + 1/r)/(N_t + N_e) from `picked_fdr_entrapment.py`, at PSM, peptide
+and protein level at 1% q-value.
+
+## Results at 1% q-value
+
+PSMs are target PSMs at `spectrum_q <= 0.01`; peptides and proteins are
+distinct targets at `peptide_q`/`protein_q <= 0.01` (single-protein rows for
+proteins). Decoys are decoy PSMs at `spectrum_q <= 0.01`.
+
+| Dataset | Variant | PSMs | Peptides | Proteins | Decoy PSMs | FDP PSM | FDP pep | FDP prot | Wall (s) | Peak RSS (GB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| HEK SILAC | base | 2,217 | 1,429 | 631 | 21 | - | - | - | 7.8 | 1.70 |
+| | A | 2,217 | 1,429 | 631 | 21 | - | - | - | 7.8 | 1.70 |
+| | B | 2,180 | 1,387 | 608 | 20 | - | - | - | 8.1 | 1.70 |
+| | C | 2,219 | 1,427 | 632 | 21 | - | - | - | 8.0 | 1.70 |
+| PXD028735 Human_01 | base | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% | 30.6 | 3.14 |
+| | A | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% | 30.7 | 3.14 |
+| | B | 62,971 | 36,371 | 4,172 | 628 | 1.30% | 1.58% | 2.05% | 31.1 | 3.15 |
+| | C | 65,748 | 37,913 | 4,314 | 656 | 1.29% | 1.40% | 1.92% | 31.1 | 3.14 |
+| PXD001468 HEK293T | base | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% | 19.8 | 2.65 |
+| | A | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% | 20.0 | 2.65 |
+| | B | 42,387 | 23,302 | 6,125 | 422 | 2.50% | 2.95% | 3.13% | 21.1 | 2.65 |
+| | C | 42,758 | 23,464 | 6,202 | 426 | 2.56% | 2.87% | 3.43% | 21.3 | 2.64 |
+| PXD011070 ion-trap CID | base | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% | 13.3 | 2.34 |
+| | A | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% | 14.7 | 2.34 |
+| | B | 6,304 | 5,226 | 995 | 62 | 1.48% | 1.58% | 0.89% | 14.4 | 2.34 |
+| | C | 7,127 | 5,920 | 1,111 | 70 | 1.36% | 1.51% | 2.92% | 14.4 | 2.35 |
+| PXD004447 ETciD | base | 13,101 | 11,750 | 2,212 | 130 | 0.82% | 0.85% | 1.87% | 16.8 | 3.40 |
+| | A | 13,101 | 11,750 | 2,212 | 130 | 0.82% | 0.85% | 1.87% | 17.9 | 3.40 |
+| | B | 12,397 | 11,180 | 2,086 | 122 | 0.78% | 0.87% | 1.27% | 17.6 | 3.41 |
+| | C | 13,114 | 11,774 | 2,192 | 130 | 0.82% | 0.85% | 1.62% | 17.4 | 3.41 |
+
+Chimeric search (`chimera: true`, `report_psms: 2`):
+
+| Dataset | Variant | PSMs | Peptides | Proteins | Decoy PSMs | FDP PSM | FDP pep | FDP prot | Wall (s) | Peak RSS (GB) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| PXD028735 Human_01 | base | 68,779 | 39,267 | 4,276 | 686 | 1.34% | 1.53% | 1.59% | 50.8* | 3.25 |
+| | C | 68,809 | 39,243 | 4,308 | 687 | 1.30% | 1.42% | 1.71% | 35.5 | 3.24 |
+| | D | 68,821 | 39,240 | 4,300 | 687 | 1.32% | 1.42% | 1.72% | 36.0 | 3.25 |
+| PXD011070 ion-trap CID | base | 7,226 | 5,971 | 1,103 | 71 | 1.24% | 1.26% | 3.21% | 17.4 | 2.35 |
+| | C | 7,226 | 5,994 | 1,094 | 71 | 1.29% | 1.55% | 2.43% | 17.8 | 2.35 |
+| | D | 7,226 | 5,981 | 1,099 | 71 | 1.24% | 1.38% | 3.22% | 20.3 | 2.36 |
+
+Wall times were measured with other agents' searches running on the same
+16-core machine and vary by about 10% between repeats; the starred base run
+was slowed by that contention. Peak RSS is `/usr/bin/time` maximum resident
+set size. Losses add no measurable memory and 0-8% wall time (C against
+base), within the contention noise.
+
+**Off is identical to base.** A matches base in every row of
+`results.sage.parquet` (duckdb `EXCEPT ALL` both ways is empty) on all five
+datasets; `results.json` differs only in output paths. The Parquet files'
+byte hashes differ only through provenance metadata (binary identity).
+
+## Reading the results
+
+- **B loses identifications everywhere**: 1-12% fewer PSMs, with the largest
+  loss on ion-trap CID. The cause is diagnosed in "Why B loses PSMs" below:
+  loss-only cleavages add to the matched-ion count, and the best wrong
+  candidate collects more of them than the correct peptide.
+- **C is neutral**: PSM, peptide and protein counts change by -0.7% to +0.7%,
+  decoy PSMs at 1% change by at most one, and entrapment FDP never rises by
+  more than about 0.1 percentage point at PSM or peptide level (protein FDP is
+  within the noise of a few entrapment proteins: +0.13 points on Human_01,
+  -0.5 on CID, -0.25 on ETciD).
+- **D is not better than C**: keeping loss-only peaks for the next chimeric
+  rank changes nothing measurable. C is kept because loss peaks belong to the
+  peptide that explained them.
+
+## Why B loses PSMs
+
+B was rerun with the experiment commit `8761c3d`, which reproduces the first
+round's B and C row for row (duckdb `EXCEPT ALL` both ways is empty on the
+shared columns of PXD011070).
+
+**It is not an implementation bug.** For a lost PSM (PXD011070 scan 4802,
+target FPGQLNADLRK replaced by the decoy TKVSTATGPAPTK) an independent Python
+recomputation from the mzML, with the approved site rules, 0.5 Da and charges
+1-2, gives the target 25 intact matches plus 2 loss-only cleavages and the
+decoy 19 plus 10, exactly the 27 and 29 `matched_peaks` Sage reported. The
+unit tests cover the site rules (b fragments hold residues 0..=i, y the rest),
+the neutral-mass arithmetic (a loss is subtracted from the neutral fragment
+mass, so it is correct at every fragment charge) and stacking.
+
+**Cause: a loss-only cleavage adds a matched-ion count, and wrong candidates
+collect more of them than the right one.** With the approved rules 81% of b
+fragments and 99.9% of y fragments carry a loss form (every tryptic y ion
+contains its C-terminal K or R), so B roughly doubles the masses tried at
+every cleavage. A cleavage whose intact ion already matched gains nothing;
+an empty cleavage gains a new chance of a random match. The correct peptide
+has few empty cleavages; each wrong candidate has many, and the runner-up is
+the best of many wrong candidates, so it collects the most random fills.
+Hyperscore change for confident targets that kept their peptide, against the
+best other candidate for the same spectrum:
+
+| Dataset | Correct peptide | Runner-up | Median `delta_next` base -> B | Confident targets that lost rank 1 (to a decoy) |
+| --- | ---: | ---: | --- | ---: |
+| PXD028735 Human_01 (HCD) | +1.8 | +6.2 | 18.9 -> 13.6 | 2,165 of 65,663 (841) |
+| PXD011070 (ion-trap CID) | +4.4 | +9.7 | 17.4 -> 12.0 | 717 of 7,129 (360) |
+| PXD004447 (ETciD) | +0.8 | +4.8 | 19.4 -> 13.2 | 364 of 13,101 (196) |
+
+At the rank-1 level decoys gain as much as or more than confident targets
+(CID: +4.3 matched peaks for decoys, +1.6 for confident targets; HCD: +0.86
+against +0.77). The hyperscore alone then separates far worse: target-decoy
+competition on the hyperscore alone passes 1,225 CID PSMs at 1% instead of
+3,111. The linear discriminant recovers most of that, but not the lost rank-1
+assignments.
+
+Each candidate cause, tested with a variant that changes only that factor:
+
+| Candidate cause | Test | Verdict |
+| --- | --- | --- |
+| Loss-only matches raise the matched-ion count (log-factorial term) | **B-int**: as B, but a loss-only cleavage adds its intensity and no count | **The cause.** B-int is within 0.7% of base everywhere (B: -1% to -12%). |
+| Loss peaks replace the intact peak's intensity | **B-intact**: as B, but the intact form wins whenever it matched | Not the cause: B-intact equals B. |
+| Decoys gain as much as targets | per-PSM comparison above | True, and worse for the best wrong candidate; this is how the count term hurts. |
+| Ion-trap CID with 0.5 Da tolerance | B across datasets | Amplifies (CID -12%), not required (HCD -1% to -4%, ETciD -5%). |
+| `max_fragment_losses` | **B-max2** (2 instead of 1) | Makes it worse (CID -24%, HCD -2% to -8%). |
+| Over-broad site rules | **B-narrow**: water D/E, ammonia N/Q, on b and y | Halves the loss but still -1% to -8%: any residue rule still covers 76% of b and 71% of y fragments of tryptic peptides. |
+| Implementation bug | independent recomputation, unit tests | None found. |
+
+## Principled fixes
+
+Every fix keeps the approved configuration shape; variants are selected with
+the experiment variables of `8761c3d`.
+
+| Variant | What it does | Published or ours |
+| --- | --- | --- |
+| B | loss forms are alternatives of their cleavage (first round) | ours (no engine above does this at full weight) |
+| B-int | as B, a loss-only cleavage adds intensity but no count | ours |
+| B-intact, B-narrow, B-max2 | diagnostics above | ours; B-narrow's ammonia N/Q follows Tabb et al. 2003, water D/E is ours |
+| C | two LDA features, `matched_loss_peaks` and `loss_intensity_pct` (shipped) | ours |
+| Cs | as C, counting only loss peaks whose intact parent (same cleavage and charge) matched: `loss_supported_fragments` | ours |
+| Cf | as Cs, the count as a fraction of `matched_peaks` | ours |
+| P0 | parent-supported: a supported loss adds its intensity to the parent cleavage, no count; unsupported loss peaks add nothing | ours; the parent gate resembles Andromeda's reported rule and Mascot's series gate |
+| P05, P1 | as P0, and a supported loss adds 0.5 or 1 to the hyperscore's count (`matched_peaks` unchanged) | ours |
+| P0-narrow | P0 with the B-narrow rules | ours |
+| P0Cs | P0 in the score plus the Cs features | ours |
+| W02 | every matched loss peak adds 0.2 to the count and 0.2 of its intensity | ours; the 0.2 weight is Comet's, but Comet adds no count (see the engine table), so the count term is ours |
+
+"Restrict losses to CID" is answered by the per-dataset columns: no variant
+does better on the ion-trap CID file than on HCD.
+
+PSM / peptide change against base at 1% q-value (percent):
+
+| Variant | HEK SILAC | PXD028735 Human_01 | PXD001468 HEK293T | PXD011070 ion-trap CID | PXD004447 ETciD |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | +0.0 / +0.0 | +0.0 / +0.0 | +0.0 / +0.0 | +0.0 / +0.0 | +0.0 / +0.0 |
+| B | -1.7 / -2.9 | -4.1 / -4.0 | -0.9 / -0.7 | -11.6 / -11.8 | -5.4 / -4.9 |
+| B-int | +0.7 / -1.0 | +0.4 / +0.5 | +0.1 / +0.1 | -0.2 / -0.6 | -0.1 / -0.0 |
+| B-intact | -1.5 / -3.1 | -4.2 / -4.1 | -0.9 / -0.8 | -12.0 / -11.5 | -5.4 / -4.9 |
+| B-narrow | +0.0 / +0.3 | -2.1 / -2.0 | -0.7 / -0.7 | -7.5 / -7.8 | -3.7 / -3.4 |
+| B-max2 | -4.3 / -5.1 | -7.7 / -7.4 | -2.1 / -2.1 | -24.1 / -22.9 | -6.3 / -5.8 |
+| C | +0.1 / -0.1 | +0.1 / +0.0 | +0.0 / +0.0 | -0.0 / -0.1 | +0.1 / +0.2 |
+| Cs | +0.4 / +0.6 | +0.1 / +0.3 | -0.1 / +0.1 | -0.1 / -0.1 | +0.0 / +0.2 |
+| Cf | +0.0 / +0.1 | +0.1 / +0.2 | -0.0 / +0.0 | -0.1 / +0.0 | -0.0 / +0.2 |
+| P0 | +0.0 / -0.1 | +0.2 / +0.0 | +0.0 / +0.0 | +0.0 / -0.3 | -0.0 / +0.0 |
+| P05 | +0.5 / +0.8 | -0.1 / -0.1 | +0.1 / +0.3 | -0.2 / -1.0 | -0.0 / +0.1 |
+| P1 | +0.6 / +0.4 | -0.7 / -0.3 | +0.0 / +0.2 | -1.9 / -2.6 | -0.1 / +0.1 |
+| P0-narrow | -0.1 / +0.1 | +0.2 / +0.1 | +0.0 / +0.0 | +0.1 / +0.0 | +0.0 / +0.0 |
+| P0Cs | +0.7 / +0.3 | +0.1 / +0.3 | -0.0 / +0.1 | -0.1 / -0.4 | +0.0 / +0.2 |
+| W02 | +1.2 / -0.4 | +0.6 / +0.5 | +0.1 / +0.2 | -0.1 / -0.4 | -0.1 / +0.0 |
+
+Entrapment FDP (full table below) stays within 0.1 point of base at PSM and
+peptide level for C, Cs, Cf, P05, P1 and W02; Cs, Cf, P05 and P1 are slightly
+lower. B-int, P0, P0-narrow and P0Cs raise PSM FDP on CID by 0.10-0.15 point,
+and B-narrow by 0.22. Protein FDP moves by a few entrapment proteins either
+way. Counted instead at a fixed 1% entrapment FDP (targets ranked by the
+discriminant, cut where the combined FDP estimate exceeds 1%):
+
+| Variant | Human_01 PSMs / peptides | CID PSMs / peptides |
+| --- | ---: | ---: |
+| base | 64,470 / 36,821 | 6,945 / 5,642 |
+| B | 60,708 / 34,863 | 6,027 / 5,058 |
+| C | 64,636 / 36,798 | 6,933 / 5,654 |
+| Cs | 64,782 / 36,865 | - |
+| P1 | 64,505 / 37,008 | - |
+| W02 | 64,546 / 36,910 | 7,006 / 5,765 |
+
+Only B moves beyond 1%. HEK293T's entrapment FDP is above 1% from the top of
+the list for every variant, so it has no fixed-FDP count.
+
+Parent-supported counting does fix the rank-1 problem: under P1 the correct
+peptide gains 3 times as much hyperscore as the runner-up (Human_01 +8.4
+against +2.8) and the median `delta_next` widens from 18.4 to 25.7. But
+this does not become identifications after the discriminant: at 0.5 Da about
+half of matched intact fragments also find a random peak at their loss mass,
+so the extra count mostly rescales the matched-ion count for targets and
+decoys alike. P1 is -1.9% on CID and -0.7% on Human_01 at 1% q-value, with
+lower FDP.
+
+<details>
+<summary>All variants, full numbers at 1% q-value</summary>
+
+| Dataset | Variant | PSMs | Peptides | Proteins | Decoy PSMs | FDP PSM | FDP pep | FDP prot |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| HEK SILAC | base | 2,217 | 1,429 | 631 | 21 | - | - | - |
+|  | A | 2,217 | 1,429 | 631 | 21 | - | - | - |
+|  | B | 2,180 | 1,387 | 608 | 20 | - | - | - |
+|  | B-int | 2,232 | 1,415 | 635 | 21 | - | - | - |
+|  | B-intact | 2,184 | 1,384 | 609 | 20 | - | - | - |
+|  | B-narrow | 2,217 | 1,433 | 630 | 21 | - | - | - |
+|  | B-max2 | 2,122 | 1,356 | 600 | 20 | - | - | - |
+|  | C | 2,219 | 1,427 | 632 | 21 | - | - | - |
+|  | Cs | 2,225 | 1,438 | 634 | 21 | - | - | - |
+|  | Cf | 2,217 | 1,430 | 633 | 21 | - | - | - |
+|  | P0 | 2,217 | 1,428 | 634 | 21 | - | - | - |
+|  | P05 | 2,228 | 1,441 | 638 | 21 | - | - | - |
+|  | P1 | 2,231 | 1,435 | 637 | 21 | - | - | - |
+|  | P0-narrow | 2,214 | 1,430 | 633 | 21 | - | - | - |
+|  | P0Cs | 2,233 | 1,434 | 636 | 21 | - | - | - |
+|  | W02 | 2,244 | 1,423 | 632 | 21 | - | - | - |
+| PXD028735 Human_01 | base | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% |
+|  | A | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% |
+|  | B | 62,971 | 36,371 | 4,172 | 628 | 1.30% | 1.58% | 2.05% |
+|  | B-int | 65,938 | 38,078 | 4,279 | 658 | 1.31% | 1.52% | 1.79% |
+|  | B-intact | 62,934 | 36,349 | 4,178 | 628 | 1.28% | 1.59% | 2.05% |
+|  | B-narrow | 64,288 | 37,132 | 4,241 | 641 | 1.38% | 1.63% | 1.81% |
+|  | B-max2 | 60,612 | 35,115 | 4,117 | 605 | 1.31% | 1.41% | 2.01% |
+|  | C | 65,748 | 37,913 | 4,314 | 656 | 1.29% | 1.40% | 1.92% |
+|  | Cs | 65,738 | 38,000 | 4,325 | 656 | 1.25% | 1.38% | 1.91% |
+|  | Cf | 65,721 | 37,985 | 4,319 | 656 | 1.21% | 1.41% | 1.91% |
+|  | P0 | 65,768 | 37,915 | 4,294 | 656 | 1.30% | 1.44% | 1.79% |
+|  | P05 | 65,627 | 37,865 | 4,295 | 655 | 1.23% | 1.29% | 1.72% |
+|  | P1 | 65,214 | 37,775 | 4,319 | 651 | 1.14% | 1.28% | 1.78% |
+|  | P0-narrow | 65,774 | 37,949 | 4,293 | 656 | 1.29% | 1.45% | 1.79% |
+|  | P0Cs | 65,748 | 38,023 | 4,322 | 656 | 1.23% | 1.40% | 1.91% |
+|  | W02 | 66,055 | 38,095 | 4,301 | 659 | 1.29% | 1.47% | 1.78% |
+| PXD001468 HEK293T | base | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% |
+|  | A | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% |
+|  | B | 42,387 | 23,302 | 6,125 | 422 | 2.50% | 2.95% | 3.13% |
+|  | B-int | 42,776 | 23,479 | 6,204 | 426 | 2.61% | 2.85% | 3.47% |
+|  | B-intact | 42,366 | 23,269 | 6,112 | 422 | 2.49% | 2.94% | 3.09% |
+|  | B-narrow | 42,448 | 23,301 | 6,118 | 423 | 2.53% | 2.91% | 3.18% |
+|  | B-max2 | 41,845 | 22,967 | 6,069 | 417 | 2.58% | 2.95% | 3.16% |
+|  | C | 42,758 | 23,464 | 6,202 | 426 | 2.56% | 2.87% | 3.43% |
+|  | Cs | 42,727 | 23,488 | 6,199 | 426 | 2.51% | 2.87% | 3.48% |
+|  | Cf | 42,738 | 23,471 | 6,200 | 426 | 2.52% | 2.87% | 3.48% |
+|  | P0 | 42,765 | 23,467 | 6,202 | 426 | 2.59% | 2.89% | 3.47% |
+|  | P05 | 42,815 | 23,540 | 6,207 | 427 | 2.57% | 2.94% | 3.42% |
+|  | P1 | 42,756 | 23,510 | 6,217 | 426 | 2.53% | 2.97% | 3.56% |
+|  | P0-narrow | 42,763 | 23,466 | 6,203 | 426 | 2.59% | 2.89% | 3.47% |
+|  | P0Cs | 42,737 | 23,483 | 6,198 | 426 | 2.54% | 2.87% | 3.48% |
+|  | W02 | 42,794 | 23,502 | 6,206 | 426 | 2.55% | 2.93% | 3.47% |
+| PXD011070 ion-trap CID | base | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% |
+|  | A | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% |
+|  | B | 6,304 | 5,226 | 995 | 62 | 1.48% | 1.58% | 0.89% |
+|  | B-int | 7,112 | 5,894 | 1,115 | 70 | 1.46% | 1.46% | 3.44% |
+|  | B-intact | 6,277 | 5,246 | 1,008 | 61 | 1.43% | 1.57% | 1.46% |
+|  | B-narrow | 6,592 | 5,467 | 993 | 64 | 1.58% | 1.64% | 1.19% |
+|  | B-max2 | 5,414 | 4,572 | 906 | 53 | 1.46% | 1.72% | 1.63% |
+|  | C | 7,127 | 5,920 | 1,111 | 70 | 1.36% | 1.51% | 2.92% |
+|  | Cs | 7,124 | 5,923 | 1,109 | 70 | 1.31% | 1.51% | 2.66% |
+|  | Cf | 7,123 | 5,927 | 1,110 | 70 | 1.31% | 1.51% | 2.93% |
+|  | P0 | 7,130 | 5,910 | 1,107 | 70 | 1.51% | 1.64% | 2.93% |
+|  | P05 | 7,114 | 5,866 | 1,100 | 70 | 1.26% | 1.34% | 2.42% |
+|  | P1 | 6,993 | 5,773 | 1,098 | 68 | 1.23% | 1.24% | 3.23% |
+|  | P0-narrow | 7,133 | 5,928 | 1,120 | 70 | 1.46% | 1.69% | 3.43% |
+|  | P0Cs | 7,123 | 5,904 | 1,113 | 70 | 1.46% | 1.70% | 2.92% |
+|  | W02 | 7,120 | 5,901 | 1,107 | 70 | 1.36% | 1.52% | 2.93% |
+| PXD004447 ETciD | base | 13,101 | 11,750 | 2,212 | 130 | 0.82% | 0.85% | 1.87% |
+|  | A | 13,101 | 11,750 | 2,212 | 130 | 0.82% | 0.85% | 1.87% |
+|  | B | 12,397 | 11,180 | 2,086 | 122 | 0.78% | 0.87% | 1.27% |
+|  | B-int | 13,083 | 11,747 | 2,205 | 129 | 0.79% | 0.82% | 1.87% |
+|  | B-intact | 12,398 | 11,177 | 2,082 | 122 | 0.78% | 0.87% | 1.13% |
+|  | B-narrow | 12,613 | 11,352 | 2,081 | 125 | 0.82% | 0.85% | 1.13% |
+|  | B-max2 | 12,271 | 11,073 | 2,055 | 121 | 0.82% | 0.91% | 1.15% |
+|  | C | 13,114 | 11,774 | 2,192 | 130 | 0.82% | 0.85% | 1.62% |
+|  | Cs | 13,104 | 11,774 | 2,194 | 130 | 0.79% | 0.88% | 1.48% |
+|  | Cf | 13,100 | 11,771 | 2,201 | 130 | 0.79% | 0.88% | 1.61% |
+|  | P0 | 13,098 | 11,750 | 2,212 | 129 | 0.82% | 0.85% | 1.87% |
+|  | P05 | 13,098 | 11,767 | 2,213 | 129 | 0.79% | 0.88% | 2.00% |
+|  | P1 | 13,083 | 11,756 | 2,212 | 129 | 0.79% | 0.85% | 2.00% |
+|  | P0-narrow | 13,103 | 11,750 | 2,213 | 130 | 0.82% | 0.88% | 2.00% |
+|  | P0Cs | 13,106 | 11,769 | 2,192 | 130 | 0.79% | 0.85% | 1.48% |
+|  | W02 | 13,083 | 11,751 | 2,211 | 129 | 0.79% | 0.85% | 2.14% |
+
+</details>
+
+Wall time and memory on a quiet machine (PXD028735 Human_01 / PXD011070):
+base 27.3 s / 12.8 s, B 29.2 / 13.1, C 29.1 / 12.8, Cs 29.4 / 12.9, P0 29.1 /
+13.0, P1 29.2 / 13.0, W02 28.9 / 13.0. Losses cost 6-8% wall time on HCD and
+0-2% on CID; peak RSS is unchanged (3.13-3.17 GB and 2.34-2.36 GB).
+
+## The ion-trap CID claim
+
+Loss ions are more prominent in ion-trap CID, as the literature says:
+confident CID target PSMs carry 6.9% of MS2 intensity in matched loss peaks,
+against 2.5% on Orbitrap HCD (Human_01) and 0.3% on ETciD. But at 0.5 Da
+fragment tolerance loss peaks also match by chance: decoy PSMs carry 5.3%
+(7.6 matched loss peaks against 11.3 for confident targets, about the same
+ratio to `matched_peaks` as targets). On HCD the loss matches track the
+ordinary matches equally for targets and decoys (0.32 against 0.34 loss peaks
+per matched peak). So loss evidence mostly restates what the b/y matches
+already say, and does not separate targets from decoys well enough to add
+identifications. We did not find the larger CID gain the literature leads one
+to expect; the effect here is none on CID, HCD or ETciD.
+
+## Third round (Beta 15): an in-score contribution plus the C features
+
+The hyperscore decides which candidate wins each spectrum; the linear
+discriminant only reweights the winners. So a small in-score contribution
+that does not touch the matched-ion count might fix winner selection, while
+the C features still let the discriminant learn how much losses matter.
+
+| Variant | Hyperscore | LDA loss features | Published or ours |
+| --- | --- | --- | --- |
+| base | no losses | no | - |
+| C | no losses | yes (shipped) | ours |
+| B-int | loss-only cleavages add their intensity, no count | no | ours |
+| W02 | every matched loss adds 0.2 to the count and 0.2 of its intensity | no | ours (Comet's weight, our count term) |
+| **W02+C** | every matched loss adds 0.2 of its intensity; count unchanged | yes | closest to Comet `use_NL_ions` (0.2, count-free); the residue rules, all fragment charges and one loss form per cleavage are ours |
+| **B-int+C** | as B-int | yes | ours |
+| W02c+C | as W02 | yes | ours |
+| W01+C, W03+C, W05+C | as W02+C with weight 0.1, 0.3, 0.5 | yes | ours (weight scan) |
+
+All variants ran on one binary, experiment commit `3eb2310` (Beta 14 plus the
+`8761c3d` hooks and `SAGE_PLUS_FRAGMENT_LOSS_COUNT_WEIGHT`); base is that
+binary without the `fragment_losses` key. Every search was run twice: the
+two runs' Parquet files are byte-identical, so the searches are
+deterministic and the only noise is in the entrapment estimate itself.
+
+Identifications at a fixed 1% entrapment FDP are counted as follows: target
+rank-1 PSMs ranked by `sage_discriminant_score`, cut at the longest prefix
+whose combined FDP N_e(1 + 1/r)/N is at most 1% (peptides: each peptide's best
+PSM). This gives 64,650 base PSMs on Human_01 where the second-round table
+above has 64,470; that table used a slightly different cut, so compare only
+within this section. HEK293T's FDP is above 1% from the top of the list, so
+it is compared at a fixed 3%. HEK SILAC has no entrapment.
+
+| Dataset | Variant | PSMs 1% q | Peptides 1% q | Proteins 1% q | FDP PSM / pep / prot | PSMs @ fixed FDP | Peptides @ fixed FDP | median `delta_next` |
+| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: |
+| HEK SILAC | base | 2,217 | 1,429 | 631 | - | - | - | 32.1 |
+| | C | 2,219 | 1,427 | 632 | - | - | - | 32.1 |
+| | W02 | 2,244 | 1,423 | 632 | - | - | - | 33.4 |
+| | B-int | 2,232 | 1,415 | 635 | - | - | - | 32.2 |
+| | W02+C | 2,227 | 1,418 | 638 | - | - | - | 32.3 |
+| | B-int+C | 2,226 | 1,417 | 634 | - | - | - | 32.2 |
+| | W02c+C | 2,219 | 1,423 | 631 | - | - | - | 33.5 |
+| PXD028735 Human_01 (HCD) | base | 65,663 | 37,904 | 4,286 | 1.29 / 1.47 / 1.79% | 64,650 | 36,924 | 18.3 |
+| | C | 65,748 | 37,913 | 4,314 | 1.29 / 1.40 / 1.92% | **64,816** | 36,900 | 18.3 |
+| | W02 | 66,055 | 38,095 | 4,301 | 1.29 / 1.47 / 1.78% | 64,726 | 37,013 | 19.7 |
+| | B-int | 65,938 | 38,078 | 4,279 | 1.31 / 1.52 / 1.79% | 64,660 | 36,949 | 18.1 |
+| | W02+C | 66,009 | 38,080 | 4,310 | 1.33 / 1.45 / 1.85% | 64,759 | 37,001 | 18.1 |
+| | B-int+C | 66,008 | 38,133 | 4,302 | 1.33 / 1.49 / 1.78% | 64,696 | **37,053** | 18.1 |
+| | W02c+C | 66,033 | 38,135 | 4,318 | 1.30 / 1.45 / 1.91% | 64,797 | 37,042 | 19.7 |
+| PXD001468 HEK293T (HCD), fixed 3% | base | 42,753 | 23,463 | 6,202 | 2.57 / 2.87 / 3.43% | 43,219 | - | 20.6 |
+| | C | 42,758 | 23,464 | 6,202 | 2.56 / 2.87 / 3.43% | 43,215 | - | 20.6 |
+| | W02 | 42,794 | 23,502 | 6,206 | 2.55 / 2.93 / 3.47% | 43,296 | - | 23.0 |
+| | B-int | 42,776 | 23,479 | 6,204 | 2.61 / 2.85 / 3.47% | 43,257 | - | 20.5 |
+| | W02+C | 42,757 | 23,469 | 6,207 | 2.57 / 2.89 / 3.47% | 43,238 | - | 20.6 |
+| | B-int+C | 42,753 | 23,477 | 6,204 | 2.57 / 2.89 / 3.47% | 43,263 | - | 20.5 |
+| | W02c+C | 42,785 | 23,504 | 6,208 | 2.53 / 2.90 / 3.47% | 43,299 | - | 23.0 |
+| PXD011070 ion-trap CID | base | 7,129 | 5,927 | 1,115 | 1.36 / 1.57 / 3.44% | 6,964 | 5,657 | 15.8 |
+| | C | 7,127 | 5,920 | 1,111 | 1.36 / 1.51 / 2.92% | 6,952 | 5,669 | 15.8 |
+| | W02 | 7,120 | 5,901 | 1,107 | 1.36 / 1.52 / 2.93% | 7,025 | 5,781 | 17.7 |
+| | B-int | 7,112 | 5,894 | 1,115 | 1.46 / 1.46 / 3.44% | 6,948 | 5,652 | 15.5 |
+| | W02+C | 7,112 | 5,907 | 1,112 | 1.36 / 1.52 / 2.92% | 6,958 | 5,682 | 15.7 |
+| | B-int+C | 7,107 | 5,891 | 1,110 | 1.41 / 1.46 / 2.93% | 6,945 | 5,669 | 15.5 |
+| | W02c+C | 7,122 | 5,900 | 1,106 | 1.36 / 1.52 / 2.67% | 7,045 | 5,785 | 17.7 |
+| PXD004447 ETciD | base | 13,101 | 11,750 | 2,212 | 0.82 / 0.85 / 1.87% | 13,228 | 11,841 | 19.5 |
+| | C | 13,114 | 11,774 | 2,192 | 0.82 / 0.85 / 1.62% | 13,226 | 11,848 | 19.5 |
+| | W02 | 13,083 | 11,751 | 2,211 | 0.79 / 0.85 / 2.14% | 13,253 | 11,871 | 19.8 |
+| | B-int | 13,083 | 11,747 | 2,205 | 0.79 / 0.82 / 1.87% | 13,265 | 11,893 | 19.5 |
+| | W02+C | 13,105 | 11,766 | 2,184 | 0.77 / 0.76 / 1.49% | 13,285 | 11,871 | 19.5 |
+| | B-int+C | 13,103 | 11,781 | 2,188 | 0.79 / 0.82 / 1.48% | 13,282 | 11,876 | 19.5 |
+| | W02c+C | 13,111 | 11,774 | 2,207 | 0.82 / 0.85 / 1.87% | 13,271 | 11,857 | 19.8 |
+
+PSMs at the fixed FDP, each variant minus C, with a 95% interval from a
+paired Poisson bootstrap over spectra (300 resamples):
+
+| Variant | Human_01 (1%) | HEK293T (3%) | CID (1%) | ETciD (1%) |
+| --- | ---: | ---: | ---: | ---: |
+| base | -166 (-451 to +2) | +4 (-40 to +31) | +12 (-58 to +42) | +2 (-68 to +40) |
+| W02 | -90 (-251 to +281) | +81 (+9 to +151) | +73 (-108 to +234) | +27 (-82 to +70) |
+| B-int | -156 (-536 to +112) | +42 (-29 to +91) | -4 (-70 to +32) | +39 (-42 to +97) |
+| W02+C | -57 (-253 to +230) | +23 (-31 to +65) | +6 (-32 to +38) | +59 (-13 to +104) |
+| B-int+C | -120 (-290 to +219) | +48 (-19 to +99) | -7 (-66 to +51) | +56 (-17 to +103) |
+| W02c+C | -19 (-201 to +383) | +84 (-8 to +147) | +93 (-105 to +242) | +45 (-52 to +94) |
+
+Weight scan of the count-free contribution plus C (PSMs / peptides at a fixed
+1% entrapment FDP; C is 64,816 / 36,900 and 6,952 / 5,669):
+
+| Weight | Human_01 | CID |
+| ---: | ---: | ---: |
+| 0.1 | 64,767 / 36,980 | 6,952 / 5,698 |
+| 0.2 | 64,759 / 37,001 | 6,958 / 5,682 |
+| 0.3 | 64,771 / 36,983 | 6,961 / 5,665 |
+| 0.5 | 64,787 / 37,014 | 6,950 / 5,669 |
+
+Reading:
+
+- **No combination beats C at a fixed entrapment FDP on HCD.** On Human_01
+  every combination has fewer PSMs than C (-19 to -120) and 0.3-0.4% more
+  peptides; on HEK293T at 3% they are +23 to +84 PSMs (at most +0.2%). Every
+  bootstrap interval against C includes zero except W02 on HEK293T (+81,
+  0.2%).
+- **The count-free contribution barely changes winner selection.** W02+C and
+  B-int+C leave the median `delta_next` at base's value (18.1 against 18.3 on
+  Human_01, 15.5-15.7 against 15.8 on CID). The hyperscore takes the log of
+  summed intensity, so a fraction of a few loss peaks' intensity moves it by
+  a few hundredths; only the factorial count term separates candidates. The
+  variants that add a count (W02, W02c+C) do widen `delta_next` (19.7 and
+  17.7), and they give the only visible CID gain (+73 and +93 PSMs, +2.2% and
+  +2.3% peptides at the fixed FDP), but the intervals include zero and the
+  same count term costs PSMs on Human_01.
+- **The weight does not matter.** From 0.1 to 0.5 the fixed-FDP counts stay
+  within 40 PSMs and 50 peptides on both files.
+- **Wall time and memory:** unchanged within the contention noise of this
+  shared machine (the two repeats of one variant differ by up to 2x). The
+  quiet-machine timings of the second round apply.
+
+Decision: no combination passes the rule (beat C at a fixed entrapment FDP
+on HCD without regressing CID or ETciD). `fragment_losses` keeps the C
+integration and no loss weight setting is added.
+
+## Decision
+
+- Integration: **C**, loss ions as two separate rescoring features, never in
+  the hyperscore, `matched_peaks` or the preliminary index; chimeric peak
+  removal removes them. After the second round no in-score integration gains
+  beyond about 1%: the count-free fixes (B-int, P0, P0-narrow) and W02 remove
+  B's loss but land in the same ±1% band as C, and none of them beats base by
+  more than 1% at a fixed 1% entrapment FDP. Counting supported losses (P05,
+  P1) costs up to 2.6% on CID. So enabling `fragment_losses` still means C.
+  Cs (parent-supported loss count as a feature) equals C within noise, with
+  slightly lower PSM FDP; it was not adopted.
+  The third round (Beta 15) combined the count-free in-score contribution
+  (W02+C, B-int+C) with the C features; neither beats C at a fixed
+  entrapment FDP, so C stays.
+- Default: **off** for every instrument type. Neither HCD, ion-trap CID nor
+  ETciD shows a gain that would justify turning losses on by default.
+- It remains available for users who want the loss evidence in their PSM
+  tables or Percolator/mokapot features.
+
+## Loss-ion charge (Beta 15 experiment, setting not shipped)
+
+Loss ions are matched at every fragment charge that the intact ions are
+matched at (up to `max_fragment_charge`). Comet matches them at 1+ only, and
+Andromeda reportedly does the same (table above). To test a 1+ cap, commit
+85b94cc on `b15/limits` added a `database.max_fragment_loss_charge` setting;
+**C-1+** is C with `"max_fragment_loss_charge": 1`, run with that binary. C
+from the same binary reproduces the Beta 14 C row for row on every dataset.
+The setting was then removed (see the decision below), so these runs need
+commit 85b94cc to reproduce.
+
+At 1% q-value:
+
+| Dataset | Variant | PSMs | Peptides | Proteins | Decoy PSMs | FDP PSM | FDP pep | FDP prot |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| HEK SILAC | base | 2,217 | 1,429 | 631 | 21 | - | - | - |
+|  | C | 2,219 | 1,427 | 632 | 21 | - | - | - |
+|  | C-1+ | 2,218 | 1,428 | 631 | 21 | - | - | - |
+| PXD028735 Human_01 | base | 65,663 | 37,904 | 4,286 | 655 | 1.29% | 1.47% | 1.79% |
+|  | C | 65,748 | 37,913 | 4,314 | 656 | 1.29% | 1.40% | 1.92% |
+|  | C-1+ | 65,741 | 37,903 | 4,323 | 656 | 1.26% | 1.39% | 1.98% |
+| PXD001468 HEK293T | base | 42,753 | 23,463 | 6,202 | 426 | 2.57% | 2.87% | 3.43% |
+|  | C | 42,758 | 23,464 | 6,202 | 426 | 2.56% | 2.87% | 3.43% |
+|  | C-1+ | 42,750 | 23,466 | 6,202 | 426 | 2.56% | 2.87% | 3.43% |
+| PXD011070 ion-trap CID | base | 7,129 | 5,927 | 1,115 | 70 | 1.36% | 1.57% | 3.44% |
+|  | C | 7,127 | 5,920 | 1,111 | 70 | 1.36% | 1.51% | 2.92% |
+|  | C-1+ | 7,127 | 5,926 | 1,114 | 70 | 1.31% | 1.57% | 3.18% |
+| PXD004447 ETciD | C and C-1+ | 13,114 | 11,774 | 2,192 | 130 | 0.82% | 0.85% | 1.62% |
+
+On PXD004447 every precursor is 2+, so fragments are searched at 1+ only and
+the two variants are identical. Mean matched loss peaks per PSM, for
+confident targets (spectrum q ≤ 1%) and for decoys:
+
+| Dataset | C targets / decoys | C-1+ targets / decoys |
+| --- | ---: | ---: |
+| HEK SILAC | 5.18 / 2.02 | 4.26 / 1.09 |
+| PXD028735 Human_01 | 4.09 / 2.28 | 3.47 / 1.91 |
+| PXD001468 HEK293T | 5.88 / 2.49 | 5.54 / 2.22 |
+| PXD011070 ion-trap CID | 11.27 / 7.57 | 7.77 / 4.39 |
+
+Capping at 1+ removes proportionally more decoy loss matches than target
+ones: 46% against 18% on HEK SILAC, and 42% against 31% on CID. So 2+ loss
+peaks are largely random. But the identifications do not move: every change
+is within 0.1% of C, and so are the PSM and peptide FDP (C-1+ is 0.03-0.05
+point lower at PSM level on Human_01 and CID). Protein FDP moves by a few
+entrapment proteins either way, as for every variant above.
+
+**Decision:** no charge setting. A fixed 1+ cap would drop real loss peaks
+where multiply charged fragments are common (high-charge precursors, ETD,
+crosslinks), and a separate setting adds tuning for no measured gain. Loss
+ions follow the intact-ion fragment charges. Limits: both loss features sum
+over all charges, so rescoring cannot weight 2+ loss matches separately, and
+no benchmark dataset had many multiply charged fragments (PXD004447 is all 2+
+precursors, so its fragments are 1+ only).
+
+## `allow_modified` and labelled residues (Beta 15 analysis)
+
+With `allow_modified: false` (the default) a residue that carries any
+modification, including a static label, is not a loss site. For the approved
+ammonia rule (R, K, N, Q on y ions) this matters because every tryptic y ion
+contains its C-terminal K or R. Isobaric tags such as TMT and iTRAQ acylate
+the lysine ε-amine (Thompson et al., Anal. Chem. 2003, 75:1895), so a labelled
+K has no free side-chain amine to lose as ammonia. Excluding it is correct,
+as it is for acetyl-K. R is not labelled by TMT and stays a site. For SILAC,
+what matters is the element that is labelled. In 13C-only labels (K6 and R6,
+Unimod `Label:13C(6)`) the lost ammonia is still 17.0265 Da, because the
+heavy carbons stay on the fragment, whose mass already includes them. So
+these residues are real ammonia sites that the default drops. Labels with
+15N (K8 `Label:13C(6)15N(2)`, R10 `Label:13C(6)15N(4)`) label every nitrogen
+of the residue. Ammonia lost from them is 15NH3, 18.0236 Da, so the
+configured 17.0265 Da would be wrong by 0.997 Da, and excluding them is
+correct (SILAC: Ong et al., Mol. Cell. Proteomics 2002, 1:376). The default
+is therefore right for isobaric tags, acylations and 15N labels, and
+conservative only for 13C-only SILAC labels. Users who want ammonia forms on
+K6/R6 residues can set `allow_modified: true` on the Ammonia entry, at the
+cost of also admitting other modified K and R. **Recommendation: no code
+change.** A per-modification exception list would be the principled fix, but
+loss features change identifications by 0.2% or less on every dataset
+here, so a narrower site rule on labelled residues cannot move results
+beyond noise. (The HEK SILAC benchmark searches K6R6 data without the label,
+so it does not exercise this case.)
+
+## Reproducing
+
+```bash
+python benchmarks/run_fragment_losses.py \
+  --base <b14/per-mod-flr sage> --candidate <6aa89ff sage> --output runs \
+  --variants base A B C
+python benchmarks/run_fragment_losses.py ... \
+  --datasets pxd028735-human01 pxd011070-itcid \
+  --variants base-chimera C-chimera
+# second round, candidate built from 8761c3d
+python benchmarks/run_fragment_losses.py --base <base sage> --candidate <8761c3d sage> \
+  --output exp --variants base A B B-int B-intact B-narrow B-max2 C Cs Cf \
+  P0 P05 P1 P0-narrow P0Cs W02
+# Beta 15 loss-ion charge, both engines built from b15/limits
+python benchmarks/run_fragment_losses.py --base <b15 sage> --candidate <b15 sage> \
+  --output b15 --variants base C C-1+
+# third round, one binary built from 3eb2310 as base and candidate
+python benchmarks/run_fragment_losses.py --base <3eb2310 sage> --candidate <3eb2310 sage> \
+  --output b15 --variants base C W02 B-int W02+C B-int+C W02c+C
+python benchmarks/run_fragment_losses.py ... --datasets pxd028735-human01 pxd011070-itcid \
+  --variants W01+C W03+C W05+C
+```
+
+D (first round, chimeric keep-peaks) was selectable only in `6aa89ff`. The
+second-round variants need the experiment variables of `8761c3d`, and the
+third-round ones those of `3eb2310`; release binaries ignore them and run C
+whenever `fragment_losses` is set.

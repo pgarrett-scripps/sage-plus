@@ -296,10 +296,10 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     let builder: Builder = serde_json::from_value(serde_json::json!({
         "generate_decoys": false,
         "static_mods": {
-            "R": {
+            "SILAC-R": {
                 "mass": 0.0,
-                "name": "SILAC-R",
-                "channel_offsets": {"light": 0.0, "heavy": 10.008269}
+                "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+                "sites": ["R"]
             }
         }
     }))
@@ -370,6 +370,7 @@ fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         mass: 20.0,
         name: Some(Arc::from("TestMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -534,6 +535,89 @@ fn deferred_chimera_annotation_replays_filtered_preceding_ranks() {
         .is_empty());
 }
 
+/// Two peptidoforms 0.984 Da apart (N vs D) that explain the same fragment
+/// peaks score identically. The heavier one fits the precursor at isotope 0;
+/// the lighter one fits only at isotope +1. The isotope-0 reading must win
+/// the tie instead of the lighter mass.
+#[test]
+fn exact_score_ties_prefer_isotope_zero() {
+    let peptide = |sequence: &str| {
+        crate::peptide::Peptide::try_from(Digest {
+            sequence: sequence.into(),
+            protein: Arc::from("protein"),
+            ..Digest::default()
+        })
+        .unwrap()
+    };
+    let deamidated = peptide("PEPTIDEDR");
+    let amidated = peptide("PEPTIDENR");
+    assert!(amidated.monoisotopic < deamidated.monoisotopic);
+
+    // Only fragments shared by both sequences: b1..b7 and y1.
+    let shared = |peptide: &Peptide| {
+        let mut masses = IonSeries::new(peptide, Kind::B)
+            .take(7)
+            .chain(IonSeries::new(peptide, Kind::Y).last())
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>();
+        masses.sort_by(f32::total_cmp);
+        masses
+    };
+    let fragment_masses = shared(&deamidated);
+    assert_eq!(fragment_masses, shared(&amidated));
+
+    let mut peptides = vec![deamidated.clone(), amidated.clone()];
+    peptides.sort_by(|a, b| a.monoisotopic.total_cmp(&b.monoisotopic));
+    let database = Builder::default()
+        .make_parameters()
+        .build_from_peptides(peptides);
+    let precursor_charge = 2;
+    let query = ProcessedSpectrum {
+        level: 2,
+        id: "isotope-tie".into(),
+        precursors: vec![Precursor {
+            mz: deamidated.monoisotopic / precursor_charge as f32 + PROTON,
+            charge: Some(precursor_charge),
+            ..Precursor::default()
+        }],
+        intensities: vec![1.0; fragment_masses.len()],
+        charges: vec![1; fragment_masses.len()],
+        total_ion_current: fragment_masses.len() as f32,
+        masses: fragment_masses,
+        ..ProcessedSpectrum::default()
+    };
+
+    let scorer = Scorer {
+        db: &database,
+        // Wide enough that the amidated form at isotope +1 (0.019 Da off) is
+        // a candidate too.
+        precursor_tol: Tolerance::Da(-0.05, 0.05),
+        fragment_tol: Tolerance::Da(-0.01, 0.01),
+        min_matched_peaks: 1,
+        min_isotope_err: 0,
+        max_isotope_err: 1,
+        min_precursor_charge: 2,
+        max_precursor_charge: 2,
+        override_precursor_charge: false,
+        max_fragment_charge: Some(1),
+        chimera: false,
+        report_psms: 2,
+        wide_window: false,
+        annotate_matches: false,
+        mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+        score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
+    };
+
+    let features = scorer.score(&query);
+    assert_eq!(features.len(), 2);
+    assert_eq!(features[0].hyperscore, features[1].hyperscore);
+    assert_eq!(database[features[0].peptide_idx].to_string(), "PEPTIDEDR");
+    assert_eq!(features[0].isotope_error, 0.0);
+    assert_eq!(database[features[1].peptide_idx].to_string(), "PEPTIDENR");
+    assert_eq!(features[1].isotope_error, NEUTRON);
+}
+
 mod mass_offsets {
     use super::*;
     use crate::database::{MassOffsetAssignment, Parameters};
@@ -549,12 +633,14 @@ mod mass_offsets {
         vec![VarModEntry::Detailed(VariableModification {
             mass: PHOSPHO,
             max_count: Some(1),
+            max_total_count: None,
             name: Some("Phospho".into()),
-            neutral_losses: Vec::new(),
+            neutral_losses: Vec::new().into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     }
 
@@ -1053,6 +1139,8 @@ mod mass_offsets {
         assert!((hit.expmass - query.precursors[0].mz * 2.0 + 2.0 * PROTON).abs() < 1e-3);
         assert!((hit.average_ppm - 15.0).abs() < 0.2, "{}", hit.average_ppm);
         assert!((hit.signed_fragment_ppm - 15.0).abs() < 0.2);
+        // Every ion is shifted by the same 15 ppm, so the within-PSM spread is ~0.
+        assert!(hit.fragment_ppm_sd < 0.2, "{}", hit.fragment_ppm_sd);
         assert!(hit.aligned_average_ppm < 0.2);
 
         // Annotation reports observed peak m/z, not corrected m/z.
@@ -1087,5 +1175,154 @@ mod mass_offsets {
             "{}",
             hit.aligned_average_ppm
         );
+    }
+
+    fn phospho_hypothesis(database: &IndexedDatabase, precursor_mass: f32) -> OffsetHypothesis {
+        let offset = database.mass_offsets[0].clone();
+        OffsetHypothesis {
+            precursor_mass,
+            precursor_charge: 2,
+            preliminary_shifts: vec![offset.fragment_shift()],
+            offset,
+        }
+    }
+
+    #[test]
+    fn offset_hypothesis_reproduces_the_configured_offset_search() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let scorer = scorer(&offset, false);
+        let configured = scorer.score(&query);
+
+        let matches = scorer.score_offset_hypotheses(
+            &query,
+            &[phospho_hypothesis(&offset, target.monoisotopic)],
+            10,
+            5,
+        );
+        assert_eq!(matches.len(), 1);
+        let best = &matches[0][0];
+        assert_eq!(best.peptide.to_string(), "MAGSPEPTS[Phospho]IDEK");
+        assert_eq!(best.site, Site::Sequence(8));
+        assert_eq!(offset[best.peptide_idx].sequence, best.peptide.sequence);
+        assert_eq!(best.hyperscore, configured[0].hyperscore);
+        assert_eq!(
+            u32::from(best.matched_b + best.matched_y),
+            configured[0].matched_peaks
+        );
+        assert!(matches[0].len() <= 5);
+        assert!(matches[0]
+            .windows(2)
+            .all(|pair| pair[0].hyperscore >= pair[1].hyperscore));
+
+        // Hypothesis matches carry the peaks they matched.
+        let fragments = &best.fragments;
+        assert!(!fragments.peak_indices.is_empty());
+        assert_eq!(
+            fragments.peak_indices.len(),
+            fragments.mz_experimental.len()
+        );
+        for (&peak, &mz) in fragments
+            .peak_indices
+            .iter()
+            .zip(&fragments.mz_experimental)
+        {
+            assert_eq!(query.peak_mz(peak as usize), mz);
+        }
+    }
+
+    #[test]
+    fn offset_hypotheses_are_scored_independently_and_truncated() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let scorer = scorer(&offset, false);
+
+        let matches = scorer.score_offset_hypotheses(
+            &query,
+            &[
+                // No indexed peptide lies 250 Da below the precursor minus
+                // the offset.
+                phospho_hypothesis(&offset, target.monoisotopic + 250.0),
+                phospho_hypothesis(&offset, target.monoisotopic),
+            ],
+            10,
+            1,
+        );
+        assert_eq!(matches.len(), 2);
+        assert!(matches[0].is_empty());
+        assert_eq!(matches[1].len(), 1);
+        assert_eq!(matches[1][0].peptide.to_string(), "MAGSPEPTS[Phospho]IDEK");
+
+        assert!(scorer
+            .score_offset_hypotheses(&query, &[], 10, 5)
+            .is_empty());
+    }
+
+    fn scored(scorer: &Scorer, query: &ProcessedSpectrum) -> Vec<(PeptideIx, serde_json::Value)> {
+        scorer
+            .score(query)
+            .into_iter()
+            .map(|feature| {
+                let mut json = serde_json::to_value(&feature).unwrap();
+                // A process-wide counter, different on every call
+                json.as_object_mut().unwrap().remove("psm_id");
+                (feature.peptide_idx, json)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn with_db_keeps_every_setting_and_swaps_the_database() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let original = Scorer {
+            annotate_matches: true,
+            ..scorer(&expanded, true)
+        };
+
+        let same = original.with_db(&expanded);
+        let original_hits = scored(&original, &query);
+        assert!(!original_hits.is_empty());
+        assert_eq!(scored(&same, &query), original_hits);
+
+        // Against another database it scores like a scorer built for it
+        let direct = Scorer {
+            annotate_matches: true,
+            ..scorer(&offset, true)
+        };
+        let swapped = original.with_db(&offset);
+        assert!(std::ptr::eq(swapped.db, &offset));
+        assert_eq!(scored(&swapped, &query), scored(&direct, &query));
+    }
+
+    #[test]
+    fn cloned_scorer_and_matched_peak_indices_leave_normal_scoring_unchanged() {
+        let expanded = database(SearchMode::Database);
+        let target = expanded_target(&expanded);
+        let query = spectrum(&target);
+        let annotating = Scorer {
+            annotate_matches: true,
+            ..scorer(&expanded, false)
+        };
+        let cloned = annotating.clone();
+        let original = annotating.score(&query);
+        let copy = cloned.score(&query);
+        assert_eq!(original.len(), copy.len());
+        assert_eq!(original[0].hyperscore, copy[0].hyperscore);
+        assert_eq!(original[0].peptide_idx, copy[0].peptide_idx);
+
+        let fragments = original[0].fragments.as_ref().expect("annotated");
+        assert_eq!(
+            fragments.peak_indices.len(),
+            fragments.mz_experimental.len()
+        );
+        // The peak indices are internal: they are not serialized.
+        let json = serde_json::to_value(fragments).unwrap();
+        assert!(json.get("peak_indices").is_none());
     }
 }

@@ -40,14 +40,24 @@ pub fn serialize(
     db: &IndexedDatabase,
     library: &GlycanLibrary,
     filenames: &[String],
+    provenance: &[(String, String)],
 ) -> parquet::errors::Result<Vec<u8>> {
+    let mut metadata = vec![
+        KeyValue::new("sage.schema.name".into(), Some("glyco".into())),
+        KeyValue::new("sage.schema.version".into(), Some("1".into())),
+        KeyValue::new("sage.schema.status".into(), Some("experimental".into())),
+    ];
+    for (key, value) in provenance {
+        if metadata.iter().any(|entry| &entry.key == key) {
+            return Err(parquet::errors::ParquetError::General(format!(
+                "provenance key `{key}` repeats a key the writer sets"
+            )));
+        }
+        metadata.push(KeyValue::new(key.clone(), Some(value.clone())));
+    }
     let options = WriterProperties::builder()
         .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
-            KeyValue::new("sage.schema.name".into(), Some("glyco".into())),
-            KeyValue::new("sage.schema.version".into(), Some("1".into())),
-            KeyValue::new("sage.schema.status".into(), Some("experimental".into())),
-        ]))
+        .set_key_value_metadata(Some(metadata))
         .build();
     let mut writer = SerializedFileWriter::new(Vec::new(), schema()?.into(), options.into())?;
     for rows in psms.chunks(65_536) {

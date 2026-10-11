@@ -97,7 +97,7 @@ def main():
     parser.add_argument("--pilot", type=Path, required=True)
     args = parser.parse_args()
     ptm = []
-    inputs = [Path(__file__).resolve(), Path(__file__).with_name("SCIENTIFIC_HARDENING.md")]
+    inputs = [Path(__file__).resolve(), Path(__file__).parent / "archive" / "SCIENTIFIC_HARDENING.md"]
     truth_path = args.pilot / "ptm-truth/truth.tsv"
     inputs.append(truth_path)
     with truth_path.open() as handle:

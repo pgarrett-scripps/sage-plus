@@ -1,25 +1,48 @@
 # Sage analytical schemas
 
-These files are the versioned, machine-readable Parquet message schemas for Sage's canonical analytical outputs.
+These files are the versioned, machine-readable Parquet message schemas for Sage's canonical analytical outputs, plus schemas for the run summary and the quality-control TSV reports.
 
 `config.schema.json` is the JSON Schema for Sage search configuration files. Run
 `sage --write-config-schema PATH` to copy the schema from the installed Sage binary.
 
 - `results.sage.v1.parquet.schema` describes unlabeled `results.sage.parquet`, including typed protein occurrence coordinates.
 - `results.sage.v2.parquet.schema` adds precursor label channel and group identity.
+- `results.sage.v3.parquet.schema` (unlabeled) and `results.sage.v4.parquet.schema` (labeled) are
+  v1 and v2 plus nine nullable columns at the end: `matched_loss_peaks` and `loss_intensity_pct`,
+  filled when `database.fragment_losses` is configured (see `scores.v1.md`), then seven
+  `immonium_*` columns, filled when `immonium` is on.
+- `results.sage.v5.parquet.schema` (unlabeled) and `results.sage.v6.parquet.schema` (labeled) are
+  v3 and v4 plus a nullable `localized_peptide` column at the end: the peptide in ProForma 2.0
+  with localized modifications on their best sites, filled when `ptm_localization` is on.
+  Current Sage writes v5 or v6.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.
 - `lfq.v4.parquet.schema` adds those diagnostics to labeled LFQ.
+- `lfq.v5.parquet.schema` adds the per-row `extraction_q_value` to unlabeled LFQ.
+- `lfq.v6.parquet.schema` adds it to labeled LFQ.
+- `lfq.v7.parquet.schema` adds peak geometry (`apex_rt`, `peak_start_rt`, `peak_end_rt`, `fwhm`, `id_apex_offset`) to unlabeled LFQ.
+- `lfq.v8.parquet.schema` adds it to labeled LFQ.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.
+- `matched_fragments.sage.v1.parquet.schema` describes `matched_fragments.sage.parquet`, one row per
+  matched fragment ion of a retained PSM.
+- `run-summary.v9.schema.json` is the JSON Schema for `run-summary.json` (`schema_version` 9).
+  Objects allow additional properties; optional fields may be added without a version bump.
+- `digestion.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are Frictionless
+  Table Schemas giving the column order, types and meaning of `digestion.tsv` and
+  `diagnostic_ions.tsv`.
 - `glyco.sage.v1.parquet.schema` (experimental, may change without a major version) describes
   `glyco.sage.parquet`, written by builds with the `glyco` feature when the config has a `glyco` block.
   One row per oxonium-gated spectrum with a glycan-explained candidate; see `docs/explore/GLYCO_SEARCH.md`.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.
+They also embed the run provenance keys (`sage.provenance.version`, `sage.version`,
+`sage.git_commit`, `sage.config`, `sage.inputs`, `sage.fasta`, `sage.database_inputs`,
+`sage.protein_inference`), described in DOCS.md under "Output provenance". Provenance keys are
+versioned by `sage.provenance.version`, separately from the table schema.
 
 `results.sage.parquet` and `matched_fragments.sage.parquet` also embed the inclusive output cutoff as `sage.output_filter.spectrum_q_max`. Every fragment row belongs to a PSM retained in `results.sage.parquet` under that cutoff.
 
@@ -28,10 +51,15 @@ records the schema version, selection strategy, PSM and peptide q-value cutoffs,
 support, and minimum fragment frequency. `library_entry_id` groups transitions belonging to the
 same exact peptidoform and precursor charge.
 
-Unlabeled searches write version 1 result schemas. A configured precursor-label search writes
-version 2 results. LFQ uses version 3 without labels and version 4 with labels. Protein site coordinates are one-based and inclusive.
+Unlabeled searches write version 5 result schemas. A configured precursor-label search writes
+version 6 results. LFQ uses version 7 without labels and version 8 with labels. Protein site coordinates are one-based and inclusive.
 Spectral libraries use version 2 only when labeled entries are present.
 
 Beta 6 adds `ptm_library.v2.parquet.schema`, `ptm_sites.v2.parquet.schema`, and
 `protein_sites.v2.parquet.schema`. These schemas retain terminal-group versus residue
 attachment identity. Legacy PTM libraries without attachment are read as residue sites.
+
+Beta 13 adds `ptm_sites.v3.parquet.schema` and `protein_sites.v3.parquet.schema`. Both keep every
+version 2 column and append site-level FDR: `site_q_value` on PSM-site rows, and `site_score` plus
+`site_q_value` on protein-site rows. `best_spectrum_q` remains the lowest PSM q-value of a site's
+supporting PSMs and is not a site-level FDR.

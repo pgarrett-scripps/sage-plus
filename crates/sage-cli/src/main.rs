@@ -14,13 +14,27 @@ fn main() -> anyhow::Result<()> {
 
     let matches = Command::new("sage")
         .version(clap::crate_version!())
-        .author("Michael Lazear <michaellazear92@gmail.com>")
+        .author("Sage Plus maintainers; Sage by Michael Lazear <michaellazear92@gmail.com>")
         .about("\u{1F52E} Sage \u{1F9D9} - Proteomics searching so fast it feels like magic!")
         .arg(
             Arg::new("parameters")
-                .required_unless_present("write-config-schema")
+                .required_unless_present_any(["write-config-schema", "write-config"])
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .help("Path to configuration parameters (JSON file)")
+                .value_hint(ValueHint::FilePath),
+        )
+        .arg(
+            Arg::new("write-config")
+                .long("write-config")
+                .num_args(1..=2)
+                .value_names(["NAME", "PATH"])
+                .value_parser(clap::builder::NonEmptyStringValueParser::new())
+                .conflicts_with("write-config-schema")
+                .help(
+                    "Write the starting configuration NAME to PATH, or to stdout without PATH. \
+                     An existing PATH is replaced only with --overwrite. \
+                     `--write-config list` names the presets",
+                )
                 .value_hint(ValueHint::FilePath),
         )
         .arg(
@@ -79,6 +93,16 @@ fn main() -> anyhow::Result<()> {
                 .value_hint(ValueHint::Other),
         )
         .arg(
+            Arg::new("dia")
+                .long("dia")
+                .value_parser(["off", "pseudo"])
+                .help(
+                    "DIA search mode; overrides `dia.mode` from the configuration file. \
+                     `pseudo` searches MS1-anchored pseudo-MS2 spectra built from co-eluting fragment hills.",
+                )
+                .value_hint(ValueHint::Other),
+        )
+        .arg(
             Arg::new("annotate-matches")
                 .long("annotate-matches")
                 .action(clap::ArgAction::SetTrue)
@@ -111,8 +135,19 @@ fn main() -> anyhow::Result<()> {
         .arg(
             Arg::new("disable-telemetry")
                 .long("disable-telemetry-i-dont-want-to-improve-sage")
-                .action(clap::ArgAction::SetFalse)
-                .help("Disable sending telemetry data"),
+                .action(clap::ArgAction::SetTrue)
+                .hide(true),
+        )
+        .arg(
+            Arg::new("threads")
+                .long("threads")
+                .value_name("N")
+                .value_parser(value_parser!(usize))
+                .help(
+                    "Number of worker threads; overrides `threads` from the configuration file \
+                     (default: all cores, or RAYON_NUM_THREADS when set)",
+                )
+                .value_hint(ValueHint::Other),
         )
         .arg(
             Arg::new("stack-size")
@@ -127,7 +162,7 @@ fn main() -> anyhow::Result<()> {
                 .value_parser(value_parser!(f64))
                 .help(
                     "Override `max_memory_gb` from the parameter file. Sage aborts \
-                     if its resident memory exceeds this many GiB; 0 disables the limit.",
+                     if its measured memory reaches this many GiB; 0 disables the limit.",
                 )
                 .value_hint(ValueHint::Other),
         )
@@ -139,9 +174,6 @@ fn main() -> anyhow::Result<()> {
                 .help("Stream versioned JSONL job events to PATH (use '-' for stdout)")
                 .value_hint(ValueHint::FilePath),
         )
-        .arg(Arg::new("migrate-modifications").long("migrate-modifications").action(clap::ArgAction::SetTrue)
-            .conflicts_with_all(["preview-modifications", "validate-only", "write-config-schema"])
-            .help("Print a configuration with named modifications and explicit sites to stdout"))
         .arg(Arg::new("preview-modifications").long("preview-modifications")
             .value_name("PEPTIDE").conflicts_with_all(["validate-only", "write-config-schema"])
             .help("Print eligible modification sites and bounded peptide variants as JSON"))
@@ -159,6 +191,16 @@ fn main() -> anyhow::Result<()> {
             .requires("preview-modifications").default_value("100")
             .value_parser(value_parser!(u32).range(1..=10000))
             .help("Maximum variants returned by the modification preview"))
+        .arg(
+            Arg::new("estimate")
+                .long("estimate")
+                .action(clap::ArgAction::SetTrue)
+                .conflicts_with("validate-only")
+                .help(
+                    "Print a rough database memory estimate and exit without searching. \
+                     Estimates never stop a run; `max_memory_gb` is enforced on measured memory",
+                ),
+        )
         .arg(
             Arg::new("validate-only")
                 .long("validate-only")
@@ -183,12 +225,13 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if matches.get_flag("migrate-modifications") {
-        let path = matches
-            .get_one::<String>("parameters")
-            .expect("config path is required");
-        let migrated = sage_cli::modification_migration::migrate(&std::fs::read_to_string(path)?)?;
-        println!("{}", serde_json::to_string_pretty(&migrated)?);
+    if let Some(mut values) = matches.get_many::<String>("write-config") {
+        let name = values.next().expect("NAME is required");
+        sage_cli::config_presets::write(
+            name,
+            values.next().map(String::as_str),
+            matches.get_flag("overwrite"),
+        )?;
         return Ok(());
     }
 
@@ -218,31 +261,18 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let stack_size_mib = matches.get_one::<u32>("stack-size").copied().unwrap_or(2);
-    let stack_size_bytes = stack_size_mib as usize * 1024 * 1024;
-    log::trace!(
-        "setting Rayon worker thread stack size to {} MiB",
-        stack_size_mib
-    );
-    ThreadPoolBuilder::new()
-        .stack_size(stack_size_bytes)
-        .build_global()
-        .expect("configure Rayon pool");
-
-    let send_telemetry = matches
-        .get_one::<bool>("disable-telemetry")
-        .copied()
-        .unwrap_or(true);
     let validate_only = matches
         .get_one::<bool>("validate-only")
         .copied()
         .unwrap_or(false);
+    let estimate_only = matches.get_flag("estimate");
     let events = match matches.get_one::<String>("events-jsonl") {
         Some(path) if path == "-" => EventEmitter::from_writer(std::io::stdout()),
         Some(path) => EventEmitter::from_writer(BufWriter::new(File::create(path)?)),
         None => EventEmitter::disabled(),
     };
 
+    let stack_size_mib = matches.get_one::<u32>("stack-size").copied().unwrap_or(2);
     let input = match Input::from_arguments(matches) {
         Ok(input) => input,
         Err(error) => {
@@ -252,9 +282,24 @@ fn main() -> anyhow::Result<()> {
             return Err(error);
         }
     };
+
+    // Build the global pool before any parallel work. `input.threads` already
+    // holds `--threads` over the configured `threads`; when neither is set
+    // Rayon falls back to RAYON_NUM_THREADS, then to every core.
+    log::trace!(
+        "setting Rayon worker thread stack size to {} MiB",
+        stack_size_mib
+    );
+    let mut pool = ThreadPoolBuilder::new().stack_size(stack_size_mib as usize * 1024 * 1024);
+    if let Some(threads) = input.threads {
+        pool = pool.num_threads(threads);
+    }
+    pool.build_global().expect("configure Rayon pool");
+    log::info!("using {} worker threads", rayon::current_num_threads());
+
     let parallel = input
         .batch_size
-        .unwrap_or_else(|| (num_cpus::get() / 2).max(1));
+        .unwrap_or_else(sage_cli::input::default_batch_size);
     let runner = SageRunner::new(
         input,
         JobOptions {
@@ -265,17 +310,17 @@ fn main() -> anyhow::Result<()> {
         },
     );
 
+    if estimate_only {
+        print!("{}", runner.estimate()?);
+        return Ok(());
+    }
+
     if validate_only {
         runner.validate()?;
         eprintln!("configuration is valid");
         return Ok(());
     }
 
-    let result = runner.run()?;
-
-    if send_telemetry {
-        result.telemetry.send();
-    }
-
+    runner.run()?;
     Ok(())
 }

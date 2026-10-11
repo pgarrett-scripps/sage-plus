@@ -26,16 +26,26 @@ fn windows_drive_letter_is_not_a_url() {
     // rather than a bogus `Ok(Url { scheme: "c", ... })`.
     let backslash = to_url(r"C:\Users\nonexistent\bar.json");
     assert!(
-        matches!(backslash, Err(Error::IO(_))),
-        "expected IO error for Windows path with backslashes, got {:?}",
+        matches!(backslash, Err(Error::Open { .. })),
+        "expected open error for Windows path with backslashes, got {:?}",
         backslash
     );
 
     let forwardslash = to_url("C:/Users/nonexistent/bar.json");
     assert!(
-        matches!(forwardslash, Err(Error::IO(_))),
-        "expected IO error for Windows path with forward slashes, got {:?}",
+        matches!(forwardslash, Err(Error::Open { .. })),
+        "expected open error for Windows path with forward slashes, got {:?}",
         forwardslash
+    );
+}
+
+#[test]
+fn missing_local_path_error_names_the_path() {
+    let error = to_url("/nonexistent/sage-plus/run.mzML").unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.starts_with("cannot open `/nonexistent/sage-plus/run.mzML`: "),
+        "{message}"
     );
 }
 
@@ -68,6 +78,7 @@ fn gzip_detection() {
     assert!(!gzip_heuristic(&Url::parse("file:///file.mzML").unwrap()));
 }
 
+#[cfg(feature = "cloud")]
 #[test]
 fn cloud_writer_completes_multipart_upload() {
     let url = Url::parse("memory:///multipart-output.tsv").unwrap();
@@ -95,4 +106,30 @@ fn gzip_writer_finishes_complete_round_trips() {
         .unwrap();
         assert_eq!(actual, payload);
     }
+}
+
+#[cfg(not(feature = "cloud"))]
+#[test]
+fn cloud_urls_fail_clearly_without_the_cloud_feature() {
+    let url = Url::parse("s3://bucket/results.tsv").unwrap();
+    let message = CloudWriter::new(&url).err().unwrap().to_string();
+    assert!(message.contains("`s3://`") && message.contains("`cloud` feature"));
+    let error = write_bytes_sync(&url, b"x".to_vec()).unwrap_err();
+    assert!(matches!(error, Error::CloudDisabled(scheme) if scheme == "s3"));
+    let error = read_and_execute("gs://bucket/file.mzML", |_| async move { Ok(()) }).unwrap_err();
+    assert!(matches!(error, Error::CloudDisabled(scheme) if scheme == "gs"));
+}
+
+#[test]
+fn local_writes_replace_existing_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("nested").join("out.tsv");
+    let url = Url::from_file_path(&path).unwrap();
+    write_bytes_sync(&url, b"first".to_vec()).unwrap();
+    write_bytes_sync(&url, b"second".to_vec()).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"second");
+    assert_eq!(
+        std::fs::read_dir(path.parent().unwrap()).unwrap().count(),
+        1
+    );
 }

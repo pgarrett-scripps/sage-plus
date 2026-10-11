@@ -3,7 +3,7 @@ name = "sage-cloudpath"
 version.workspace = true
 authors = ["Michael Lazear <michaellazear92@gmail.com"]
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.97"
 description = "A very fast proteomics database search tool"
 readme = "README.md"
 license = "MIT"
@@ -12,36 +12,44 @@ publish = false
 [features]
 default = []
 mzmlb = ["dep:mzdata"]
+# S3, GCS, and Azure paths through object_store. Without it, only local paths work
+# and cloud URLs fail with an error that names this feature.
+cloud = ["dep:object_store"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-thiserror = "1.0"
+thiserror = "2"
 async-compression = { version = "0.3", features = ["tokio", "gzip", "zlib"] }
-base64 = "0.13"
+base64 = "0.22"
 bytes = "1.0"
 futures = "0.3"
 log = "0.4.0"
-object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"] }
+object_store = { version = "0.14.1", features = ["aws", "gcp", "azure"], optional = true }
 tokio = { version = "1.0", features = ["fs", "io-util", "rt", "macros"] }
 tokio-util = { version = "0.7", features = ["io"] }
-quick-xml = { version = "0.41.0", features = ["async-tokio"] }
-timsrust = { version = "0.6.6" }
-# Same version and features as timsrust; reads TimsCalibration from analysis.tdf.
+quick-xml = { version = "0.42.0", features = ["async-tokio"] }
+# Bruker TDF reader (pure Rust, no SQLite C library).
+sage-plus-tdf = { version = "0.2.0", features = ["minitdf"] }
+# Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.
 rusqlite = { version = "0.35", features = ["bundled"] }
-opentfraw = "1.4.1"
+# Thermo RAW reader.
+sage-plus-raw = "0.1.0"
+# Opt-in timsTOF MS1 denoising (bruker_config.denoise).
+dnoise-core = "0.5.0"
 rayon = "1.5"
-reqwest = { version = "0.13.4", features = ["json", "rustls"], default-features = false }
 regex = "1.6"
 schemars = "1"
 url = { version = "2", features = ["serde"]}
 
 serde = { version="1.0", features = ["derive"] }
 serde_json = "1.0"
+# Streaming SHA-256 of input files for provenance (hash.rs).
+sha2 = "0.10"
 
 sage-core = { path = "../sage" }
-parquet = { version = "59.2.0", optional = true, default-features = false, features = ["zstd"] }
-mzdata = { version = "0.65.5", optional = true, default-features = false, features = ["mzmlb", "hdf5_static", "zlib"] }
+parquet = { version = "60.0.0", optional = true, default-features = false, features = ["zstd"] }
+mzdata = { version = "0.67.4", optional = true, default-features = false, features = ["mzmlb", "hdf5_static", "zlib"] }
 
 [dev-dependencies]
 tempfile = "3"
