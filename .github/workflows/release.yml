@@ -135,7 +135,7 @@ jobs:
         run: |
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
-          cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
+          cp README.md FEATURES.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R licenses "$archive/"
           cp -R schemas "$archive/"
@@ -148,7 +148,7 @@ jobs:
         run: |
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-${{ matrix.target }}"
           mkdir -p "$archive"
-          cp README.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
+          cp README.md FEATURES.md DOCS.md CHANGELOG.md LICENSE THIRD_PARTY_NOTICES.md "$archive/"
           cp crates/sage/data/LICENSE-unimod.txt "$archive/LICENSE-unimod.txt"
           cp -R licenses "$archive/"
           cp -R schemas "$archive/"
