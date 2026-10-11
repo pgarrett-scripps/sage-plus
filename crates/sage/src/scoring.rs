@@ -2,7 +2,7 @@ use crate::database::{
     same_peptidoform, IndexedDatabase, MassOffset, MassOffsetAssignment, PeptideIx, Theoretical,
 };
 use crate::heap::bounded_min_heapify;
-use crate::ion_series::{IonGroupSeries, Kind};
+use crate::ion_series::{IonGroupSeries, IonVariant, Kind};
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::mass_recalibration::{FileMassCorrection, MassRecalibration};
 use crate::peptide::{Peptide, Site};
@@ -78,6 +78,12 @@ struct Score {
     /// Fragment errors of the observed, uncorrected peaks.
     raw_ppm_difference: f32,
     raw_signed_ppm_difference: f32,
+    /// Intensity-weighted sum (then mean) of squared raw signed errors.
+    raw_squared_ppm_difference: f32,
+    /// Cleavages whose generic fragment-loss form matched a peak, when loss
+    /// ions are scored as separate features.
+    matched_loss: u16,
+    summed_loss: f32,
     precursor_charge: u8,
     isotope_error: i8,
 }
@@ -113,7 +119,7 @@ struct PreScore {
 #[derive(Copy, Clone)]
 pub(crate) struct FragmentMatchPeak {
     pub(crate) neutral_mass: f32,
-    query_index: usize,
+    pub(crate) query_index: usize,
     charge: u8,
     charge_is_known: bool,
 }
@@ -260,6 +266,10 @@ pub struct Feature {
     /// Signed, intensity-weighted fragment error (observed - theoretical).
     #[serde(skip_serializing)]
     pub signed_fragment_ppm: f32,
+    /// Intensity-weighted standard deviation of the raw signed fragment
+    /// errors within this PSM, around `signed_fragment_ppm`.
+    #[serde(skip_serializing)]
+    pub fragment_ppm_sd: f32,
     /// Precursor mass error after per-file retention-time alignment.
     #[serde(skip_serializing)]
     pub aligned_delta_mass: f32,
@@ -309,6 +319,11 @@ pub struct Feature {
 
     pub fragments: Option<Fragments>,
 
+    /// Generic fragment-loss evidence, when `database.fragment_losses` is
+    /// configured.
+    #[serde(skip_serializing)]
+    pub fragment_loss: Option<FragmentLossFeatures>,
+
     /// Sequence-ambiguity annotation: the peptide string with residues lacking
     /// flanking fragment-ion evidence wrapped in `(?...)`, plus any residual
     /// mass-shift placement.
@@ -328,6 +343,21 @@ pub struct Feature {
     /// peptidoform.
     #[serde(skip_serializing)]
     pub mass_offset: Option<MassOffsetAssignment>,
+
+    /// Immonium-ion evidence; `None` unless `immonium` is enabled.
+    #[serde(skip_serializing)]
+    pub immonium: Option<crate::immonium::ImmoniumEvidence>,
+}
+
+/// Matched generic fragment-loss ions (`database.fragment_losses`) of a PSM.
+/// They do not enter the hyperscore or `matched_peaks`; they are separate
+/// rescoring features.
+#[derive(Serialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct FragmentLossFeatures {
+    /// Cleavage and charge pairs whose loss form matched a peak.
+    pub matched_peaks: u32,
+    /// Percent of MS2 intensity matched by loss ions.
+    pub intensity_pct: f32,
 }
 
 /// A fully scored candidate peptidoform.
@@ -511,6 +541,33 @@ pub(crate) fn offset_query(mass: f32, tolerance: Tolerance, delta: f32) -> (f32,
 }
 
 impl<'db> Scorer<'db> {
+    /// This scorer's settings against another database, e.g. a module's own
+    /// candidate set. Override single settings with struct update syntax:
+    /// `Scorer { chimera: false, ..scorer.with_db(&db) }`.
+    pub fn with_db<'other>(&self, db: &'other IndexedDatabase) -> Scorer<'other> {
+        // Listed field by field (the lifetime changes), so a new setting
+        // fails to compile here until it is carried over.
+        Scorer {
+            db,
+            precursor_tol: self.precursor_tol,
+            fragment_tol: self.fragment_tol,
+            min_matched_peaks: self.min_matched_peaks,
+            min_isotope_err: self.min_isotope_err,
+            max_isotope_err: self.max_isotope_err,
+            min_precursor_charge: self.min_precursor_charge,
+            max_precursor_charge: self.max_precursor_charge,
+            override_precursor_charge: self.override_precursor_charge,
+            max_fragment_charge: self.max_fragment_charge,
+            chimera: self.chimera,
+            report_psms: self.report_psms,
+            wide_window: self.wide_window,
+            annotate_matches: self.annotate_matches,
+            mass_shift_ppm: self.mass_shift_ppm,
+            score_type: self.score_type,
+            mass_recalibration: self.mass_recalibration.clone(),
+        }
+    }
+
     /// Mark every peptide that contributes at least one preliminary fragment
     /// match for this spectrum. Keeping all contributors preserves the normal
     /// top-K candidate set and its candidate statistics after chunk merging.
@@ -546,17 +603,13 @@ impl<'db> Scorer<'db> {
                     );
                     let candidates = self.db.query(mass, tolerance, self.fragment_tol);
                     let shift = self.fragment_shift(offset);
-                    for peak in &fragment_index.peaks {
-                        for fragment in candidates.page_search(peak.neutral_mass) {
+                    candidates.page_search_batch(
+                        fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                        shift.as_slice(),
+                        |fragment| {
                             keep.insert(fragment.peptide_index.0 as usize);
-                        }
-                        if let Some(shift) = shift {
-                            for fragment in candidates.page_search_shifted(peak.neutral_mass, shift)
-                            {
-                                keep.insert(fragment.peptide_index.0 as usize);
-                            }
-                        }
-                    }
+                        },
+                    );
                 }
             }
         };
@@ -752,18 +805,13 @@ impl<'db> Scorer<'db> {
                 sc.matched += 1;
                 matched_peaks += 1;
             };
-            for peak in &fragment_index.peaks {
-                for frag in candidates.page_search(peak.neutral_mass) {
-                    count(frag);
-                }
-                // Fragments retaining the offset appear at the indexed base
-                // fragment mass plus the shift.
-                for &shift in shifts {
-                    for frag in candidates.page_search_shifted(peak.neutral_mass, shift) {
-                        count(frag);
-                    }
-                }
-            }
+            // Fragments retaining the offset appear at the indexed base
+            // fragment mass plus each shift.
+            candidates.page_search_batch(
+                fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+                shifts,
+                &mut count,
+            );
 
             if matched_peaks == 0 {
                 return InitialHits::default();
@@ -1179,6 +1227,10 @@ impl<'db> Scorer<'db> {
                 isotope_error,
                 average_ppm: score.raw_ppm_difference,
                 signed_fragment_ppm: score.raw_signed_ppm_difference,
+                fragment_ppm_sd: (score.raw_squared_ppm_difference
+                    - score.raw_signed_ppm_difference.powi(2))
+                .max(0.0)
+                .sqrt(),
                 aligned_average_ppm: score.ppm_difference,
                 aligned_signed_fragment_ppm: score.signed_ppm_difference,
                 hyperscore: score.hyperscore,
@@ -1211,6 +1263,10 @@ impl<'db> Scorer<'db> {
                 delta_rt_model: 0.999,
                 delta_ims_model: 0.999,
                 ms2_intensity: score.summed_b + score.summed_y,
+                fragment_loss: self.loss_features().then(|| FragmentLossFeatures {
+                    matched_peaks: score.matched_loss as u32,
+                    intensity_pct: 100.0 * score.summed_loss / query.total_ion_current,
+                }),
 
                 //Fragments
                 protein_groups: None,
@@ -1220,9 +1276,34 @@ impl<'db> Scorer<'db> {
                 mass_shift: ambiguity.mass_shift,
                 protein_group_q: 1.0,
                 localization: None,
+                immonium: None,
                 mass_offset,
             })
         }
+    }
+
+    /// The most intense peak matched by any of `variants` at `charge`.
+    fn select_variant<'v>(
+        &self,
+        query: &ProcessedSpectrum,
+        fragment_index: &FragmentMatchIndex,
+        variants: impl Iterator<Item = &'v IonVariant>,
+        charge: u8,
+    ) -> Option<(&'v IonVariant, usize)> {
+        variants
+            .filter_map(|variant| {
+                fragment_index
+                    .select_peak(query, variant.monoisotopic_mass, charge, self.fragment_tol)
+                    .map(|peak_idx| (variant, peak_idx))
+            })
+            .max_by(|a, b| query.intensities[a.1].total_cmp(&query.intensities[b.1]))
+    }
+
+    /// Whether generic fragment-loss ions are scored, as separate rescoring
+    /// features (never inside the hyperscore; see
+    /// `benchmarks/FRAGMENT_LOSSES.md`).
+    fn loss_features(&self) -> bool {
+        self.db.fragment_losses.is_some()
     }
 
     /// Remove peaks matching a PSM from a query spectrum
@@ -1232,7 +1313,14 @@ impl<'db> Scorer<'db> {
             .db
             .ion_kinds
             .iter()
-            .flat_map(|kind| IonGroupSeries::new(&peptide, *kind))
+            .flat_map(|kind| {
+                IonGroupSeries::with_fragment_losses(
+                    &peptide,
+                    *kind,
+                    self.db.fragment_losses.as_deref(),
+                )
+            })
+            // Loss peaks belong to this peptide too, so they are removed.
             .flat_map(|group| group.variants);
 
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, psm.charge);
@@ -1404,11 +1492,12 @@ impl<'db> Scorer<'db> {
         // Regenerate theoretical ions - initial database search might be
         // using only a subset of all possible ions (e.g. no b1/b2/y1/y2)
         // so we need to completely re-score this candidate
-        let fragment_groups = self
-            .db
-            .ion_kinds
-            .iter()
-            .flat_map(|kind| IonGroupSeries::new(peptide, *kind));
+        let fragment_groups = self.db.ion_kinds.iter().flat_map(|kind| {
+            IonGroupSeries::with_fragment_losses(peptide, *kind, self.db.fragment_losses.as_deref())
+        });
+        // Generic loss forms are scored separately as features, not as
+        // alternatives of their cleavage in the hyperscore.
+        let score_losses = self.loss_features();
 
         let mut b_run = Run::default();
         let mut y_run = Run::default();
@@ -1426,20 +1515,29 @@ impl<'db> Scorer<'db> {
                 // Neutral-loss forms are alternatives for the same cleavage
                 // and charge. Select at most one, so extra configured variants
                 // cannot inflate matched-ion counts or hyperscore factorials.
-                let best = group
-                    .variants
-                    .iter()
-                    .filter_map(|variant| {
-                        fragment_index
-                            .select_peak(
-                                query,
-                                variant.monoisotopic_mass,
-                                charge,
-                                self.fragment_tol,
-                            )
-                            .map(|peak_idx| (variant, peak_idx))
-                    })
-                    .max_by(|a, b| query.intensities[a.1].total_cmp(&query.intensities[b.1]));
+                let best = self.select_variant(
+                    query,
+                    fragment_index,
+                    group
+                        .variants
+                        .iter()
+                        .filter(|variant| !variant.fragment_loss),
+                    charge,
+                );
+                if score_losses {
+                    if let Some((_, peak_idx)) = self.select_variant(
+                        query,
+                        fragment_index,
+                        group
+                            .variants
+                            .iter()
+                            .filter(|variant| variant.fragment_loss),
+                        charge,
+                    ) {
+                        score.matched_loss += 1;
+                        score.summed_loss += query.intensities[peak_idx];
+                    }
+                }
 
                 if let Some((frag, peak_idx)) = best {
                     let peak_mass = query.masses[peak_idx];
@@ -1477,6 +1575,10 @@ impl<'db> Scorer<'db> {
                     score.raw_signed_ppm_difference +=
                         peak_intensity * (raw_peak_mass - expected_mass) * 2E6
                             / (expected_mass + raw_peak_mass);
+                    let raw_signed_ppm =
+                        (raw_peak_mass - expected_mass) * 2E6 / (expected_mass + raw_peak_mass);
+                    score.raw_squared_ppm_difference +=
+                        peak_intensity * raw_signed_ppm * raw_signed_ppm;
                     let calc_mz = frag.monoisotopic_mass / charge as f32 + PROTON;
 
                     match frag.kind {
@@ -1524,6 +1626,7 @@ impl<'db> Scorer<'db> {
         score.signed_ppm_difference /= score.summed_b + score.summed_y;
         score.raw_ppm_difference /= score.summed_b + score.summed_y;
         score.raw_signed_ppm_difference /= score.summed_b + score.summed_y;
+        score.raw_squared_ppm_difference /= score.summed_b + score.summed_y;
 
         if collect_fragments {
             (score, Some(fragments_details), coverage)

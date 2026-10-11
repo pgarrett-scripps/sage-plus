@@ -21,6 +21,12 @@
 //!   tier 1 alone, tiers FDR-controlled separately, and one LDA with the tier
 //!   as a feature.
 //! * `hillfilter`: `wide` on raw scans that keep only peaks on a fragment hill.
+//!
+//! `--raw` may also be a timsTOF diaPASEF `.d` directory (modes `wide`,
+//! `tiered`, `hillfilter`). Hills then come from `sage_dia::tims` (dnoise
+//! watershed centroids, ion-mobility-aware hills per m/z x 1/K0 box), and the
+//! wide-window scans from Sage's Bruker reader. Tolerances are 15 ppm
+//! precursor / 20 ppm fragment instead of 10 / 15.
 //! * `rescore`: `wide` plus fragment-hill co-elution features for every
 //!   candidate, and LDA refits with those features.
 //!
@@ -44,7 +50,11 @@ use sage_dia::pipeline::{self as dia, to_koth, window_of};
 use sage_dia::pseudo::{self, PrecursorTrace, PseudoSettings};
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+
+/// Is the input a timsTOF `.d` (set once in `main`)?
+static TIMS: AtomicBool = AtomicBool::new(false);
 
 struct Args {
     raw: String,
@@ -401,15 +411,17 @@ fn search(
     wide: bool,
     report_psms: usize,
 ) -> (Vec<Feature>, f64) {
+    let tims = TIMS.load(Ordering::Relaxed);
+    let (prec_ppm, frag_ppm) = if tims { (15.0, 20.0) } else { (10.0, 15.0) };
     let precursor_tol = if wide {
         Tolerance::Da(-2.0, 2.0)
     } else {
-        Tolerance::Ppm(-10.0, 10.0)
+        Tolerance::Ppm(-prec_ppm, prec_ppm)
     };
     let scorer = Scorer {
         db,
         precursor_tol,
-        fragment_tol: Tolerance::Ppm(-15.0, 15.0),
+        fragment_tol: Tolerance::Ppm(-frag_ppm, frag_ppm),
         min_matched_peaks: 4,
         min_isotope_err: if wide { 0 } else { -1 },
         max_isotope_err: if wide { 0 } else { 1 },
@@ -564,9 +576,23 @@ fn tier_row(p: &Psm) -> [f64; 14] {
     out
 }
 
+/// Hills of the input: from the `.raw` scans, or straight from `.d` frames.
+fn run_hills(args: &Args, raw: &[RawSpectrum]) -> anyhow::Result<dia::RunHills> {
+    if TIMS.load(Ordering::Relaxed) {
+        sage_dia::tims::detect_hills(std::path::Path::new(&args.raw), args.ms2_min_scans as u32)
+    } else {
+        dia::detect_hills(raw, args.ms2_min_scans as u32)
+    }
+}
+
 fn tiered(args: &Args, raw: Vec<RawSpectrum>, lap: &dyn Fn(&str)) -> anyhow::Result<String> {
-    let hills = dia::detect_hills(&raw, args.ms2_min_scans as u32)?;
+    let hills = run_hills(args, &raw)?;
     drop(raw);
+    lap(&format!(
+        "hills: {} MS1 precursor features, {} windows",
+        hills.precursors.len(),
+        hills.windows.len()
+    ));
     let n_hills: usize = hills.windows.iter().map(Channel::len).sum();
     let t1 = PseudoSettings {
         min_corr: args.min_corr,
@@ -695,14 +721,18 @@ fn hill_filtered(
     mut raw: Vec<RawSpectrum>,
     lap: &dyn Fn(&str),
 ) -> anyhow::Result<String> {
-    let hills = dia::detect_hills(&raw, args.ms2_min_scans as u32)?;
+    let hills = run_hills(args, &raw)?;
     let before: usize = raw
         .iter()
         .filter(|s| s.ms_level == 2)
         .map(|s| s.mz.len())
         .sum();
     let t = Instant::now();
-    dia::hill_filter(&mut raw, &hills, 15.0);
+    if TIMS.load(Ordering::Relaxed) {
+        hill_filter_by_rt(&mut raw, &hills, 20.0);
+    } else {
+        dia::hill_filter(&mut raw, &hills, 15.0);
+    }
     drop(hills);
     let after: usize = raw
         .iter()
@@ -739,8 +769,44 @@ fn hill_filtered(
     Ok(report)
 }
 
+/// timsTOF variant of `dia::hill_filter`: each wide-window scan is one
+/// quadrupole window of one frame, so its channel is the box with the same
+/// m/z bounds and a cycle at the scan's retention time.
+fn hill_filter_by_rt(raw: &mut [RawSpectrum], hills: &dia::RunHills, ppm: f32) {
+    raw.par_iter_mut()
+        .filter(|s| s.ms_level == 2)
+        .for_each(|s| {
+            let found = window_of(s).and_then(|(_, lo, hi)| {
+                hills
+                    .windows
+                    .iter()
+                    .filter(|w| (w.lower - lo).abs() < 0.5 && (w.upper - hi).abs() < 0.5)
+                    .map(|w| {
+                        let c = w.cycle_at(s.scan_start_time);
+                        ((w.rts[c] - s.scan_start_time).abs(), w, c as u32)
+                    })
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+            });
+            let keep: Vec<bool> = match found {
+                Some((dt, w, c)) if dt < 1e-3 => {
+                    s.mz.iter()
+                        .map(|&mz| w.find(mz, ppm).iter().any(|h| h.start <= c && c <= h.end()))
+                        .collect()
+                }
+                _ => vec![false; s.mz.len()],
+            };
+            let mut it = keep.iter();
+            s.mz.retain(|_| *it.next().unwrap());
+            let mut it = keep.iter();
+            s.intensity.retain(|_| *it.next().unwrap());
+            s.total_ion_current = s.intensity.iter().sum();
+        });
+}
+
 fn main() -> anyhow::Result<()> {
     let args = parse_args();
+    let tims = sage_dia::tims::is_tdf(std::path::Path::new(&args.raw));
+    TIMS.store(tims, Ordering::Relaxed);
     std::fs::create_dir_all(&args.out)?;
     let started = Instant::now();
     let lap = |label: &str| {
@@ -750,9 +816,17 @@ fn main() -> anyhow::Result<()> {
             peak_rss_mb()
         )
     };
-    let mut raw =
-        sage_cloudpath::util::read_thermoraw(&sage_cloudpath::to_url(&args.raw)?, 0, None)
-            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    let url = sage_cloudpath::to_url(&args.raw)?;
+    let mut raw = if !tims {
+        sage_cloudpath::util::read_thermoraw(&url, 0, None).map_err(|e| anyhow::anyhow!("{e:?}"))?
+    } else if matches!(args.mode.as_str(), "wide" | "hillfilter") {
+        sage_cloudpath::util::read_spectra(&url, 0, None, Default::default(), false)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?
+    } else if args.mode == "tiered" {
+        Vec::new()
+    } else {
+        anyhow::bail!("mode {} does not support timsTOF input", args.mode);
+    };
     raw.sort_by(|a, b| a.scan_start_time.total_cmp(&b.scan_start_time));
     let n_ms1 = raw.iter().filter(|s| s.ms_level == 1).count();
     let n_ms2 = raw.iter().filter(|s| s.ms_level == 2).count();

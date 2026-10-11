@@ -481,6 +481,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "im_tolerance": {
+          "default": 0.029999999329447746,
+          "description": "timsTOF only: fragment hills must lie within this ion mobility (1/K0)\nof the precursor feature's apex mobility.",
+          "format": "float",
+          "minimum": 0.0,
+          "type": "number"
+        },
         "max_peaks": {
           "default": 150,
           "description": "Keep at most this many fragment peaks (by intensity) per pseudo-spectrum.",
@@ -518,6 +525,51 @@
       },
       "type": "object"
     },
+    "DiagnosticIon": {
+      "additionalProperties": false,
+      "properties": {
+        "mz": {
+          "description": "Singly charged m/z.",
+          "format": "float",
+          "type": "number"
+        },
+        "name": {
+          "description": "Name reported in the output.",
+          "type": "string"
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Matching tolerance; 20 ppm when omitted."
+        }
+      },
+      "required": [
+        "name",
+        "mz"
+      ],
+      "type": "object"
+    },
+    "DiagnosticIonsConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/DiagnosticIon"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "`diagnostic_ions` configuration: `true` for the built-in ions, or a list\nof ions that replaces them."
+    },
     "EnzymeBuilder": {
       "additionalProperties": false,
       "properties": {
@@ -528,19 +580,31 @@
           ]
         },
         "cleave_at": {
+          "description": "Residues the enzyme cleaves at, `$` for no digestion (whole proteins),\nor an empty string for a non-specific digest. Required when a FASTA is\ndigested.",
           "type": [
             "string",
             "null"
           ]
         },
         "max_len": {
-          "description": "Maximum peptide length that will be fragmented",
-          "format": "uint",
-          "minimum": 1,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "format": "uint",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "const": "unlimited"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Maximum peptide length that will be fragmented, or `\"unlimited\"` for\nno length limit beyond the peptide mass range and the\n255-residue encoding limit."
         },
         "min_len": {
           "description": "Minimum peptide length that will be fragmented",
@@ -552,26 +616,118 @@
           ]
         },
         "missed_cleavages": {
-          "description": "How many missed cleavages to use",
-          "format": "uint8",
-          "maximum": 255,
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "format": "uint8",
+                  "maximum": 255,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "const": "unlimited"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How many missed cleavages to use, or `\"unlimited\"` to keep every\npeptide within the length limits. Required when a FASTA is digested."
         },
         "restrict": {
+          "description": "Residues that block cleavage when they follow a cleavage site (`\"\"`\nfor none). Required when a FASTA is digested.",
           "type": [
             "string",
             "null"
           ]
         },
         "semi_enzymatic": {
+          "description": "Also generate semi-enzymatic peptides. Required when a FASTA is\ndigested.",
           "type": [
             "boolean",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "FragmentLossEntry": {
+      "additionalProperties": false,
+      "description": "One configured fragment loss. The map key is a label only.",
+      "properties": {
+        "allow_modified": {
+          "description": "Whether a residue or terminus carrying any modification still counts\nas a loss site (default false).",
+          "type": "boolean"
+        },
+        "ion_kinds": {
+          "description": "Ion kinds that can carry the loss. A subset of `database.ion_kinds`.",
+          "items": {
+            "$ref": "#/$defs/Kind"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "mass": {
+          "description": "Neutral mass removed from the fragment, in daltons. Positive and finite.",
+          "format": "float",
+          "type": "number"
+        },
+        "sites": {
+          "description": "Where the loss can occur, in the modification site vocabulary (for\nexample `\"S\"`, `\"first_residue:E\"` or `\"peptide_c_term\"`). A fragment\nis eligible when it contains at least one listed site.",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mass",
+        "sites",
+        "ion_kinds"
+      ],
+      "type": "object"
+    },
+    "ImmoniumConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ImmoniumOptions"
+        }
+      ],
+      "description": "`immonium` configuration: `true` for the defaults, or an object."
+    },
+    "ImmoniumOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "rescore": {
+          "description": "Add the immonium counts to the linear discriminant (default true);\nfalse only reports them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "residue_ions": {
+          "description": "Global switch for the unmodified-residue ions of P, V, L/I, H, F, Y\nand W (default true). Modified-residue ions come from each\nmodification's `immonium_ions`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Tolerance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Matching tolerance; the search's `fragment_tol` when omitted."
         }
       },
       "type": "object"
@@ -750,6 +906,13 @@
             "null"
           ]
         },
+        "recenter_on_apex": {
+          "description": "Center extraction on the MS1 elution apex rather than the MS2\nidentification RT.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rt_pct_tolerance": {
           "format": "float",
           "minimum": 0.0,
@@ -806,6 +969,10 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
@@ -820,11 +987,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "sites": {
           "items": {
@@ -852,11 +1016,25 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
         },
         "max_count": {
+          "description": "Per-peptide limit on new (non-library) placements.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_total_count": {
+          "description": "Per-peptide limit on all placements, library-supported included.\nDefaults to `max_count`.",
           "format": "uint",
           "minimum": 1,
           "type": [
@@ -874,11 +1052,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"
@@ -962,6 +1137,13 @@
           "maximum": 1.0,
           "minimum": 0.0,
           "type": "number"
+        },
+        "min_separating_margin": {
+          "default": 1,
+          "description": "Fewest matched separating ions (fragments whose mass differs between the\nbest and runner-up arrangements) by which the best arrangement must win\nto enter the false-localization-rate competition. Localizations below\nthe margin keep q-value 1. Use 0 to let tied arrangements compete, 2 for\nfewer localizations with fewer wrong sites.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
         },
         "psm_q_value": {
           "default": 0.009999999776482582,
@@ -1078,6 +1260,33 @@
           "type": "string"
         }
       ]
+    },
+    "SiteMap": {
+      "anyOf": [
+        {
+          "description": "Applies to every site of the modification.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "Applies to the listed sites only; keys are sites from `sites`.",
+          "propertyNames": {
+            "pattern": "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])"
+          },
+          "type": "object"
+        }
+      ],
+      "description": "A list for every site, or a map from declared site to list."
     },
     "SiteMode": {
       "description": "Controls where candidates for a variable modification are generated.",
@@ -1233,6 +1442,10 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
@@ -1247,11 +1460,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         }
       },
       "required": [
@@ -1413,11 +1623,25 @@
           },
           "type": "object"
         },
+        "immonium_ions": {
+          "$ref": "#/$defs/SiteMap",
+          "description": "Singly charged m/z of this modification's immonium ions, reported\nby the opt-in `immonium` evidence: a list for every site, or a map\nfrom declared site to list."
+        },
         "mass": {
           "format": "float",
           "type": "number"
         },
         "max_count": {
+          "description": "Per-peptide limit on new (non-library) placements.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_total_count": {
+          "description": "Per-peptide limit on all placements, library-supported included.\nDefaults to `max_count`.",
           "format": "uint",
           "minimum": 0,
           "type": [
@@ -1435,11 +1659,8 @@
           "$ref": "#/$defs/NeutralLossMode"
         },
         "neutral_losses": {
-          "items": {
-            "format": "float",
-            "type": "number"
-          },
-          "type": "array"
+          "$ref": "#/$defs/SiteMap",
+          "description": "Fragment neutral-loss masses: a list for every site, or a map from\ndeclared site to list. Sites left out of the map have no loss."
         },
         "search_mode": {
           "$ref": "#/$defs/SearchMode"
@@ -1491,6 +1712,24 @@
     },
     "database": {
       "additionalProperties": false,
+      "dependentSchemas": {
+        "fasta": {
+          "properties": {
+            "enzyme": {
+              "required": [
+                "cleave_at",
+                "restrict",
+                "missed_cleavages",
+                "semi_enzymatic"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "enzyme"
+          ]
+        }
+      },
       "description": "Parameters used for generating the fragment database",
       "properties": {
         "bucket_size": {
@@ -1499,6 +1738,13 @@
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "clip_n_term_met": {
+          "description": "Also search each protein with its initiator methionine removed when\nthe second residue is G, A, S, T, C, P, or V (MetAP clipping). The\nclipped peptides are protein N-terminal. Enzymatic digests only.\nDefault: true.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -1526,10 +1772,27 @@
             }
           ]
         },
+        "expand_ambiguous_residues": {
+          "description": "Expand ambiguous FASTA residues into every residue they may stand\nfor: B to D or N, Z to E or Q, X to each of the 20 standard residues\n(default false: peptides containing B, X or Z are not searched).\nJ (Ile or Leu) is always searched with the I/L mass.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "fasta": {
           "description": "Path to fasta database",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "fragment_losses": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FragmentLossEntry"
+          },
+          "description": "Generic fragment neutral losses, keyed by a label, for example\n`{\"Water\": {\"mass\": 18.010565, \"sites\": [\"S\", \"T\", \"E\", \"D\"],\n\"ion_kinds\": [\"b\", \"y\"]}}`. Loss ions are matched only when a\ncandidate is fully scored and enter rescoring as separate features.\nOff unless present. Separate from modification `neutral_losses`.",
+          "type": [
+            "object",
             "null"
           ]
         },
@@ -1549,10 +1812,28 @@
             "null"
           ]
         },
+        "max_ambiguous_variants": {
+          "description": "Peptides whose ambiguous residues expand into more sequences than\nthis are dropped (default 20, one X per peptide). Values below 1 are\nnormalized to 1.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "max_combinations": {
           "description": "Hard cap on the total peptide variants generated per input peptide,\nincluding its unmodified form. Values below 1 are normalized to 1.\nVariants with fewer PTMs are preferred (generated first).",
           "format": "uint",
           "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_fragment_losses": {
+          "description": "Most generic fragment losses stacked on one fragment (default 1).\nRequires `fragment_losses`.",
+          "format": "uint",
+          "minimum": 1,
           "type": [
             "integer",
             "null"
@@ -1573,6 +1854,13 @@
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "merge_isoleucine_leucine": {
+          "description": "Merge peptides that differ only in I, L and J (Ile or Leu) into one\npeptide listing every protein, when their modifications and decoy\nflag also match (default true). They have the same mass and fragments.",
+          "type": [
+            "boolean",
             "null"
           ]
         },
@@ -1616,7 +1904,8 @@
           ]
         },
         "prefilter_chunk_size": {
-          "description": "Number of sequences to handle simultaneously when pre-filtering the db",
+          "deprecated": true,
+          "description": "Deprecated and ignored. The prefilter streams proteins one at a time.",
           "format": "uint",
           "minimum": 0,
           "type": [
@@ -1629,6 +1918,25 @@
           "description": "Deprecated compatibility option. Exact prefiltering always uses compact\nsurvivor tracking and ignores this value.",
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "prefilter_max_peaks": {
+          "description": "Only each spectrum's most intense peaks are used by the prefilter\n(default: every processed peak).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "prefilter_min_matched_peaks": {
+          "description": "Preliminary fragment matches one precursor hypothesis of a spectrum\nneeds for the prefilter to keep a peptide (default 4).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -1668,6 +1976,10 @@
           "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
         }
       },
+      "required": [
+        "static_mods",
+        "ion_kinds"
+      ],
       "type": "object"
     },
     "deisotope": {
@@ -1691,8 +2003,30 @@
       ],
       "description": "DIA search. `{\"mode\": \"pseudo\"}` builds MS1-anchored pseudo-MS2\nspectra from co-eluting fragment hills and searches them closed (like\nDDA); `wide_window` and `chimera` are ignored in that mode. Default off."
     },
+    "diagnostic_ions": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DiagnosticIonsConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Diagnostic-ion scan of MS2 spectra, written to `diagnostic_ions.tsv`.\n`true` searches the built-in glycan oxonium, acetyl-lysine and\nphosphotyrosine immonium ions; a list of `{name, mz, tolerance}`\nreplaces them (tolerance defaults to 20 ppm). Default off."
+    },
     "fragment_tol": {
       "$ref": "#/$defs/Tolerance"
+    },
+    "immonium": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ImmoniumConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Per-PSM immonium-ion evidence, written to `results.sage.parquet` and\nthe PIN file and added to the linear discriminant. `true` looks for the\nunmodified P, V, L/I, H, F, Y and W ions and for the modified-residue\nions that modifications declare in `immonium_ions`. An object sets\n`rescore` (default true; false only reports the counts),\n`residue_ions` (the global switch for the unmodified-residue ions,\ndefault true) and `tolerance` (default `fragment_tol`). Default off."
     },
     "ion_mobility_model": {
       "anyOf": [
@@ -1771,6 +2105,7 @@
       ]
     },
     "min_free_memory_gb": {
+      "description": "Ignored since Beta 11: Sage enforces only `max_memory_gb`. Still\naccepted so older configurations parse.",
       "format": "double",
       "minimum": 0.0,
       "type": [
@@ -1897,6 +2232,13 @@
         }
       ]
     },
+    "record_input_hashes": {
+      "description": "Record the SHA-256 of every local spectrum file in the Parquet footers\nand `run-summary.json` (default false). Each file is read once more after\nthe search, at disk speed; remote files are never hashed. The FASTA and\nother database files are always hashed.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "report_psms": {
       "format": "uint",
       "minimum": 1,
@@ -1944,6 +2286,15 @@
         {
           "type": "null"
         }
+      ]
+    },
+    "threads": {
+      "description": "Worker threads for parallel work (default: all cores, or\n`RAYON_NUM_THREADS` when set). The `--threads` flag overrides it.",
+      "format": "uint",
+      "minimum": 1,
+      "type": [
+        "integer",
+        "null"
       ]
     },
     "wide_window": {

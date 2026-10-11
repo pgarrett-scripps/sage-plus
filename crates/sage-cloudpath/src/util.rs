@@ -1,6 +1,5 @@
 use crate::{read_and_execute, tdf::BrukerProcessingConfig, Error};
 use sage_core::spectrum::RawSpectrum;
-use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use url::Url;
 
@@ -51,7 +50,16 @@ impl From<&str> for FileFormat {
     }
 }
 
-const BRUKER_EXTENSIONS: [&str; 4] = [".d", ".tdf", ".tdf_bin", "ms2"];
+const BRUKER_EXTENSIONS: [&str; 8] = [
+    ".d",
+    ".tdf",
+    ".tdf_bin",
+    ".tsf",
+    ".tsf_bin",
+    "ms2",
+    ".ms2spectrum.bin",
+    ".ms2spectrum.parquet",
+];
 
 fn is_bruker(path: &str) -> bool {
     BRUKER_EXTENSIONS.iter().any(|ext| {
@@ -233,23 +241,6 @@ where
         let mut contents = String::new();
         bf.read_to_string(&mut contents).await?;
         Ok(serde_json::from_str(&contents)?)
-    })
-}
-
-/// Send telemetry data
-pub fn send_data<T>(url: &str, data: &T) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
-where
-    T: Serialize,
-{
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
-    rt.block_on(async {
-        let client = reqwest::ClientBuilder::default().https_only(true).build()?;
-        let res = client.post(url).json(data).send().await?;
-        res.error_for_status()?;
-        Ok(())
     })
 }
 

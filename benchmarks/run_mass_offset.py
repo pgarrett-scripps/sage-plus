@@ -61,8 +61,9 @@ def scale_jobs(spectra: Path, fasta: Path, repeats: int) -> list[dict]:
                 "database": {
                     "bucket_size": 16384,
                     "enzyme": {"missed_cleavages": 1, "cleave_at": "KR", "restrict": "P",
-                               "min_len": 7, "max_len": 50},
+                               "semi_enzymatic": False, "min_len": 7, "max_len": 50},
                     "static_mods": CARBAMIDOMETHYL,
+                    "ion_kinds": ["b", "y"],
                     "variable_mods": mods,
                     "max_variable_mods": 1,
                     "max_total_variable_mods": 1,
@@ -90,8 +91,9 @@ def localization_jobs(fasta: Path, files: list[Path]) -> list[dict]:
                 "database": {
                     "bucket_size": 16384,
                     "enzyme": {"missed_cleavages": 0, "cleave_at": "$", "restrict": "",
-                               "min_len": 7, "max_len": 50},
+                               "semi_enzymatic": False, "min_len": 7, "max_len": 50},
                     "static_mods": {"C": 57.021464},
+                    "ion_kinds": ["b", "y"],
                     "variable_mods": mods,
                     "max_variable_mods": 1, "max_total_variable_mods": 1,
                     "max_combinations": 128,
@@ -121,8 +123,9 @@ def entrapment_jobs(paired_fasta: Path, spectra: Path) -> list[dict]:
             "database": {
                 "bucket_size": 16384,
                 "enzyme": {"missed_cleavages": 0, "cleave_at": "$", "restrict": "",
-                           "min_len": 7, "max_len": 50},
+                           "semi_enzymatic": False, "min_len": 7, "max_len": 50},
                 "static_mods": {"C": 57.021464},
+                "ion_kinds": ["b", "y"],
                 "variable_mods": {**mods, "Acetyl": {"mass": 42.010565,
                                                      "sites": ["peptide_n_term"]}},
                 "max_variable_mods": 2, "max_total_variable_mods": 2,

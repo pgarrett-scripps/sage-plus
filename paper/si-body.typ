@@ -42,7 +42,8 @@ The fragment index is in `database.rs`, and spectrum storage and isotope
 processing are in `spectrum.rs`. Resource estimation and limits are in
 `crates/sage-cli/src/memory.rs` and the runner modules. API events and summaries
 are defined by `api.rs`, `events.rs`, and `runner/artifacts.rs`. Persistent
-worker orchestration is in `crates/sage-mcp/src/lib.rs`.
+worker orchestration was in `crates/sage-mcp/src/lib.rs`, which was removed
+after the evaluated release, in Sage Plus Beta 10.
 
 Scientific extensions are implemented in `crates/sage/src/mass_calibration.rs`,
 `scoring.rs`, and the retention and mobility modules under `ml/`. Modification
@@ -440,3 +441,23 @@ and quantitative endpoints correspond to @fig:lfq-endpoints and @fig:control.
     identical across those repeats. Offset PSMs count reported candidates of any
     rank whose peptidoform carries an offset, including decoys.],
 ) <tbl:si-mass-offset>
+
+#figure(
+  tbl("tbl.large-db"),
+  caption: [Every large-database search with its outcome. Refused searches
+    stopped at the preflight estimate before building, and stopped searches hit
+    the runtime memory guard. Peptides searched counts the database peptides
+    after prefiltering where it applied. PSMs and peptides are accepted at one
+    percent q-value.],
+) <tbl:si-large-db>
+
+#figure(
+  tbl("tbl.prefilter-sweep"),
+  caption: [Prefilter match threshold and peak cap on the HEK file against the
+    human reference with the ten-times catalog subset. Min. matches is the
+    preliminary fragment matches one precursor hypothesis needs to keep a
+    peptide, and Peaks limits the prefilter to each spectrum's most intense
+    peaks. Kept is the percent of streamed peptides retained. PSMs are accepted
+    at one percent q-value, and the entrapment FDP is combined at the peptide
+    level.],
+) <tbl:si-prefilter-sweep>

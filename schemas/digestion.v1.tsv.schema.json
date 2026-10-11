@@ -1,0 +1,83 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "digestion",
+  "title": "digestion.tsv",
+  "description": "Digestion summary: one row per searched file, then a `total` row. Also written to run-summary.json under qc.digestion.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, or `total` for the final row covering all files."
+    },
+    {
+      "name": "target_peptides",
+      "type": "integer",
+      "description": "Distinct target peptide sequences among rank-1 PSMs at 1% spectrum and peptide q-value."
+    },
+    {
+      "name": "decoy_peptides",
+      "type": "integer",
+      "description": "Distinct decoy peptide sequences passing the same filter."
+    },
+    {
+      "name": "peptides",
+      "type": "integer",
+      "description": "Denominator: target minus decoy peptides."
+    },
+    {
+      "name": "missed_cleavages_0",
+      "type": "integer",
+      "description": "Peptides without missed cleavages (decoy-corrected)."
+    },
+    {
+      "name": "missed_cleavages_1",
+      "type": "integer",
+      "description": "Peptides with one missed cleavage (decoy-corrected)."
+    },
+    {
+      "name": "missed_cleavages_2_plus",
+      "type": "integer",
+      "description": "Peptides with two or more missed cleavages (decoy-corrected)."
+    },
+    {
+      "name": "semi_n",
+      "type": "integer",
+      "description": "Peptides with a ragged (non-enzymatic) N-terminus only (decoy-corrected)."
+    },
+    {
+      "name": "semi_c",
+      "type": "integer",
+      "description": "Peptides with a ragged (non-enzymatic) C-terminus only (decoy-corrected)."
+    },
+    {
+      "name": "non_enzymatic",
+      "type": "integer",
+      "description": "Peptides with neither terminus produced by the enzyme (decoy-corrected)."
+    },
+    {
+      "name": "missed_cleavage_pct",
+      "type": "number",
+      "description": "Percent of peptides with at least one missed cleavage, three decimals."
+    },
+    {
+      "name": "semi_n_pct",
+      "type": "number",
+      "description": "Percent semi N-terminal, three decimals."
+    },
+    {
+      "name": "semi_c_pct",
+      "type": "number",
+      "description": "Percent semi C-terminal, three decimals."
+    },
+    {
+      "name": "non_enzymatic_pct",
+      "type": "number",
+      "description": "Percent non-enzymatic, three decimals."
+    }
+  ],
+  "missingValues": []
+}

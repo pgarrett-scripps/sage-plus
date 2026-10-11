@@ -178,6 +178,86 @@ pub fn fit(points: &[CalibrationPoint], options: FitOptions) -> Option<Calibrati
     })
 }
 
+/// Search tolerances (± ppm) a recommendation is rounded up to.
+pub const TOLERANCE_LADDER_PPM: [f32; 5] = [5.0, 10.0, 20.0, 50.0, 100.0];
+
+/// Robust standard deviations a recommended tolerance covers beyond the bias.
+pub const TOLERANCE_SIGMAS: f32 = 4.0;
+
+/// Fewest confident PSMs needed before a tolerance is recommended.
+pub const MIN_TOLERANCE_PSMS: usize = 100;
+
+/// Scale from a median absolute deviation to a normal standard deviation.
+const MAD_TO_SIGMA: f32 = 1.4826;
+
+/// Signed mass-error bias and spread with the tolerance they call for.
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToleranceEstimate {
+    /// Median signed error (`observed - theoretical`), ppm.
+    pub bias_ppm: f32,
+    /// Robust standard deviation (1.4826 × MAD), ppm.
+    pub sigma_ppm: f32,
+    /// `|bias_ppm| + 4 × sigma_ppm`.
+    pub required_ppm: f32,
+    /// Smallest of 5, 10, 20, 50 and 100 ppm covering `required_ppm`;
+    /// `None` when even 100 ppm does not.
+    pub recommended_ppm: Option<f32>,
+}
+
+impl ToleranceEstimate {
+    /// Build an estimate from a bias and a robust standard deviation.
+    pub fn new(bias_ppm: f32, sigma_ppm: f32) -> Self {
+        let required_ppm = bias_ppm.abs() + TOLERANCE_SIGMAS * sigma_ppm;
+        Self {
+            bias_ppm,
+            sigma_ppm,
+            required_ppm,
+            recommended_ppm: TOLERANCE_LADDER_PPM
+                .into_iter()
+                .find(|&rung| rung >= required_ppm),
+        }
+    }
+
+    /// Estimate from one signed error per PSM: median bias, 1.4826 × MAD spread.
+    /// `None` without any finite error.
+    pub fn from_errors(errors: &[f32]) -> Option<Self> {
+        let (bias, sigma) = robust_center_sigma(errors)?;
+        Some(Self::new(bias, sigma))
+    }
+
+    /// Estimate for fragment ions from each PSM's signed mean fragment error
+    /// and the standard deviation of its ions around that mean. The spread of
+    /// PSM means alone understates how far single ions stray, so the typical
+    /// (median) within-PSM deviation is added in quadrature.
+    pub fn from_fragment_errors(mean_errors: &[f32], within_sd: &[f32]) -> Option<Self> {
+        let (bias, between) = robust_center_sigma(mean_errors)?;
+        let within = within_sd
+            .iter()
+            .copied()
+            .filter(|sd| sd.is_finite())
+            .collect::<Vec<_>>();
+        let within = if within.is_empty() {
+            0.0
+        } else {
+            median(&within)
+        };
+        Some(Self::new(bias, between.hypot(within)))
+    }
+}
+
+fn robust_center_sigma(values: &[f32]) -> Option<(f32, f32)> {
+    let finite = values
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .collect::<Vec<_>>();
+    if finite.is_empty() {
+        return None;
+    }
+    let (center, mad) = median_mad(&finite);
+    Some((center, MAD_TO_SIGMA * mad))
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/mass_calibration.rs"]
 mod tests;

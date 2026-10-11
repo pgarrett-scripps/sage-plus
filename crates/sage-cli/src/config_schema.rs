@@ -12,11 +12,13 @@ pub fn generate_config_schema() -> String {
         .as_object_mut()
         .expect("root configuration schema is an object")
         .insert("$id".into(), SCHEMA_ID.into());
-    value
-        .pointer_mut("/properties/database/properties/prefilter_low_memory")
-        .and_then(serde_json::Value::as_object_mut)
-        .expect("deprecated compatibility field is present")
-        .insert("deprecated".into(), true.into());
+    for field in ["prefilter_low_memory", "prefilter_chunk_size"] {
+        value
+            .pointer_mut(&format!("/properties/database/properties/{field}"))
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("deprecated compatibility field is present")
+            .insert("deprecated".into(), true.into());
+    }
 
     let explicit = "^([ACDEFGHIKLMNPQRSTVWYUO]|(first_residue|internal_residue|last_residue|protein_first|protein_last):[ACDEFGHIKLMNPQRSTVWYUO]|(peptide_n_term|peptide_c_term|protein_n_term|protein_c_term)(:[ACDEFGHIKLMNPQRSTVWYUO])?|motif:[^\\s]+)(?![\\s\\S])";
     for name in ["NamedStaticModification", "NamedVariableModification"] {
@@ -24,8 +26,34 @@ pub fn generate_config_schema() -> String {
         value["$defs"][name]["properties"]["sites"]["items"]["pattern"] = explicit.into();
         value["$defs"][name]["additionalProperties"] = false.into();
     }
+    // Per-site maps (`neutral_losses`, `immonium_ions`) are keyed by the same
+    // explicit site strings.
+    value["$defs"]["SiteMap"]["anyOf"][1]["propertyNames"] =
+        serde_json::json!({"pattern": explicit});
+
+    // Mandatory settings (Beta 16). The enzyme is required only when a FASTA
+    // is digested; `--fasta` on the command line cannot be checked here.
+    let database = &mut value["properties"]["database"];
+    database["required"] = serde_json::json!(["static_mods", "ion_kinds"]);
+    database["dependentSchemas"] = serde_json::json!({
+        "fasta": {
+            "required": ["enzyme"],
+            "properties": {
+                "enzyme": {
+                    "type": "object",
+                    "required": ["cleave_at", "restrict", "missed_cleavages", "semi_enzymatic"]
+                }
+            }
+        }
+    });
+
+    // `max_len` is a positive length or "unlimited".
+    value["$defs"]["EnzymeBuilder"]["properties"]["max_len"]["anyOf"][0]["anyOf"][0]["minimum"] =
+        1.into();
 
     value["$defs"]["NamedVariableModification"]["properties"]["max_count"]["minimum"] = 1.into();
+    value["$defs"]["NamedVariableModification"]["properties"]["max_total_count"]["minimum"] =
+        1.into();
     // Symbol-keyed maps accept upstream Sage syntax only: residue or terminal
     // symbol keys mapped to masses (variable mods: a mass or a mass array).
     let legacy = "^([ACDEFGHIKLMNPQRSTVWYUO]|[\\^$\\[\\]][ACDEFGHIKLMNPQRSTVWYUO]?)(?![\\s\\S])";

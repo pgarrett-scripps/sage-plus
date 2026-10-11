@@ -1,0 +1,38 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "diagnostic_ions",
+  "title": "diagnostic_ions.tsv",
+  "description": "One row per configured diagnostic ion found in a raw MS2 spectrum, in file order. Written only when `diagnostic_ions` is enabled.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name."
+    },
+    {
+      "name": "scannr",
+      "type": "string",
+      "description": "Native spectrum identifier, as in the `scannr` column of results.sage.parquet."
+    },
+    {
+      "name": "ion",
+      "type": "string",
+      "description": "Configured ion name."
+    },
+    {
+      "name": "mz",
+      "type": "number",
+      "description": "Observed m/z of the matched peak, four decimals."
+    },
+    {
+      "name": "relative_intensity",
+      "type": "number",
+      "description": "Matched peak intensity divided by the spectrum's summed intensity (0-1], six decimals."
+    }
+  ],
+  "missingValues": []
+}

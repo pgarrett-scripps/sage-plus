@@ -1,17 +1,44 @@
 use super::*;
+use sage_core::immonium::ImmoniumSettings;
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/results.sage.v1.parquet.schema"
-    ))
+    build_results_schema(false)
+}
+
+/// Schema version of `results.sage.parquet`: 5 without precursor labels, 6
+/// with them. Versions 3 and 4 added the nullable fragment-loss and immonium
+/// columns to versions 1 and 2; versions 5 and 6 add `localized_peptide`.
+fn results_schema_version(has_labels: bool) -> &'static str {
+    if has_labels {
+        "6"
+    } else {
+        "5"
+    }
 }
 
 fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
     parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/results.sage.v2.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v6.parquet.schema")
     } else {
-        include_str!("../../../../schemas/results.sage.v1.parquet.schema")
+        include_str!("../../../../schemas/results.sage.v5.parquet.schema")
     })
+}
+
+/// Write an optional column: `None` rows are null.
+fn write_optional_column<T: DataType>(
+    mut column: SerializedColumnWriter,
+    values: impl Iterator<Item = Option<T::T>>,
+) -> parquet::errors::Result<()> {
+    let mut present = Vec::new();
+    let mut levels = Vec::new();
+    for value in values {
+        levels.push(i16::from(value.is_some()));
+        present.extend(value);
+    }
+    column
+        .typed::<T>()
+        .write_batch(&present, Some(&levels), None)?;
+    column.close()
 }
 
 struct OutputProteinSite {
@@ -65,9 +92,13 @@ fn write_reporter_ions(
 
     // https://docs.rs/parquet/44.0.0/parquet/column/index.html
     // Using the low level API here is not very pleasant...
-    let def_levels = vec![3; channels];
+    // Definition levels: 0 = no reporter spectrum (null list), 2 = channel
+    // not observed (null element), 3 = observed intensity. Only observed
+    // intensities are passed as values.
     let mut rep_levels = vec![1; channels];
     rep_levels[0] = 0;
+    let mut def_levels = Vec::with_capacity(channels);
+    let mut values = Vec::with_capacity(channels);
 
     let col = column.typed::<FloatType>();
     for feature in features {
@@ -80,7 +111,19 @@ fn write_reporter_ions(
             // MS3 reporter spectra are keyed to their MS2 scan's first occurrence.
             .or_else(|| scan_map.get(&(feature.file_id, feature.spec_id.as_str(), 0)));
         if let Some(rs) = rs {
-            col.write_batch(&rs.peaks, Some(&def_levels), Some(&rep_levels))?;
+            debug_assert_eq!(rs.peaks.len(), channels);
+            def_levels.clear();
+            values.clear();
+            for peak in &rs.peaks {
+                match peak {
+                    Some(intensity) => {
+                        def_levels.push(3);
+                        values.push(*intensity);
+                    }
+                    None => def_levels.push(2),
+                }
+            }
+            col.write_batch(&values, Some(&def_levels), Some(&rep_levels))?;
         } else {
             col.write_batch(&[], Some(&[0]), Some(&[0]))?;
         }
@@ -103,6 +146,10 @@ fn write_null_column(
 
 /// `spectrum_occurrences` maps `psm_id` to the zero-based occurrence of a
 /// repeated spectrum ID; PSMs that are absent are the first occurrence.
+/// `immonium` is the search's immonium settings; without them the immonium
+/// columns are null. `localization_q_cutoff` is the localization q-value
+/// cutoff when site localization is on; without it `localized_peptide` is null.
+#[allow(clippy::too_many_arguments)]
 pub fn serialize_features(
     features: &[&Feature],
     reporter_ions: &[TmtQuant],
@@ -110,24 +157,28 @@ pub fn serialize_features(
     filenames: &[String],
     database: &IndexedDatabase,
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
+    immonium: Option<&ImmoniumSettings>,
+    localization_q_cutoff: Option<f32>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
+    let has_fragment_losses = database.fragment_losses.is_some();
     let schema = build_results_schema(has_labels)?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![
+    let options = writer_properties(
+        vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "2" } else { "1" }.into()),
+                Some(results_schema_version(has_labels).into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
                 Some(output_psm_q_value.to_string()),
             ),
-        ]))
-        .build();
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
     let mut writer = SerializedFileWriter::new(buf, schema.into(), options.into())?;
@@ -177,6 +228,31 @@ pub fn serialize_features(
         write_col!(mass_shift, FloatType);
         write_col!(
             |f: &&Feature| database[f.peptide_idx].sequence.as_ref().into(),
+            ByteArrayType
+        );
+        // Null unless the peptide was expanded from ambiguous FASTA residues.
+        if let Some(mut column) = rg.next_column()? {
+            let spans = features
+                .iter()
+                .map(|f| database[f.peptide_idx].database_peptide())
+                .collect::<Vec<_>>();
+            let definition_levels = spans
+                .iter()
+                .map(|span| i16::from(span.is_some()))
+                .collect::<Vec<_>>();
+            let values = spans
+                .into_iter()
+                .flatten()
+                .map(|span| ByteArray::from(span.into_bytes()))
+                .collect::<Vec<_>>();
+            column
+                .typed::<ByteArrayType>()
+                .write_batch(&values, Some(&definition_levels), None)?;
+            column.close()?;
+        }
+        // Empty unless the peptide was expanded from ambiguous FASTA residues.
+        write_col!(
+            |f: &&Feature| database[f.peptide_idx].substitutions().into_bytes().into(),
             ByteArrayType
         );
         if has_labels {
@@ -334,41 +410,116 @@ pub fn serialize_features(
             }
         }
 
+        // Generic fragment-loss evidence: null for every row when
+        // `database.fragment_losses` is not configured.
+        let loss = features
+            .iter()
+            .map(|f| has_fragment_losses.then(|| f.fragment_loss.unwrap_or_default()))
+            .collect::<Vec<_>>();
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<Int32Type>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.matched_peaks as i32)),
+            )?;
+        }
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<FloatType>(
+                column,
+                loss.iter().map(|l| l.map(|l| l.intensity_pct)),
+            )?;
+        }
+
+        // Immonium evidence: null for every row when `immonium` is off.
+        let evidence = features
+            .iter()
+            .map(|f| immonium.and(f.immonium))
+            .collect::<Vec<_>>();
+        macro_rules! write_immonium_count {
+            ($field:ident) => {
+                if let Some(column) = rg.next_column()? {
+                    write_optional_column::<Int32Type>(
+                        column,
+                        evidence.iter().map(|e| e.map(|e| e.$field as i32)),
+                    )?;
+                }
+            };
+        }
+        write_immonium_count!(explained);
+        write_immonium_count!(missing);
+        write_immonium_count!(unexplained);
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                evidence
+                    .iter()
+                    .map(|e| e.map(|e| e.residue_names().into_bytes().into())),
+            )?;
+        }
+        write_immonium_count!(modified_explained);
+        write_immonium_count!(modified_unexplained);
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                evidence.iter().map(|e| {
+                    e.zip(immonium).map(|(e, settings)| {
+                        settings
+                            .modified_names(e.modified_observed)
+                            .into_bytes()
+                            .into()
+                    })
+                }),
+            )?;
+        }
+
+        // Localized peptide in ProForma: null without a localization.
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                features.iter().map(|f| {
+                    localization_q_cutoff.zip(f.localization.as_ref()).map(
+                        |(cutoff, localization)| {
+                            localization
+                                .proforma(&database[f.peptide_idx], cutoff)
+                                .into_bytes()
+                                .into()
+                        },
+                    )
+                }),
+            )?;
+        }
+
         rg.close()?;
     }
     writer.into_inner()
 }
 
 pub fn build_matched_fragment_schema() -> parquet::errors::Result<Type> {
-    let msg = r#"
-        message schema {
-            required int64 psm_id;
-            required byte_array fragment_type (utf8);
-            required int32 fragment_ordinals;
-            required int32 fragment_charge;
-            required float fragment_mz_experimental;
-            required float fragment_mz_calculated;
-            required float neutral_loss;
-            required float fragment_intensity;
-        }
-    "#;
-
-    parquet::schema::parser::parse_message_type(msg)
+    parquet::schema::parser::parse_message_type(include_str!(
+        "../../../../schemas/matched_fragments.sage.v1.parquet.schema"
+    ))
 }
 
 pub fn serialize_matched_fragments(
     features: &[&Feature],
     output_psm_q_value: f32,
+    provenance: &[(String, String)],
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let schema = build_matched_fragment_schema()?;
 
-    let options = WriterProperties::builder()
-        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
-        .set_key_value_metadata(Some(vec![KeyValue::new(
-            "sage.output_filter.spectrum_q_max".into(),
-            Some(output_psm_q_value.to_string()),
-        )]))
-        .build();
+    let options = writer_properties(
+        vec![
+            KeyValue::new(
+                "sage.schema.name".into(),
+                Some("matched_fragments.sage".into()),
+            ),
+            KeyValue::new("sage.schema.version".into(), Some("1".into())),
+            KeyValue::new(
+                "sage.output_filter.spectrum_q_max".into(),
+                Some(output_psm_q_value.to_string()),
+            ),
+        ],
+        provenance,
+    )?;
 
     let buf = Vec::new();
 

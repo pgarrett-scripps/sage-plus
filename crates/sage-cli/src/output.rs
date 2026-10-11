@@ -33,6 +33,8 @@ pub(crate) fn prepare_local_directory(
         "results.sage.ptm-library.tsv",
         "results.sage.pin",
         "results.sage.report.html",
+        "digestion.tsv",
+        "diagnostic_ions.tsv",
     ];
     let existing = names
         .iter()

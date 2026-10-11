@@ -268,8 +268,15 @@ impl Runner {
 
 impl Runner {
     pub(super) fn spectrum_fdr(&self, features: &mut [Feature]) -> usize {
-        use sage_core::ml::linear_discriminant::{score_psms, score_psms_fallback};
-        if let Err(failure) = score_psms(features, self.parameters.precursor_tol) {
+        use sage_core::ml::linear_discriminant::{score_psms_fallback, score_psms_with_immonium};
+        let immonium = self
+            .parameters
+            .immonium
+            .as_ref()
+            .is_some_and(|settings| settings.rescore);
+        if let Err(failure) =
+            score_psms_with_immonium(features, self.parameters.precursor_tol, immonium)
+        {
             let message = format!(
                 "linear discriminant model not used ({failure}); ranking PSMs by the heuristic score ln(1 - poisson) + longest_y_pct / 3"
             );
@@ -453,7 +460,13 @@ impl Runner {
                 x
             })
             .flat_map(|(spec, &occurrence)| {
-                let features = scorer.score(spec);
+                let mut features = scorer.score(spec);
+                if let Some(immonium) = &self.parameters.immonium {
+                    for feature in &mut features {
+                        let peptide = &scorer.db[feature.peptide_idx];
+                        feature.immonium = Some(immonium.evaluate(spec, peptide));
+                    }
+                }
                 if occurrence > 0 {
                     repeated
                         .lock()
@@ -637,6 +650,21 @@ impl Runner {
         )
     }
 
+    /// Combine a diaPASEF file's regular read (MS1 frames and raw window MS2)
+    /// with its pseudo-spectra: the raw spectra feed the QC scans first, then
+    /// only their MS1 is kept next to the pseudo-spectra.
+    pub(super) fn tdf_dia_with_ms1(
+        &self,
+        file_id: usize,
+        mut spectra: Vec<sage_core::spectrum::RawSpectrum>,
+        pseudo: &mut Vec<sage_core::spectrum::RawSpectrum>,
+    ) -> Vec<sage_core::spectrum::RawSpectrum> {
+        self.collect_file_qc(file_id, &spectra);
+        spectra.retain(|x| x.ms_level == 1);
+        spectra.append(pseudo);
+        spectra
+    }
+
     /// `search_events` controls the per-file progress events
     /// (`file_started`, `file_completed`, `spectra_processed`). Rereads after
     /// the search has reported completion pass `false`; read failures are
@@ -693,22 +721,62 @@ impl Runner {
                     path: path.to_string(),
                 });
             }
-            let res = sage_cloudpath::util::read_spectra(
-                path,
-                file_id,
-                sn,
-                self.parameters.bruker_config,
-                requires_ms1 || !self.parameters.dia.is_off(),
-            );
-            // DIA pseudo mode: replace the MS2 scans with MS1-anchored
-            // pseudo-MS2 spectra before the usual processing.
-            let res = match res {
-                Ok(s) if !self.parameters.dia.is_off() && !s.is_empty() => {
-                    sage_dia::prepare(s, file_id, requires_ms1, &self.parameters.dia).map_err(|e| {
-                        sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
-                    })
+            let dia = &self.parameters.dia;
+            let tdf = !dia.is_off()
+                && FileFormat::from(path.as_ref()) == FileFormat::TDF
+                && path
+                    .to_file_path()
+                    .is_ok_and(|p| sage_dia::tims::is_tdf(&p));
+            let res = if tdf {
+                // timsTOF diaPASEF: pseudo-spectra come straight from the
+                // frames; the regular reader only supplies MS1 when needed.
+                let pseudo = sage_dia::pseudo_spectra_tdf(
+                    &path.to_file_path().expect("checked above"),
+                    file_id,
+                    dia,
+                )
+                .map_err(|e| {
+                    sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
+                });
+                match pseudo {
+                    Ok(mut pseudo) if requires_ms1 => sage_cloudpath::util::read_spectra(
+                        path,
+                        file_id,
+                        sn,
+                        self.parameters.bruker_config,
+                        true,
+                    )
+                    .map(|s| self.tdf_dia_with_ms1(file_id, s, &mut pseudo)),
+                    // Without MS1 the pseudo-spectra are all that is read:
+                    // scan them so the file still gets diagnostic-ion QC
+                    // (polymer QC needs MS1 and is reported as absent).
+                    Ok(pseudo) => {
+                        self.collect_file_qc(file_id, &pseudo);
+                        Ok(pseudo)
+                    }
+                    Err(e) => Err(e),
                 }
-                res => res,
+            } else {
+                let res = sage_cloudpath::util::read_spectra(
+                    path,
+                    file_id,
+                    sn,
+                    self.parameters.bruker_config,
+                    requires_ms1 || !dia.is_off(),
+                );
+                if let Ok(spectra) = &res {
+                    self.collect_file_qc(file_id, spectra);
+                }
+                // DIA pseudo mode: replace the MS2 scans with MS1-anchored
+                // pseudo-MS2 spectra before the usual processing.
+                match res {
+                    Ok(s) if !dia.is_off() && !s.is_empty() => {
+                        sage_dia::prepare(s, file_id, requires_ms1, dia).map_err(|e| {
+                            sage_cloudpath::Error::Unsupported(format!("DIA pseudo-spectra: {e:#}"))
+                        })
+                    }
+                    res => res,
+                }
             };
 
             match res {

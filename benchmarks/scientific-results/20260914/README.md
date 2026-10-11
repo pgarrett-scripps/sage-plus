@@ -11,6 +11,6 @@ The complete evidence is under `/data/sage-plus-scientific/20260914`. Its archiv
 
 Archive SHA-256: `1ba4fd1c0a1d58413b030ac8320a69c3a2f72975da4eac625abc8edc70d3d6c4`.
 
-[Archive verification](archive-verification.json), [input and output audit](evidence-audit.json), [test log](benchmark-tests.log), and [protocol](../../SCIENTIFIC_PILOT.md).
+[Archive verification](archive-verification.json), [input and output audit](evidence-audit.json), [test log](benchmark-tests.log), and [protocol](../../archive/SCIENTIFIC_PILOT.md).
 
 These results identify unresolved PTM acceptance and MBR transfer-confidence questions. They do not certify production calibration. No scoring defaults, published beta.3 binary or older beta.2 manuscript measurements were changed. No external deposition was performed.

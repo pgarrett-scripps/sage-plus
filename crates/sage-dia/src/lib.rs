@@ -13,8 +13,9 @@ pub mod coelution;
 pub mod hills;
 pub mod pipeline;
 pub mod pseudo;
+pub mod tims;
 
 pub use coelution::{CoelutionFeatures, CoelutionSettings};
 pub use hills::{Channel, CompactHill};
-pub use pipeline::{prepare, pseudo_spectra, DiaMode, DiaSettings};
+pub use pipeline::{prepare, pseudo_spectra, pseudo_spectra_tdf, DiaMode, DiaSettings};
 pub use pseudo::{PrecursorTrace, PseudoSettings, PseudoSpectrum};

@@ -1,8 +1,147 @@
 use super::*;
 
+/// One reported protein site: a localized modification on a peptide,
+/// attributed to one protein the peptide maps to, aggregated over every
+/// supporting PSM. Decoy sites come from decoy PSMs on decoy proteins and are
+/// built with the same key; they only feed the site-level FDR.
+pub(super) struct ProteinSite {
+    pub(super) decoy: bool,
+    pub(super) attachment: sage_core::ptm_library::Attachment,
+    pub(super) protein: String,
+    pub(super) peptide: String,
+    pub(super) residue: u8,
+    /// 1-based position within the peptide.
+    pub(super) position: usize,
+    pub(super) modification: String,
+    /// `modification` is a name, not a signed mass.
+    pub(super) named: bool,
+    pub(super) modification_mass: f32,
+    pub(super) n_psms: u32,
+    pub(super) best_probability: f32,
+    pub(super) best_delta_score: f32,
+    pub(super) best_localization_q_value: f32,
+    pub(super) best_spectrum_q: f32,
+    /// Site score: best discriminant score of any supporting PSM.
+    pub(super) score: f32,
+    /// Site-level target-decoy q-value.
+    pub(super) q_value: f32,
+}
+
+type ProteinSiteKey = (
+    String,
+    String,
+    usize,
+    String,
+    sage_core::ptm_library::Attachment,
+);
+
+fn protein_site_key(protein: &str, row: &SiteRow) -> ProteinSiteKey {
+    (
+        protein.to_string(),
+        row.peptide.clone(),
+        row.position,
+        row.modification.clone(),
+        row.attachment,
+    )
+}
+
+/// Collapse site rows into protein sites and estimate site-level FDR.
+///
+/// Every row has already passed the PSM identification cutoff and the
+/// localization gates, which are applied identically to target and decoy
+/// PSMs. Site q-values are then estimated on exactly this set, which is the
+/// set written to the protein-site report, so no filter follows estimation.
+/// Target and decoy sites are returned together, sorted by protein, peptide
+/// and position.
+pub(super) fn aggregate_protein_sites(rows: &[SiteRow]) -> Vec<ProteinSite> {
+    // Protein coordinates are not resolved (the FASTA is consumed during
+    // indexing), so a site is keyed on (protein, modified peptide, position
+    // in peptide, modification, attachment) and a shared peptide yields one
+    // site per protein, on the target and the decoy side alike.
+    let mut map: HashMap<ProteinSiteKey, ProteinSite> = HashMap::new();
+    for row in rows {
+        for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
+            let entry = map
+                .entry(protein_site_key(protein, row))
+                .or_insert_with(|| ProteinSite {
+                    decoy: row.decoy,
+                    attachment: row.attachment,
+                    protein: protein.to_string(),
+                    peptide: row.peptide.clone(),
+                    residue: row.residue,
+                    position: row.position,
+                    modification: row.modification.clone(),
+                    named: row.named,
+                    modification_mass: row.modification_mass,
+                    n_psms: 0,
+                    best_probability: 0.0,
+                    best_delta_score: f32::MIN,
+                    best_localization_q_value: 1.0,
+                    best_spectrum_q: f32::MAX,
+                    score: f32::MIN,
+                    q_value: 1.0,
+                });
+            entry.decoy &= row.decoy;
+            entry.n_psms += 1;
+            entry.best_probability = entry.best_probability.max(row.localization_probability);
+            entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
+            entry.best_localization_q_value = entry
+                .best_localization_q_value
+                .min(row.localization_q_value);
+            entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
+            entry.score = entry.score.max(row.discriminant_score);
+        }
+    }
+
+    let mut sites: Vec<ProteinSite> = map.into_values().collect();
+    sites.sort_by(|a, b| {
+        a.protein
+            .cmp(&b.protein)
+            .then_with(|| a.peptide.cmp(&b.peptide))
+            .then_with(|| a.position.cmp(&b.position))
+            .then_with(|| a.modification.cmp(&b.modification))
+            .then_with(|| a.attachment.as_str().cmp(b.attachment.as_str()))
+    });
+    // Site FDR is estimated per modification type, like the localization
+    // FLR, so one type's decoy sites never set another type's q-values.
+    let identities = sites
+        .iter()
+        .map(|site| {
+            (
+                site.named.then_some(site.modification.as_str()),
+                site.modification_mass,
+            )
+        })
+        .collect::<Vec<_>>();
+    let evidence = sage_core::ptm::modification_types(&identities)
+        .into_iter()
+        .zip(&sites)
+        .map(|(kind, site)| (kind, site.score, site.decoy))
+        .collect::<Vec<_>>();
+    for (site, q_value) in sites
+        .iter_mut()
+        .zip(sage_core::fdr::site_q_values_by_type(&evidence))
+    {
+        site.q_value = q_value;
+    }
+    sites
+}
+
+/// Site-level q-value of a PSM site row: the best q-value among the protein
+/// sites it supports.
+fn row_site_q_value(row: &SiteRow, q_values: &HashMap<ProteinSiteKey, f32>) -> f32 {
+    row.proteins
+        .split(';')
+        .filter(|p| !p.is_empty())
+        .filter_map(|protein| q_values.get(&protein_site_key(protein, row)).copied())
+        .fold(1.0, f32::min)
+}
+
 impl Runner {
-    /// Flatten FDR-passing target PSMs into one [`SiteRow`] per localized
-    /// modification site. Shared by the PSM-site and protein-site reports.
+    /// Flatten localized PSMs that pass the PTM identification cutoff into one
+    /// [`SiteRow`] per localized modification site. Decoy PSMs are included,
+    /// flagged, for site-level FDR. Shared by the PSM-site, protein-site and
+    /// PTM-library reports.
     pub(super) fn collect_site_rows(
         &self,
         features: &[Feature],
@@ -10,8 +149,7 @@ impl Runner {
     ) -> Vec<SiteRow> {
         let mut rows = Vec::new();
         for feature in features {
-            // Only confidently-identified target PSMs.
-            if !passes_localization_filter(feature, self.parameters.ptm_localization.psm_q_value) {
+            if !passes_site_psm_filter(feature, self.parameters.ptm_localization.psm_q_value) {
                 continue;
             }
             let localization = match &feature.localization {
@@ -31,7 +169,7 @@ impl Runner {
                 {
                     continue;
                 }
-                let modification = m.label.clone().unwrap_or_else(|| format!("{:+}", m.mass));
+                let modification = m.reported_name();
                 let site_probabilities = m
                     .all_sites
                     .iter()
@@ -49,6 +187,8 @@ impl Runner {
 
                 for site in &m.best_sites {
                     rows.push(SiteRow {
+                        decoy: feature.label != 1,
+                        discriminant_score: feature.discriminant_score,
                         ambiguous: m.candidate_sites > m.site_count
                             && (!m.delta_score.is_finite() || m.delta_score <= 0.0),
                         protein_sites: peptide.protein_sites.clone(),
@@ -63,6 +203,7 @@ impl Runner {
                         spectrum_q: feature.spectrum_q,
                         peptide_q: feature.peptide_q,
                         modification: modification.clone(),
+                        named: m.label.is_some(),
                         modification_mass: m.mass,
                         position: site.position + 1,
                         residue: site.residue,
@@ -82,17 +223,34 @@ impl Runner {
     }
 
     /// Write a per-PSM-site PTM localization report (one row per localized
-    /// modification site of each FDR-passing PSM).
-    pub fn write_ptm_sites(
+    /// modification site of each passing target PSM), with the site-level
+    /// q-value of the protein sites each row supports.
+    pub(super) fn write_ptm_sites(
         &self,
-        features: &[Feature],
-        filenames: &[String],
+        rows: &[SiteRow],
+        protein_sites: &[ProteinSite],
     ) -> anyhow::Result<Url> {
-        let rows = self.collect_site_rows(features, filenames);
+        let q_values = protein_sites
+            .iter()
+            .filter(|site| !site.decoy)
+            .map(|site| {
+                (
+                    (
+                        site.protein.clone(),
+                        site.peptide.clone(),
+                        site.position,
+                        site.modification.clone(),
+                        site.attachment,
+                    ),
+                    site.q_value,
+                )
+            })
+            .collect::<HashMap<_, _>>();
 
         use sage_cloudpath::parquet::PtmSiteRecord;
         let records = rows
             .iter()
+            .filter(|row| !row.decoy)
             .map(|row| PtmSiteRecord {
                 attachment: row.attachment.as_str().into(),
                 psm_id: row.psm_id as i64,
@@ -115,114 +273,43 @@ impl Runner {
                 site_determining_ions_matched: row.site_determining_matched as i32,
                 site_determining_ions_total: row.site_determining_total as i32,
                 site_probabilities: row.site_probabilities.clone(),
+                site_q_value: row_site_q_value(row, &q_values),
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.ptm-sites.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_ptm_sites(&records)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_ptm_sites(&records, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
 
-    /// Write a collapsed protein-site report: the best localization for each
-    /// (protein, modified peptide site) aggregated across all supporting PSMs.
-    pub fn write_protein_sites(
-        &self,
-        features: &[Feature],
-        filenames: &[String],
-    ) -> anyhow::Result<Url> {
-        let rows = self.collect_site_rows(features, filenames);
-
-        // Key on (protein, peptide, position, mod mass). Protein coordinates
-        // are not resolved (the FASTA is consumed during indexing), so a row
-        // represents a localized site on a peptide, attributed to each protein
-        // the peptide maps to.
-        #[derive(Clone)]
-        struct Agg {
-            attachment: sage_core::ptm_library::Attachment,
-            protein: String,
-            peptide: String,
-            residue: u8,
-            position: usize,
-            modification: String,
-            modification_mass: f32,
-            n_psms: u32,
-            best_probability: f32,
-            best_delta_score: f32,
-            best_localization_q_value: f32,
-            best_spectrum_q: f32,
-        }
-
-        let mut map: HashMap<
-            (
-                String,
-                String,
-                usize,
-                String,
-                sage_core::ptm_library::Attachment,
-            ),
-            Agg,
-        > = HashMap::new();
-        for row in &rows {
-            for protein in row.proteins.split(';').filter(|p| !p.is_empty()) {
-                let key = (
-                    protein.to_string(),
-                    row.peptide.clone(),
-                    row.position,
-                    row.modification.clone(),
-                    row.attachment,
-                );
-                let entry = map.entry(key).or_insert_with(|| Agg {
-                    attachment: row.attachment,
-                    protein: protein.to_string(),
-                    peptide: row.peptide.clone(),
-                    residue: row.residue,
-                    position: row.position,
-                    modification: row.modification.clone(),
-                    modification_mass: row.modification_mass,
-                    n_psms: 0,
-                    best_probability: 0.0,
-                    best_delta_score: f32::MIN,
-                    best_localization_q_value: 1.0,
-                    best_spectrum_q: f32::MAX,
-                });
-                entry.n_psms += 1;
-                entry.best_probability = entry.best_probability.max(row.localization_probability);
-                entry.best_delta_score = entry.best_delta_score.max(row.delta_score);
-                entry.best_localization_q_value = entry
-                    .best_localization_q_value
-                    .min(row.localization_q_value);
-                entry.best_spectrum_q = entry.best_spectrum_q.min(row.spectrum_q);
-            }
-        }
-
-        let mut aggregated: Vec<Agg> = map.into_values().collect();
-        aggregated.sort_by(|a, b| {
-            a.protein
-                .cmp(&b.protein)
-                .then_with(|| a.peptide.cmp(&b.peptide))
-                .then_with(|| a.position.cmp(&b.position))
-        });
-
+    /// Write the collapsed protein-site report: one row per target protein
+    /// site, with its best localization evidence and its site-level q-value.
+    pub(super) fn write_protein_sites(&self, protein_sites: &[ProteinSite]) -> anyhow::Result<Url> {
         use sage_cloudpath::parquet::ProteinSiteRecord;
-        let records = aggregated
+        let records = protein_sites
             .iter()
-            .map(|agg| ProteinSiteRecord {
-                attachment: agg.attachment.as_str().into(),
-                protein: agg.protein.clone(),
-                peptide: agg.peptide.clone(),
-                residue: (agg.residue as char).to_string(),
-                position_in_peptide: agg.position as i32,
-                modification: agg.modification.clone(),
-                modification_mass: agg.modification_mass,
-                num_psms: agg.n_psms as i32,
-                best_localization_probability: agg.best_probability,
-                best_delta_localization_score: agg.best_delta_score,
-                best_localization_q_value: agg.best_localization_q_value,
-                best_spectrum_q: agg.best_spectrum_q,
+            .filter(|site| !site.decoy)
+            .map(|site| ProteinSiteRecord {
+                attachment: site.attachment.as_str().into(),
+                protein: site.protein.clone(),
+                peptide: site.peptide.clone(),
+                residue: (site.residue as char).to_string(),
+                position_in_peptide: site.position as i32,
+                modification: site.modification.clone(),
+                modification_mass: site.modification_mass,
+                num_psms: site.n_psms as i32,
+                best_localization_probability: site.best_probability,
+                best_delta_localization_score: site.best_delta_score,
+                best_localization_q_value: site.best_localization_q_value,
+                best_spectrum_q: site.best_spectrum_q,
+                site_score: site.score,
+                site_q_value: site.q_value,
             })
             .collect::<Vec<_>>();
         let path = self.make_path("results.sage.protein-sites.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_protein_sites(&records)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_protein_sites(&records, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&path, bytes)?;
         Ok(path)
     }
@@ -230,11 +317,7 @@ impl Runner {
     /// Emit a compact, reusable protein-coordinate site library from passing
     /// localized PSMs. Only names defined by this search's `variable_mods` are
     /// included, so every emitted row can be resolved by the same config.
-    pub(super) fn write_ptm_library(
-        &self,
-        features: &[Feature],
-        filenames: &[String],
-    ) -> anyhow::Result<Vec<Url>> {
+    pub(super) fn write_ptm_library(&self, rows: &[SiteRow]) -> anyhow::Result<Vec<Url>> {
         if self.database_parameters.fasta.is_empty() {
             return Ok(Vec::new());
         }
@@ -258,10 +341,22 @@ impl Runner {
             .map(|(accession, sequence)| (accession.as_ref(), sequence.as_str()))
             .collect::<HashMap<_, _>>();
 
+        // Digestion ignores initiator Met clipping for non-specific digests.
+        let clip_n_term_met = self.database_parameters.clip_n_term_met
+            && self
+                .database_parameters
+                .enzyme_parameters()
+                .enzyme
+                .is_some();
+        // Merged I/L twins and expanded B, Z or X spans differ from the
+        // displayed peptide, so locate peptides residue by residue.
+        use sage_core::ambiguous_residues::{peptide_starts, residue_fits};
+        let merge_isoleucine_leucine = self.database_parameters.merge_isoleucine_leucine;
+        let expand_ambiguous = self.database_parameters.expand_ambiguous_residues;
         let mut sites = HashSet::new();
         let mut skipped_unnamed = 0usize;
-        for row in self.collect_site_rows(features, filenames) {
-            if row.ambiguous {
+        for row in rows {
+            if row.decoy || row.ambiguous {
                 continue;
             }
             if !known_names.contains(&row.modification) {
@@ -283,19 +378,28 @@ impl Runner {
                     .filter(|occurrence| occurrence.protein.as_ref() == protein)
                     .filter_map(|occurrence| occurrence.start)
                     .collect::<Vec<_>>();
-                for (start, _) in sequence.match_indices(&row.peptide_sequence) {
+                for start in peptide_starts(
+                    sequence.as_bytes(),
+                    row.peptide_sequence.as_bytes(),
+                    merge_isoleucine_leucine,
+                    expand_ambiguous,
+                ) {
                     if !known_starts.is_empty() && !known_starts.contains(&(start as u32)) {
                         continue;
                     }
-                    let position = match (
-                        start == 0,
-                        start + row.peptide_sequence.len() == sequence.len(),
-                    ) {
-                        (true, true) => sage_core::enzyme::Position::Full,
-                        (true, false) => sage_core::enzyme::Position::Nterm,
-                        (false, true) => sage_core::enzyme::Position::Cterm,
-                        _ => sage_core::enzyme::Position::Internal,
-                    };
+                    // A peptide at offset 1 of a clippable protein starts at
+                    // the protein N-terminus left by initiator Met removal.
+                    let met_clipped = start == 1
+                        && clip_n_term_met
+                        && sage_core::enzyme::metap_clips(sequence.as_bytes());
+                    let n_term = start == 0 || met_clipped;
+                    let position =
+                        match (n_term, start + row.peptide_sequence.len() == sequence.len()) {
+                            (true, true) => sage_core::enzyme::Position::Full,
+                            (true, false) => sage_core::enzyme::Position::Nterm,
+                            (false, true) => sage_core::enzyme::Position::Cterm,
+                            _ => sage_core::enzyme::Position::Internal,
+                        };
                     let attachment = row.attachment.site(
                         peptide_position as u32,
                         row.peptide_sequence.len(),
@@ -311,10 +415,11 @@ impl Runner {
                                     .sites_in_context(
                                         row.peptide_sequence.as_bytes(),
                                         position,
-                                        sage_core::motif::MotifContext::in_protein(
+                                        sage_core::motif::MotifContext::in_digested_protein(
                                             sequence.as_bytes(),
                                             start,
                                             row.peptide_sequence.len(),
+                                            met_clipped,
                                         ),
                                     )
                                     .contains(&site)
@@ -325,15 +430,27 @@ impl Runner {
                         continue;
                     }
                     let protein_position = start + peptide_position;
-                    if sequence.as_bytes().get(protein_position) == Some(&row.residue) {
-                        sites.insert(sage_core::ptm_library::PtmLibrarySite {
-                            attachment: row.attachment,
-                            protein: Arc::from(protein),
-                            position: protein_position as u32,
-                            residue: row.residue,
-                            modification: Arc::from(row.modification.as_str()),
-                        });
-                    }
+                    let Some(&written) = sequence.as_bytes().get(protein_position) else {
+                        continue;
+                    };
+                    // An I/L twin records the FASTA residue, which is what a
+                    // reloaded library is checked against; an expanded B, Z
+                    // or X keeps the residue searched.
+                    let residue =
+                        if residue_fits(written, row.residue, merge_isoleucine_leucine, false) {
+                            written
+                        } else if residue_fits(written, row.residue, false, expand_ambiguous) {
+                            row.residue
+                        } else {
+                            continue;
+                        };
+                    sites.insert(sage_core::ptm_library::PtmLibrarySite {
+                        attachment: row.attachment,
+                        protein: Arc::from(protein),
+                        position: protein_position as u32,
+                        residue,
+                        modification: Arc::from(row.modification.as_str()),
+                    });
                 }
             }
         }
@@ -353,7 +470,8 @@ impl Runner {
                 .then_with(|| a.attachment.cmp(&b.attachment))
         });
         let parquet_path = self.make_path("results.sage.ptm-library.parquet");
-        let bytes = sage_cloudpath::parquet::serialize_ptm_library(&sites)?;
+        let bytes =
+            sage_cloudpath::parquet::serialize_ptm_library(&sites, &self.parquet_provenance)?;
         sage_cloudpath::write_bytes_sync(&parquet_path, bytes)?;
 
         let tsv_path = self.make_path("results.sage.ptm-library.tsv");
@@ -508,6 +626,18 @@ impl Runner {
                 .format(feature.posterior_error)
                 .as_bytes(),
         );
+        if self.database.fragment_losses.is_some() {
+            let loss = feature.fragment_loss.unwrap_or_default();
+            record.push_field(itoa::Buffer::new().format(loss.matched_peaks).as_bytes());
+            record.push_field(
+                ryu::Buffer::new()
+                    .format(loss.intensity_pct.ln_1p())
+                    .as_bytes(),
+            );
+        }
+        if self.parameters.immonium.is_some() {
+            super::immonium::push_pin_fields(&mut record, feature);
+        }
         record.push_field(peptide.to_string().as_bytes());
         record.push_field(
             peptide
@@ -524,7 +654,7 @@ impl Runner {
             .delimiter(b'\t')
             .from_writer(OutputTarget::new(&path)?);
 
-        let headers = csv::ByteRecord::from(vec![
+        let mut headers = vec![
             "SpecId",
             "Label",
             "ScanNr",
@@ -562,9 +692,15 @@ impl Runner {
             "scored_candidates",
             "ln(-poisson)",
             "posterior_error",
-            "Peptide",
-            "Proteins",
-        ]);
+        ];
+        if self.database.fragment_losses.is_some() {
+            headers.extend(["matched_loss_peaks", "ln(loss_intensity_pct)"]);
+        }
+        if self.parameters.immonium.is_some() {
+            headers.extend(super::immonium::PIN_COLUMNS);
+        }
+        headers.extend(["Peptide", "Proteins"]);
+        let headers = csv::ByteRecord::from(headers);
 
         let re = regex::Regex::new(r"scan=(\d+)").expect("This is valid regex");
 
@@ -693,96 +829,44 @@ impl Runner {
                 vec![0.0; filenames.len()]
             };
 
-            // Mmedian MS1 mass accuracy for each file, using feature.delta_mass
-            let median_ms1_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_mass)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
+            // Summarize one value over each file's target PSMs at 1% spectrum
+            // q-value (median or mean of the finite values; NaN when none).
+            let per_file =
+                |summarize: fn(Vec<f32>) -> Option<f32>, value: fn(&Feature) -> f32| -> Vec<f32> {
+                    (0..filenames.len())
+                        .map(|file_id| {
+                            let values = features
+                                .iter()
+                                .filter(|feature| {
+                                    feature.file_id == file_id
+                                        && feature.label == 1
+                                        && feature.spectrum_q <= global_q_value_filter
+                                })
+                                .map(value)
+                                .collect::<Vec<_>>();
+                            summarize(values).unwrap_or(f32::NAN)
+                        })
+                        .collect()
+                };
+            let median_per_file = |value| per_file(median_finite, value);
+            let average_per_file = |value| per_file(average_finite, value);
 
-            // Median MS2 mass accuracy for each file, using feature.average_ppm
-            let median_ms2_mass_accuracy_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.average_ppm)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Median RT deviation for each file, using feature.delta_rt_model
-            let median_rt_deviation_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_rt_model)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Median IM deviation for each file, using feature.delta_ims_model
-            let median_im_deviation_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    median_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.delta_ims_model)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average peptide length for each file
-            let avg_peptide_length_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.peptide_len as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average peptide charge for each file
-            let avg_peptide_charge_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.charge as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
-
-            // Average number of matched peaks for each file
-            let avg_matched_peaks_per_file: Vec<f32> = (0..filenames.len())
-                .map(|file_id| {
-                    average_finite(features.iter().filter_map(|feature| {
-                        (feature.file_id == file_id
-                            && feature.label == 1
-                            && feature.spectrum_q <= global_q_value_filter)
-                            .then_some(feature.matched_peaks as f32)
-                    }))
-                    .unwrap_or(f32::NAN)
-                })
-                .collect();
+            // Median signed precursor error (observed - theoretical, ppm) per file.
+            let median_ms1_mass_bias_per_file = median_per_file(|feature| feature.delta_mass);
+            // Median signed fragment error per file. `average_ppm` is an
+            // absolute error and cannot show a bias, so the bias comes from
+            // the signed, intensity-weighted `signed_fragment_ppm`.
+            let median_ms2_mass_bias_per_file =
+                median_per_file(|feature| feature.signed_fragment_ppm);
+            // Median absolute fragment error per file (spread, never negative).
+            let median_ms2_abs_error_per_file = median_per_file(|feature| feature.average_ppm);
+            let median_rt_deviation_per_file = median_per_file(|feature| feature.delta_rt_model);
+            let median_im_deviation_per_file = median_per_file(|feature| feature.delta_ims_model);
+            let avg_peptide_length_per_file =
+                average_per_file(|feature| feature.peptide_len as f32);
+            let avg_peptide_charge_per_file = average_per_file(|feature| feature.charge as f32);
+            let avg_matched_peaks_per_file =
+                average_per_file(|feature| feature.matched_peaks as f32);
 
             // Prepare html table to add to the report
             let table = html! {
@@ -796,8 +880,9 @@ impl Runner {
                                 th { "Proteins" }
                                 th { "Total MS1 Intensity" }
                                 th { "Total MS2 Intensity" }
-                                th { "Median MS1 Delta Mass" }
-                                th { "Median MS2 Delta Mass" }
+                                th { "Median MS1 Mass Bias (ppm)" }
+                                th { "Median MS2 Mass Bias (ppm)" }
+                                th { "Median MS2 Absolute Error (ppm)" }
                                 th { "Median RT Deviation" }
                                 th { "Median IM Deviation" }
                                 th { "Average Peptide Length" }
@@ -814,8 +899,9 @@ impl Runner {
                                     td { (num_protein_targets_per_file[i]) }
                                     td { (total_lfq_intensity_per_file[i]) }
                                     td { (total_ms2_intensity_per_file[i]) }
-                                    td { (median_ms1_mass_accuracy_per_file[i]) }
-                                    td { (median_ms2_mass_accuracy_per_file[i]) }
+                                    td { (median_ms1_mass_bias_per_file[i]) }
+                                    td { (median_ms2_mass_bias_per_file[i]) }
+                                    td { (median_ms2_abs_error_per_file[i]) }
                                     td { (median_rt_deviation_per_file[i]) }
                                     td { (median_im_deviation_per_file[i]) }
                                     td { (avg_peptide_length_per_file[i]) }

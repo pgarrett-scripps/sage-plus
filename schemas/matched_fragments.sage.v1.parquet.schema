@@ -1,0 +1,10 @@
+message schema {
+    required int64 psm_id;
+    required byte_array fragment_type (utf8);
+    required int32 fragment_ordinals;
+    required int32 fragment_charge;
+    required float fragment_mz_experimental;
+    required float fragment_mz_calculated;
+    required float neutral_loss;
+    required float fragment_intensity;
+}

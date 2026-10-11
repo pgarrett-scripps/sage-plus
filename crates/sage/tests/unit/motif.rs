@@ -182,6 +182,38 @@ mod database {
         );
     }
 
+    #[test]
+    fn protein_n_anchor_at_residue_two_needs_met_clipping() {
+        let anchor: ModificationSpecificity = "motif:<A*".parse().unwrap();
+        let at_residue_two = |clip: bool| {
+            let parameters = parameters(serde_json::json!({
+                "clip_n_term_met": clip,
+                "enzyme": {"min_len": 4, "semi_enzymatic": true}
+            }));
+            let digest = parameters
+                .enzyme_parameters()
+                .digest("MASPEPTIDEAAKGG", std::sync::Arc::from("P1"))
+                .into_iter()
+                .find(|digest| {
+                    digest.protein_start == Some(1) && &digest.sequence[..] == b"ASPEPTIDEAAK"
+                })
+                .unwrap();
+            crate::enzyme::ProteinOccurrence::of_protein_digest(&digest)
+        };
+        // A shared peptide keeps one position, here protein N-terminal from
+        // another protein. Without clipping, residue 2 of this protein is
+        // an internal (semi-enzymatic) span and does not satisfy `<`.
+        for (clip, expected) in [(true, vec![Site::Sequence(0)]), (false, vec![])] {
+            let sites = anchor.sites_for_occurrences(
+                b"ASPEPTIDEAAK",
+                Position::Nterm,
+                false,
+                &[at_residue_two(clip)],
+            );
+            assert_eq!(sites, expected, "clip_n_term_met {clip}");
+        }
+    }
+
     fn parameters_with_enzyme(cleave: &str) -> Parameters {
         parameters(serde_json::json!({
             "enzyme": {"min_len": 4, "cleave_at": cleave, "restrict": null, "missed_cleavages": 0}

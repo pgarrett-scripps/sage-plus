@@ -1,7 +1,9 @@
 {
   "database": {
+    "ion_kinds": ["b", "y"],
     "bucket_size": 16384,
     "enzyme": {
+      "semi_enzymatic": false,
       "missed_cleavages": 1,
       "cleave_at": "KR",
       "restrict": "P",
@@ -32,8 +34,7 @@
     "decoy_tag": "rev_",
     "generate_decoys": true,
     "fasta": "data/silac-k6r6/human-reviewed.fasta",
-    "prefilter": true,
-    "prefilter_chunk_size": 2000
+    "prefilter": true
   },
   "precursor_tol": {
     "da": [-150.0, 500.0]

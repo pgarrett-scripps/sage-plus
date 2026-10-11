@@ -11,12 +11,15 @@ use tokio::io::{AsyncBufRead, AsyncRead, AsyncWriteExt, BufReader};
 
 pub use url::Url;
 
+pub mod bruker_formats;
 pub mod denoise;
+pub mod hash;
 pub mod mgf;
 pub mod mzml;
 #[cfg(feature = "mzmlb")]
 pub mod mzmlb;
 pub mod tdf;
+pub mod tdf_spectra;
 pub mod thermoraw;
 pub mod tims_mobility;
 pub mod util;
@@ -47,7 +50,10 @@ pub fn to_url(s: &str) -> Result<Url, Error> {
         return Ok(url);
     }
     let path = std::path::Path::new(s);
-    let canonical = path.canonicalize()?;
+    let canonical = path.canonicalize().map_err(|error| Error::Open {
+        path: s.to_string(),
+        error,
+    })?;
     Url::from_file_path(&canonical).map_err(|_| Error::InvalidUri)
 }
 
@@ -285,6 +291,8 @@ pub enum Error {
          Use a local path, or build with the `cloud` feature (enabled by default)"
     )]
     CloudDisabled(String),
+    #[error("cannot open `{path}`: {error}")]
+    Open { path: String, error: std::io::Error },
     #[error(transparent)]
     IO(#[from] tokio::io::Error),
     #[error(transparent)]
@@ -292,13 +300,13 @@ pub enum Error {
     #[error("MzML error: {0}")]
     MzML(#[from] mzml::MzMLError),
     #[error("TDF error: {0}")]
-    TDF(#[from] timsrust::TimsRustError),
+    TDF(#[from] sage_plus_tdf::Error),
     #[error(transparent)]
     MobilityCalibration(#[from] tims_mobility::MobilityCalibrationError),
     #[error(transparent)]
     Denoise(#[from] denoise::DenoiseError),
     #[error("Thermo RAW error: {0}")]
-    ThermoRaw(#[from] opentfraw::Error),
+    ThermoRaw(#[from] sage_plus_raw::Error),
     #[error("MGF error: {0}")]
     MGF(#[from] mgf::MgfError),
     #[error("FASTA error: {0}")]

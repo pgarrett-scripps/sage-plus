@@ -142,3 +142,24 @@ fn reference_alignment_recovers_affine_shift_with_outliers() {
     assert!((alignment.transform(40.0) - 37.0).abs() < 0.1);
     assert!(alignment.inliers < alignment.points);
 }
+
+#[test]
+fn inverse_undoes_affine_and_knot_transforms() {
+    let affine = Alignment {
+        file_id: 0,
+        max_rt: 120.0,
+        slope: 0.9,
+        intercept: 0.05,
+        knots: Vec::new(),
+    };
+    let knots = Alignment {
+        knots: vec![(0.0, 0.02), (0.4, 0.35), (0.8, 0.85), (1.0, 1.0)],
+        ..affine.clone()
+    };
+    for alignment in [affine, knots] {
+        for rt in [3.0f32, 40.0, 77.5, 119.0] {
+            let back = alignment.inverse(alignment.transform(rt));
+            assert!((back - rt).abs() < 1e-3, "{rt} -> {back}");
+        }
+    }
+}

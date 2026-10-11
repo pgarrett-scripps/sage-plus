@@ -64,6 +64,7 @@ pub fn preview_with_flanks(
     builder
         .validate_modification_keys()
         .map_err(anyhow::Error::msg)?;
+    builder.validate_enzyme().map_err(anyhow::Error::msg)?;
     let mut parameters = builder.make_parameters();
     parameters.validate_channels().map_err(anyhow::Error::msg)?;
     parameters
@@ -207,6 +208,7 @@ fn rules(parameters: &Parameters, peptide: &Peptide) -> Vec<Value> {
             output.push(json!({"kind": "variable", "key": specificity.explicit_name(),
                 "mass": definition.mass, "name": definition.name.as_deref(),
                 "max_count": entry.max_count(),
+                "max_total_count": entry.max_total_count(),
                 "search_mode": entry.search_mode(),
                 "effective_max_count": if entry.search_mode() == SearchMode::MassOffset { Some(1) } else { entry.max_count() },
                 "eligible_sites": sites.into_iter().map(site_value).collect::<Vec<_>>() }));
@@ -257,6 +259,134 @@ mod tests {
             result["rules"][0]["eligible_sites"],
             json!([{"position":3}])
         );
+    }
+
+    fn error(result: anyhow::Result<Value>) -> String {
+        format!("{:#}", result.unwrap_err())
+    }
+
+    #[test]
+    fn preview_rejects_invalid_requests_with_clear_errors() {
+        let config =
+            r#"{"database":{"variable_mods":{"Oxidation":{"mass":15.994915,"sites":["M"]}}}}"#;
+        assert_eq!(
+            error(preview_with_flanks(
+                config,
+                "PEPMK",
+                "internal",
+                10,
+                None,
+                ("m", "")
+            )),
+            "preview flanking residues must be uppercase one-letter codes"
+        );
+        assert_eq!(
+            error(preview(config, "PEPMK", "internal", 10_001)),
+            "preview limit must be between 1 and 10000"
+        );
+        assert!(error(preview("{not json", "PEPMK", "internal", 10))
+            .starts_with("invalid JSON configuration"));
+        assert_eq!(
+            error(preview("{}", "PEPMK", "internal", 10)),
+            "`database` must be configured"
+        );
+        assert_eq!(
+            error(preview(config, "PEPMK", "middle", 10)),
+            "unknown peptide position `middle`"
+        );
+        assert_eq!(
+            error(preview_with_context(
+                config,
+                "PEPMK",
+                "internal",
+                10,
+                Some(("P1", 0))
+            )),
+            "preview-start is one-based"
+        );
+        assert_eq!(
+            error(preview_with_flanks(
+                config,
+                "PEPMK",
+                "internal",
+                10,
+                Some(("P1", 2)),
+                ("MR", "")
+            )),
+            "--preview-before is longer than the residues before --preview-start"
+        );
+        let library_mode = r#"{"database":{"variable_mods":{"Acetyl":{"mass":42.010565,"sites":["K"],"max_count":1,"site_mode":"both"}}}}"#;
+        assert_eq!(
+            error(preview(library_mode, "PEPKK", "internal", 10)),
+            "preview requires a PTM library for non-exhaustive site_mode"
+        );
+    }
+
+    #[test]
+    fn preview_reports_static_rules_offsets_and_effective_counts() {
+        let config = r#"{"database":{
+            "static_mods":{"Carbamidomethyl":{"mass":57.021464,"sites":["C"]}},
+            "variable_mods":{
+                "Oxidation":{"mass":15.994915,"sites":["M"],"max_count":2},
+                "Phospho":{"mass":79.966331,"sites":["S"],"search_mode":"mass_offset"}
+            },
+            "max_combinations":50
+        }}"#;
+        let result = preview(config, "MCSMK", "full", 100).unwrap();
+        let rules = result["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 3);
+        let rule = |name: &str| {
+            rules
+                .iter()
+                .find(|rule| rule["name"] == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+        };
+        let static_rule = rule("Carbamidomethyl");
+        assert_eq!(static_rule["kind"], "static");
+        assert_eq!(static_rule["key"], "C");
+        assert_eq!(static_rule["eligible_sites"], json!([{"position": 2}]));
+        let oxidation = rule("Oxidation");
+        assert_eq!(oxidation["kind"], "variable");
+        assert_eq!(oxidation["max_count"], 2);
+        assert_eq!(oxidation["effective_max_count"], 2);
+        assert_eq!(
+            oxidation["eligible_sites"],
+            json!([{"position": 1}, {"position": 4}])
+        );
+        let phospho = rule("Phospho");
+        assert_eq!(phospho["search_mode"], "mass_offset");
+        assert_eq!(phospho["max_count"], Value::Null);
+        assert_eq!(phospho["effective_max_count"], 1);
+        assert_eq!(phospho["eligible_sites"], json!([{"position": 3}]));
+
+        assert_eq!(
+            result["limits"],
+            json!({"max_variable_mods": 2, "max_total_variable_mods": 2,
+                   "max_combinations": 50, "preview_limit": 100})
+        );
+        // Four indexed oxidation variants, each also previewed with phospho on S.
+        let variants = result["variants"].as_array().unwrap();
+        assert_eq!(variants.len(), 8);
+        assert_eq!(result["truncated"], false);
+        for variant in variants {
+            assert!(variant["modifications"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|applied| applied["name"] == "Carbamidomethyl"
+                    && applied["site"] == json!({"position": 2})));
+        }
+        let phosphorylated = variants
+            .iter()
+            .filter(|variant| {
+                variant["modifications"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|applied| applied["name"] == "Phospho")
+            })
+            .count();
+        assert_eq!(phosphorylated, 4);
     }
 }
 

@@ -9,7 +9,504 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Dependencies: parquet 60 (was 59), mzdata 0.67.4 (was 0.65.5; reads mzMLb input), base64
+  0.22, itertools 0.15, thiserror 2; num_cpus is replaced by the standard library. Results and
+  the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
+  are kept when they come before the target m/z (pwiz Waters files), and a window with no
+  offsets or limits gets correct bounds.
+- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.0, `sage-plus-raw`
+  0.1.0) instead of git revisions, so Sage Plus builds with one parquet version.
+
+### Fixed
+- `localized_peptide` gives each copy of a multi-copy ambiguous modification its own ProForma group
+  (`#g1`, `#g2`, ...), with every other candidate tagged in each group:
+  `PES[Phospho#g1(0.95)]PT[#g1(0.20)][#g2(0.20)]IS[Phospho#g2(0.85)]K`. Beta 17 put every copy in one
+  group, which ProForma 2.0 reads as a single modification, so conforming parsers (mzcore) read those
+  peptides one modification light. Single-copy groups are unchanged.
+- Localization output is the same from run to run. Modifications were numbered in hash-map order,
+  so `#g1`/`#g2` in `localized_peptide` and the row order of `results.sage.ptm-sites.parquet` could
+  change between two runs of the same search.
+
+## [v0.1.0-beta.17] - 2026-10-09
+
+### Changed
+- Thermo RAW input is read by sage-plus-raw, Sage Plus's fork of OpenTFRaw, in place of
+  OpenTFRaw 1.4.1. The fork decodes scan events in step with the scans on the Orbitrap Fusion
+  and Lumos files where 1.4.1 did not, so the trailer-based workarounds are removed: MS levels,
+  precursors and filter strings come straight from the reader. Those files keep their filter
+  strings, so their scans get real acquisition groups (analyzer and activation) for per-group
+  fragment recalibration instead of `unknown/unknown`. The SPS-MS3 TMT reporter link is the
+  reader's master scan number, taken from the "Master Scan Number" trailer or, when that is
+  missing, the nearest earlier scan of the parent level.
+- Bruker TDF input is read by sage-plus-tdf, Sage Plus's fork of MannLabs TimsRust, in place
+  of TimsRust 0.6.6. Sage Plus now assembles ddaPASEF and diaPASEF spectra itself; spectra are
+  bit-identical to Beta 16 apart from MS1 spectrum order, which now follows frame Id. Peak
+  memory while reading is lower (LFQ diaPASEF 6.8 → 4.1 GB). A ddaPASEF spectrum whose
+  precursor cannot be resolved is skipped with one aggregated warning instead of failing the run.
+- The timsTOF mobility code reads `analysis.tdf` through sage-plus-tdf instead of SQLite. Only the
+  opt-in denoiser still uses rusqlite.
+- Bruker TSF and ProteoScape miniTDF inputs are read by sage-plus-tdf. TSF MS/MS spectra now
+  carry their precursor from `FrameMsMsInfo` and are searched (TimsRust gave them none, so
+  Beta 16 searched no TSF MS/MS spectra), with m/z from the calibrated model instead of the
+  linear scale (up to about 30 ppm off). miniTDF spectra match TimsRust 0.6.6 exactly and are
+  now found under the `<name>.ms2spectrum.*` names ProteoScape writes, which TimsRust missed.
+  miniTDF with LFQ is an error, since its MS1 frames are not read. TimsRust parquet spectrum
+  inputs are no longer read and return an error naming the format.
+- Building from source needs Rust 1.97 or newer (was 1.88).
+- Release archives and the container ship the reader licenses under `licenses/`.
+- A Thermo RAW scan that cannot be decoded is skipped with one warning per file giving the
+  count and the first error; it no longer stops the file. Peaks with an invalid m/z or
+  intensity are dropped with a warning.
+- Dependencies: tokio 1.53.2, sysinfo 0.39, quick-xml 0.42 (the mzML parser now matches tag
+  and attribute names as strings).
+
+## [v0.1.0-beta.16] - 2026-10-08
+
+### Changed
+- **Breaking:** search-space settings must be stated. `database.static_mods` (may be `{}`),
+  `database.ion_kinds`, and, when a FASTA is digested, `database.enzyme` with `cleave_at`,
+  `restrict`, `missed_cleavages` and `semi_enzymatic` no longer have defaults. A missing setting
+  is an error naming it, with a snippet to paste. The old implicit values were: no enzyme block =
+  trypsin, 0 missed cleavages, `restrict: "P"`; partial block = 1 missed cleavage, `restrict: ""`;
+  no static mods; b and y ions. The JSON Schema marks the same fields required.
+- Committed configurations, tests and benchmark generators state these settings explicitly.
+
 ### Added
+- `sage --write-config <NAME> [PATH]` writes a starting configuration: `minimal`, `full`,
+  `trypsin-hcd`, `trypsin-hcd-tmt`, `phospho`, `etd` or `nonspecific` (`list` shows them).
+  Without `PATH` it prints to standard output; an existing file is replaced only with
+  `--overwrite`. Every preset is tested to pass validation.
+- `"missed_cleavages": "unlimited"` keeps every peptide within the length and mass limits.
+- `"max_len": "unlimited"` bounds peptide length only by `peptide_max_mass` and the 255-residue
+  encoding limit. Sage logs one warning when it is combined with unlimited missed cleavages or a
+  non-specific digest (`cleave_at: ""`).
+- Startup logs, at info level, the defaults used for search-space settings left unset.
+
+### Fixed
+- The fragment index no longer panics past 4,294,967,295 fragments. Bucket offsets are 64-bit
+  (24-byte buckets, one per up to `bucket_size` fragments), so the only index cap left is the
+  32-bit peptide index inherited from Sage.
+- A missing input file or FASTA names the path: ``cannot open `/x/y.mzML`: No such file or
+  directory``. An output directory that cannot be created is named the same way.
+- A search whose database has no target peptides fails instead of exiting 0 with empty results.
+  The error names the length and mass ranges in force. `enzyme.min_len` above `max_len`, or
+  `peptide_min_mass` above `peptide_max_mass`, is rejected when the configuration is validated.
+
+- `missed_cleavages` above 254 no longer overflows. In a release build 255 wrapped and searched
+  as 0 missed cleavages.
+
+### Removed
+- Telemetry. Sage Plus no longer sends run statistics to upstream Sage's endpoint, and the
+  `reqwest` dependency is gone. `--disable-telemetry-i-dont-want-to-improve-sage` is still
+  accepted as a hidden no-op so existing scripts keep working. `Runner::run` and
+  `run_with_summary` return the `RunSummary`, and `JobResult` has no `telemetry` field.
+- `min_free_memory_gb` from seven benchmark configurations; Sage already ignored it.
+
+### Documentation
+- `benchmarks/HEADTOHEAD.md`: Beta 16 against upstream Sage v0.15.0-beta.2 on four PXD028735 HYE
+  runs with one shared config. Sage Plus finds 1.2% more PSMs and peptides and 1.6% more protein
+  groups at 1%, peaks at 6.2 vs 7.5 GiB, and matches upstream's LFQ species-ratio accuracy.
+- Initiator Met clipping re-measured on HEK SILAC: +3.4% PSMs at 1% when protein N-terminal
+  acetylation is searched, +0.2% when it is not. README and DOCS state the condition.
+- README rewritten for new users: measured results, install options and a quickstart.
+  Internal design notes moved to `docs/design/` and old benchmark notes to `benchmarks/archive/`.
+
+## [v0.1.0-beta.15] - 2026-09-29
+
+### Documentation
+- `allow_modified: false` and labelled residues, analysed in `benchmarks/FRAGMENT_LOSSES.md`:
+  excluding TMT/iTRAQ-labelled K and 15N SILAC labels (K8, R10) from ammonia loss is correct
+  (acylated ε-amine; lost ammonia would be 15NH3, 18.0236 Da). 13C-only labels (K6, R6) are
+  excluded conservatively; `allow_modified: true` keeps them. No code change.
+
+### Added
+- `localized_peptide` in `results.sage.parquet` (schema v5 unlabeled, v6 labeled): the peptide in
+  ProForma 2.0 with each localized modification on its best sites. A localization that is not
+  confident is written as a ProForma scored position group (LeDuc et al. 2022), for example
+  `PEPT[#g1(0.10)]IS[Phospho#g1(0.90)]K`. Scores are the uncalibrated site probabilities.
+- `ptm_localization.min_separating_margin` (default 1): a localization enters the FLR competition
+  only when the best arrangement beats the runner-up by this many matched separating ions;
+  otherwise its q-value is 1. `separating_margin` is our own rule, validated on the PXD000138
+  known-site library (true FLR 0.96% to 0.93% at margin 1, 0% at margin 2).
+
+### Changed
+- Modifications with as many candidate sites as copies (one Met, one oxidation) are certain:
+  site probability 1, localization q-value 0, and no FLR competition. Before, they competed
+  against impossible-site decoys and rarely passed; Met oxidation localizations on PXD007058 at
+  1% went from 0 to 256.
+- Per-modification FLR and site FDR group named modifications by name alone, and cluster unnamed
+  mass-only modifications by delta mass within 0.002 Da without a fixed grid. Before, a type was
+  the name plus the delta mass rounded to 0.001 Da, so two spellings of one modification, or two
+  masses on either side of a rounding boundary, could fall into separate competitions.
+- `benchmarks/FRAGMENT_LOSSES.md` adds a third round: an in-score loss contribution plus the two
+  loss features did not beat the features alone at a fixed 1% entrapment FDP, so scoring is
+  unchanged.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- On 15 min timsTOF E. coli replicates, `recenter_on_apex` raises the median replicate CV from
+  0.171 to 0.269 on the same precursors. Leave it off for timsTOF data.
+- Immonium modified-residue ions count as explained only when the search placed the
+  modification on the ion's residue, before PTM localization can move it.
+- At `min_separating_margin` 1 the estimated localization FLR is about half the true FLR on the
+  PXD000138 single-site peptides (0.44% against 0.93%).
+
+## [v0.1.0-beta.14] - 2026-09-28
+
+### Added
+- Opt-in per-PSM immonium-ion evidence (`immonium`, default off). For each PSM, the processed
+  spectrum is checked for the immonium ions of unmodified P, V, L/I, H, F, Y and W (Hohmann et
+  al. 2008; global switch `residue_ions`, default on) and for the modified-residue ions that
+  modifications declare. Each is counted as explained, missing or unexplained by the peptide.
+  The evidence goes into seven nullable `immonium_*` columns of `results.sage.parquet` (null when
+  off; results schema v3 unlabeled, v4 labeled) and, with `write_pin`, five `.pin` columns.
+  With the option on, `rescore` (default true) adds the counts to the linear discriminant;
+  `rescore: false` only reports them. The ions never enter the fragment index, the hyperscore or
+  localization. With the option off, scores, identifications and q-values are unchanged. On the
+  benchmarks `rescore` added 0.4-1.3% PSMs at 1% and moved the HYE entrapment FDP from 1.67% to
+  1.73%. See `benchmarks/IMMONIUM.md`.
+- Modifications accept `immonium_ions`: the singly charged m/z of their immonium ions, as a list
+  for every site or a map from declared site to list (`"Phospho": {..., "immonium_ions": {"Y":
+  [216.0420]}}`). Map keys must be declared sites. Ions are labeled `Name@Sites` (`Phospho@Y`) and
+  explained only when the peptide carries that modification on such a site. There are no
+  built-in modified ions; DOCS.md gives pY 216.0420 (Steen et al. 2001) and acK 126.0913 (Trelle &
+  Jensen 2008) as examples. The list-or-map form is the generic `SiteMap` type.
+- `neutral_losses` now also accepts a map from site to loss list (the same `SiteMap` form as
+  `immonium_ions`), such as `{"S": [97.976896], "T": [97.976896]}` for Phospho on S, T and Y.
+  Sites left out of the map get no loss; keys must repeat a site from `sites` exactly and
+  unknown keys are rejected. The list form is unchanged and gives byte-identical output. With `neutral_loss_mode: "required"`,
+  a site without losses keeps its retained fragment form. On PXD000138 the S/T map gives 4,142
+  phospho localizations at `localization_q_value` <= 0.01, against 3,883 with the loss on S, T
+  and Y and 3,841 without losses; single-phospho known-site true FLR is 1.05% (estimate 0.99%).
+- `lfq.parquet` reports peak geometry per precursor and file: `apex_rt`, `peak_start_rt`,
+  `peak_end_rt`, `fwhm` and `id_apex_offset` (best PSM RT minus apex), in each file's own RT
+  units, via the inverse of its RT alignment. New schemas `lfq.v7` (unlabeled) and `lfq.v8`
+  (labeled); metadata key `sage.lfq.peak_center`. On PXD028735 the median MS2-confirmed row was
+  identified about 4 s before its apex (median FWHM about 16 s).
+- Experimental `lfq_settings.recenter_on_apex` (default false) centers LFQ on the MS1 elution
+  apex: the MBR window is centered on the median identification RT across files, each
+  identified file climbs to its own isotope-consistent apex, and bounds follow the peak down to
+  a valley or half height without fixed caps. On PXD028735 HYE it halves non-apex picks (12% to
+  6% of MS2-confirmed rows more than half a FWHM off), adds 2% precursors at 1% and 10% rows at
+  `extraction_q_value` <= 0.01 with unchanged ratio accuracy, but the human-only control's
+  foreign rate at that cutoff rises from 2.6% to 3.2%, so it stays opt-in.
+- Generic fragment losses: `database.fragment_losses` configures water- and ammonia-style
+  losses by label, `mass`, `sites` (the modification site vocabulary), `ion_kinds` (a subset
+  of `database.ion_kinds`) and `allow_modified` (default false); `database.max_fragment_losses`
+  (default 1) caps stacking. Loss ions are matched only in full candidate scoring, never in
+  the preliminary fragment index, and enter the linear discriminant as two separate features,
+  `matched_loss_peaks` and `loss_intensity_pct`. Both are nullable columns of
+  `results.sage.parquet` (null when off; the same schema v3/v4 as the immonium columns, placed
+  before them) and, with `write_pin`, `.pin` columns before the immonium ones. With both
+  options on, the discriminant row is the base features, then the loss features, then the
+  immonium features. The hyperscore, `matched_peaks` and modification `neutral_losses` are
+  unchanged. Off unless the key is present, and then scores, identifications and q-values are
+  unchanged. On five HCD, ion-trap CID and ETciD datasets the separate
+  features changed identifications at 1% FDR by under 1% with no entrapment FDP inflation,
+  while scoring losses in the hyperscore lost 1-12% of PSMs (loss-only matches raise the
+  matched-ion count, which favours wrong candidates; count-free, parent-supported and
+  Comet-weighted in-score variants were only neutral); see
+  `benchmarks/FRAGMENT_LOSSES.md`. The setting is not enabled by default.
+
+### Changed
+- PTM localization FLR is now estimated per modification type. Each type (reported name plus
+  delta mass) gets its own target/decoy competition, following the per-modification decoy FLR
+  of LuciPHOr (Fermin et al. 2013), LuciPHOr2 (Fermin et al. 2015) and Ramsbottom et al. 2022.
+  Before, every type was pooled into one competition. Decoy wins of single-Met oxidation rows,
+  which have nothing to localize, then set the phospho q-values: on PXD007058 phospho
+  localizations at `localization_q_value` <= 0.01 go from 303 to 6,973. On the PXD000138
+  known-site libraries the single-phospho true FLR stays at 0.96% against an estimate of 0.96%
+  at the 1% cutoff. A PSM with several types contributes one
+  localization to each type's competition; decoy PSMs read their q-value off their own type's
+  curve. Site-level `site_q_value` is likewise estimated per modification type. No schema
+  change; `localization_q_value` and `site_q_value` values change.
+
+### Known limitations
+- With `recenter_on_apex`, a precursor whose identified rows find no apex within 10 bins of their
+  identification is not quantified; it does not fall back to the window search.
+- Immonium `modified_explained` counts use the modification sites before PTM localization
+  relocates them.
+- `fragment_losses` with `allow_modified: false` also excludes label-carrying residues (TMT,
+  SILAC), and loss ions are matched at every fragment charge.
+- The per-modification FLR groups types by name and delta mass rounded to 0.001 Da.
+
+## [v0.1.0-beta.13] - 2026-09-27
+
+### Fixed
+- TMT/isobaric reporter channels that are not observed are now missing values instead of 0.0
+  (grounding HC-QUANT-02). `TmtQuant::peaks` is `Vec<Option<f32>>`, and
+  `reporter_ion_intensity` in `results.sage.parquet` writes a null element for each missing
+  channel; the schema already allowed it. Only finite, positive peaks count as observed: a
+  zero-intensity centroid or a non-finite signal-to-noise value (zero noise estimate) is skipped,
+  and a real peak in the same window is still used. Readers that summed or averaged the list
+  must now skip nulls. `run-summary.json` gains an optional `quantification.tmt_channels`
+  (observed and missing counts and the median observed intensity per channel, skipping missing
+  channels); the run-summary schema stays at version 9. Sage has no other consumer of reporter
+  intensities: the PIN, TSV and HTML report outputs do not include them, and no reporter
+  normalisation or ratio is computed.
+- timsTOF diaPASEF files searched without LFQ are now scanned for diagnostic ions; they were
+  left out of `diagnostic_ions.tsv` and the run summary. Their polymer QC stays absent because
+  no MS1 is read. A file without any QC scan now logs a warning.
+- The PTM library locates merged I/L peptides in every listed protein, including those with the
+  other isoform (and, with `expand_ambiguous_residues`, B, Z or X spans); such proteins were
+  dropped. An I/L site records the residue as written in the FASTA.
+- `Tmt18` reports the TMTpro reagent mass 304.2071, as `Tmt16` does, instead of 304.2135
+  (inherited from upstream Sage).
+
+### Added
+- Every Parquet output records run provenance in its key-value footer: `sage.version`,
+  `sage.git_commit`, the effective configuration (`sage.config`), spectrum files with sizes
+  (`sage.inputs`), the FASTA with its SHA-256, protein and decoy counts, decoy strategy and
+  UniProt organisms (`sage.fasta`), hashed peptide, cleavage-site and PTM-library inputs
+  (`sage.database_inputs`), and the protein inference strategy (`sage.protein_inference`).
+  `run-summary.json` holds the same object under `provenance.metadata`; its schema stays at
+  version 9. See "Output provenance" in DOCS.md.
+- `record_input_hashes` (default false) also records the SHA-256 of each local spectrum file.
+  It reads each file once more.
+- `matched_fragments.sage.parquet` now carries `sage.schema.name` and `sage.schema.version`, and
+  its schema is published as `schemas/matched_fragments.sage.v1.parquet.schema`.
+- `--threads <N>` and the configuration key `threads` set the worker thread count (the flag wins;
+  `RAYON_NUM_THREADS` still applies when neither is set, then all cores). The effective count is
+  logged and recorded in `run-summary.json` as `execution.rayon_threads`.
+- `run-summary.json` records `peak_rss_bytes`, the process's peak resident memory (Linux `VmHWM`,
+  else `getrusage`; `null` where unavailable), and the end of the run logs it. The field is
+  optional and the run-summary schema stays at version 9.
+- Published schemas for `run-summary.json` (`schemas/run-summary.v9.schema.json`, JSON Schema),
+  `digestion.tsv` and `diagnostic_ions.tsv` (`schemas/*.v1.tsv.schema.json`, Table Schema). An
+  integration test validates real outputs against them.
+- Site-level FDR for PTM site reports. `results.sage.protein-sites.parquet` gains `site_score`
+  (best supporting PSM discriminant score) and `site_q_value`, a target-decoy q-value estimated
+  over protein sites with the same target-decoy estimator as the peptide and protein levels.
+  `results.sage.ptm-sites.parquet` gains `site_q_value`, the best q-value of the protein sites
+  each row supports. Filter on `site_q_value <= 0.01` for 1% site FDR. Schemas `protein_sites`
+  and `ptm_sites` move to version 3 (`schemas/*.v3.parquet.schema`); all version 2 columns are
+  kept, and `best_spectrum_q` is documented as a PSM-level minimum, not a site FDR.
+- `run-summary.json` records `target_protein_sites`, `decoy_protein_sites` and
+  `protein_sites_at_one_percent_fdr` under `ptm_localization`. The fields are optional and the
+  run-summary schema version is unchanged.
+- `lfq.parquet` gains `extraction_q_value`, a target-decoy q-value for every precursor/file row
+  (MS2-backed and transferred). Each target's shifted decoy is scored at the target's own peak,
+  with its own per-file warp search, and competes by `file_score`. LFQ schemas move to version 5
+  (unlabeled) and 6 (labeled). The log prints how many target rows pass 1%. The value is a
+  diagnostic, not a calibrated transfer FDR, and the MBR default is unchanged.
+
+### Changed
+- Peptide, protein and protein-group q-values are now textbook picked FDR (Savitski et al.
+  2015; The et al. 2022). Only the winner of each target-decoy pair is ranked, q is
+  `(decoys + 1) / targets` over complete tied-score groups, and the losing member is reported
+  with q = 1. Previously both members were ranked and the numerator was a running sum of a
+  KDE posterior error fitted on the winners, so a target beaten by its own decoy could still
+  pass. On two human-only entrapment searches the entrapment FDP at 1% is unchanged within
+  noise and identifications at 1% change by at most 0.3% (`benchmarks/PICKED_FDR.md`).
+  Spectrum q-values and the per-PSM `posterior_error` are unchanged. Output columns and
+  schemas are unchanged.
+- PTM localization also runs on decoy PSMs that pass `ptm_localization.psm_q_value`, so decoy
+  sites exist to count. Decoy PSMs stay out of the false-localization-rate competition and take
+  the target curve's localization q-value at their own score, so every PSM and localization gate
+  is applied identically to targets and decoys before site FDR is estimated (HC-FDR-04). Site
+  reports, the PTM library and `localized_psms` still contain target PSMs only.
+
+### Documentation
+- The PSM column list in DOCS.md now matches `results.sage.parquet`. `label` and `ms1_intensity`
+  are removed, the `delta_bext` and `pepide_len` typos are fixed, and `protein_groups`,
+  `num_protein_groups`, `protein_group_q` and the other missing columns are added. Every score
+  states whether higher or lower is better.
+- `poisson` and `posterior_error` are documented as log10 values, as Sage has always written
+  them. `ms2_intensity` is the matched fragment intensity, and `longest_y_pct` is a fraction.
+- New "Protein inference" section: IDPicker parsimony grouping (`protein_grouping`,
+  `protein_grouping_peptide_fdr`), picked-protein and picked protein-group FDR over unique
+  peptides, and the q-value estimator.
+- The LFQ `q_value` is described as a cumulative target-decoy count, not picked competition.
+- The `generate_decoys` default is documented as true, which the code has always used.
+- Sage does no protein rollup, intensity normalization or imputation; DOCS.md now says so.
+- New "Performance and complexity" section, with `RAYON_NUM_THREADS` for limiting cores.
+- `benchmarks/GROUNDING.md` maps each grounding rule to its tests and lists the gaps.
+
+## [v0.1.0-beta.12] - 2026-09-27
+
+### Added
+- `run-summary.json` records `recommended_tolerances`: signed precursor and fragment mass bias,
+  robust spread (1.4826 × MAD), and the smallest of ±5/10/20/50/100 ppm covering
+  `|bias| + 4 × sigma`, from rank-1 target PSMs at 1% spectrum q-value (at least 100). The log
+  prints one `recommended tolerances: ...` line. The field is optional and the run-summary
+  schema stays at version 9.
+- Unimod attribution: `THIRD_PARTY_NOTICES.md` credits the compiled-in Unimod data, and
+  `crates/sage/data/LICENSE-unimod.txt` carries its notice and the Design Science License text.
+  Release archives ship it as `LICENSE-unimod.txt`; containers at `/app/licenses/unimod.txt`.
+- Initiator methionine clipping, on by default (`database.clip_n_term_met`, default true).
+  Proteins starting with M followed by G, A, S, T, C, P, or V are also digested without the Met,
+  as methionine aminopeptidase does. The added peptides start at residue 2, count as protein
+  N-terminal (so `protein_n_term` modifications such as N-terminal acetylation apply), are not
+  semi-enzymatic, and keep FASTA coordinates. The unclipped peptides stay. Generated decoys, the
+  prefilter, and the memory estimate include them. FASTA-supplied decoy proteins are clipped by
+  the same rule as written, so fully reversed decoys (ending in `M`) rarely gain peptides; use
+  generated decoys for a balanced search space. Non-specific digests and peptide TSV input
+  are unchanged. A motif's `<` anchor matches at residue 2 only for occurrences digested with
+  clipping, so a peptide that is protein N-terminal in another protein no longer satisfies it
+  at residue 2 when clipping is off or the digest is non-specific; the exported site library
+  follows the same rule. On human Swiss-Prot with isoforms (trypsin, 2 missed cleavages, length 7-50)
+  this adds 0.9% digests.
+- `database.expand_ambiguous_residues` (default false) searches FASTA peptides containing B
+  (D or N), Z (E or Q) or X (any of the 20 standard residues) as each sequence they may stand
+  for, keeping their proteins and positions. `database.max_ambiguous_variants` (default 20)
+  drops peptides with more combinations; the log reports expanded, created and dropped counts.
+  FASTA proteins containing B, Z or X are logged at info level when expansion is on, and with a
+  warning that their peptides are not searched when it is off. `database.peptides` TSV rows
+  with B, Z or X are expanded the same way, under the same cap, instead of being skipped;
+  with expansion off they are still skipped with a warning.
+  Cleavage uses the residue as written (an X is never a K/R site). Results with and without the
+  prefilter are identical. A PTM library record at a B, Z or X position validates, also in
+  strict mode, when its residue is one the FASTA residue expands to, and modifies only that
+  variant.
+- `database.merge_isoleucine_leucine` (default true) merges peptides that differ only in I,
+  L and J, with the same modifications and decoy flag, into one peptide listing every
+  protein. It keeps the most enzymatic occurrence and shows the sequence of the twin found
+  first in protein order; generated decoys merge the same way. Previously twins tied
+  (`delta_next` 0) and split protein inference. Set false for the previous behavior.
+- `results.sage.parquet` has a nullable `database_peptide` column with the FASTA sequence of
+  expanded peptides (e.g. `PEPXIDE` for a `PEPTIDE` match).
+- `results.sage.parquet` has a `substitutions` column listing the ambiguous residues replaced in
+  an expanded peptide, as `X4K;B7D` (residue as written, one-based position, residue searched).
+  It is empty for other peptides and when any protein has the residues as written. J is not
+  listed, since it is scored as I/L. It is computed at output time from the protein
+  occurrences, so peptides take no extra memory.
+- Every search writes a digestion summary, `digestion.tsv`, with one row per file and a total
+  row, and adds it to `run-summary.json` under `qc.digestion`. From rank-1 PSMs at 1% spectrum
+  and peptide q-value it counts distinct peptide sequences with 0, 1, and 2+ missed cleavages
+  and with ragged N-terminal, ragged C-terminal, or non-enzymatic termini, subtracting distinct
+  decoy peptides class by class. Met-clipped peptides count as protein N-terminal. Peptides
+  expanded from ambiguous residues are classified on the FASTA residues as written, and a
+  terminus at a custom cleavage site counts as enzymatic. A one-line
+  summary is logged. The run-summary schema stays at
+  version 9.
+- Every search checks centroided MS1 spectra for PEG, PPG and polysiloxane ladders (charges
+  1-3; H+, Na+ and NH4+ adducts; at least 4 consecutive members) and reports each polymer's
+  percent of the MS1 TIC per file in the log and in `run-summary.json` under `qc.polymers`.
+  A `polymer_contamination` warning is raised above 5%. The scan reuses MS1 spectra that DDA
+  searches already read and adds about 1% to spectrum reading; Bruker TDF files, DDA and
+  diaPASEF, are checked only with `quant.lfq`, which reads their MS1 frames.
+- Opt-in `diagnostic_ions` searches raw MS2 spectra for glycan oxonium (HexNAc, HexNAc
+  fragment, Hex, NeuAc), acetyl-lysine immonium and phosphotyrosine immonium ions, or a
+  user list of `{name, mz, tolerance}` (20 ppm default). Hits go to a long-format
+  `diagnostic_ions.tsv` (file, scannr, ion, mz, relative_intensity); the percent of MS2
+  spectra containing each ion is logged and written to `run-summary.json` under
+  `qc.diagnostic_ions`. PSM columns are unchanged. Overhead is under 0.5% of file IO.
+  DIA files are scanned on their raw wide-window MS2 before pseudo-spectrum conversion;
+  timsTOF diaPASEF files only when `quant.lfq` makes Sage read their raw frames.
+- Library: `Enzyme::cleaves_between` tests one bond against the enzyme rule, and
+  `sage_core::digestion` classifies and summarizes peptide termini (optionally with custom
+  cleavage sites);
+  `sage_core::polymer` and `sage_core::diagnostic` scan raw spectra.
+- The README credits NIST [sageRecon](https://github.com/usnistgov/sageRecon), which inspired
+  initiator Met clipping, ambiguous-residue expansion, the QC outputs, and tolerance
+  recommendations. Sage Plus implements them independently.
+
+### Changed
+- The documentation no longer promises that upstream Sage configurations load unchanged.
+  The basic symbol-keyed modification form still works; new options use named definitions.
+- Results change with the new default: searches of FASTA proteins with a clippable Met gain the
+  clipped N-terminal peptides and their decoys. Set `clip_n_term_met` to false for the previous
+  search space.
+- When the same peptide comes from digests with different enzymatic state, the kept copy is now
+  the one with the fewest semi-enzymatic flags and missed cleavages, instead of depending on
+  sort order or protein accession order. This also holds between proteins that share a
+  peptide at the same terminal position (for example a Met-clipped fully enzymatic N-terminal
+  peptide and a semi-enzymatic N-terminal copy in another protein). A FASTA copy is kept over a peptide TSV copy, whose placeholder state (whole protein, fully
+  enzymatic) would otherwise let protein-terminal modification rules apply to an internal
+  FASTA peptide.
+- FASTA residue J (Ile or Leu) is scored with the shared I/L mass instead of dropping its
+  peptides. Peptides keep J in `peptide` and `stripped_peptide`; static or variable
+  modifications declared on I or L do not apply to J. Retention-time and mobility models embed J
+  as L.
+- Preliminary fragment matching resolves each spectrum's fragment-index buckets together: each
+  distinct bucket's precursor range is found once per candidate window, and 16 buckets' binary
+  searches run interleaved so their memory loads overlap. Adapted, with credit, from Matteo
+  Lacki's MIT-licensed Sage fork (MatteoLacki/sage 950641f and 062f7b3). Results are identical
+  (every PSM row and column matched the previous build on all three benchmarks). Median of 3
+  runs, 8 threads, previous build vs this one:
+  - HEK SILAC, closed search: search 0.71 s to 0.52 s (-27%), wall 6.43 s to 6.18 s (-4%).
+  - PXD028735 LFQ file (1.2 GB mzML), closed search: search 9.96 s to 8.07 s (-19%), wall
+    27.2 s to 25.0 s (-8%).
+  - HEK SILAC, open search (`prefilter-open`, -150 to +500 Da): prefilter 16.9 s to 15.8 s,
+    search 40.5 s to 38.9 s (-4%), wall 61.9 s to 60.5 s (-2%).
+  Peak memory is unchanged. The upstream fork's 2.27x came from a larger, memory-bound index;
+  wide searches here are dominated by scanning fragments, not by the bucket searches.
+- Lower peak memory without the prefilter. Modified peptides are now expanded in chunks of 65,536
+  digest groups instead of one parallel collect over the whole digest. The single collect left
+  per-thread pieces as large as the whole peptide list, and the allocator kept their pages
+  through the fragment index build, where peak memory occurs. Peptides come out in the same
+  order and PSMs are byte-identical. Human reviewed FASTA, 8 threads, 3 runs: peak RSS 1.44-1.53
+  GB to 1.25 GB with standard mods, and 7.76-8.30 GB to 7.00 GB with broad PTMs (seven variable
+  mods, 18.4 million peptides); wall time unchanged. Adapted from theGreatHerrLebert/sage
+  (commit ccce5da, chunked peptide materialisation).
+
+### Fixed
+- The HTML report's "Median MS2 Delta Mass" column showed the median absolute fragment error,
+  so it could never reveal a bias. It is now `Median MS2 Mass Bias (ppm)`, the median signed
+  fragment error, next to a labelled `Median MS2 Absolute Error (ppm)`; the MS1 column is
+  renamed `Median MS1 Mass Bias (ppm)`.
+- `database.enzyme.cleave_at` or `restrict` with unsupported residues (for example `B`, `Z`,
+  `J`, `X`, or lowercase letters) now fails configuration validation with a message naming the
+  residues instead of panicking. `Enzyme::try_new` is the fallible constructor.
+
+## [v0.1.0-beta.11] - 2026-09-26
+
+### Added
+- `prefilter_min_matched_peaks` (default 4) and `prefilter_max_peaks` (default: all peaks). The
+  prefilter keeps a peptide only when one precursor hypothesis of a spectrum has at least
+  `prefilter_min_matched_peaks` preliminary fragment matches, using only each spectrum's
+  `prefilter_max_peaks` most intense peaks. The threshold never exceeds `min_matched_peaks`.
+- The prefilter streams proteins through the spectrum index in parallel, one protein per
+  worker, instead of digesting the database whole or in chunks. Digests shared between proteins
+  or colliding with a generated decoy are grouped by sequence and filtered group by group, so the
+  retained peptides are unchanged. Its memory no longer grows with the full digest.
+- `sage config.json --estimate` prints a rough database memory estimate (peptides, fragments,
+  whether the prefilter is on) and exits without searching.
+- Library: `ml::qvalue::grouped_q_values` computes target-decoy q-values separately per group
+  key (for example intra- vs inter-protein crosslinks or glycan classes) with the same
+  conventions as `spectrum_q_value`. `Scorer::with_db` builds a scorer with the same settings
+  against another `IndexedDatabase`. Search results are unchanged.
+
+### Changed
+- Memory estimates no longer refuse or stop a search. Estimates could not predict database size
+  reliably (PTM libraries, custom cleavages, peptide lists) and rejected searches that would
+  have fit. `max_memory_gb` is now enforced only on measured memory. Use `--estimate` for a
+  preview.
+- `prefilter_chunk_size` is deprecated and ignored with a warning; turning the prefilter on
+  always prefilters. The `database_estimated` event is no longer emitted, and
+  `prefilter_chunk_size` no longer appears in the parameters written to `results.json`.
+- The `SAGE_PREFILTER_INDEX_GB` environment variable is removed; the prefilter's budgets come
+  only from `max_memory_gb`.
+- `min_free_memory_gb` is ignored with a warning. It is still accepted so older configurations
+  parse; keeping memory free for other programs is left to the system.
+- The prefilter now requires three preliminary fragment matches by default instead of one. On a
+  human plus 10x gut catalog search it kept 19% of peptides instead of 76%, halved peak memory,
+  and accepted 0.7% fewer PSMs at the same entrapment FDP. Set `prefilter_min_matched_peaks: 1`
+  to keep the previous exact behavior.
+- The default `prefilter_min_matched_peaks` is now four. Against three on human plus gut
+  catalog searches it accepted 1.3% fewer PSMs at 10x and 0.5% fewer at 30x, used 60% and 46%
+  less peak memory, and let the 100x search finish in 19 GiB (14,459 PSMs in 451 s).
+
+### Fixed
+- mzML files read without an MS-level filter no longer gain an empty spectrum (blank id, MS
+  level 0) for every spectrum with zero total ion current.
+- A modification site such as `peptide_n_term:Z` now reports an invalid residue instead of a
+  too-long specificity.
+- `Matrix::get_mut` returns `None` for an out-of-range column instead of another row's entry,
+  and `Matrix::is_close` compares shapes and every entry of non-square matrices.
+
+## [v0.1.0-beta.10] - 2026-09-25
+
+### Added
+- Per-modification `max_total_count` for PTM-library searches. `max_count` now limits new
+  (exhaustive) placements of a modification, and `max_total_count` limits all its placements,
+  library-supported included. `max_total_count` defaults to `max_count`, which reproduces
+  Beta 9 exactly, so existing configs give the same results. Setting
+  `{"max_count": 1, "max_total_count": 3}` lets a peptide carry up to three library acetyl
+  sites plus one new one, where Beta 9 allowed one acetyl in total. Library and `both`
+  definitions need `max_count` or `max_total_count`.
 - `dia` (off by default): DIA pseudo-spectrum search (`"dia": {"mode": "pseudo"}` or
   `--dia pseudo`). The new `sage-dia` crate detects MS1 and per-window MS2 hills with koth-core
   v0.11.0 and anchors on each charged MS1 isotope feature. Fragment hills whose apex and elution
@@ -19,6 +516,13 @@ entries are retained below for provenance.
   6 s and 2.3 GB. A wide-window chimeric search found 6,975 in 30 s and 3.0 GB, so wide-window
   stays the default. With `dia` off, spectra and results are unchanged, and `results.json`
   omits `dia`. See "DIA pseudo-spectrum search" in `DOCS.md`.
+- `dia` pseudo mode reads timsTOF diaPASEF `.d` input. Frames get dnoise-core v0.5.0's
+  vertical ion-mobility and halo filters, then watershed centroiding. MS2 frames are processed
+  per diaPASEF m/z × 1/K0 box. koth hills and features carry 1/K0, a feature is paired only
+  with boxes that contain its m/z and 1/K0, and fragment hills must match its 1/K0 within the
+  new `dia.im_tolerance` (default 0.03). On a diaPASEF E. coli run (PXD070049, 50 ng, 15 min)
+  it found 6,403 peptides in 3 min 7 s and 6.1 GB. A wide-window chimeric search found 3,897
+  in 18 s and 5.8 GB with the default diaPASEF reader (see Fixed).
 - `bruker_config.denoise` (off by default): timsTOF MS1 denoising with dnoise v0.5.0
   (`dnoise-core`), applied to each Bruker TDF MS1 frame before centroiding. It runs the dnoise
   mobility-streak filter, halo removal, and the DDA selection-polygon or DIA window gate, with
@@ -75,6 +579,32 @@ entries are retained below for provenance.
   now use named definitions.
 - The `sage-mcp` server crate and binary are removed; release archives and the container image no
   longer ship `sage-mcp`. The Rust runner API, JSONL events, and `run-summary.json` are unchanged.
+
+### Fixed
+- The preflight memory estimate now counts modified peptides exactly, honoring each
+  modification's `max_count` and `max_total_count`. It previously ignored per-modification
+  caps, overestimated PTM-library searches and could refuse a database that would fit.
+- diaPASEF files are read as quadrupole-window spectra again, honoring `bruker_config.ms2`
+  splitting. Beta 2 to Beta 9 silently used timsrust 0.6's precursor-anchored reader, which
+  ignored these settings. diaPASEF identification counts will change. Each MS2 frame now gives
+  one spectrum per isolation window (split by `frame_splitting_params`), with the window center
+  as the precursor m/z, as in upstream Sage with timsrust 0.4. DDA and other inputs are
+  unchanged. On the E. coli diaPASEF run (PXD070049, wide-window chimeric search) the default
+  finds 3,897 peptides in 18 s and 5.8 GB, against 8,087 in 12 min 50 s and 16.6 GB before:
+
+  | `frame_splitting_params`, `centroiding_window` | Peptides at 1% | Time | Peak memory |
+  |---|---|---|---|
+  | Beta 2 to Beta 9 (precursor-anchored, settings ignored) | 8,087 | 12 min 50 s | 16.6 GB |
+  | `Even` 1, 1 (default) | 3,897 | 18 s | 5.8 GB |
+  | `Even` 1, 3 | 4,195 | 18 s | 5.0 GB |
+  | `Even` 2, 1 | 4,477 | 30 s | 7.1 GB |
+  | `Even` 4, 1 | 5,296 | 53 s | 8.4 GB |
+  | `Even` 4, 3 | 5,546 | 55 s | 7.3 GB |
+  | `Even` 4, 5 | 5,572 | 56 s | 6.7 GB |
+  | `Even` 8, 1 | 6,038 | 1 min 41 s | 9.8 GB |
+  | `Even` 8, 3 | 6,092 | 1 min 43 s | 8.6 GB |
+  | `UniformMobility` [0.05, 0.025], 1 | 6,359 | 1 min 54 s | 10.2 GB |
+  | `UniformMobility` [0.05, 0.025], 3 | 6,386 | 1 min 54 s | 8.9 GB |
 
 ### Documentation
 - DOCS.md has a recipe for searching DSSO and DSBU monolinks (hydrolyzed, amidated and Tris
@@ -358,7 +888,7 @@ entries are retained below for provenance.
 - mzML binary arrays containing XML entity references now fail explicitly. Literal base64 arrays remain supported.
 
 ### Validation scope
-- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/HARDENING_RESULTS.md` and `benchmarks/BETA3_RELEASE.md` for evidence and release status.
+- Representative HEK searches and a bounded 20-seed entrapment comparison preserve identification outcomes. This is regression evidence on one dataset and a reduced FASTA, not broad scientific calibration. Expanded independent-study validation remains planned. See `benchmarks/archive/HARDENING_RESULTS.md` and `benchmarks/archive/BETA3_RELEASE.md` for evidence and release status.
 
 ## [v0.1.0-beta.2] - 2026-08-28
 

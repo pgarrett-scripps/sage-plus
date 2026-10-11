@@ -1,7 +1,6 @@
 use super::input::Search;
 use super::memory::{trim_allocator, AllocatorTrimResult, MemoryLimits};
 use super::output::SageResults;
-use super::telemetry;
 use crate::events::{CancellationToken, EventEmitter, EventKind};
 use anyhow::Context;
 use log::{info, warn};
@@ -15,6 +14,7 @@ use sage_core::mass::Tolerance;
 use sage_core::mass::PROTON;
 use sage_core::mass_calibration::{
     align_fragment_error, fit as fit_mass_calibration, CalibrationPoint, FitOptions,
+    ToleranceEstimate, MIN_TOLERANCE_PSMS,
 };
 use sage_core::mass_recalibration::{
     confident_per_group, select_group_models, select_model, stable_hash, stratified_sample,
@@ -115,7 +115,18 @@ impl LabelGroupIndex {
     }
 }
 
+#[cfg(test)]
 fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
+    close_pairs(keep, |index| {
+        database
+            .paired_peptide_index(sage_core::database::PeptideIx(index as u32))
+            .map(|pair| pair.0 as usize)
+    });
+}
+
+/// Add the target or decoy partner, given by `pair_of`, of every kept peptide.
+#[cfg(test)]
+fn close_pairs(keep: &AtomicBitSet, pair_of: impl Fn(usize) -> Option<usize> + Sync) {
     // Pairs are resolved in parallel and repeated until no partner is added,
     // so the closure does not depend on visit order.
     let mut frontier = (0..keep.len())
@@ -126,9 +137,7 @@ fn close_prefilter_pairs(database: &IndexedDatabase, keep: &AtomicBitSet) {
         frontier = frontier
             .into_par_iter()
             .filter_map(|index| {
-                let pair = database
-                    .paired_peptide_index(sage_core::database::PeptideIx(index as u32))?
-                    .0 as usize;
+                let pair = pair_of(index)?;
                 (!keep.contains(pair)).then_some(pair)
             })
             .collect::<Vec<_>>();
@@ -259,6 +268,13 @@ pub struct Runner {
     retained_spectra: std::sync::Mutex<RetainedSpectra>,
     /// Search-time mass corrections selected for each searched file.
     mass_recalibration: std::sync::Mutex<Vec<MassRecalibrationFileStats>>,
+    /// Quality-control scans of each file's raw spectra, by file id.
+    file_qc: Arc<std::sync::Mutex<std::collections::BTreeMap<usize, qc::FileQc>>>,
+    /// Custom cleavage sites of the searched FASTA, for the digestion summary.
+    custom_cleavages: Option<ValidatedCustomCleavageLibrary>,
+    /// Provenance key-value pairs for Parquet footers, set before outputs are
+    /// written.
+    parquet_provenance: Vec<(String, String)>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -298,11 +314,101 @@ pub struct RunSummary {
     pub modifications: ModificationRunStats,
     #[serde(default)]
     pub spectral_library: SpectralLibraryRunStats,
+    /// Quality-control summaries (digestion, and the optional MS1 and MS2
+    /// checks when enabled).
+    #[serde(default)]
+    pub qc: qc::QcRunStats,
     pub output_paths: Vec<String>,
     #[serde(default)]
     pub warnings: Vec<crate::events::RunWarning>,
     #[serde(default)]
     pub provenance: RunProvenance,
+    /// Precursor and fragment tolerances suggested by the confident PSMs.
+    #[serde(default)]
+    pub recommended_tolerances: ToleranceRecommendation,
+    /// Peak resident set size of the Sage process, in bytes, at the end of
+    /// the run; `None` where the platform does not report it.
+    #[serde(default)]
+    pub peak_rss_bytes: Option<u64>,
+}
+
+/// Search tolerances suggested by the signed mass errors of rank-1 target
+/// PSMs at 1% spectrum q-value, pooled over all files. Errors are the raw,
+/// uncorrected ones, so the suggestion applies to a search without
+/// `mass_recalibration`.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ToleranceRecommendation {
+    /// Confident PSMs the estimates were computed from.
+    pub psms: usize,
+    /// Precursor estimate, from `precursor_ppm`.
+    pub precursor: Option<ToleranceEstimate>,
+    /// Fragment estimate, from each PSM's signed fragment error and its
+    /// ions' spread around it.
+    pub fragment: Option<ToleranceEstimate>,
+    /// Why no recommendation was made, such as too few PSMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
+}
+
+impl ToleranceRecommendation {
+    /// Estimate tolerances from rank-1 target PSMs at 1% spectrum q-value.
+    /// Spectrum q-values must already be assigned.
+    pub fn from_features(features: &[Feature]) -> Self {
+        let confident = features
+            .iter()
+            .filter(|feature| feature.rank == 1 && feature.label == 1 && feature.spectrum_q <= 0.01)
+            .collect::<Vec<_>>();
+        let psms = confident.len();
+        if psms < MIN_TOLERANCE_PSMS {
+            return Self {
+                psms,
+                skipped: Some(format!(
+                    "{psms} confident PSMs, fewer than the {MIN_TOLERANCE_PSMS} needed"
+                )),
+                ..Self::default()
+            };
+        }
+        let precursor = confident
+            .iter()
+            .map(|feature| feature.delta_mass)
+            .collect::<Vec<_>>();
+        let fragment = confident
+            .iter()
+            .map(|feature| feature.signed_fragment_ppm)
+            .collect::<Vec<_>>();
+        let fragment_sd = confident
+            .iter()
+            .map(|feature| feature.fragment_ppm_sd)
+            .collect::<Vec<_>>();
+        Self {
+            psms,
+            precursor: ToleranceEstimate::from_errors(&precursor),
+            fragment: ToleranceEstimate::from_fragment_errors(&fragment, &fragment_sd),
+            skipped: None,
+        }
+    }
+
+    /// One log line, for example
+    /// `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`.
+    pub fn log_line(&self) -> String {
+        if let Some(reason) = &self.skipped {
+            return format!("recommended tolerances: skipped ({reason})");
+        }
+        let describe = |estimate: &Option<ToleranceEstimate>| match estimate {
+            Some(ToleranceEstimate {
+                recommended_ppm: Some(ppm),
+                ..
+            }) => format!("±{ppm} ppm"),
+            Some(estimate) => format!("wider than ±100 ppm (needs ±{:.1})", estimate.required_ppm),
+            None => "not estimated".into(),
+        };
+        format!(
+            "recommended tolerances: precursor {}, fragment {} (from {} PSMs)",
+            describe(&self.precursor),
+            describe(&self.fragment),
+            self.psms
+        )
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -311,6 +417,10 @@ pub struct RunProvenance {
     pub mzmlb_enabled: bool,
     pub input_identity_mode: String,
     pub inputs: Vec<InputIdentity>,
+    /// The provenance record written to every Parquet footer, keyed as there
+    /// without the `sage.` prefix. Absent in summaries from before Beta 13.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<crate::provenance::Provenance>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -385,6 +495,40 @@ pub struct PtmLocalizationRunStats {
     pub localized_psms: usize,
     pub psm_q_value: f32,
     pub localization_q_value: f32,
+    /// Separating-ion margin a localization needed to compete.
+    #[serde(default)]
+    pub min_separating_margin: u32,
+    /// Target protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub target_protein_sites: usize,
+    /// Decoy protein sites in the site-level FDR competition.
+    #[serde(default)]
+    pub decoy_protein_sites: usize,
+    /// Target protein sites at site-level q-value <= 0.01.
+    #[serde(default)]
+    pub protein_sites_at_one_percent_fdr: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SiteFdrRunStats {
+    target_protein_sites: usize,
+    decoy_protein_sites: usize,
+    protein_sites_at_one_percent_fdr: usize,
+}
+
+impl SiteFdrRunStats {
+    fn from_sites(sites: &[artifacts::ProteinSite]) -> Self {
+        let mut stats = Self::default();
+        for site in sites {
+            if site.decoy {
+                stats.decoy_protein_sites += 1;
+            } else {
+                stats.target_protein_sites += 1;
+                stats.protein_sites_at_one_percent_fdr += usize::from(site.q_value <= 0.01);
+            }
+        }
+        stats
+    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -415,6 +559,10 @@ pub struct QuantificationRunStats {
     pub lfq_features: usize,
     pub tmt: Option<String>,
     pub tmt_features: usize,
+    /// Per-channel reporter-ion coverage over all quantified spectra. Missing
+    /// channels are counted, not averaged in as 0. Absent without TMT.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tmt_channels: Vec<sage_core::tmt::ReporterChannelSummary>,
     #[serde(default)]
     pub ms1_label_channels: usize,
     #[serde(default)]
@@ -428,7 +576,6 @@ pub struct ExecutionRunStats {
     #[serde(default)]
     pub rayon_threads: usize,
     pub max_memory_gb: Option<f64>,
-    pub min_free_memory_gb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -475,6 +622,10 @@ pub struct SpectralLibraryRunStats {
 /// A single localized modification site for one PSM, used to build the
 /// PTM-site and protein-site reports.
 struct SiteRow {
+    /// Site from a decoy PSM: counted in site-level FDR, never written.
+    decoy: bool,
+    /// Discriminant score of the supporting PSM.
+    discriminant_score: f32,
     ambiguous: bool,
     protein_sites: Arc<[sage_core::enzyme::ProteinOccurrence]>,
     attachment: sage_core::ptm_library::Attachment,
@@ -488,6 +639,8 @@ struct SiteRow {
     spectrum_q: f32,
     peptide_q: f32,
     modification: String,
+    /// `modification` is a name, not a signed mass.
+    named: bool,
     modification_mass: f32,
     /// 1-based position within the peptide.
     position: usize,
@@ -502,8 +655,10 @@ struct SiteRow {
     site_probabilities: String,
 }
 
-fn passes_localization_filter(feature: &Feature, psm_q_value: f32) -> bool {
-    feature.label == 1 && feature.spectrum_q <= psm_q_value
+/// PSMs entering PTM localization and site-level FDR. Targets and decoys pass
+/// the same identification cutoff so decoy sites can be counted.
+fn passes_site_psm_filter(feature: &Feature, psm_q_value: f32) -> bool {
+    feature.spectrum_q <= psm_q_value
 }
 
 fn passes_output_filter(feature: &Feature, psm_q_value: f32) -> bool {
@@ -605,6 +760,116 @@ impl FromIterator<ProcessedSpectrum> for SpectrumAccumulator {
     }
 }
 
+/// Load `database.ptm_library`, if configured, into the database parameters.
+/// Does a PTM library record's residue match the FASTA residue at its
+/// position? With ambiguous-residue expansion on, a B, Z or X in the FASTA
+/// also matches any residue it expands to, since the record is applied to
+/// that expanded peptide.
+fn library_residue_matches(fasta: Option<u8>, record: u8, expand_ambiguous: bool) -> bool {
+    fasta.is_some_and(|written| {
+        written == record
+            || (expand_ambiguous
+                && sage_core::ambiguous_residues::is_expansion_of(&[written], &[record]))
+    })
+}
+
+fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> {
+    if let Some(settings) = database_parameters.ptm_library.clone() {
+        let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
+            let contents = sage_cloudpath::util::read_text(&settings.path)
+                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+            sage_core::ptm_library::PtmLibrary::from_tsv(&contents).map_err(anyhow::Error::msg)
+        } else {
+            let bytes = sage_cloudpath::util::read_bytes(&settings.path)
+                .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
+            sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
+        }
+        .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
+        database_parameters
+            .validate_ptm_library(&library)
+            .map_err(anyhow::Error::msg)?;
+        info!("loaded {} unique PTM library sites", library.len());
+        database_parameters.loaded_ptm_library = Some(Arc::new(library));
+    }
+    Ok(())
+}
+
+fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
+    let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
+    let fasta = sage_cloudpath::util::read_fasta(
+        &fasta_url,
+        &database_parameters.decoy_tag,
+        database_parameters.generate_decoys,
+    )
+    .with_context(|| {
+        format!(
+            "Failed to build database from `{}`",
+            database_parameters.fasta
+        )
+    })?;
+    database_parameters.log_ambiguous_proteins(&fasta);
+    Ok(fasta)
+}
+
+fn load_custom_cleavages(
+    database_parameters: &Parameters,
+    fasta: &Fasta,
+) -> anyhow::Result<Option<ValidatedCustomCleavageLibrary>> {
+    let Some(path) = database_parameters.custom_cleavage_sites.as_deref() else {
+        return Ok(None);
+    };
+    let library = if path.to_ascii_lowercase().ends_with(".parquet") {
+        let content = sage_cloudpath::util::read_bytes(path)
+            .with_context(|| format!("Failed to read custom cleavage-site file `{path}`"))?;
+        sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)
+            .with_context(|| format!("Failed to parse custom cleavage-site file `{path}`"))?
+    } else {
+        let content = sage_cloudpath::util::read_text(path)
+            .with_context(|| format!("Failed to read custom cleavage-site file `{path}`"))?;
+        CustomCleavageLibrary::from_tsv(&content)
+            .with_context(|| format!("Failed to parse custom cleavage-site file `{path}`"))?
+    };
+    let validated = library
+        .validate(fasta)
+        .with_context(|| format!("Failed to validate custom cleavage-site file `{path}`"))?;
+    info!(
+        "custom cleavage sites: {} matched, {} unmatched",
+        validated.matched_sites, validated.unmatched_sites
+    );
+    if validated.unmatched_sites > 0 {
+        warn!(
+            "{} custom cleavage sites refer to proteins absent from the FASTA",
+            validated.unmatched_sites
+        );
+    }
+    if validated.sites_without_context > 0 {
+        warn!(
+                "{} custom cleavage sites have no sequence context and were validated by coordinate only",
+                validated.sites_without_context
+            );
+    }
+    Ok(Some(validated))
+}
+
+fn empty_database_message(parameters: &sage_core::database::Parameters) -> String {
+    let enzyme = &parameters.enzyme;
+    let mut message = format!(
+        "the database contains no target peptides. Check that `database.fasta` or \
+         `database.peptides` contains target sequences, and that peptides of length {}-{} \
+         and mass {}-{} Da can be digested from them",
+        enzyme.min_len.unwrap_or(5),
+        enzyme.effective_max_len(),
+        parameters.peptide_min_mass,
+        parameters.peptide_max_mass,
+    );
+    if parameters.prefilter {
+        message.push_str(
+            ", or that some peptides match the spectra closely enough to pass the prefilter",
+        );
+    }
+    message
+}
+
 fn missing_decoy_warning(
     generate_decoys: bool,
     decoy_labels: impl IntoIterator<Item = bool>,
@@ -642,85 +907,19 @@ impl Runner {
         let mut database_parameters = parameters.database.clone();
         let start = Instant::now();
         cancellation.check()?;
-        if let Some(settings) = database_parameters.ptm_library.clone() {
-            let library = if sage_core::ptm_library::is_tsv_path(&settings.path) {
-                let contents = sage_cloudpath::util::read_text(&settings.path)
-                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
-                sage_core::ptm_library::PtmLibrary::from_tsv(&contents).map_err(anyhow::Error::msg)
-            } else {
-                let bytes = sage_cloudpath::util::read_bytes(&settings.path)
-                    .with_context(|| format!("Failed to read PTM library `{}`", settings.path))?;
-                sage_cloudpath::parquet::deserialize_ptm_library(bytes).map_err(anyhow::Error::from)
-            }
-            .with_context(|| format!("Failed to parse PTM library `{}`", settings.path))?;
-            database_parameters
-                .validate_ptm_library(&library)
-                .map_err(anyhow::Error::msg)?;
-            info!("loaded {} unique PTM library sites", library.len());
-            database_parameters.loaded_ptm_library = Some(Arc::new(library));
-        }
+        load_ptm_library(&mut database_parameters)?;
         events.emit(EventKind::DatabaseStarted);
-        let limits =
-            MemoryLimits::from_gib(parameters.max_memory_gb, parameters.min_free_memory_gb)?;
+        let limits = MemoryLimits::from_gib(parameters.max_memory_gb)?;
         let mut retained_spectra = RetainedSpectra::default();
+        let file_qc = Arc::new(std::sync::Mutex::new(std::collections::BTreeMap::new()));
         // Prefilter survivors are already mass-ordered and deduplicated.
         let mut reordered = false;
+        let mut custom_cleavage_sites = None;
         // Collect peptides from FASTA (if configured).
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
-            let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
-            let fasta = sage_cloudpath::util::read_fasta(
-                &fasta_url,
-                &database_parameters.decoy_tag,
-                database_parameters.generate_decoys,
-            )
-            .with_context(|| {
-                format!(
-                    "Failed to build database from `{}`",
-                    database_parameters.fasta
-                )
-            })?;
-            let custom_cleavages = if let Some(path) =
-                database_parameters.custom_cleavage_sites.as_deref()
-            {
-                let library = if path.to_ascii_lowercase().ends_with(".parquet") {
-                    let content = sage_cloudpath::util::read_bytes(path).with_context(|| {
-                        format!("Failed to read custom cleavage-site file `{path}`")
-                    })?;
-                    sage_cloudpath::parquet::deserialize_custom_cleavage_sites(content)
-                        .with_context(|| {
-                            format!("Failed to parse custom cleavage-site file `{path}`")
-                        })?
-                } else {
-                    let content = sage_cloudpath::util::read_text(path).with_context(|| {
-                        format!("Failed to read custom cleavage-site file `{path}`")
-                    })?;
-                    CustomCleavageLibrary::from_tsv(&content).with_context(|| {
-                        format!("Failed to parse custom cleavage-site file `{path}`")
-                    })?
-                };
-                let validated = library.validate(&fasta).with_context(|| {
-                    format!("Failed to validate custom cleavage-site file `{path}`")
-                })?;
-                info!(
-                    "custom cleavage sites: {} matched, {} unmatched",
-                    validated.matched_sites, validated.unmatched_sites
-                );
-                if validated.unmatched_sites > 0 {
-                    warn!(
-                        "{} custom cleavage sites refer to proteins absent from the FASTA",
-                        validated.unmatched_sites
-                    );
-                }
-                if validated.sites_without_context > 0 {
-                    warn!(
-                        "{} custom cleavage sites have no sequence context and were validated by coordinate only",
-                        validated.sites_without_context
-                    );
-                }
-                Some(validated)
-            } else {
-                None
-            };
+            let fasta = load_fasta(&database_parameters)?;
+            let custom_cleavages = load_custom_cleavages(&database_parameters, &fasta)?;
+            custom_cleavage_sites = custom_cleavages.clone();
 
             if let (Some(settings), Some(library)) = (
                 database_parameters.ptm_library.as_ref(),
@@ -740,7 +939,11 @@ impl Runner {
                             site.position + 1
                         )),
                         Some(sequence)
-                            if sequence.get(site.position as usize) != Some(&site.residue) =>
+                            if !library_residue_matches(
+                                sequence.get(site.position as usize).copied(),
+                                site.residue,
+                                database_parameters.expand_ambiguous_residues,
+                            ) =>
                         {
                             invalid.push(format!(
                                 "{}:{} expects residue {}",
@@ -765,105 +968,32 @@ impl Runner {
                 }
             }
 
-            let needs_estimate = limits.is_enabled()
-                || (database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0);
-            if needs_estimate {
-                let full_estimate = database_parameters
-                    .estimate_memory_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-                events.emit(EventKind::DatabaseEstimated {
-                    unmodified_peptides: full_estimate.unmodified_peptides,
-                    modified_peptides: full_estimate.modified_peptides,
-                    fragments: full_estimate.fragments,
-                    peak_bytes: full_estimate
-                        .unmodified_peak_bytes
-                        .max(full_estimate.modified_peak_bytes)
-                        .max(full_estimate.fragment_peak_bytes),
-                });
-                if database_parameters.prefilter && database_parameters.prefilter_chunk_size == 0 {
-                    database_parameters.auto_calculate_prefilter_chunk_size(
-                        &fasta,
-                        full_estimate.modified_peptides,
-                    );
-                }
-
-                if limits.is_enabled() {
-                    info!(
-                        "database preflight: {} unmodified peptides ({:.2} GiB peak), up to {} modified peptides ({:.2} GiB peak), up to {} fragments ({:.2} GiB index peak)",
-                        full_estimate.unmodified_peptides,
-                        full_estimate.unmodified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        full_estimate.modified_peptides,
-                        full_estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        full_estimate.fragments,
-                        full_estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                    );
-                    limits.check_estimate(
-                        "unmodified-peptide",
-                        full_estimate.unmodified_peak_bytes,
-                    )?;
-
-                    // Prefilter chunks are streamed through the spectrum index
-                    // without a fragment index; the survivor index is checked
-                    // by the final database preflight.
-                    if database_parameters.prefilter {
-                        let mut modified_peak = 0u64;
-                        for chunk in fasta.iter_chunks(database_parameters.prefilter_chunk_size) {
-                            let estimate = database_parameters
-                                .estimate_memory_with_custom_cleavages(
-                                    &chunk,
-                                    custom_cleavages.as_ref(),
-                                );
-                            modified_peak = modified_peak.max(estimate.modified_peak_bytes);
-                        }
-                        limits.check_estimate("modified-peptide", modified_peak)?;
-                    }
-                }
-            }
-
+            database_parameters.log_ambiguous_expansion(&fasta, custom_cleavages.as_ref());
             match database_parameters.prefilter {
                 false => {
                     let digests = database_parameters
                         .digest_unmodified_with_custom_cleavages(&fasta, custom_cleavages.as_ref());
-                    if limits.is_enabled() {
-                        let estimate = database_parameters.estimate_modified_memory(&digests);
-                        info!(
-                            "modification preflight: {} unmodified peptides may expand to {} modified peptides ({:.2} GiB additional peak)",
-                            estimate.unmodified_peptides,
-                            estimate.modified_peptides,
-                            estimate.modified_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-                        );
-                        limits.check_estimate("modified-peptide", estimate.modified_peak_bytes)?;
-                    }
                     database_parameters.modify_digests(digests)
                 }
                 true => {
-                    if database_parameters.prefilter_chunk_size >= fasta.targets.len() {
-                        database_parameters
-                            .digest_with_custom_cleavages(&fasta, custom_cleavages.as_ref())
-                    } else {
-                        info!(
-                            "using {} db chunks of size {}",
-                            fasta
-                                .targets
-                                .len()
-                                .div_ceil(database_parameters.prefilter_chunk_size),
-                            database_parameters.prefilter_chunk_size,
-                        );
-                        let mini_runner = Self {
-                            database: IndexedDatabase::default(),
-                            parameters: parameters.clone(),
-                            database_parameters: database_parameters.clone(),
-                            start,
-                            events: events.clone(),
-                            cancellation: cancellation.clone(),
-                            retained_spectra: Default::default(),
-                            mass_recalibration: Default::default(),
-                        };
-                        let (peptides, retained) =
-                            mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
-                        retained_spectra = retained;
-                        reordered = true;
-                        peptides
-                    }
+                    let mini_runner = Self {
+                        database: IndexedDatabase::default(),
+                        parameters: parameters.clone(),
+                        database_parameters: database_parameters.clone(),
+                        start,
+                        events: events.clone(),
+                        cancellation: cancellation.clone(),
+                        retained_spectra: Default::default(),
+                        mass_recalibration: Default::default(),
+                        file_qc: file_qc.clone(),
+                        custom_cleavages: None,
+                        parquet_provenance: Vec::new(),
+                    };
+                    let (peptides, retained) =
+                        mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
+                    retained_spectra = retained;
+                    reordered = true;
+                    peptides
                 }
             }
         } else {
@@ -883,34 +1013,30 @@ impl Runner {
 
         // Merge, deduplicate, and build the index.
         if !reordered {
-            Parameters::reorder_peptides(&mut all_peptides);
+            database_parameters.reorder_merged_peptides(&mut all_peptides);
         }
-        if limits.is_enabled() {
+        // Prefilter spectra are kept to skip rereading them, unless the
+        // fragment index looks unlikely to fit beside them. The search
+        // rereads released spectra.
+        if limits.is_enabled() && !retained_spectra.batches.is_empty() {
             let estimate = database_parameters.estimate_index_memory(&all_peptides);
-            info!(
-                "final database preflight: {} peptides, {} fragments, estimated {:.2} GiB peak",
-                estimate.modified_peptides,
-                estimate.fragments,
-                estimate.fragment_peak_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
-            );
             let additional = estimate
                 .fragment_peak_bytes
                 .saturating_sub(estimate.modified_peak_bytes);
-            if let Err(error) = limits.check_estimate("final fragment-index", additional) {
-                if retained_spectra.batches.is_empty() {
-                    return Err(error);
-                }
-                // Spectra are reread by the search rather than held through
-                // the index build.
-                info!("releasing prefilter spectra to fit the fragment index");
+            if !limits.estimate_fits(additional) {
+                info!("releasing prefilter spectra to make room for the fragment index");
                 retained_spectra = RetainedSpectra::default();
                 let _ = trim_allocator();
-                limits.check_estimate("final fragment-index", additional)?;
             }
         }
         let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
+        anyhow::ensure!(
+            database.peptides.iter().any(|peptide| !peptide.decoy),
+            "{}",
+            empty_database_message(&database_parameters)
+        );
 
         if let Some(message) = missing_decoy_warning(
             database_parameters.generate_decoys,
@@ -967,13 +1093,19 @@ impl Runner {
             cancellation,
             retained_spectra: std::sync::Mutex::new(retained_spectra),
             mass_recalibration: Default::default(),
+            file_qc,
+            custom_cleavages: custom_cleavage_sites,
+            parquet_provenance: Vec::new(),
         })
     }
 }
 mod artifacts;
+pub mod estimate;
 mod execution;
+mod immonium;
 mod postprocess;
-mod prefilter;
+pub(crate) mod prefilter;
+pub mod qc;
 mod search;
 
 #[cfg(test)]

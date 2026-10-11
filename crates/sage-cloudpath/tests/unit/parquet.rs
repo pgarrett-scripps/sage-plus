@@ -31,14 +31,22 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
             file_evidence: vec![
                 Some(sage_core::lfq::FileEvidence {
                     score: 0.75,
+                    extraction_q_value: Some(0.004),
                     ..Default::default()
                 }),
                 None,
             ],
+            paired_decoy_evidence: Vec::new(),
         },
     );
 
-    let bytes = serialize_lfq(&areas, &["run-a".into(), "run-b".into()], &database)?;
+    let bytes = serialize_lfq(
+        &areas,
+        &["run-a".into(), "run-b".into()],
+        &database,
+        &[],
+        "identification_rt",
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -49,7 +57,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("3")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -70,6 +78,12 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
     );
     assert_eq!(values(&rows[0])["file_score"], &Field::Double(0.75));
     assert_eq!(values(&rows[1])["file_score"], &Field::Null);
+    assert_eq!(values(&rows[0])["extraction_q_value"], &Field::Float(0.004));
+    assert_eq!(values(&rows[1])["extraction_q_value"], &Field::Null);
+    assert!(metadata.iter().any(|entry| {
+        entry.key == "sage.lfq.extraction_q_value_scope"
+            && entry.value.as_deref() == Some("precursor_file_all_rows")
+    }));
     Ok(())
 }
 
@@ -97,6 +111,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         ms2_confirmed: vec![true],
         ms2_confirmed_strict: vec![true],
         file_evidence: vec![Some(Default::default())],
+        paired_decoy_evidence: Vec::new(),
     };
     let second_peak = || QuantifiedPeak {
         peak: sage_core::lfq::Peak {
@@ -109,6 +124,7 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
         ms2_confirmed: vec![false],
         ms2_confirmed_strict: vec![false],
         file_evidence: vec![Some(Default::default())],
+        paired_decoy_evidence: Vec::new(),
     };
 
     let mut forward = HashMap::new();
@@ -120,8 +136,8 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
 
     let filenames = ["run-a".into()];
     assert_eq!(
-        serialize_lfq(&forward, &filenames, &database)?,
-        serialize_lfq(&reverse, &filenames, &database)?
+        serialize_lfq(&forward, &filenames, &database, &[], "identification_rt")?,
+        serialize_lfq(&reverse, &filenames, &database, &[], "identification_rt")?
     );
     Ok(())
 }
@@ -158,11 +174,18 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
                 ms2_confirmed: vec![true],
                 ms2_confirmed_strict: vec![true],
                 file_evidence: vec![Some(Default::default())],
+                paired_decoy_evidence: Vec::new(),
             },
         );
     }
 
-    let bytes = serialize_lfq(&areas, &["run-a".into()], &database)?;
+    let bytes = serialize_lfq(
+        &areas,
+        &["run-a".into()],
+        &database,
+        &[],
+        "identification_rt",
+    )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
         .metadata()
@@ -170,7 +193,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("4")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("8")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -182,6 +205,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
             .map(|(name, field)| (name.as_str(), field))
             .collect::<HashMap<_, _>>();
         assert_eq!(values["label_group"], &Field::Str("PEPTIDER".into()));
+        assert_eq!(values["extraction_q_value"], &Field::Null);
         match values["label_channel"] {
             Field::Str(channel) if channel == "light" => {
                 assert_eq!(values["ratio_to_reference"], &Field::Double(1.0));
@@ -208,6 +232,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 prev_aa: Some(b'K'),
                 next_aa: Some(b'R'),
                 source: None,
+                met_clipped: false,
             },
             ProteinOccurrence {
                 protein: Arc::from("P67890"),
@@ -215,6 +240,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
                 prev_aa: None,
                 next_aa: None,
                 source: None,
+                met_clipped: false,
             },
         ]),
         ..Peptide::default()
@@ -231,6 +257,9 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         &["run-a".into()],
         &database,
         1.0,
+        &[],
+        None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -239,7 +268,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("1")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("5")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -252,6 +281,196 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         values["protein_sites"].to_string(),
         "[{protein: \"P12345\", start: 5, end: 11, prev_aa: \"K\", next_aa: \"R\"}, {protein: \"P67890\", start: 10, end: 16, prev_aa: null, next_aa: null}]"
     );
+    Ok(())
+}
+
+#[test]
+fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::errors::Result<()> {
+    let protein: sage_core::sequence::ProteinSequence = "MKPEPXIDER".into();
+    let mut database = IndexedDatabase::default();
+    for (sequence, source) in [("PEPTIDE", Some(protein.clone())), ("PEPKIDE", None)] {
+        database.peptides.push(Peptide {
+            sequence: sequence.as_bytes().into(),
+            proteins: vec![Arc::from("P1")].into(),
+            protein_sites: Arc::from([ProteinOccurrence {
+                protein: Arc::from("P1"),
+                start: Some(2),
+                prev_aa: Some(b'K'),
+                next_aa: Some(b'R'),
+                source,
+                met_clipped: false,
+            }]),
+            ..Peptide::default()
+        });
+    }
+    let features = [0, 1].map(|index| Feature {
+        peptide_idx: PeptideIx(index),
+        ..Feature::default()
+    });
+
+    let bytes = serialize_features(
+        &features.iter().collect::<Vec<_>>(),
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+        &[],
+        None,
+        None,
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let rows = reader
+        .get_row_iter(None)?
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    let column = |column: &str| {
+        rows.iter()
+            .map(|row| {
+                row.get_column_iter()
+                    .find(|(name, _)| name.as_str() == column)
+                    .map(|(_, field)| field.to_string())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(column("database_peptide"), ["\"PEPXIDE\"", "null"]);
+    assert_eq!(column("substitutions"), ["\"X4T\"", "\"\""]);
+    Ok(())
+}
+
+#[test]
+fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
+    use sage_core::immonium::{ImmoniumConfig, ImmoniumEvidence, ModifiedImmoniumIon};
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"PEPTYDE".as_slice().into(),
+        ..Peptide::default()
+    });
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        immonium: Some(ImmoniumEvidence {
+            explained: 2,
+            missing: 1,
+            unexplained: 1,
+            modified_explained: 1,
+            modified_unexplained: 0,
+            // P, Y and W observed.
+            residue_observed: 0b110_0001,
+            modified_observed: 0b1,
+        }),
+        ..Feature::default()
+    };
+    let settings = ImmoniumConfig::Enabled(true)
+        .resolve(
+            sage_core::mass::Tolerance::Ppm(-20.0, 20.0),
+            vec![ModifiedImmoniumIon {
+                label: "Phospho@Y".into(),
+                modification: "Phospho".into(),
+                mass: 79.96633,
+                residues: vec![b'Y'],
+                any_residue: false,
+                mz: 216.042,
+            }],
+        )
+        .unwrap();
+    let columns = [
+        "immonium_explained",
+        "immonium_missing",
+        "immonium_unexplained",
+        "immonium_residue_ions",
+        "immonium_modified_explained",
+        "immonium_modified_unexplained",
+        "immonium_modified_ions",
+    ];
+    let read = |settings: Option<&sage_core::immonium::ImmoniumSettings>| -> parquet::errors::Result<Vec<String>> {
+        let bytes = serialize_features(
+            &[&feature],
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            settings,
+            None,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let values = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.clone(), field.to_string()))
+            .collect::<HashMap<_, _>>();
+        Ok(
+            columns
+                .iter()
+                .map(|column| values[*column].clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(read(None)?, vec!["null"; columns.len()]);
+    assert_eq!(
+        read(Some(&settings))?,
+        ["2", "1", "1", "\"P,Y,W\"", "1", "0", "\"Phospho@Y\""]
+    );
+    Ok(())
+}
+
+#[test]
+fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
+    use sage_core::fragment_loss::{FragmentLoss, FragmentLosses};
+    use sage_core::scoring::FragmentLossFeatures;
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"PEPTIDE".as_slice().into(),
+        ..Peptide::default()
+    });
+    let feature = Feature {
+        peptide_idx: PeptideIx(0),
+        fragment_loss: Some(FragmentLossFeatures {
+            matched_peaks: 3,
+            intensity_pct: 2.5,
+        }),
+        ..Feature::default()
+    };
+    let read = |database: &IndexedDatabase| -> parquet::errors::Result<Vec<String>> {
+        let bytes = serialize_features(
+            &[&feature],
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            database,
+            1.0,
+            &[],
+            None,
+            None,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let rows = reader
+            .get_row_iter(None)?
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        let values = rows[0]
+            .get_column_iter()
+            .map(|(name, field)| (name.clone(), field.to_string()))
+            .collect::<HashMap<_, _>>();
+        Ok(["matched_loss_peaks", "loss_intensity_pct"]
+            .iter()
+            .map(|column| values[*column].clone())
+            .collect())
+    };
+    assert_eq!(read(&database)?, ["null", "null"]);
+    database.fragment_losses = Some(std::sync::Arc::new(FragmentLosses {
+        losses: vec![FragmentLoss {
+            name: "Water".into(),
+            mass: 18.010565,
+            sites: vec!["S".parse().unwrap()],
+            ion_kinds: vec![sage_core::ion_series::Kind::B],
+            allow_modified: false,
+        }],
+        max_losses: 1,
+    }));
+    assert_eq!(read(&database)?, ["3", "2.5"]);
     Ok(())
 }
 
@@ -288,6 +507,9 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         &["run-a".into()],
         &database,
         1.0,
+        &[],
+        None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -296,7 +518,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("2")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("6")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -356,7 +578,7 @@ fn spectral_library_has_versioned_long_form_rows() -> parquet::errors::Result<()
         strategy: SpectralLibraryStrategy::Consensus,
         ..SpectralLibrarySettings::default()
     };
-    let bytes = serialize_spectral_library(&[entry], &settings)?;
+    let bytes = serialize_spectral_library(&[entry], &settings, &[])?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     assert_eq!(reader.metadata().file_metadata().num_rows(), 2);
     assert_eq!(
@@ -426,7 +648,7 @@ fn labeled_spectral_library_round_trips_channel_metadata() -> parquet::errors::R
             relative_intensity: 1.0,
         }],
     };
-    let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default())?;
+    let bytes = serialize_spectral_library(&[entry], &SpectralLibrarySettings::default(), &[])?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let rows = reader
         .get_row_iter(None)?
@@ -459,7 +681,7 @@ fn ptm_library_round_trip() {
             modification: Arc::from("Phospho"),
         },
     ];
-    let encoded = serialize_ptm_library(&sites).unwrap();
+    let encoded = serialize_ptm_library(&sites, &[]).unwrap();
     let decoded = deserialize_ptm_library(encoded).unwrap();
     assert_eq!(decoded.len(), 1);
     assert_eq!(decoded.sites_for("P12345")[0], sites[0]);
@@ -510,29 +732,33 @@ fn deserialize_custom_cleavage_library() -> parquet::errors::Result<()> {
 
 #[test]
 fn serialize_ptm_site_reports() {
-    let ptm = serialize_ptm_sites(&[PtmSiteRecord {
-        attachment: "residue".into(),
-        psm_id: 42,
-        filename: "sample.mzML".into(),
-        scannr: "scan=42".into(),
-        peptide: "AAS[+79.966]AATAA".into(),
-        proteins: "P12345".into(),
-        charge: 2,
-        spectrum_q: 0.005,
-        peptide_q: 0.006,
-        modification: "Phospho".into(),
-        modification_mass: 79.96633,
-        position: 3,
-        residue: "S".into(),
-        localization_probability: 0.982,
-        delta_localization_score: 18.7,
-        target_decoy_score: 21.0,
-        localization_q_value: 0.01,
-        candidate_sites: 2,
-        site_determining_ions_matched: 6,
-        site_determining_ions_total: 8,
-        site_probabilities: "S3:0.982;T6:0.018".into(),
-    }])
+    let ptm = serialize_ptm_sites(
+        &[PtmSiteRecord {
+            attachment: "residue".into(),
+            psm_id: 42,
+            filename: "sample.mzML".into(),
+            scannr: "scan=42".into(),
+            peptide: "AAS[+79.966]AATAA".into(),
+            proteins: "P12345".into(),
+            charge: 2,
+            spectrum_q: 0.005,
+            peptide_q: 0.006,
+            modification: "Phospho".into(),
+            modification_mass: 79.96633,
+            position: 3,
+            residue: "S".into(),
+            localization_probability: 0.982,
+            delta_localization_score: 18.7,
+            target_decoy_score: 21.0,
+            localization_q_value: 0.01,
+            candidate_sites: 2,
+            site_determining_ions_matched: 6,
+            site_determining_ions_total: 8,
+            site_probabilities: "S3:0.982;T6:0.018".into(),
+            site_q_value: 0.004,
+        }],
+        &[],
+    )
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(ptm)).unwrap();
     assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
@@ -542,23 +768,29 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        21
+        22
     );
+    assert_site_schema(&reader, "ptm_sites", 0.004);
 
-    let protein = serialize_protein_sites(&[ProteinSiteRecord {
-        attachment: "residue".into(),
-        protein: "P12345".into(),
-        peptide: "AAS[+79.966]AATAA".into(),
-        residue: "S".into(),
-        position_in_peptide: 3,
-        modification: "Phospho".into(),
-        modification_mass: 79.96633,
-        num_psms: 2,
-        best_localization_probability: 0.982,
-        best_delta_localization_score: 18.7,
-        best_localization_q_value: 0.01,
-        best_spectrum_q: 0.005,
-    }])
+    let protein = serialize_protein_sites(
+        &[ProteinSiteRecord {
+            attachment: "residue".into(),
+            protein: "P12345".into(),
+            peptide: "AAS[+79.966]AATAA".into(),
+            residue: "S".into(),
+            position_in_peptide: 3,
+            modification: "Phospho".into(),
+            modification_mass: 79.96633,
+            num_psms: 2,
+            best_localization_probability: 0.982,
+            best_delta_localization_score: 18.7,
+            best_localization_q_value: 0.01,
+            best_spectrum_q: 0.005,
+            site_score: 1.25,
+            site_q_value: 0.003,
+        }],
+        &[],
+    )
     .unwrap();
     let reader = SerializedFileReader::new(bytes::Bytes::from(protein)).unwrap();
     assert_eq!(reader.metadata().file_metadata().num_rows(), 1);
@@ -568,8 +800,28 @@ fn serialize_ptm_site_reports() {
             .file_metadata()
             .schema_descr()
             .num_columns(),
-        12
+        14
     );
+    assert_site_schema(&reader, "protein_sites", 0.003);
+}
+
+fn assert_site_schema(reader: &SerializedFileReader<bytes::Bytes>, name: &str, site_q: f32) {
+    let metadata = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap()
+        .iter()
+        .map(|kv| (kv.key.as_str(), kv.value.as_deref().unwrap_or_default()))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(metadata["sage.schema.name"], name);
+    assert_eq!(metadata["sage.schema.version"], "3");
+    let row = reader.get_row_iter(None).unwrap().next().unwrap().unwrap();
+    let value = row
+        .get_column_iter()
+        .find_map(|(column, field)| (column == "site_q_value").then(|| field.clone()))
+        .unwrap();
+    assert_eq!(value, parquet::record::Field::Float(site_q));
 }
 
 #[test]
@@ -591,7 +843,7 @@ fn typed_ptm_library_round_trip_preserves_all_attachments() {
         modification: "Acetyl".into(),
     })
     .collect::<Vec<_>>();
-    let bytes = serialize_ptm_library(&sites).unwrap();
+    let bytes = serialize_ptm_library(&sites, &[]).unwrap();
     let restored = deserialize_ptm_library(bytes).unwrap();
     assert_eq!(restored.len(), 5);
     for site in sites {
@@ -618,7 +870,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         file_id: 0,
         occurrence,
         ion_injection_time: 0.0,
-        peaks: vec![intensity, intensity],
+        peaks: vec![Some(intensity), Some(intensity)],
     };
     let bytes = serialize_features(
         &[&first, &second],
@@ -627,6 +879,9 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         &["run-a".into()],
         &database,
         1.0,
+        &[],
+        None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader
@@ -642,4 +897,99 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         .collect::<parquet::errors::Result<Vec<_>>>()?;
     assert_eq!(reporters, ["[10.0, 10.0]", "[20.0, 20.0]"]);
     Ok(())
+}
+
+#[test]
+fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()> {
+    use parquet::record::Field;
+
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: (&b"PEPTIDE"[..]).into(),
+        ..Peptide::default()
+    });
+    let feature = |psm_id: usize, spec_id: &str| Feature {
+        psm_id,
+        spec_id: spec_id.into(),
+        peptide_idx: PeptideIx(0),
+        ..Feature::default()
+    };
+    let (quantified, unquantified) = (feature(1, "scan=1"), feature(2, "scan=2"));
+    let bytes = serialize_features(
+        &[&quantified, &unquantified],
+        &[TmtQuant {
+            spec_id: "scan=1".into(),
+            file_id: 0,
+            occurrence: 0,
+            ion_injection_time: 0.0,
+            peaks: vec![Some(10.0), None, Some(0.5), None],
+        }],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+        &[],
+        None,
+        None,
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    let reporters = reader
+        .get_row_iter(None)?
+        .map(|row| {
+            row.map(|row| {
+                row.get_column_iter()
+                    .find(|(name, _)| name.as_str() == "reporter_ion_intensity")
+                    .map(|(_, field)| field.clone())
+                    .unwrap()
+            })
+        })
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+
+    let Field::ListInternal(channels) = &reporters[0] else {
+        panic!("expected a reporter list, got {:?}", reporters[0]);
+    };
+    assert_eq!(channels.len(), 4);
+    let elements = channels.elements();
+    assert_eq!(elements[0], Field::Float(10.0));
+    assert_eq!(
+        elements[1],
+        Field::Null,
+        "missing channel must be NULL, not 0"
+    );
+    assert_eq!(elements[2], Field::Float(0.5));
+    assert_eq!(elements[3], Field::Null);
+    // A PSM without a reporter spectrum keeps a null list.
+    assert_eq!(reporters[1], Field::Null);
+    Ok(())
+}
+
+#[test]
+fn provenance_follows_the_schema_keys_in_the_footer() {
+    let provenance = vec![
+        ("sage.version".to_string(), "9.9.9".to_string()),
+        ("sage.config".to_string(), "{\"a\":1}".to_string()),
+    ];
+    let bytes = serialize_ptm_library(&[], &provenance).unwrap();
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes)).unwrap();
+    let keys = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap()
+        .iter()
+        .map(|entry| (entry.key.as_str(), entry.value.as_deref().unwrap()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        vec![
+            ("sage.schema.name", "ptm_library"),
+            ("sage.schema.version", "2"),
+            ("sage.version", "9.9.9"),
+            ("sage.config", "{\"a\":1}"),
+        ]
+    );
+
+    let clash = vec![("sage.schema.name".to_string(), "other".to_string())];
+    let error = serialize_ptm_library(&[], &clash).unwrap_err().to_string();
+    assert!(error.contains("sage.schema.name"), "{error}");
 }

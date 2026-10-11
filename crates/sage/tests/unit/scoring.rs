@@ -370,6 +370,7 @@ fn neutral_loss_alternatives_count_once_per_cleavage_and_charge() {
         mass: 20.0,
         name: Some(Arc::from("TestMod")),
         neutral_losses: Arc::from([10.0]),
+        site_losses: None,
         neutral_loss_mode: NeutralLossMode::Optional,
         channel_offsets: Arc::default(),
     });
@@ -632,12 +633,14 @@ mod mass_offsets {
         vec![VarModEntry::Detailed(VariableModification {
             mass: PHOSPHO,
             max_count: Some(1),
+            max_total_count: None,
             name: Some("Phospho".into()),
-            neutral_losses: Vec::new(),
+            neutral_losses: Vec::new().into(),
             neutral_loss_mode: NeutralLossMode::Optional,
             site_mode,
             search_mode,
             channel_offsets: Default::default(),
+            immonium_ions: Default::default(),
         })]
     }
 
@@ -1089,6 +1092,8 @@ mod mass_offsets {
         assert!((hit.expmass - query.precursors[0].mz * 2.0 + 2.0 * PROTON).abs() < 1e-3);
         assert!((hit.average_ppm - 15.0).abs() < 0.2, "{}", hit.average_ppm);
         assert!((hit.signed_fragment_ppm - 15.0).abs() < 0.2);
+        // Every ion is shifted by the same 15 ppm, so the within-PSM spread is ~0.
+        assert!(hit.fragment_ppm_sd < 0.2, "{}", hit.fragment_ppm_sd);
         assert!(hit.aligned_average_ppm < 0.2);
 
         // Annotation reports observed peak m/z, not corrected m/z.
@@ -1208,6 +1213,44 @@ mod mass_offsets {
         assert!(scorer
             .score_offset_hypotheses(&query, &[], 10, 5)
             .is_empty());
+    }
+
+    fn scored(scorer: &Scorer, query: &ProcessedSpectrum) -> Vec<(PeptideIx, serde_json::Value)> {
+        scorer
+            .score(query)
+            .into_iter()
+            .map(|feature| {
+                let mut json = serde_json::to_value(&feature).unwrap();
+                // A process-wide counter, different on every call
+                json.as_object_mut().unwrap().remove("psm_id");
+                (feature.peptide_idx, json)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn with_db_keeps_every_setting_and_swaps_the_database() {
+        let expanded = database(SearchMode::Database);
+        let offset = database(SearchMode::MassOffset);
+        let query = spectrum(&expanded_target(&expanded));
+        let original = Scorer {
+            annotate_matches: true,
+            ..scorer(&expanded, true)
+        };
+
+        let same = original.with_db(&expanded);
+        let original_hits = scored(&original, &query);
+        assert!(!original_hits.is_empty());
+        assert_eq!(scored(&same, &query), original_hits);
+
+        // Against another database it scores like a scorer built for it
+        let direct = Scorer {
+            annotate_matches: true,
+            ..scorer(&offset, true)
+        };
+        let swapped = original.with_db(&offset);
+        assert!(std::ptr::eq(swapped.db, &offset));
+        assert_eq!(scored(&swapped, &query), scored(&direct, &query));
     }
 
     #[test]

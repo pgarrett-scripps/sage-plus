@@ -2,11 +2,12 @@
   "_about": "Numbers the manuscript states in prose, read as #s(\"<id>\"). Scripts own each entry's value; fmt, unit, desc and expect are the author's to edit here. Entries with origin.by = \"hand\" are entirely yours.",
   "sources": {
     "analysis/scripts/gen_stats.py": {
-      "analysis/scripts/gen_stats.py": "sha256:809b530efc89d18b971d37713655b29972bbd64f1f58d44a32ad7ac473760b5f",
+      "analysis/scripts/gen_stats.py": "sha256:5b9fb8f39040ea87e3c8e783e907bfce91c8ad940ae1cc5111e8532f9dc4ea67",
       "analysis/scripts/_scientific.py": "sha256:84967b5494c6956520690704c014ef20687b90966d4c99fd6e6c42a6ee2efc34",
       "analysis/scripts/_report.py": "sha256:349c6d36dbb525c41cda946d30771b2d9d87372dce39d4ec7d68dbeb229988c7",
       "analysis/scripts/_matched_fdp.py": "sha256:cedfc959dd511af192632b18170eaf4d8aac4159383265ed0faa88ef7f716dfb",
       "analysis/scripts/_mass_offset.py": "sha256:95951ccbd942d6ecf5b2b500aeb20d73ff474dc70c11a8a7dcaabef9e0b19997",
+      "analysis/scripts/_large_db.py": "sha256:b0cb93340400543d886842df63029046e2f1c2881ece534689be95bd6d8e1876",
       "../benchmarks/scientific-results/20260920/pilot-summary.json": "sha256:b455c63bc1c165dea5b5ee57d441ae426187f09beea7a52b498d178333c98601",
       "../benchmarks/scientific-results/20260920/evidence-verification.json": "sha256:90b7201f76435148c4bad6dd526f109f03adc9a1b7b732185b3a213649299838",
       "analysis/data/report-extension/public.json": "sha256:ca3d6ff8c0d8dadbb3d1ee8274f91038268bd53bcfc469806ecad556aede3cd1",
@@ -16,6 +17,7 @@
       "analysis/data/report-extension/verification.json": "sha256:70d90eddb4beb2b9c7969ca203abe4b72ef2462449863dc0e196a3460d19ec88",
       "analysis/data/matched-fdp.json": "sha256:366dcc75b3a6f6973f9cf9e49ce64c8a4e68211e92229221ec248f27f99f0daa",
       "../benchmarks/scientific-results/mass-offset-20260920/summary.json": "sha256:f2c61d4dc4f340ba02f447cc554ce21236cc69e5e1fc457266b2b00e27746028",
+      "../benchmarks/scientific-results/large-db-20260925/summary.json": "sha256:0e2f058e0d869674057e71bfcfa79212e4b17b07464ecc0084192c5687b7b614",
       "analysis/data/execution.json": "sha256:57b81bdbb7570be98469e1c53fb73d9a59384c97c4d3125d5caa05896421ef57",
       "analysis/data/named-modifications.json": "sha256:8daf80ce678ba5a02147b1660087c3f52ea82fee5742115cb50e4c29e97251a1"
     }
@@ -93,6 +95,916 @@
       "origin": {
         "by": "analysis/scripts/gen_stats.py",
         "at": "2026-09-20T23:25:57Z"
+      }
+    },
+    "large.100x.need": {
+      "value": 38.11,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "GiB the 100x preflight said the unmodified digest needed",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:e1b8fa14c484cf6d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.10x.fdp": {
+      "value": 1.349016960820265,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "10x combined entrapment FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:203fbf440f97576c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.full.need": {
+      "value": 36.809999999999995,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "GiB the 10x unfiltered preflight said it needed",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:cc544a388d019132",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.10x.kept": {
+      "value": 5.957474,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x peptides kept by the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:791b0e1bc14a58ab",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.minutes": {
+      "value": 1.8763333333333334,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x prefilter wall minutes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:8e387a7b8becae6f",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.psms": {
+      "value": 16038,
+      "fmt": ",",
+      "unit": "",
+      "desc": "10x accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:43eca8705f5bc2d3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.retained": {
+      "value": 91.81104056816959,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x percent of human-only peptides still accepted",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:6240c629f5ee7657",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.retention": {
+      "value": 18.724860802093247,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "10x prefilter retention percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:871ced290dd95d42",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.rss": {
+      "value": 5.158817291259766,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:8a3cd8ccc8102b7c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.10x.streamed": {
+      "value": 31.815852,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x peptides streamed through the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:0bc86c4c33c610a1",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.1x.fdp": {
+      "value": 1.2629955650133948,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "1x combined entrapment FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:483111ce9a09d3a4",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.30x.fdp": {
+      "value": 1.2017356338383758,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "30x combined entrapment FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:a67cd37196404eac",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.kept": {
+      "value": 15.705702,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x peptides kept by the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:4d15672fa42a8114",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.minutes": {
+      "value": 5.450333333333333,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x prefilter wall minutes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:4c4cb0fca7b24f0d",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.psms": {
+      "value": 15404,
+      "fmt": ",",
+      "unit": "",
+      "desc": "30x accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:91e86a9aa38b5f94",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.retention": {
+      "value": 18.626445873273887,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "30x prefilter retention percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:f51616df3a1e82ea",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.rss": {
+      "value": 9.91463851928711,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:3711adda0e28f06c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.30x.streamed": {
+      "value": 84.319371,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x peptides streamed through the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:a5359b1ca5e3de7c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.fdp": {
+      "value": 1.1620096567405076,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "3x combined entrapment FDP percent",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:a351f3dc1cad63fc",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.full.minutes": {
+      "value": 0.6246666666666666,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x unfiltered wall minutes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:e3031bad7e69f148",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.full.rss": {
+      "value": 5.432437896728516,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x unfiltered peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:83beb15dd586b300",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.kept": {
+      "value": 2.21987,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x peptides kept by the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:b1301a8c2a4623e0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.minutes": {
+      "value": 0.6671666666666667,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x prefilter wall minutes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:74566bc52e43b1eb",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.retention": {
+      "value": 18.75216940248964,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "3x prefilter retention percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:771928bc88cb163c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.rss": {
+      "value": 2.987995147705078,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:3a352a7a4cdf10c8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.3x.streamed": {
+      "value": 11.837937,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "3x peptides streamed through the prefilter, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:d52781e3d1202542",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.campi.F05.microbial": {
+      "value": 13730,
+      "fmt": ",",
+      "unit": "",
+      "desc": "CAMPI F05 accepted microbial peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:05f44b2a613ecba0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F05.psms": {
+      "value": 23177,
+      "fmt": ",",
+      "unit": "",
+      "desc": "CAMPI F05 accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:2a7a8445c8b18f9c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F05.rss": {
+      "value": 5.753055572509766,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "CAMPI F05 prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:0c020f422fb5ab98",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F06.microbial": {
+      "value": 20312,
+      "fmt": ",",
+      "unit": "",
+      "desc": "CAMPI F06 accepted microbial peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:035a71140dd9d1b8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F06.need": {
+      "value": 34.36,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "GiB the CAMPI F06 unfiltered preflight needed",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:6a34b1a53c84ad04",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F06.psms": {
+      "value": 42740,
+      "fmt": ",",
+      "unit": "",
+      "desc": "CAMPI F06 accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:6a762cba06160baf",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.F06.rss": {
+      "value": 7.0823822021484375,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "CAMPI F06 prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:1459d4397460c1d2",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.campi.proteins": {
+      "value": 441558,
+      "fmt": ",",
+      "unit": "",
+      "desc": "CAMPI sample-specific metagenome proteins",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:80a6ee819afd273e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.campi.residues": {
+      "value": 110.312187,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "CAMPI sample-specific metagenome residues, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:81ba6630d26bf2d2",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.catalog.multiple": {
+      "value": 216.43652934385912,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "Full catalog residues as a multiple of human residues",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:a796159216465b20",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.catalog.proteins": {
+      "value": 9878765,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Cleaned gut catalog proteins",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:9044b638a1dcba7e",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.catalog.residues": {
+      "value": 2.470544416,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "Cleaned gut catalog residues, billions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:c5bbd52d41e92fd3",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.human.psms": {
+      "value": 16915,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Human-only accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:d8841ff729977992",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.human.residues": {
+      "value": 11.414637,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Human reference residues, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:33fde30dbce1f611",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.mono.10x.psms": {
+      "value": 13031,
+      "fmt": ",",
+      "unit": "",
+      "desc": "10x monoisotopic accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:04b102996714e9d0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.mono.10x.retention": {
+      "value": 6.316891969449695,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "10x monoisotopic prefilter retention percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:59b6056ce5358d1c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.mono.10x.rss": {
+      "value": 4.692985534667969,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x monoisotopic prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:d978d8b4e2cfa0ba",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.mono.30x.psms": {
+      "value": 12506,
+      "fmt": ",",
+      "unit": "",
+      "desc": "30x monoisotopic accepted PSMs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:ec7e719b88fbb349",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.mono.30x.retention": {
+      "value": 6.215752012666224,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "30x monoisotopic prefilter retention percent",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:72eed795765e080c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.mono.30x.rss": {
+      "value": 9.891155242919922,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "30x monoisotopic prefilter peak RSS GiB",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:142a284327d75c74",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.pairs.compared": {
+      "value": 5,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Completed prefilter and unfiltered pairs",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:ef2d127de37b942b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.pairs.max.psm.loss": {
+      "value": 1.6427492447129932,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Largest percent drop in accepted PSMs with the prefilter, across pairs",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:ad38d405d9485d3a",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.pairs.min.shared": {
+      "value": 96.54467718949152,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Lowest percent of unfiltered accepted peptides also accepted with the prefilter, across pairs",
+      "expect": {
+        "min": 90,
+        "max": 100
+      },
+      "checksum": "v2:d6fe6a66e6dcab8b",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.six.annotated.microbial": {
+      "value": 10638,
+      "fmt": ",",
+      "unit": "",
+      "desc": "annotated database accepted microbial peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:19f2fb46a8b8dc3c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.six.annotated.peptides": {
+      "value": 3.888457,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Annotated database peptides, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:b3f98f08e208eef5",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.six.annotated.share": {
+      "value": 98.33316991861948,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Percent of six-frame microbial peptides found in annotated proteomes",
+      "expect": {
+        "min": 90,
+        "max": 100
+      },
+      "checksum": "v2:750b0316d2706bf5",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.six.frame.microbial": {
+      "value": 10199,
+      "fmt": ",",
+      "unit": "",
+      "desc": "frame database accepted microbial peptides",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:e058b40a3416fe46",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.six.frame.peptides": {
+      "value": 10.766531,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Six-frame database peptides, millions",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:4231809ca696b5d8",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.six.shared": {
+      "value": 9790,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Microbial peptides accepted from both databases",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:02710fc94f019128",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.six.unannotated": {
+      "value": 170,
+      "fmt": ",",
+      "unit": "",
+      "desc": "Six-frame microbial peptides absent from the annotated proteomes",
+      "expect": {
+        "sign": "+"
+      },
+      "checksum": "v2:734d0759cdb4e0d0",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T07:21:21Z"
+      }
+    },
+    "large.sweep.default.fdp": {
+      "value": 1.349016960820265,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "10x combined entrapment FDP percent, default threshold",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:203fbf440f97576c",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.default.retention": {
+      "value": 18.724860802093247,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "10x prefilter retention percent, default threshold",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:871ced290dd95d42",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.default.rss": {
+      "value": 4.977153778076172,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x prefilter peak RSS GiB, default threshold",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:e272db9769e4fbca",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.exact.fdp": {
+      "value": 1.1899662553447958,
+      "fmt": ".2f",
+      "unit": "",
+      "desc": "10x combined entrapment FDP percent, exact threshold",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:70328d53d714d528",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.exact.retention": {
+      "value": 76.30597477006117,
+      "fmt": ".0f",
+      "unit": "",
+      "desc": "10x prefilter retention percent, exact threshold",
+      "expect": {
+        "min": 0,
+        "max": 100
+      },
+      "checksum": "v2:284d74a725814744",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.exact.rss": {
+      "value": 9.999736785888672,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "10x prefilter peak RSS GiB, exact threshold",
+      "expect": {
+        "min": 0,
+        "max": 16
+      },
+      "checksum": "v2:358674772e38ecb9",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
+      }
+    },
+    "large.sweep.psm.loss": {
+      "value": 0.7242339832869038,
+      "fmt": ".1f",
+      "unit": "",
+      "desc": "Percent fewer 10x PSMs at the default threshold than at one match",
+      "expect": {
+        "min": 0,
+        "max": 5
+      },
+      "checksum": "v2:ee51becfaecc1642",
+      "origin": {
+        "by": "analysis/scripts/gen_stats.py",
+        "at": "2026-09-26T10:38:32Z"
       }
     },
     "matched.fdp.max": {

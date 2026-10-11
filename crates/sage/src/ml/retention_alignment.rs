@@ -176,6 +176,32 @@ pub fn fit_reference_alignment(
 }
 
 impl Alignment {
+    /// Map a consensus RT back into the original run's time units: the inverse
+    /// of [`Alignment::transform`] (flat warp segments map to their left end).
+    pub fn inverse(&self, aligned: f32) -> f32 {
+        let x = if self.knots.len() < 2 {
+            if self.slope.abs() > f32::EPSILON {
+                (aligned - self.intercept) / self.slope
+            } else {
+                aligned
+            }
+        } else {
+            let upper = self.knots.partition_point(|&(_, knot_y)| knot_y <= aligned);
+            let (left, right) = match upper {
+                0 => (self.knots[0], self.knots[1]),
+                n if n == self.knots.len() => (self.knots[n - 2], self.knots[n - 1]),
+                n => (self.knots[n - 1], self.knots[n]),
+            };
+            let height = right.1 - left.1;
+            if height <= f32::EPSILON {
+                left.0
+            } else {
+                left.0 + (aligned - left.1) * (right.0 - left.0) / height
+            }
+        };
+        x * self.max_rt
+    }
+
     /// Transform a retention time in the original run's time units into consensus RT.
     pub fn transform(&self, rt: f32) -> f32 {
         let x = rt / self.max_rt;

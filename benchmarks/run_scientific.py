@@ -22,8 +22,9 @@ CANDIDATE = REPO / "benchmarks/results/beta3-publication-20260910/hosted-gnu/unp
 
 def base_config(fasta, spectra):
     return {"database": {"bucket_size": 16384, "enzyme": {
-        "missed_cleavages": 1, "cleave_at": "KR", "restrict": "P", "min_len": 7, "max_len": 50},
-        "static_mods": {"C": 57.021464}, "decoy_tag": "rev_", "generate_decoys": True, "fasta": str(fasta)},
+        "missed_cleavages": 1, "cleave_at": "KR", "restrict": "P", "semi_enzymatic": False,
+        "min_len": 7, "max_len": 50},
+        "static_mods": {"C": 57.021464}, "ion_kinds": ["b", "y"], "decoy_tag": "rev_", "generate_decoys": True, "fasta": str(fasta)},
         "precursor_tol": {"ppm": [-10, 10]}, "fragment_tol": {"ppm": [-20, 20]},
         "isotope_errors": [-1, 3], "deisotope": True, "chimera": False,
         "max_fragment_charge": 2, "min_matched_peaks": 6, "report_psms": 1,

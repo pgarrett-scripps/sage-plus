@@ -1,0 +1,11 @@
+sage-plus-raw
+
+This software is an independently maintained fork of OpenTFRaw.
+Original OpenTFRaw copyright 2026 Sigilweaver Holdings LLC.
+Original authors and contributors are retained in repository history and CONTRIBUTORS.md.
+The parser code is distributed under the Apache License 2.0 in LICENSE.
+Fork changes are by Sage Plus contributors.
+
+OpenTFRaw and the public opentfraw package are upstream projects. This fork does
+not claim ownership of their registry names, website, trademarks or publishing accounts.
+Thermo Fisher Scientific is not affiliated with or endorsing this project.

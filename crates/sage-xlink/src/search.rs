@@ -161,6 +161,7 @@ impl CrosslinkSearch {
                 mass,
                 name: Some(self.definition_name.clone()),
                 neutral_losses: Arc::from(losses),
+                site_losses: None,
                 neutral_loss_mode: NeutralLossMode::Optional,
                 channel_offsets: Arc::default(),
             }),

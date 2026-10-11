@@ -43,6 +43,29 @@ macro_rules! write_required_column {
     };
 }
 
+/// Writer properties shared by every Sage Parquet file: ZSTD level 3 and a
+/// key-value footer holding the file's own keys (schema name and version,
+/// filters) followed by the run `provenance` pairs, such as
+/// `("sage.version", "0.1.0")`. Pass an empty slice to write no provenance.
+/// A provenance key that repeats one of the file's own keys is an error.
+fn writer_properties(
+    mut metadata: Vec<KeyValue>,
+    provenance: &[(String, String)],
+) -> parquet::errors::Result<WriterProperties> {
+    for (key, value) in provenance {
+        if metadata.iter().any(|entry| &entry.key == key) {
+            return Err(ParquetError::General(format!(
+                "provenance key `{key}` repeats a key the writer sets"
+            )));
+        }
+        metadata.push(KeyValue::new(key.clone(), Some(value.clone())));
+    }
+    Ok(WriterProperties::builder()
+        .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3)?))
+        .set_key_value_metadata(Some(metadata))
+        .build())
+}
+
 mod lfq;
 mod results;
 mod sites;

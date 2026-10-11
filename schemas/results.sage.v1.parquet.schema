@@ -6,6 +6,8 @@ message schema {
     required byte_array ambiguity_sequence (utf8);
     required float mass_shift;
     required byte_array stripped_peptide (utf8);
+    optional byte_array database_peptide (utf8);
+    required byte_array substitutions (utf8);
     required byte_array proteins (utf8);
     required group protein_sites (LIST) {
         repeated group list {
