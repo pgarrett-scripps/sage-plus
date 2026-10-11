@@ -38,11 +38,11 @@ ETD, EThcD, ETciD), so recalibration never mixes scan types. See [inputs](DOCS.m
 
 Better defaults and scoring for the spectra you already have.
 - Initiator methionine clipping, on by default: 3.4% more PSMs at 1% FDR on HEK SILAC with protein N-terminal acetylation searched ([details](DOCS.md#initiator-methionine-clipping)).
-- `z_dot` fragment ions for ETD and EThcD: 43% more ETD PSMs than Sage's `z` on PXD018176 ([details](DOCS.md#fragment-settings)).
+- `z_dot` fragment ions for ETD and EThcD: 51% more ETD-scan PSMs than upstream Sage with `z` ions on PXD018176 ([head-to-head](benchmarks/HEADTOHEAD-2026-10.md)) ([details](DOCS.md#fragment-settings)).
 - Search-time mass recalibration per file and per analyzer, kept only when it improves held-out error ([details](DOCS.md#other-settings)).
 - Ambiguous residues: J scored as I/L, opt-in B/Z/X expansion with a `substitutions` column, I/L twins merged ([details](DOCS.md#ambiguous-residues)).
 - Averagine-scored deisotoping, charge-aware fragment matching, and `ambiguity_sequence` marking unsupported regions ([details](DOCS.md#sequence-ambiguity-annotation)).
-- Picked target-decoy FDR for peptides, proteins and protein groups: a target beaten by its own decoy no longer passes ([details](DOCS.md#protein-inference)).
+- Textbook picked target-decoy FDR for peptides, proteins and protein groups (upstream Sage also uses picked FDR; this version drops a target beaten by its own decoy, and changes IDs by at most 0.3%) ([details](DOCS.md#protein-inference)).
 - Opt-in immonium-ion evidence and water/ammonia fragment losses as extra rescoring features, reported per PSM ([details](DOCS.md#immonium-ions)).
 - Opt-in DIA pseudo-spectrum mode for Orbitrap DIA and diaPASEF ([details](DOCS.md#dia-pseudo-spectrum-search)).
 
@@ -60,7 +60,7 @@ Say exactly where a modification can go, and check it before searching.
 
 Most useful for large databases, many modifications, or many files.
 - Streamed prefilter (above); `prefilter_min_matched_peaks` (default 4) trades a few weak PSMs for memory ([details](DOCS.md#fasta)).
-- Compact peptide, fragment-index, and spectrum storage: 22-37% less peak memory than upstream Sage `v0.15.0-beta.2` on three HEK workloads, with 2-20% longer wall time (Beta 2, [results](benchmarks/RESULTS.md#upstream-sage-versus-sage-plus)).
+- Compact peptide, fragment-index, and spectrum storage: 18% less peak memory than upstream Sage `v0.15.0-beta.2` on standard DDA and 41% less on a phospho search, at about the same speed on DDA ([head-to-head](benchmarks/HEADTOHEAD-2026-10.md)).
 - Interleaved fragment-bucket search: 19-27% faster search phase with identical PSMs ([changelog](CHANGELOG.md)).
 - `max_memory_gb` stops a run at a measured memory limit, and `--estimate` previews database size ([details](DOCS.md#memory-guard)).
 
