@@ -4,7 +4,8 @@ Status: milestone 1 (cleavable DSSO/DSBU) is implemented on the `feat/crosslink`
 The search lives in `crates/sage-xlink`. It is built into `sage` only with the `crosslink`
 Cargo feature and runs only when the config has a `"crosslink"` block. See
 [Milestone 1](#milestone-1-implementation) at the end of this document. Nothing here ships
-in Beta 9.
+in a release. The branch was last caught up with main at `cbc6969` (Beta 17 plus unreleased
+work) on 2026-10-11; see [Caught up with main](#caught-up-with-main-cbc6969-2026-10-11).
 
 ## Recommendation in one paragraph
 
@@ -389,6 +390,11 @@ The `"crosslink"` block is valid only in builds with the feature. `prefilter` an
   `"DSSO_hydrolyzed": {"mass": 176.01433, "sites": ["K"], "search_mode": "mass_offset", ...}`
   (see "Monolinks" in DOCS.md). The benchmark configs were converted with
   `runs/modernize_mods.py`, and the results are unchanged.
+- Since Beta 16, `database.ion_kinds` and `enzyme.semi_enzymatic` must be stated
+  (`["b", "y"]` and `false` reproduce the earlier runs).
+- Set `"clip_n_term_met": false` for synthetic crosslink libraries. Main's default (on since
+  Beta 12) adds Met-clipped N-terminal chains that cost 1–3% of correct CSMs here (see
+  "Caught up with main").
 
 ### Results, true FDR at 1% estimated CSM FDR
 
@@ -648,3 +654,52 @@ runs, recomputing the split CSM q-values the tool's way (script `analysis/combo.
   - Candidate caps of 5/3 match 10/5 at about 5% less CPU.
   - Dropping the intact-linker preliminary shift saved about 13% CPU with no loss.
 - Wall times are noisy; the load average was 12–50 during these runs.
+
+### Caught up with main cbc6969, 2026-10-11
+
+`origin/main` (Beta 10–17 plus unreleased work) was merged into `feat/crosslink`.
+
+- **Conflicts:** `execution.rs` only. `Runner::run` and `run_with_summary` now return the
+  `RunSummary` (telemetry is gone); `write_crosslinks` is unchanged and runs before main's
+  digestion and diagnostic-ion outputs. The crosslink output already used main's
+  `write_sidecar` path.
+- **Ports:** `ModificationDefinition` gained `site_losses` (Beta 14); the chain offset sets it
+  to `None`. `sage-xlink` moved to parquet 60 and Rust 1.97 like the rest of the workspace.
+- **Configs:** `ion_kinds: ["b", "y"]` and `semi_enzymatic: false` added (Beta 16). The
+  prefilter defaults (Beta 11) do not apply: crosslink search requires the prefilter off.
+- fmt, clippy (`-D warnings`, all features) and 900 workspace tests pass.
+
+Runs `*-catchup*`, script `runs/catchup.sh` and `runs/catchup2.sh`, same binary for every
+column. Each cell gives correct target matches and the true FDR:
+
+| Dataset, level | Est. FDR | Before (Sep 25) | Main defaults | Met clip off | Clip and I/L merge off |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Beveridge, CSMs | 1% | 1851 (2.7%) | 1832 (2.7%) | 1853 (2.7%) | 1851 (2.7%) |
+| Beveridge, CSMs | 0.2% | 1172 (1.9%) | 1152 (2.0%) | 1158 (1.9%) | 1172 (1.9%) |
+| Beveridge, residue pairs | 1% | 171 (3.4%) | 172 (3.4%) | 170 (3.4%) | 171 (3.4%) |
+| Beveridge, residue pairs | 0.2% | 146 (2.0%) | 149 (2.0%) | 148 (2.0%) | 146 (2.0%) |
+| Ribosome, CSMs | 1% | 2875 (2.4%) | 2841 (2.3%) | 2917 (2.6%) | 2928 (2.6%) |
+| Ribosome, CSMs | 0.2% | 2239 (1.1%) | 2222 (1.1%) | 2261 (1.1%) | 2267 (1.1%) |
+| Ribosome, residue pairs | 1% | 575 (3.0%) | 574 (3.0%) | 577 (3.2%) | 578 (3.3%) |
+| Ribosome, residue pairs | 0.2% | 385 (0.5%) | 383 (0.5%) | 390 (0.8%) | 395 (0.8%) |
+
+- **Beveridge with both defaults off gives the same counts as before** at every level, so
+  the merge did not change the crosslink search itself.
+- **Met clipping costs depth.** It adds clipped N-terminal chains and their decoys
+  (10890 → 11036 candidates on Beveridge). These synthetic libraries have no clipped
+  protein N-termini, so the extra candidates only compete. Turning clipping off alone
+  recovers most of the gap at 1%: +21 correct CSMs on Beveridge (+1.1%) and +76 on
+  ribosome (+2.7%). At 0.2% the ribosome gain is +39 (+1.8%) at the same 1.1% true FDR.
+  Turn it off for crosslink libraries; for lysates the trade-off is untested.
+- **I/L merging is small** (+4 to +13 correct CSMs when split, within noise of the
+  q-value boundary). Kept at main's default.
+- **Ribosome gains about 2% with both defaults off relative to Sep 25** (2928 vs 2875 at 1%,
+  2267 vs 2239 at 0.2%). The fragment index and peptide count are identical, but the
+  linear search finds 260 instead of 252 target peptides at 1%. The crosslink search reuses
+  the scorer recalibrated on those linear PSMs, so main's linear changes (Beta 13–17
+  scoring and FDR fixes) are the likely source. Not traced further. Beveridge's linear
+  results did not change, and neither did its crosslinks.
+- **Cost:** peak RSS 766–777 MB on Beveridge (746 MB before) and 985–989 MB on ribosome
+  (964 MB before), from main's QC outputs and 64-bit index offsets. The crosslink step took
+  11–23 s on Beveridge and 18–44 s on ribosome. Another agent was building at the same
+  time, so wall times are not comparable with the earlier table.
