@@ -31,7 +31,7 @@ jobs:
           toolchain: 1.97.1
           components: rustfmt, clippy
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: quality
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -61,7 +61,7 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: test-${{ matrix.rust }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -105,7 +105,7 @@ jobs:
         with:
           toolchain: 1.97.1
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: minimal
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -125,7 +125,7 @@ jobs:
           toolchain: 1.97.1
           components: llvm-tools-preview
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: coverage
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -160,7 +160,7 @@ jobs:
         with:
           toolchain: 1.97.1
       - name: Cache Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: smoke-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
