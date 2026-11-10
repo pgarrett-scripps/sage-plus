@@ -10,6 +10,12 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Changed
+- Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
+  same problem, the Sage Plus implementation is kept: named modifications with explicit sites
+  (not upstream's named PTMs), `z_dot` ions (not upstream's radical z ions), per-modification
+  `max_count`/`max_total_count` (not upstream's per-mod variable limits), and the Bruker and
+  Thermo readers from `sage-plus-tdf`/`sage-plus-raw` (not timsrust 0.6.7). Telemetry stays
+  removed. Upstream's LFQ and score-ordering fixes are taken; see below.
 - Dependencies: parquet 60 (was 59), mzdata 0.67.4 (was 0.65.5; reads mzMLb input), base64
   0.22, itertools 0.15, thiserror 2; num_cpus is replaced by the standard library. Results and
   the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
@@ -19,6 +25,17 @@ entries are retained below for provenance.
   0.1.0) instead of git revisions, so Sage Plus builds with one parquet version.
 
 ### Fixed
+- LFQ integration windows contain only bins that pass both the score and spectral-angle
+  thresholds, on both sides (upstream `75a5300`, `63f10e7`). The window previously always included
+  one bin either side of the apex whether or not it passed, and then dropped the last passing bin
+  on the right; a window may now be a single bin. The apex-recentering path had the matching
+  off-by-one, because `peak_bounds` returned an exclusive right bound while the integration sliced
+  it inclusively. Peak areas, `peak_start_rt` and `peak_end_rt` change for affected precursors.
+  Alignment also prefers the smallest displacement when two retention-time shifts correlate
+  equally well, and the spectral-angle distance is accumulated in f64 instead of f32.
+- PSM ordering is total (upstream `df16dec`, lazear/sage#236). `Score` compared hyperscores with
+  a partial comparison, so a NaN hyperscore could make the ranking of a whole spectrum's
+  candidates depend on heap order.
 - `localized_peptide` gives each copy of a multi-copy ambiguous modification its own ProForma group
   (`#g1`, `#g2`, ...), with every other candidate tagged in each group:
   `PES[Phospho#g1(0.95)]PT[#g1(0.20)][#g2(0.20)]IS[Phospho#g2(0.85)]K`. Beta 17 put every copy in one
@@ -988,6 +1005,9 @@ The entries below predate independent Sage Plus versioning and are retained from
 - `protein_grouping_peptide_fdr` parameter to control the peptide FDR threshold used for confident peptides during protein grouping (default: 0.01)
 - Initial support for LFQ on data with ion mobility.
 - Speedup on the generation of databases when large number of peptides are redundant.
+- Database splitting and prefiltering to reduce memory usage (`database.prefilter`, `database.prefilter_chunk_size`, and `database.prefilter_low_memory` settings)
+- Per-modification occurrence limits using `{"mass": <mass>, "max_count": <limit>}` entries in `database.variable_mods`; existing bare-mass entries remain supported.
+- `database.max_combinations` to cap the number of peptide variants (including the unmodified form) generated from variable modifications, preferring variants with fewer modifications.
 - Initial support for searching diaPASEF data
 - `override_precursor_charge` setting that forces multiple charge states to be searched
 - Cross-cloud storage support: Replaced AWS SDK with the `object_store` crate. Sage now natively supports reading/writing from Amazon S3, Google Cloud Storage, and Azure Blob Storage using `s3://`, `gs://`, and `az://` URL schemes.
@@ -998,6 +1018,7 @@ The entries below predate independent Sage Plus versioning and are retained from
 - CITATION.cff file
 
 ### Fixed
+- Use neutral NH3 mass in c, x, and non-radical z fragment calculations.
 - Handle negative mass errors for .pin files
 - Extract precursor m/z from 'isolation window target m/z' if missing
 - Selected ion m/z of 0.0 was overwriting precursor.mz
@@ -1005,8 +1026,12 @@ The entries below predate independent Sage Plus versioning and are retained from
 - Bruker `.tdf` filename handling (use parent directory name)
 - Performance optimizations on prefiltering
 - Picked protein FDR now correctly uses only proteotypic peptides for competition
+- Fixed bug in MS1 picked-precursor FDR where target and decoy q-values were not distinguished when assigning them to peaks
+- Fixed bug in candidate score ordering that could retain lower-scoring peptide matches during prefiltering
+- Track charges on deisotoped ions to correctly report fragment charges and m/z in matched fragment annotations
 
 ### Breaking Changes
+- Variable modifications must be specified as lists (e.g. `[15.9949]`), rather than single values (e.g. `15.9949`)
 - `precursor_ppm` field reports the non-absoluted average mass error, rather than the absoluted average mass error.
 - Don't deisotope reporter ion regions if MS2-based TMT/iTRAQ is used
 - Removed `fragment_min_mz` and `fragment_max_mz` parameters. These were decreasing the accuracy of preliminary scoring estimation when attempting to annotate multiply-charged, high-m/z ions.

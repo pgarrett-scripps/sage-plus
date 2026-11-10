@@ -301,9 +301,14 @@ fn every_peak_scoring_strategy_prefers_the_centered_matching_peak() {
 #[test]
 fn integration_supports_sum_and_apex_and_rejects_weak_matches() {
     let mut sum_trace = traces();
+    // Intensity scoring, so the bins either side of the apex clear the 50%
+    // score threshold and the window is wider than one bin. Under the default
+    // hybrid scorer they do not, and Sum and Apex integrate the same single
+    // bin -- correct, but it would not test Sum against Apex.
     let mut settings = LfqSettings {
         spectral_angle: 0.5,
         integration: IntegrationStrategy::Sum,
+        peak_scoring: PeakScoringStrategy::Intensity,
         ..Default::default()
     };
     let (sum_peak, sum_areas) = sum_trace.integrate(&settings).unwrap();
@@ -662,9 +667,10 @@ fn apex_climb_crosses_small_dips_but_not_valleys() {
 #[test]
 fn peak_bounds_stop_at_valleys_and_the_height_fraction() {
     let trace = [3.0, 2.5, 2.2, 6.0, 10.0, 7.0, 4.0, 1.5, 0.5];
-    // Left stops before the valley (bin 1 rises again), right at 20% of the apex.
-    assert_eq!(peak_bounds(&trace, 4, 0.2), (2, 7));
-    assert_eq!(peak_bounds(&trace, 4, 0.5), (3, 6));
+    // Left stops before the valley (bin 1 rises again), right at 20% of the
+    // apex. Both bounds are inclusive: the last bin named is inside the peak.
+    assert_eq!(peak_bounds(&trace, 4, 0.2), (2, 6));
+    assert_eq!(peak_bounds(&trace, 4, 0.5), (3, 5));
 }
 
 #[test]
@@ -698,8 +704,132 @@ fn apex_mode_integrates_around_each_files_own_apex() {
     let (peak, _, evidence, window) = trace.pick(&settings, Some(&[Some(2), None])).unwrap();
     assert_eq!(peak.rt, 4);
     assert_eq!(window.shifts, vec![0, 1]);
-    assert_eq!((window.left, window.right), (3, 6));
+    // `right` is the last bin inside the window, not one past it.
+    assert_eq!((window.left, window.right), (3, 5));
     let file0 = evidence[0].as_ref().unwrap();
     assert_eq!(file0.apex_rt, 4.0);
     assert_eq!(evidence[1].as_ref().unwrap().apex_rt, 5.0);
+}
+
+// Ported from upstream Sage (63f10e7, 75a5300). Upstream keeps these inline in
+// `src/lfq.rs`; sage-plus keeps unit tests out of production source.
+
+fn flat_traces(rows: Vec<Vec<f64>>) -> Traces {
+    let n = rows.len();
+    let cols = rows[0].len();
+    Traces {
+        dot_product: Matrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), n, cols),
+        spectral_angle: Matrix::new(vec![1.0; n * cols], n, cols),
+        reference_file_id: 0,
+        geometry: GridGeometry::default(),
+    }
+}
+
+fn intensity_settings() -> LfqSettings {
+    LfqSettings {
+        peak_scoring: PeakScoringStrategy::Intensity,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn lfq_perfect_isotopes_finite() {
+    for carbon in 20..100 {
+        let dist = crate::isotopes::peptide_isotopes(carbon, 1);
+        let e = PrecursorRange {
+            rt: 0.5,
+            mass_lo: 0.0,
+            mass_hi: 0.0,
+            mobility_lo: 0.0,
+            mobility_hi: 0.0,
+            charge: 2,
+            isotope: 0,
+            peptide: PeptideIx(0),
+            file_id: 0,
+            decoy: false,
+        };
+        let mut grid = Grid::new(&e, 0.005, dist, 1, 100);
+        for i in 0..3 {
+            grid.add_entry(0.5, i, 0, dist[i] * 1000.0);
+        }
+        let mut trace = grid.summarize_traces();
+        assert!(trace.integrate(&LfqSettings::default()).is_some());
+        assert!(
+            trace
+                .spectral_angle
+                .row_slice(0)
+                .iter()
+                .all(|x| x.is_finite()),
+            "NaN spectral angle for carbon={carbon}, distribution={dist:?}"
+        );
+    }
+}
+
+#[test]
+fn empty_reference_preserves_other_runs() {
+    let mut signal = vec![0.0; 100];
+    signal[50] = 100.0;
+    let mut t = flat_traces(vec![vec![0.0; 100], signal]);
+    assert_eq!(t.find_time_warps(&t.dot_product, 75), vec![0, 0]);
+    let (_, areas) = t
+        .integrate(&intensity_settings())
+        .expect("signal in the non-reference run");
+    assert_eq!(areas, vec![None, Some(100.0)]);
+}
+
+#[test]
+fn informative_reference_still_aligns_shifted_peaks() {
+    let mut reference = vec![0.0; 100];
+    let mut shifted = reference.clone();
+    reference[50] = 100.0;
+    shifted[60] = 100.0;
+    let mut t = flat_traces(vec![reference, shifted, vec![0.0; 100]]);
+    assert_eq!(t.find_time_warps(&t.dot_product, 75), vec![0, 10, 0]);
+    assert_eq!(
+        t.integrate(&intensity_settings()).unwrap().1,
+        vec![Some(100.0), Some(100.0), None]
+    );
+}
+
+#[test]
+fn tied_correlations_prefer_smallest_shift() {
+    let mut reference = vec![0.0; 100];
+    let mut plateau = reference.clone();
+    reference[50] = 100.0;
+    plateau[48..=52].fill(100.0);
+    let t = flat_traces(vec![reference, plateau]);
+    assert_eq!(t.find_time_warps(&t.dot_product, 75), vec![0, 0]);
+}
+
+#[test]
+fn mirrored_peaks_exclude_failing_boundary_bins() {
+    for tail in [49, 51] {
+        for spectral_failure in [false, true] {
+            let mut row = vec![0.0; 100];
+            row[50] = 100.0;
+            row[tail] = if spectral_failure { 40.0 } else { 10.0 };
+            let mut t = flat_traces(vec![row]);
+            if spectral_failure {
+                t.spectral_angle[(0, tail)] = 0.0;
+            }
+            assert_eq!(
+                t.integrate(&intensity_settings()).unwrap().1,
+                vec![Some(100.0)]
+            );
+        }
+    }
+}
+
+#[test]
+fn integration_includes_passing_bins_at_both_grid_edges() {
+    for (apex, neighbor) in [(0, 1), (1, 0), (98, 99), (99, 98)] {
+        let mut row = vec![0.0; 100];
+        row[apex] = 100.0;
+        row[neighbor] = 40.0;
+        let mut t = flat_traces(vec![row]);
+        assert_eq!(
+            t.integrate(&intensity_settings()).unwrap().1,
+            vec![Some(140.0)]
+        );
+    }
 }

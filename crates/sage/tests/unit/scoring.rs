@@ -1279,3 +1279,24 @@ mod mass_offsets {
         assert!(json.get("peak_indices").is_none());
     }
 }
+
+/// Ported from upstream Sage (df16dec, #236): `Score::cmp` must be a total
+/// order, or `bounded_min_heapify` can drop the best candidates.
+#[test]
+fn score_ordering_issue_236() {
+    let mut scores = [(1, 100.0), (2, 50.0), (3, 1.0)]
+        .into_iter()
+        .map(|(index, hyperscore)| Score {
+            peptide: PeptideIx(index),
+            hyperscore,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    bounded_min_heapify(&mut scores, 2);
+    let mut retained = scores[..2]
+        .iter()
+        .map(|score| score.hyperscore)
+        .collect::<Vec<_>>();
+    retained.sort_by(f64::total_cmp);
+    assert_eq!(retained, vec![50.0, 100.0]);
+}

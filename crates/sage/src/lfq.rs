@@ -967,7 +967,7 @@ impl Traces {
 
     /// Offset of `run` that maximizes its dot product with `reference`.
     fn best_shift(reference: &[f64], run: &[f64], slack: isize) -> isize {
-        let mut best_offset = (0, 0.0);
+        let mut best_offset = (0isize, 0.0);
         for offset in -slack..=slack {
             let mut dot = 0.0;
             for (i, ref_int) in reference.iter().enumerate() {
@@ -977,7 +977,9 @@ impl Traces {
                 }
             }
 
-            if dot >= best_offset.1 {
+            // Without evidence for a shift, preserve the trace. For tied
+            // correlations, prefer the smallest displacement.
+            if dot > best_offset.1 || (dot == best_offset.1 && offset.abs() < best_offset.0.abs()) {
                 best_offset = (offset, dot);
             }
         }
@@ -1085,23 +1087,24 @@ impl Traces {
             return None;
         }
 
-        // Find peak boundaries
-        let mut left = best.rt.saturating_sub(1);
-        let mut right = best.rt.saturating_add(1);
+        // Inclusive boundaries contain only bins that pass both thresholds.
+        let mut left = best.rt;
+        let mut right = best.rt;
 
         let threshold = best.score * 0.50;
 
-        // Don't let peaks extend more than GRID_SIZE/5 bins to either side
-        while left > best.rt.saturating_sub(scores.len() / 5)
-            && scores[left] >= threshold
-            && spectral[left] >= settings.spectral_angle
+        // Don't let peaks extend more than one fifth of the grid to either side.
+        let max_width = scores.len() / 5;
+        while left > best.rt.saturating_sub(max_width)
+            && scores[left - 1] >= threshold
+            && spectral[left - 1] >= settings.spectral_angle
         {
             left -= 1;
         }
 
-        while right < scores.len().saturating_sub(1).min(best.rt + 20)
-            && scores[right] >= threshold
-            && spectral[right] >= settings.spectral_angle
+        while right < (scores.len() - 1).min(best.rt + max_width)
+            && scores[right + 1] >= threshold
+            && spectral[right + 1] >= settings.spectral_angle
         {
             right += 1;
         }
@@ -1172,7 +1175,7 @@ impl Traces {
         for file in 0..self.dot_product.rows {
             let area = match settings.integration {
                 IntegrationStrategy::Sum => self.dot_product.row_slice(file)
-                    [window.left..window.right]
+                    [window.left..=window.right]
                     .iter()
                     .sum::<f64>(),
                 IntegrationStrategy::Apex => self.dot_product.row_slice(file)[window.rt],
@@ -1213,7 +1216,7 @@ impl Traces {
                         extraction_q_value: None,
                         apex_rt: self.geometry.rt(window.rt as f64 + shift),
                         peak_start_rt: self.geometry.rt(window.left as f64 + shift),
-                        peak_end_rt: self.geometry.rt(window.right as f64 - 1.0 + shift),
+                        peak_end_rt: self.geometry.rt(window.right as f64 + shift),
                         fwhm,
                         id_apex_offset: None,
                     }
@@ -1297,9 +1300,9 @@ impl Grid {
         let ss_dist = self
             .distribution
             .iter()
-            .map(|x| x.powi(2))
-            .sum::<f32>()
-            .sqrt() as f64;
+            .map(|&x| (x as f64).powi(2))
+            .sum::<f64>()
+            .sqrt();
 
         for file in 0..self.files {
             let mut summed_squared_intensities = vec![0.0; self.matrix.cols];
@@ -1323,7 +1326,8 @@ impl Grid {
                 };
 
                 // Calculate the normalized spectral angle
-                spectral_angle[(file, col)] = 1.0 - 2.0 * similarity.acos() / std::f64::consts::PI;
+                spectral_angle[(file, col)] =
+                    1.0 - 2.0 * similarity.clamp(-1.0, 1.0).acos() / std::f64::consts::PI;
                 dot_product[(file, col)] = dot;
             }
         }
@@ -1374,9 +1378,10 @@ fn climb_to_apex(trace: &[f64], seed: usize) -> Option<usize> {
     }
 }
 
-/// Integration bounds `[left, right)` around `apex`: extend while the trace
-/// stays above `fraction` of the apex height and keeps falling (a valley ends
-/// the peak).
+/// Inclusive integration bounds `[left, right]` around `apex`: extend while
+/// the trace stays above `fraction` of the apex intensity and keeps falling (a
+/// valley ends the peak). Inclusive to match [`PeakWindow::right`], which every
+/// consumer slices with `..=`.
 fn peak_bounds(trace: &[f64], apex: usize, fraction: f64) -> (usize, usize) {
     let floor = trace[apex] * fraction;
     let mut left = apex;
@@ -1387,7 +1392,7 @@ fn peak_bounds(trace: &[f64], apex: usize, fraction: f64) -> (usize, usize) {
     while right + 1 < trace.len() && trace[right + 1] >= floor && trace[right + 1] <= trace[right] {
         right += 1;
     }
-    (left, right + 1)
+    (left, right)
 }
 
 /// Width, in (fractional) bins, of `trace` at half its height at `apex`.

@@ -98,9 +98,7 @@ impl PartialOrd for Score {
 
 impl Ord for Score {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.hyperscore
-            .partial_cmp(&other.hyperscore)
-            .unwrap_or(std::cmp::Ordering::Less)
+        self.hyperscore.total_cmp(&other.hyperscore)
     }
 }
 
