@@ -633,3 +633,20 @@ fn symbol_keyed_maps_reject_sage_plus_extensions() {
         assert!(message.contains("DOCS.md"), "{message}");
     }
 }
+
+#[test]
+fn internal_prefix_requires_a_residue_and_never_panics() {
+    use ModificationSpecificity::*;
+
+    // With a residue, `~` is an internal-site key.
+    assert_eq!("~K".parse::<ModificationSpecificity>(), Ok(Internal(b'K')));
+
+    // Without one it is a malformed key, reported as an error. The parse used
+    // to reach `Self::Internal(residue.unwrap())`, which only held because `~`
+    // is absent from the single-byte prefix arm.
+    assert_eq!(
+        "~".parse::<ModificationSpecificity>(),
+        Err(InvalidModification::InvalidResidue('~'))
+    );
+    assert!("~1".parse::<ModificationSpecificity>().is_err());
+}
