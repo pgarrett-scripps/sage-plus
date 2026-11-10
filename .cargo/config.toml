@@ -1,0 +1,14 @@
+# Workspace build settings.
+#
+# `sage-cli` enables the `mzmlb` feature by default, which pulls in
+# mzdata -> blosc-src, whose vendored c-blosc still declares
+# `cmake_minimum_required(VERSION <3.5)`. CMake 4 removed compatibility with
+# those policy versions, so the build fails outright on any machine with
+# CMake >= 4 ("Compatibility with CMake < 3.5 has been removed").
+#
+# Setting the policy floor here fixes `cargo build`, `cargo test` and
+# `cargo clippy` for every developer, not just the `platform-smoke` CI job
+# that already sets it (.github/workflows/rust.yml). Remove this once mzdata
+# ships a blosc-src that declares a supported minimum.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
