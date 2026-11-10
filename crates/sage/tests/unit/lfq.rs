@@ -749,8 +749,8 @@ fn lfq_perfect_isotopes_finite() {
             decoy: false,
         };
         let mut grid = Grid::new(&e, 0.005, dist, 1, 100);
-        for i in 0..3 {
-            grid.add_entry(0.5, i, 0, dist[i] * 1000.0);
+        for (i, intensity) in dist.iter().enumerate() {
+            grid.add_entry(0.5, i, 0, *intensity * 1000.0);
         }
         let mut trace = grid.summarize_traces();
         assert!(trace.integrate(&LfqSettings::default()).is_some());
