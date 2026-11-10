@@ -577,10 +577,13 @@ impl<'db> Scorer<'db> {
         assert_eq!(keep.len(), self.db.peptides.len());
         let query = self.recalibrated(query);
         let query = query.as_ref();
-        let precursor = query
-            .precursors
-            .first()
-            .unwrap_or_else(|| panic!("missing MS1 precursor for {}", query.id));
+        // Readers keep MS2 scans with no selected precursor on purpose (see
+        // `spectrum.rs`); in-tree callers filter them with `is_searchable`, but a
+        // library caller can hand one straight here. Such a scan has no
+        // precursor window, so it marks no candidate rather than panicking.
+        let Some(precursor) = query.precursors.first() else {
+            return;
+        };
         let mz = precursor.mz - PROTON;
 
         let mark = |precursor_mass: f32, precursor_charge: u8, tolerance: Tolerance| {
@@ -935,9 +938,13 @@ impl<'db> Scorer<'db> {
 
     /// Score a single [`ProcessedSpectrum`] against the database
     pub fn score_standard(&self, query: &ProcessedSpectrum) -> Vec<Feature> {
-        let precursor = query.precursors.first().unwrap_or_else(|| {
-            panic!("missing MS1 precursor for {}", query.id);
-        });
+        // An MS2 scan with no selected precursor cannot be searched: there is no
+        // precursor mass to query the index with. Report no match instead of
+        // panicking, so a library caller that skips `is_searchable` sees an empty
+        // result rather than an abort.
+        let Some(precursor) = query.precursors.first() else {
+            return Vec::new();
+        };
 
         let hits = self.initial_hits(query, precursor);
         let mut features = Vec::with_capacity(self.report_psms);
@@ -1214,12 +1221,7 @@ impl<'db> Scorer<'db> {
                 // Features
                 charge: score.precursor_charge,
                 rt: query.scan_start_time,
-                ims: query
-                    .precursors
-                    .first()
-                    .unwrap()
-                    .inverse_ion_mobility
-                    .unwrap_or(0.0),
+                ims: precursor.inverse_ion_mobility.unwrap_or(0.0),
                 delta_mass,
                 aligned_delta_mass,
                 isotope_error,
@@ -1370,9 +1372,11 @@ impl<'db> Scorer<'db> {
     /// Return multiple PSMs for each spectra - first is the best match, second PSM is the best match
     /// after all theoretical peaks assigned to the best match are removed, etc
     pub fn score_chimera_fast(&self, query: &ProcessedSpectrum) -> Vec<Feature> {
-        let precursor = query.precursors.first().unwrap_or_else(|| {
-            panic!("missing MS1 precursor for {}", query.id);
-        });
+        // As in `score_standard`: no selected precursor means no searchable
+        // precursor mass, so report no match.
+        let Some(precursor) = query.precursors.first() else {
+            return Vec::new();
+        };
 
         let mut query = query.clone();
         let hits = self.initial_hits(&query, precursor);
