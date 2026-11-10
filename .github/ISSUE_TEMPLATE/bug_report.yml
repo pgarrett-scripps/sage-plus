@@ -1,0 +1,95 @@
+name: Bug report
+description: Something in Sage Plus behaves incorrectly or crashes
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the existing [issues](https://github.com/pgarrett-scripps/sage-plus/issues)
+        first. If the same problem reproduces in unmodified upstream
+        [Sage](https://github.com/lazear/sage), it belongs in the
+        [upstream tracker](https://github.com/lazear/sage/issues) instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what Sage Plus did instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Search configuration
+      description: >
+        The JSON configuration you ran, or the parts of it that matter. Paste it as text rather
+        than a screenshot so it can be run directly.
+      render: json
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command line
+      description: The full command, including every flag.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or error
+      description: >
+        The error message or panic, with the backtrace if there is one
+        (`RUST_BACKTRACE=1`). Trim long logs to the relevant part.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Sage Plus version
+      description: >
+        The output of `sage --version`, or the commit hash if you built from a working tree.
+      placeholder: "0.1.0-beta.17"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: input-format
+    attributes:
+      label: Input format
+      multiple: true
+      options:
+        - mzML
+        - mzMLb
+        - Bruker timsTOF (.d / TDF)
+        - Bruker miniTDF
+        - Thermo .raw
+        - mzSpecLib / spectral library
+        - Other or not applicable
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and Rust version
+      placeholder: "Ubuntu 24.04, rustc 1.97.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Input data
+      description: >
+        Bugs are much easier to fix with the data that triggered them. If you can share an mzML
+        file (or a single-spectrum excerpt of one) and the FASTA, say so here; do not attach
+        anything you are not free to publish.
+    validations:
+      required: false
