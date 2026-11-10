@@ -1052,11 +1052,24 @@ impl Peptide {
         if let Some(group) = &self.label_group_override {
             return group.to_string();
         }
-        if self.label_channel.is_none() {
-            return self.to_string();
+        match self.label_group_peptide() {
+            Some(base) => base.to_string(),
+            None => self.to_string(),
         }
+    }
+
+    /// The channel-collapsed peptidoform behind [`Peptide::label_group`]:
+    /// every precursor-label modification resolved back to its channel base,
+    /// with the channel offset removed from the terminal masses. `None` when
+    /// this peptide carries no precursor label channel, in which case the
+    /// peptide is already its own label group.
+    ///
+    /// Callers that need a structural identity rather than a rendered string
+    /// (peptide-level FDR competition) use this instead of parsing
+    /// `label_group`.
+    pub fn label_group_peptide(&self) -> Option<Peptide> {
+        let channel = self.label_channel.clone()?;
         let mut base = self.clone();
-        let channel = base.label_channel.clone().unwrap();
         let lookup = base.modifications.lookup.clone();
         for encoded in &mut base.modifications.entries {
             let record = lookup.record(encoded.modification_id);
@@ -1081,7 +1094,7 @@ impl Peptide {
         base.label_channel = None;
         base.label_group_override = None;
         base.modifications.sort();
-        base.to_string()
+        Some(base)
     }
 
     /// Physical sites selected by one rule. Motif rules are evaluated against
