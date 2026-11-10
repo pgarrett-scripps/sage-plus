@@ -21,8 +21,12 @@ entries are retained below for provenance.
   the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
   are kept when they come before the target m/z (pwiz Waters files), and a window with no
   offsets or limits gets correct bounds.
-- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.0, `sage-plus-raw`
-  0.1.0) instead of git revisions, so Sage Plus builds with one parquet version.
+- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.1, `sage-plus-raw`
+  0.1.1) instead of git revisions, so Sage Plus builds with one parquet version. The reader
+  updates are additive: `.raw` input decodes ETD and EThcD activation from the version 66
+  scan-event preamble for MS2 events whose reaction tag is unresolved, and TSF line spectra and
+  miniTDF spectra reject non-finite and negative intensities as corrupt data instead of handing
+  NaN intensities to the caller.
 
 ### Fixed
 - LFQ integration windows contain only bins that pass both the score and spectral-angle
