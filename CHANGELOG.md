@@ -18,11 +18,18 @@ entries are retained below for provenance.
   the ten unsound advisories RUSTSEC-2026-0395 through 0406), zstd-sys 2.1.1 → 2.1.2
   (RUSTSEC-2026-0410), libz-sys 1.1.29 → 1.1.33 (RUSTSEC-2026-0418) and tokio 1.53.2 → 1.54.1
   (RUSTSEC-2026-0386). None is a direct dependency of a Sage Plus crate; all are reached
-  through reqwest/object_store, parquet or mzdata. One finding remains and cannot be fixed
-  here: libsqlite3-sys 0.33.0 (RUSTSEC-2026-0459), which needs a rusqlite major bump.
+  through reqwest/object_store, parquet or mzdata.
 - Required `sage-plus-tdf` 0.2.2 (was 0.2.1) in `sage-cloudpath` and `sage-dia`. 0.2.1 pinned
   `ruzstd` exactly at 0.9.0, which made RUSTSEC-2026-0344 unreachable from this repository;
   0.2.2 relaxes the pin and the lockfile now takes ruzstd 0.9.1, clearing that advisory.
+- Required `rusqlite` 0.41 (was 0.35) in `sage-cloudpath`, which takes libsqlite3-sys from
+  0.33.0 to 0.39.1 and clears RUSTSEC-2026-0459 (the C SQLite CVE-2026-119375; the advisory is
+  first patched in libsqlite3-sys 0.39.0, and rusqlite 0.41 is the first release that accepts
+  it). `rusqlite` reads the Bruker TDF/TSF SQLite databases in `denoise.rs`; the read-only
+  connection, prepared statements and row accessors Sage Plus uses are unchanged across the six
+  minor versions, so no call site moved and no search behaviour changes. The lockfile also takes
+  hashlink 0.10.0 to 0.12.2 and adds foldhash, rsqlite-vfs and sqlite-wasm-rs, the last two
+  reached only on wasm targets.
 
 ### Changed
 - Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
