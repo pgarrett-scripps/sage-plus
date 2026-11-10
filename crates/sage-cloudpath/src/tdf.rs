@@ -772,9 +772,23 @@ impl PeakBuffer {
     }
 
     fn sort_and_order(&mut self) {
+        // A corrupt frame, or a degenerate m/z calibration, can decode to a
+        // non-finite m/z. Such a point has no position in the m/z ordering the
+        // rest of this type binary searches on, and `fastcentroid_frame` can
+        // neither window nor accumulate it, so drop it rather than abort the
+        // whole run on one bad point.
+        let decoded = self.peaks.len();
+        self.peaks.retain(|peak| peak.mz.is_finite());
+        let dropped = decoded - self.peaks.len();
+        if dropped > 0 {
+            log::warn!("dropped {dropped} of {decoded} peaks with a non-finite m/z");
+        }
+
         // sort by mz ... bc binary searching on the mz space
         // for neighbors is the fastest way to find neighbors that I have tried.
-        self.peaks.sort_by(|a, b| a.mz.partial_cmp(&b.mz).unwrap());
+        // `total_cmp` rather than `partial_cmp().unwrap()`: the unwrap panicked
+        // on a non-finite m/z, naming no file or frame.
+        self.peaks.sort_by(|a, b| a.mz.total_cmp(&b.mz));
 
         // The "order" is sorted by intensity
         // This will be used later during the centroiding (for details check that implementation)
@@ -926,8 +940,7 @@ impl PeakBuffer {
             }
         }
 
-        self.agg_buff
-            .sort_unstable_by(|a, b| a.mz.partial_cmp(&b.mz).unwrap());
+        self.agg_buff.sort_unstable_by(|a, b| a.mz.total_cmp(&b.mz));
         // println!("Centroiding: Start len: {}; end len: {};", arr_len, result.len());
         // Ultra data is usually start: 40k end 10k,
         // HT2 data is usually start 400k end 40k, limiting to 10k

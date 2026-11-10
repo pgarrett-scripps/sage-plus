@@ -1146,12 +1146,17 @@ impl FromStr for ModificationSpecificity {
                 ))
             }
         };
-        Ok(match prefix {
-            b'^' => Self::PeptideN(residue),
-            b'$' => Self::PeptideC(residue),
-            b'[' => Self::ProteinN(residue),
-            b']' => Self::ProteinC(residue),
-            b'~' => Self::Internal(residue.unwrap()),
+        Ok(match (prefix, residue) {
+            (b'^', residue) => Self::PeptideN(residue),
+            (b'$', residue) => Self::PeptideC(residue),
+            (b'[', residue) => Self::ProteinN(residue),
+            (b']', residue) => Self::ProteinC(residue),
+            (b'~', Some(residue)) => Self::Internal(residue),
+            // `~` is only accepted above with a residue, so a residue-less `~`
+            // is a malformed key, not an internal invariant: report it instead
+            // of unwrapping `None`, which would panic on user config if another
+            // single-byte prefix is ever added to the match above.
+            (b'~', None) => return Err(InvalidModification::InvalidResidue('~')),
             _ => unreachable!(),
         })
     }

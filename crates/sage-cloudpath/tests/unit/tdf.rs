@@ -313,3 +313,48 @@ fn diapasef_reads_one_spectrum_per_window_split() {
     ));
     assert_eq!(split.len(), 2 * spectra.len());
 }
+
+#[test]
+fn non_finite_mz_peaks_are_dropped_instead_of_panicking() {
+    let mut buffer = PeakBuffer {
+        peaks: vec![
+            ImsPeak {
+                mz: 101.0,
+                intensity: 7.0,
+                im: 1.2,
+            },
+            ImsPeak {
+                mz: f32::NAN,
+                intensity: 9.0,
+                im: 1.0,
+            },
+            ImsPeak {
+                mz: 100.0,
+                intensity: 10.0,
+                im: 1.0,
+            },
+            ImsPeak {
+                mz: f32::INFINITY,
+                intensity: 3.0,
+                im: 1.1,
+            },
+        ],
+        order: Vec::new(),
+        agg_buff: Vec::new(),
+    };
+
+    buffer.sort_and_order();
+
+    // The NaN and the infinity are gone, and the rest is m/z sorted.
+    assert_eq!(
+        buffer.peaks.iter().map(|peak| peak.mz).collect::<Vec<_>>(),
+        vec![100.0, 101.0]
+    );
+    // `order` is by descending intensity over the surviving peaks.
+    assert_eq!(buffer.order, vec![0, 1]);
+
+    let (mz, (intensity, mobility)) = buffer.fastcentroid_frame(5.0, 2.0);
+    assert_eq!(mz, vec![100.0, 101.0]);
+    assert_eq!(intensity, vec![10.0, 7.0]);
+    assert_eq!(mobility, vec![1.0, 1.2]);
+}
