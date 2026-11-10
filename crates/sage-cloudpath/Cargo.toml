@@ -32,7 +32,7 @@ quick-xml = { version = "0.42.0", features = ["async-tokio"] }
 # Bruker TDF reader (pure Rust, no SQLite C library).
 sage-plus-tdf = { version = "0.2.1", features = ["minitdf"] }
 # Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.
-rusqlite = { version = "0.35", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 # Thermo RAW reader.
 sage-plus-raw = "0.1.1"
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
