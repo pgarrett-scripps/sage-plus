@@ -9,6 +9,19 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Security
+- Updated nine transitive dependencies flagged by `cargo audit`, lockfile only, no manifest
+  change: rustls 0.23.45 → 0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), rustls-webpki
+  0.103.15 → 0.103.16 (RUSTSEC-2026-0382), webpki-root-certs 1.0.9 → 1.0.11
+  (RUSTSEC-2026-0383), quinn-proto 0.11.15 → 0.11.19 (RUSTSEC-2026-0338 through 0342), zstd
+  0.14.2 → 0.14.3 (RUSTSEC-2026-0391), zstd-safe 8.1.0 → 8.2.0 (RUSTSEC-2026-0398/0403 plus
+  the ten unsound advisories RUSTSEC-2026-0395 through 0406), zstd-sys 2.1.1 → 2.1.2
+  (RUSTSEC-2026-0410), libz-sys 1.1.29 → 1.1.33 (RUSTSEC-2026-0418) and tokio 1.53.2 → 1.54.1
+  (RUSTSEC-2026-0386). None is a direct dependency of a Sage Plus crate; all are reached
+  through reqwest/object_store, parquet or mzdata. Two findings remain and cannot be fixed
+  here: ruzstd 0.9.0 (RUSTSEC-2026-0344), pinned exactly by published `sage-plus-tdf` 0.2.1,
+  and libsqlite3-sys 0.33.0 (RUSTSEC-2026-0459), which needs a rusqlite major bump.
+
 ### Changed
 - Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
   same problem, the Sage Plus implementation is kept: named modifications with explicit sites
