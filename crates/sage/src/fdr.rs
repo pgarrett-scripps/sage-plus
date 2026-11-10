@@ -8,12 +8,15 @@
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::lfq::{PrecursorId, QuantifiedPeak};
-use crate::peptide::Peptide;
+use crate::modification::ModificationDefinition;
+use crate::peptide::{ModificationKind, Peptide, Site};
 use crate::scoring::Feature;
+use crate::sequence::PeptideSequence;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::hash::BuildHasher;
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::Arc;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Competition<Ix> {
@@ -132,7 +135,7 @@ fn assign_count_q_values<Ix>(scores: &mut [Row<Ix>], threshold: f32) -> usize {
 }
 
 pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
-    let mut map: FnvHashMap<String, Competition<PeptideIx>> = FnvHashMap::default();
+    let mut map: FnvHashMap<PeptideKey, Competition<PeptideIx>> = FnvHashMap::default();
     for feat in features.iter() {
         let peptide = &db[feat.peptide_idx];
         let key = peptide_competition_key(db, feat.peptide_idx);
@@ -181,22 +184,103 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     passing
 }
 
-fn peptide_competition_key(db: &IndexedDatabase, peptide_idx: PeptideIx) -> String {
+/// Target/decoy competition identity for picked peptide-level FDR.
+///
+/// Upstream keys the competition on the peptidoform structure itself —
+/// `(sequence, modifications, nterm, cterm)` with interned modification ids.
+/// This fork rendered the peptidoform to a string instead (`Peptide::label_group`,
+/// which ends in `Display`), and `Display` prints only a mass or a name per
+/// site: two distinct peptidoforms whose modifications render the same tag
+/// therefore shared one competition entry, and the loser of that collision
+/// disappeared from the competition and silently took `peptide_q = 1.0`.
+/// Keying on the structure cannot live upstream as-is because upstream has no
+/// label channels and no library-provided group identity, both of which this
+/// key has to preserve.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PeptideKey {
+    /// Library-provided base peptidoform identity, used when applied
+    /// modification provenance was lost to ProForma mass deltas and the
+    /// recorded group string is all the identity there is.
+    Group(Arc<str>),
+    /// Structural peptidoform identity, label channels collapsed.
+    Peptidoform {
+        sequence: PeptideSequence,
+        modifications: Vec<(Site, ModificationIdentity, ModificationKind)>,
+        nterm: Option<u32>,
+        cterm: Option<u32>,
+    },
+}
+
+/// A modification definition compared by full identity (mass, name, neutral
+/// losses, loss mode, channel offsets) and hashed on mass and name alone.
+/// Hashing a subset of the compared fields is sound — equal definitions always
+/// hash equally — and `Eq` separates definitions that only differ elsewhere.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ModificationIdentity(ModificationDefinition);
+
+impl Hash for ModificationIdentity {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.mass.to_bits().hash(state);
+        self.0.name.hash(state);
+    }
+}
+
+impl PeptideKey {
+    fn new(peptide: &Peptide) -> Self {
+        if let Some(group) = &peptide.label_group_override {
+            return Self::Group(group.clone());
+        }
+        match peptide.label_group_peptide() {
+            Some(base) => Self::structural(&base),
+            None => Self::structural(peptide),
+        }
+    }
+
+    fn structural(peptide: &Peptide) -> Self {
+        let mut modifications = peptide
+            .applied_modifications()
+            .map(|applied| {
+                (
+                    applied.site,
+                    ModificationIdentity(applied.modification.clone()),
+                    applied.kind,
+                )
+            })
+            .collect::<Vec<_>>();
+        // Compact entries are already sorted by site, definition and kind, but
+        // the key must not depend on that invariant holding for every peptide
+        // source.
+        modifications.sort_unstable_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1 .0.cmp(&right.1 .0))
+                .then_with(|| left.2.cmp(&right.2))
+        });
+        Self::Peptidoform {
+            sequence: peptide.sequence.clone(),
+            modifications,
+            nterm: peptide.nterm.map(f32::to_bits),
+            cterm: peptide.cterm.map(f32::to_bits),
+        }
+    }
+}
+
+fn peptide_competition_key(db: &IndexedDatabase, peptide_idx: PeptideIx) -> PeptideKey {
     let peptide = &db[peptide_idx];
     if peptide.decoy {
         db.decoy_pairing
             .get(peptide_idx.0 as usize)
             .and_then(|paired| db.peptides.get(paired.0 as usize))
-            .map(Peptide::label_group)
+            .map(PeptideKey::new)
             .unwrap_or_else(|| {
                 if db.generate_decoys {
-                    peptide.reverse().label_group()
+                    PeptideKey::new(&peptide.reverse())
                 } else {
-                    peptide.label_group()
+                    PeptideKey::new(peptide)
                 }
             })
     } else {
-        peptide.label_group()
+        PeptideKey::new(peptide)
     }
 }
 
