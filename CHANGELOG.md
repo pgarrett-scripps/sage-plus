@@ -40,6 +40,14 @@ entries are retained below for provenance.
   to 17.0 s and the run from 59.7 s to 52.3 s; with variable modifications (M oxidation,
   N-terminal acetyl) the run falls from 98.5 s to 77.7 s. `results.sage.parquet` and
   `lfq.parquet` are byte-identical in every case, and peak memory is unchanged.
+- A search uses less memory, with identical output. The MS1 spectra retained for label-free
+  quantification no longer carry the two per-peak charge columns that quantification never
+  reads, and which are constants for an MS1 scan without ion mobility. They were 2 of the 10
+  bytes of every retained MS1 peak, held from the first file to the end of quantification. On
+  five PXD028735 files at 20 threads peak memory falls from 5.27 GiB to 4.92 GiB, and with
+  variable modifications (M oxidation, N-terminal acetyl) from 7.74 GiB to 7.42 GiB; wall time
+  is unchanged (52.28 s to 52.57 s and 77.66 s to 77.76 s, both inside run-to-run noise) and
+  `results.sage.parquet` and `lfq.parquet` are byte-identical.
 - Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
   same problem, the Sage Plus implementation is kept: named modifications with explicit sites
   (not upstream's named PTMs), `z_dot` ions (not upstream's radical z ions), per-modification
