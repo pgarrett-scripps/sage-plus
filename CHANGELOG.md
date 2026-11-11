@@ -32,6 +32,14 @@ entries are retained below for provenance.
   reached only on wasm targets.
 
 ### Changed
+- Searching is faster, with identical output. A spectrum's fragment tolerance windows and
+  the index buckets they touch are planned once per mass offset instead of once per isotope
+  error, and every isotope error's per-bucket precursor range is then resolved in one pass
+  over those buckets, so a bucket's search path is read from memory once rather than once
+  per isotope error. On five PXD028735 files at 20 threads the search stage falls from 23.8 s
+  to 17.0 s and the run from 59.7 s to 52.3 s; with variable modifications (M oxidation,
+  N-terminal acetyl) the run falls from 98.5 s to 77.7 s. `results.sage.parquet` and
+  `lfq.parquet` are byte-identical in every case, and peak memory is unchanged.
 - Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
   same problem, the Sage Plus implementation is kept: named modifications with explicit sites
   (not upstream's named PTMs), `z_dot` ions (not upstream's radical z ions), per-modification
