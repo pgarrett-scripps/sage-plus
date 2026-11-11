@@ -45,7 +45,13 @@ enum Dtype {
 
 /// Base64 held per batch before the arrays are decoded in parallel. One
 /// 1.2 GB Thermo mzML is about 600 MB of base64, so a batch is a small part of
-/// a file and the parse loop's memory stays flat.
+/// a file.
+///
+/// This bounds the queue, not the reader: `decode_batch` gives every worker
+/// thread a base64 buffer and an inflate buffer that grow to the largest array
+/// that worker has seen and are never shrunk, so a file's resident decode
+/// memory is this batch plus threads x (largest base64 array + largest
+/// inflated array). Profile-mode MS1 arrays are what make that term large.
 const DECODE_BATCH_BYTES: usize = 32 * 1024 * 1024;
 
 /// One mzML binary data array, still base64-encoded.
@@ -134,8 +140,13 @@ fn decode_batch(
                 Ok(spectrum)
             },
         )
-        .collect::<Result<Vec<_>, MzMLError>>()?;
-    spectra.extend(decoded);
+        .collect::<Vec<Result<RawSpectrum, MzMLError>>>();
+    // `collect::<Result<_, _>>` would short-circuit on whichever worker failed
+    // first; walking the results in index order reports the earliest bad array
+    // in the file, as the serial decoder did.
+    for spectrum in decoded {
+        spectra.push(spectrum?);
+    }
     Ok(())
 }
 
@@ -293,6 +304,29 @@ impl CvParam {
 const ZLIB_COMPRESSION: &[u8] = b"MS:1000574";
 const NO_COMPRESSION: &[u8] = b"MS:1000576";
 
+// Numpress encodings, alone or followed by zlib. Sage has no numpress
+// decoder: an array in one of these is rejected by name, because the bytes
+// are not IEEE floats and reading them as floats gives wrong numbers quietly.
+const NUMPRESS_LINEAR: &[u8] = b"MS:1002312";
+const NUMPRESS_PIC: &[u8] = b"MS:1002313";
+const NUMPRESS_SLOF: &[u8] = b"MS:1002314";
+const NUMPRESS_LINEAR_ZLIB: &[u8] = b"MS:1002746";
+const NUMPRESS_PIC_ZLIB: &[u8] = b"MS:1002747";
+const NUMPRESS_SLOF_ZLIB: &[u8] = b"MS:1002748";
+
+/// The name of a numpress compression term, for the error message.
+fn numpress_name(accession: &[u8]) -> Option<&'static str> {
+    match accession {
+        NUMPRESS_LINEAR => Some("MS-Numpress linear prediction compression"),
+        NUMPRESS_PIC => Some("MS-Numpress positive integer compression"),
+        NUMPRESS_SLOF => Some("MS-Numpress short logged float compression"),
+        NUMPRESS_LINEAR_ZLIB => Some("MS-Numpress linear prediction compression followed by zlib"),
+        NUMPRESS_PIC_ZLIB => Some("MS-Numpress positive integer compression followed by zlib"),
+        NUMPRESS_SLOF_ZLIB => Some("MS-Numpress short logged float compression followed by zlib"),
+        _ => None,
+    }
+}
+
 // MUST supply only one of the following
 const INTENSITY_ARRAY: &[u8] = b"MS:1000515";
 const MZ_ARRAY: &[u8] = b"MS:1000514";
@@ -344,6 +378,9 @@ pub struct MzMLReader {
     signal_to_noise: Option<u8>,
 
     file_id: usize,
+    /// How much base64 one decode batch holds, [`DECODE_BATCH_BYTES`] unless a
+    /// test lowers it to reach the mid-parse flush without a 32 MB fixture.
+    decode_batch_bytes: usize,
 }
 
 impl MzMLReader {
@@ -357,6 +394,7 @@ impl MzMLReader {
             ms_level: Some(ms_level),
             file_id,
             signal_to_noise: None,
+            decode_batch_bytes: DECODE_BATCH_BYTES,
         }
     }
 
@@ -365,11 +403,20 @@ impl MzMLReader {
             ms_level: None,
             signal_to_noise: None,
             file_id,
+            decode_batch_bytes: DECODE_BATCH_BYTES,
         }
     }
 
     pub fn set_file_id(&mut self, file_id: usize) -> &mut Self {
         self.file_id = file_id;
+        self
+    }
+
+    /// Decode a batch as soon as it holds this much base64. Only tests change
+    /// it; the search path always uses [`DECODE_BATCH_BYTES`].
+    #[cfg(test)]
+    fn set_decode_batch_bytes(&mut self, bytes: usize) -> &mut Self {
+        self.decode_batch_bytes = bytes.max(1);
         self
     }
 
@@ -438,6 +485,14 @@ impl MzMLReader {
                         MZ_ARRAY => binary_array = Some(BinaryKind::Mz),
                         NOISE_ARRAY => binary_array = Some(BinaryKind::Noise),
                         CHARGE_ARRAY => binary_array = Some(BinaryKind::Charge),
+                        accession if numpress_name(accession).is_some() => {
+                            return Err(MzMLError::UnsupportedCV(format!(
+                                "{} ({}): Sage reads zlib-compressed or uncompressed \
+                                 binary arrays only",
+                                String::from_utf8_lossy(accession),
+                                numpress_name(accession).expect("matched just above"),
+                            )));
+                        }
                         _ => {}
                     },
                     Some(State::Spectrum) => match param.accession.as_slice() {
@@ -695,7 +750,7 @@ impl MzMLReader {
                             } else {
                                 pending_arrays.clear();
                             }
-                            if pending_bytes >= DECODE_BATCH_BYTES {
+                            if pending_bytes >= self.decode_batch_bytes {
                                 decode_batch(
                                     std::mem::take(&mut pending),
                                     self.signal_to_noise,
