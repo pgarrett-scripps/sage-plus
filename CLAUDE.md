@@ -1,9 +1,9 @@
 # Working in this repository
 
 Sage Plus is an independently maintained downstream distribution of
-[Sage](https://github.com/lazear/sage). Contributor policy is in `CONTRIBUTING.md`, the feature
-list in `FEATURES.md`, and the upstream relationship in `UPSTREAM.md`. This file covers how to
-build, test and change the code.
+[Sage](https://github.com/lazear/sage). The crate and pipeline map is in `ARCHITECTURE.md`,
+contributor policy in `CONTRIBUTING.md`, the feature list in `FEATURES.md`, and the upstream
+relationship in `UPSTREAM.md`. This file covers how to build, test and change the code.
 
 ## Building and testing
 
