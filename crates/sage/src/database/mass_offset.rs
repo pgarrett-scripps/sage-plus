@@ -71,7 +71,7 @@ impl MassOffset {
 }
 
 /// The offset placement selected for a candidate. `offset` indexes
-/// [`IndexedDatabase::mass_offsets`].
+/// [`crate::database::IndexedDatabase::mass_offsets`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct MassOffsetAssignment {
     pub offset: u16,

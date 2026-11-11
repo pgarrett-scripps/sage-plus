@@ -117,7 +117,7 @@ impl Traces {
     /// * Unseeded (transfer) rows get the usual warp search towards the sum of
     ///   the aligned seeded traces.
     /// * Integration bounds follow the summed seeded trace down to a valley
-    ///   or [`APEX_BOUND_FRACTION`] of its apex, without fixed caps.
+    ///   or half (`APEX_BOUND_FRACTION`) of its apex, without fixed caps.
     #[allow(clippy::type_complexity)]
     pub fn integrate_apex(
         &mut self,
