@@ -2,7 +2,7 @@
 //!
 //! Moved out of `scoring.rs` unchanged; every item keeps its `scoring::` path.
 
-use crate::database::Theoretical;
+use crate::database::{FragmentWindowPlan, Theoretical};
 use crate::heap::bounded_min_heapify;
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::spectrum::{Precursor, ProcessedSpectrum};
@@ -185,7 +185,13 @@ impl<'db> Scorer<'db> {
                 query,
                 max_fragment_charge(self.max_fragment_charge, precursor_charge),
             );
+            let mut plan = FragmentWindowPlan::default();
             for offset in self.offsets() {
+                // The peaks, the fragment tolerance and the shift are the same
+                // for every isotope error, so the windows and their buckets are
+                // planned once per offset.
+                let shift = self.fragment_shift(offset);
+                self.plan_windows(&fragment_index, shift.as_slice(), &mut plan);
                 for isotope_error in self.min_isotope_err..=self.max_isotope_err {
                     let (mass, tolerance) = self.offset_query(
                         precursor_mass - isotope_error as f32 * NEUTRON,
@@ -193,14 +199,9 @@ impl<'db> Scorer<'db> {
                         offset,
                     );
                     let candidates = self.db.query(mass, tolerance, self.fragment_tol);
-                    let shift = self.fragment_shift(offset);
-                    candidates.page_search_batch(
-                        fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
-                        shift.as_slice(),
-                        |fragment| {
-                            keep.insert(fragment.peptide_index.0 as usize);
-                        },
-                    );
+                    candidates.page_search_planned(&mut plan, |fragment| {
+                        keep.insert(fragment.peptide_index.0 as usize);
+                    });
                 }
             }
         };
@@ -221,6 +222,22 @@ impl<'db> Scorer<'db> {
             }
         }
     }
+    /// Plan the fragment windows of one spectrum's peaks, including the
+    /// shifted lookups, so several precursor windows can reuse them.
+    pub(super) fn plan_windows(
+        &self,
+        fragment_index: &FragmentMatchIndex,
+        shifts: &[f32],
+        plan: &mut FragmentWindowPlan,
+    ) {
+        plan.build(
+            self.db,
+            self.fragment_tol,
+            fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
+            shifts,
+        );
+    }
+
     /// Keep the top-K preliminary candidates of each offset hypothesis. Shifted
     /// hypotheses combine two fragment lookups, so their preliminary counts are
     /// not comparable with unshifted counts until full scoring.
@@ -265,7 +282,7 @@ impl<'db> Scorer<'db> {
     /// in sorted order.
     fn matched_peaks_with_isotope(
         &self,
-        fragment_index: &FragmentMatchIndex,
+        plan: &mut FragmentWindowPlan,
         precursor_mass: f32,
         precursor_charge: u8,
         precursor_tol: Tolerance,
@@ -277,12 +294,10 @@ impl<'db> Scorer<'db> {
             precursor_tol,
             offset,
         );
-        let shift = self.fragment_shift(offset);
         self.preliminary_hits(
-            fragment_index,
+            plan,
             mass,
             tolerance,
-            shift.as_slice(),
             PreScore {
                 precursor_charge,
                 isotope_error,
@@ -299,10 +314,9 @@ impl<'db> Scorer<'db> {
     /// isotope and offset recorded on each hit.
     pub(super) fn preliminary_hits(
         &self,
-        fragment_index: &FragmentMatchIndex,
+        plan: &mut FragmentWindowPlan,
         base_mass: f32,
         tolerance: Tolerance,
-        shifts: &[f32],
         template: PreScore,
     ) -> InitialHits {
         let PreScore {
@@ -337,12 +351,8 @@ impl<'db> Scorer<'db> {
                 matched_peaks += 1;
             };
             // Fragments retaining the offset appear at the indexed base
-            // fragment mass plus each shift.
-            candidates.page_search_batch(
-                fragment_index.peaks.iter().map(|peak| peak.neutral_mass),
-                shifts,
-                &mut count,
-            );
+            // fragment mass plus each shift; `plan` holds both lookups.
+            candidates.page_search_planned(plan, &mut count);
 
             if matched_peaks == 0 {
                 return InitialHits::default();
@@ -370,10 +380,12 @@ impl<'db> Scorer<'db> {
     ) -> InitialHits {
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
         let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
+        let mut plan = FragmentWindowPlan::default();
         self.offsets()
             .fold(InitialHits::default(), |mut hits, offset| {
                 hits += self.matched_peaks_with_offset(
                     &fragment_index,
+                    &mut plan,
                     precursor_mass,
                     precursor_charge,
                     precursor_tol,
@@ -386,17 +398,22 @@ impl<'db> Scorer<'db> {
     fn matched_peaks_with_offset(
         &self,
         fragment_index: &FragmentMatchIndex,
+        plan: &mut FragmentWindowPlan,
         precursor_mass: f32,
         precursor_charge: u8,
         precursor_tol: Tolerance,
         offset: u8,
     ) -> InitialHits {
+        // One plan for every isotope error of this offset: they search the
+        // same peaks and differ only in the precursor window.
+        let shift = self.fragment_shift(offset);
+        self.plan_windows(fragment_index, shift.as_slice(), plan);
         if self.min_isotope_err != self.max_isotope_err {
             let mut hits = (self.min_isotope_err..=self.max_isotope_err).fold(
                 InitialHits::default(),
                 |mut hits, isotope| {
                     hits += self.matched_peaks_with_isotope(
-                        fragment_index,
+                        plan,
                         precursor_mass,
                         precursor_charge,
                         precursor_tol,
@@ -410,7 +427,7 @@ impl<'db> Scorer<'db> {
             hits
         } else {
             self.matched_peaks_with_isotope(
-                fragment_index,
+                plan,
                 precursor_mass,
                 precursor_charge,
                 precursor_tol,

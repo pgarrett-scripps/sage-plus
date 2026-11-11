@@ -2,7 +2,7 @@
 //!
 //! Moved out of `scoring.rs` unchanged; every item keeps its `scoring::` path.
 
-use crate::database::PeptideIx;
+use crate::database::{FragmentWindowPlan, PeptideIx};
 use crate::heap::bounded_min_heapify;
 use crate::spectrum::ProcessedSpectrum;
 
@@ -85,11 +85,12 @@ impl<'db> Scorer<'db> {
             self.precursor_tol,
             hypothesis.offset.mass(),
         );
+        let mut plan = FragmentWindowPlan::default();
+        self.plan_windows(fragment_index, &hypothesis.preliminary_shifts, &mut plan);
         let mut hits = self.preliminary_hits(
-            fragment_index,
+            &mut plan,
             mass,
             tolerance,
-            &hypothesis.preliminary_shifts,
             PreScore {
                 precursor_charge: hypothesis.precursor_charge,
                 ..Default::default()

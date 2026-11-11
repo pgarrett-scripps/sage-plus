@@ -7,10 +7,15 @@ use std::cmp::Ordering;
 
 use super::*;
 
-/// Per-thread scratch for [`IndexedQuery::page_search_batch`], reused across
-/// spectra so the batched path allocates nothing in steady state.
+/// One spectrum's fragment windows and the buckets they touch, each distinct
+/// bucket listed once.
+///
+/// A plan depends on the peak list, the fragment tolerance and the shifts, and
+/// not on the precursor window, so every isotope-error and charge hypothesis
+/// of one spectrum can share it: only the per-bucket precursor ranges have to
+/// be resolved again. Its allocations are reused by every `build`.
 #[derive(Default)]
-struct BatchSearchScratch {
+pub(crate) struct FragmentWindowPlan {
     /// Per window: fragment bounds and its span in `entries`.
     windows: Vec<(f32, f32, u32, u32)>,
     /// One bucket per (window, bucket) pair, in emission order.
@@ -24,9 +29,62 @@ struct BatchSearchScratch {
     ranges: Vec<(usize, usize)>,
 }
 
+impl FragmentWindowPlan {
+    /// Lay out one window per mass and one per shifted mass, and list the
+    /// distinct buckets they touch.
+    pub(crate) fn build(
+        &mut self,
+        db: &IndexedDatabase,
+        fragment_tol: Tolerance,
+        masses: impl IntoIterator<Item = f32>,
+        shifts: &[f32],
+    ) {
+        let Self {
+            windows,
+            entries,
+            order,
+            distinct,
+            ..
+        } = self;
+        windows.clear();
+        entries.clear();
+        let mut push_window = |fragment_lo: f32, fragment_hi: f32| {
+            let (left, right) = fragment_bucket_slice(&db.min_value, fragment_lo, fragment_hi);
+            let first = entries.len() as u32;
+            entries.extend(left as u32..right as u32);
+            windows.push((fragment_lo, fragment_hi, first, entries.len() as u32));
+        };
+        for mass in masses {
+            let (fragment_lo, fragment_hi) = fragment_tol.bounds(mass);
+            push_window(fragment_lo, fragment_hi);
+            for &shift in shifts {
+                push_window(fragment_lo - shift, fragment_hi - shift);
+            }
+        }
+
+        // Each distinct bucket is resolved once for the whole spectrum.
+        order.clear();
+        order.extend(
+            entries
+                .iter()
+                .enumerate()
+                .map(|(entry, &bucket)| (bucket, entry as u32)),
+        );
+        order.sort_unstable();
+        distinct.clear();
+        distinct.extend(order.iter().map(|&(bucket, _)| bucket));
+        distinct.dedup();
+    }
+}
+
 thread_local! {
-    static BATCH_SEARCH_SCRATCH: std::cell::RefCell<BatchSearchScratch> =
-        std::cell::RefCell::new(BatchSearchScratch::default());
+    /// Plan for [`IndexedQuery::page_search_batch`], which plans and searches
+    /// in one call. Callers that search the same peaks against several
+    /// precursor windows keep their own plan and call
+    /// [`IndexedQuery::page_search_planned`]; nothing may call
+    /// `page_search_batch` while this plan is borrowed.
+    static BATCH_SEARCH_PLAN: std::cell::RefCell<FragmentWindowPlan> =
+        std::cell::RefCell::new(FragmentWindowPlan::default());
 }
 
 pub(super) struct FragmentIter<'a> {
@@ -136,81 +194,62 @@ impl IndexedQuery<'_> {
         &self,
         masses: impl IntoIterator<Item = f32>,
         shifts: &[f32],
+        on_match: impl FnMut(Theoretical),
+    ) {
+        BATCH_SEARCH_PLAN.with(|plan| {
+            let mut plan = plan.borrow_mut();
+            plan.build(self.db, self.fragment_tol, masses, shifts);
+            self.page_search_planned(&mut plan, on_match);
+        });
+    }
+
+    /// [`Self::page_search_batch`] against a plan built once for the spectrum,
+    /// so a second precursor window over the same peaks pays only for
+    /// resolving the buckets again.
+    pub(crate) fn page_search_planned(
+        &self,
+        plan: &mut FragmentWindowPlan,
         mut on_match: impl FnMut(Theoretical),
     ) {
         let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
         let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
         let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
+        let FragmentWindowPlan {
+            windows,
+            entries,
+            order,
+            distinct,
+            resolved,
+            ranges,
+        } = plan;
 
-        BATCH_SEARCH_SCRATCH.with(|scratch| {
-            let mut scratch = scratch.borrow_mut();
-            let BatchSearchScratch {
-                windows,
-                entries,
-                order,
-                distinct,
-                resolved,
-                ranges,
-            } = &mut *scratch;
-            windows.clear();
-            entries.clear();
-
-            let mut push_window = |fragment_lo: f32, fragment_hi: f32| {
-                let (left, right) =
-                    fragment_bucket_slice(&self.db.min_value, fragment_lo, fragment_hi);
-                let first = entries.len() as u32;
-                entries.extend(left as u32..right as u32);
-                windows.push((fragment_lo, fragment_hi, first, entries.len() as u32));
-            };
-            for mass in masses {
-                let (fragment_lo, fragment_hi) = self.fragment_tol.bounds(mass);
-                push_window(fragment_lo, fragment_hi);
-                for &shift in shifts {
-                    push_window(fragment_lo - shift, fragment_hi - shift);
-                }
+        self.db
+            .fragments
+            .resolve_bucket_ranges(distinct, peptide_lo, peptide_hi, resolved);
+        ranges.clear();
+        ranges.resize(entries.len(), (0, 0));
+        let mut group = 0;
+        for &(bucket, entry) in order.iter() {
+            if distinct[group] != bucket {
+                group += 1;
             }
+            ranges[entry as usize] = resolved[group];
+        }
 
-            // Resolve each distinct bucket once.
-            order.clear();
-            order.extend(
-                entries
-                    .iter()
-                    .enumerate()
-                    .map(|(entry, &bucket)| (bucket, entry as u32)),
-            );
-            order.sort_unstable();
-            distinct.clear();
-            distinct.extend(order.iter().map(|&(bucket, _)| bucket));
-            distinct.dedup();
-            self.db
-                .fragments
-                .resolve_bucket_ranges(distinct, peptide_lo, peptide_hi, resolved);
-            ranges.clear();
-            ranges.resize(entries.len(), (0, 0));
-            let mut group = 0;
-            for &(bucket, entry) in order.iter() {
-                if distinct[group] != bucket {
-                    group += 1;
-                }
-                ranges[entry as usize] = resolved[group];
-            }
-
-            for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
-                for entry in first as usize..last as usize {
-                    let (lo, hi) = ranges[entry];
-                    for frag in self
-                        .db
-                        .fragments
-                        .range_iter(entries[entry] as usize, lo, hi)
-                    {
-                        if self.accepts(&frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi)
-                        {
-                            on_match(frag);
-                        }
+        for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
+            for entry in first as usize..last as usize {
+                let (lo, hi) = ranges[entry];
+                for frag in self
+                    .db
+                    .fragments
+                    .range_iter(entries[entry] as usize, lo, hi)
+                {
+                    if self.accepts(&frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi) {
+                        on_match(frag);
                     }
                 }
             }
-        });
+        }
     }
 }
 
