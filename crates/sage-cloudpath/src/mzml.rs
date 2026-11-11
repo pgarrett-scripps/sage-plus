@@ -1,12 +1,12 @@
-use async_compression::tokio::bufread::ZlibDecoder;
 use base64::engine::{general_purpose, DecodePaddingMode, GeneralPurpose};
 use base64::Engine;
+use flate2::{Decompress, FlushDecompress, Status};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use sage_core::spectrum::{AcquisitionGroup, Activation, MassAnalyzer, Precursor, Representation};
 use sage_core::{mass::Tolerance, spectrum::RawSpectrum};
 use std::collections::HashMap;
-use tokio::io::{AsyncBufRead, AsyncReadExt};
+use tokio::io::AsyncBufRead;
 
 /// Standard alphabet that accepts padded and unpadded input, as base64 0.13
 /// `decode` did.
@@ -40,6 +40,51 @@ enum Dtype {
     F64,
     I32,
     I64,
+}
+
+/// Inflate one zlib-compressed mzML binary array into `output`, reusing both
+/// the decompressor and the output buffer across arrays.
+///
+/// A 1.2 GB Thermo mzML holds on the order of 300,000 arrays, and the previous
+/// `async_compression` decoder built a decompressor, a future and an output
+/// allocation for every one of them while the parse loop awaited it.
+fn inflate_into(
+    inflater: &mut Decompress,
+    input: &[u8],
+    output: &mut Vec<u8>,
+) -> Result<(), MzMLError> {
+    fn invalid(error: impl std::fmt::Display) -> MzMLError {
+        MzMLError::IOError(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            error.to_string(),
+        ))
+    }
+
+    inflater.reset(true);
+    output.clear();
+    // mzML arrays inflate to roughly 1.7x their compressed size; ask for twice
+    // that and grow only if a stream beats the guess.
+    output.reserve(input.len().saturating_mul(2).max(64));
+    loop {
+        let consumed = inflater.total_in() as usize;
+        let before_out = inflater.total_out();
+        let status = inflater
+            .decompress_vec(&input[consumed..], output, FlushDecompress::Finish)
+            .map_err(invalid)?;
+        match status {
+            Status::StreamEnd => return Ok(()),
+            // `decompress_vec` only writes into spare capacity, so no progress
+            // means the buffer is full, not that the stream is truncated.
+            Status::Ok | Status::BufError => {
+                if inflater.total_out() == before_out && inflater.total_in() as usize == consumed {
+                    if output.len() < output.capacity() {
+                        return Err(invalid("truncated zlib stream in a binary array"));
+                    }
+                    output.reserve(output.capacity().max(64));
+                }
+            }
+        }
+    }
 }
 
 fn decode_float_array(bytes: &[u8], dtype: Dtype) -> Result<Vec<f32>, MzMLError> {
@@ -249,6 +294,8 @@ impl MzMLReader {
         let mut state = None;
         let mut compression = false;
         let mut output_buffer = Vec::with_capacity(4096);
+        let mut base64_buffer = Vec::with_capacity(4096);
+        let mut inflater = Decompress::new(true);
         let mut binary_dtype = Dtype::F64;
         let mut binary_array = None;
 
@@ -475,13 +522,13 @@ impl MzMLReader {
                         if raw.is_empty() || binary_array.is_none() {
                             continue;
                         }
-                        let decoded = BASE64.decode(raw.as_bytes())?;
+                        base64_buffer.clear();
+                        BASE64.decode_vec(raw.as_bytes(), &mut base64_buffer)?;
                         let bytes = match compression {
-                            false => &decoded,
+                            false => &base64_buffer[..],
                             true => {
-                                let mut r = ZlibDecoder::new(decoded.as_slice());
-                                let n = r.read_to_end(&mut output_buffer).await?;
-                                &output_buffer[..n]
+                                inflate_into(&mut inflater, &base64_buffer, &mut output_buffer)?;
+                                &output_buffer[..]
                             }
                         };
 
@@ -501,7 +548,6 @@ impl MzMLReader {
                             }
                             None => {}
                         }
-                        output_buffer.clear();
 
                         binary_array = None;
                     }

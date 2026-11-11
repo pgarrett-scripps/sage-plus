@@ -3596,6 +3596,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "dnoise-core",
+ "flate2",
  "futures",
  "log",
  "mzdata",
