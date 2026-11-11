@@ -7,8 +7,9 @@ use crate::enzyme::{Digest, DigestGroup, ProteinOccurrence};
 use crate::fasta::Fasta;
 use crate::modification::SiteMode;
 use crate::peptide::{AppliedModification, Peptide, Site, VariableRule, INLINE_PROTEINS};
+use fnv::FnvHashMap;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::*;
@@ -161,7 +162,7 @@ fn variant_upper_bound(
     max_variable_mods: usize,
     max_total_variable_mods: usize,
 ) -> u64 {
-    let mut choices_by_site: HashMap<usize, (u64, u64)> = HashMap::new();
+    let mut choices_by_site: FnvHashMap<usize, (u64, u64)> = FnvHashMap::default();
     for (site, _, library_supported) in candidates.iter().copied() {
         let choices = choices_by_site.entry(site).or_default();
         if library_supported {
@@ -443,7 +444,7 @@ impl Parameters {
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
-        let mut candidates: HashMap<(usize, usize), bool> = HashMap::new();
+        let mut candidates: FnvHashMap<(usize, usize), bool> = FnvHashMap::default();
         let nterm = sequence.len();
         let cterm = sequence.len().saturating_add(1);
 

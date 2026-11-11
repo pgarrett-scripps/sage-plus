@@ -11,10 +11,10 @@ use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteM
 use crate::peptide::{Peptide, Site};
 use crate::ptm_library::PtmLibrary;
 use crate::scoring::Feature;
+use fnv::FnvHashMap;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -114,7 +114,7 @@ impl FragmentIndex {
         let counts = ranges
             .par_iter()
             .map(|range| {
-                let mut counts = HashMap::<u32, u32>::new();
+                let mut counts = FnvHashMap::<u32, u32>::default();
                 for peptide in &peptides[range.clone()] {
                     for mass in preliminary_fragment_masses(parameters, peptide) {
                         let prefix = mass.to_bits() >> suffix_bits;
@@ -147,8 +147,8 @@ impl FragmentIndex {
             .map(|(_, count)| count.div_ceil(bucket_size))
             .sum();
 
-        let mut positions = vec![HashMap::<u32, usize>::new(); ranges.len()];
-        let mut limits = vec![HashMap::<u32, usize>::new(); ranges.len()];
+        let mut positions = vec![FnvHashMap::<u32, usize>::default(); ranges.len()];
+        let mut limits = vec![FnvHashMap::<u32, usize>::default(); ranges.len()];
         let mut buckets = Vec::with_capacity(bucket_count);
         let mut total = 0usize;
         for (prefix, prefix_count) in prefix_counts {
@@ -578,7 +578,7 @@ impl IndexedDatabase {
     /// ordinary peptides. Returns the number of materialized peptidoforms.
     pub fn materialize_mass_offsets(&mut self, features: &mut [Feature]) -> usize {
         let base = self.peptides.len();
-        let mut identities: HashMap<(String, bool), PeptideIx> = self
+        let mut identities: FnvHashMap<(String, bool), PeptideIx> = self
             .offset_peptides
             .iter()
             .enumerate()
