@@ -59,6 +59,13 @@ entries are retained below for provenance.
   gzip and mzMLb input are unchanged.
 
 ### Fixed
+- mzML binary arrays in a numpress encoding are rejected with the accession and encoding
+  named, instead of being read as IEEE floats. `MS:1002312`, `MS:1002313`, `MS:1002314` and the
+  numpress-plus-zlib terms `MS:1002746` through `MS:1002748` matched no branch of the cvParam
+  dispatch, so a numpress array was decoded as raw floats: wrong m/z and intensity values with
+  no error at all. Sage has no numpress decoder, so the array is now an error
+  (`unsupported cvParam MS:1002312 (MS-Numpress linear prediction compression): ...`). Files
+  without numpress arrays are unaffected.
 - LFQ integration windows contain only bins that pass both the score and spectral-angle
   thresholds, on both sides (upstream `75a5300`, `63f10e7`). The window previously always included
   one bin either side of the apex whether or not it passed, and then dropped the last passing bin
