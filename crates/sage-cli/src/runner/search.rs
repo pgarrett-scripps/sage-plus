@@ -42,8 +42,8 @@ pub(super) fn widen_for_recalibration(tolerance: Tolerance) -> Tolerance {
 /// spectrum regardless of level, and for an MS1 scan without ion mobility
 /// they are constants: charge 1, charge unknown. Holding them costs 2 of
 /// the 10 bytes per peak for as long as the run keeps its MS1 spectra,
-/// which is from the first chunk to the end of quantification -- 0.37 GiB
-/// of a five-file run's 5.27 GiB peak (audits/perf-2026-11.md, task 17).
+/// which is from the first chunk to the end of quantification. Measured on
+/// five PXD028735 files, that is 0.34 GiB of a 5.27 GiB peak.
 ///
 /// Dropping the allocations here, rather than not filling them in
 /// `SpectrumProcessor::process`, keeps the content of a public field in
