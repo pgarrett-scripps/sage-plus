@@ -1261,18 +1261,19 @@ impl Peptide {
             // Multiple specificity entries can describe the same named
             // modification at one site. Collapse them and preserve library
             // support if either route supplies it.
+            // A linear scan, not a map: this runs once per digest per rule
+            // set, and `mods` holds a handful of entries, so an allocation
+            // and a hash per candidate cost more than the comparisons.
             let mut mods: Vec<ModificationCandidate> = Vec::with_capacity(candidates.len());
-            let mut candidate_indices: HashMap<(Site, usize), usize> = HashMap::new();
             for candidate in candidates {
-                let key = (
-                    candidate.site,
-                    plan.variable_mods[candidate.rule].count_group,
-                );
-                if let Some(index) = candidate_indices.get(&key).copied() {
-                    mods[index].library_supported |= candidate.library_supported;
-                } else {
-                    candidate_indices.insert(key, mods.len());
-                    mods.push(candidate);
+                let group = plan.variable_mods[candidate.rule].count_group;
+                let same = mods.iter_mut().find(|kept| {
+                    kept.site == candidate.site
+                        && plan.variable_mods[kept.rule].count_group == group
+                });
+                match same {
+                    Some(kept) => kept.library_supported |= candidate.library_supported,
+                    None => mods.push(candidate),
                 }
             }
 
