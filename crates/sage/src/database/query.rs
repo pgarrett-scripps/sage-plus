@@ -27,6 +27,8 @@ pub(crate) struct FragmentWindowPlan {
     resolved: Vec<(usize, usize)>,
     /// Resolved range per entry.
     ranges: Vec<(usize, usize)>,
+    /// Peptide-index range per precursor window, for the batched resolve.
+    peptide_windows: Vec<(u32, u32)>,
 }
 
 impl FragmentWindowPlan {
@@ -211,9 +213,27 @@ impl IndexedQuery<'_> {
         plan: &mut FragmentWindowPlan,
         mut on_match: impl FnMut(Theoretical),
     ) {
-        let (precursor_lo, precursor_hi) = self.precursor_tol.bounds(self.precursor_mass);
-        let peptide_lo = self.pre_idx_lo.min(u32::MAX as usize) as u32;
-        let peptide_hi = self.pre_idx_hi.min(u32::MAX as usize) as u32;
+        Self::page_search_planned_multi(std::slice::from_ref(self), plan, |_, frag| on_match(frag));
+    }
+
+    /// [`Self::page_search_planned`] for several precursor windows over one
+    /// plan, resolving every bucket for every window in a single pass and
+    /// then emitting each window's matches with its index.
+    ///
+    /// `queries` must share the database, the fragment tolerance and the peaks
+    /// the plan was built from, and differ only in the precursor window --
+    /// which is what the isotope-error hypotheses of one spectrum are. Each
+    /// window's matches are emitted in the order a single
+    /// [`Self::page_search_planned`] call would emit them, windows in order.
+    pub(crate) fn page_search_planned_multi(
+        queries: &[Self],
+        plan: &mut FragmentWindowPlan,
+        mut on_match: impl FnMut(usize, Theoretical),
+    ) {
+        let Some(first) = queries.first() else {
+            return;
+        };
+        let db = first.db;
         let FragmentWindowPlan {
             windows,
             entries,
@@ -221,31 +241,45 @@ impl IndexedQuery<'_> {
             distinct,
             resolved,
             ranges,
+            peptide_windows,
         } = plan;
 
-        self.db
-            .fragments
-            .resolve_bucket_ranges(distinct, peptide_lo, peptide_hi, resolved);
+        peptide_windows.clear();
+        peptide_windows.extend(queries.iter().map(|query| {
+            (
+                query.pre_idx_lo.min(u32::MAX as usize) as u32,
+                query.pre_idx_hi.min(u32::MAX as usize) as u32,
+            )
+        }));
+        db.fragments
+            .resolve_bucket_ranges_multi(distinct, peptide_windows, resolved);
+
         ranges.clear();
         ranges.resize(entries.len(), (0, 0));
-        let mut group = 0;
-        for &(bucket, entry) in order.iter() {
-            if distinct[group] != bucket {
-                group += 1;
+        for (index, query) in queries.iter().enumerate() {
+            let (precursor_lo, precursor_hi) = query.precursor_tol.bounds(query.precursor_mass);
+            let resolved = &resolved[index * distinct.len()..(index + 1) * distinct.len()];
+            let mut group = 0;
+            for &(bucket, entry) in order.iter() {
+                if distinct[group] != bucket {
+                    group += 1;
+                }
+                ranges[entry as usize] = resolved[group];
             }
-            ranges[entry as usize] = resolved[group];
-        }
 
-        for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
-            for entry in first as usize..last as usize {
-                let (lo, hi) = ranges[entry];
-                for frag in self
-                    .db
-                    .fragments
-                    .range_iter(entries[entry] as usize, lo, hi)
-                {
-                    if self.accepts(&frag, fragment_lo, fragment_hi, precursor_lo, precursor_hi) {
-                        on_match(frag);
+            for &(fragment_lo, fragment_hi, first, last) in windows.iter() {
+                for entry in first as usize..last as usize {
+                    let (lo, hi) = ranges[entry];
+                    for frag in db.fragments.range_iter(entries[entry] as usize, lo, hi) {
+                        if query.accepts(
+                            &frag,
+                            fragment_lo,
+                            fragment_hi,
+                            precursor_lo,
+                            precursor_hi,
+                        ) {
+                            on_match(index, frag);
+                        }
                     }
                 }
             }

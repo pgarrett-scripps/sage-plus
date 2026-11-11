@@ -2728,8 +2728,29 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             let queried = (0..rng.below(50))
                 .map(|_| rng.below(bucket_count as u64) as u32)
                 .collect::<Vec<_>>();
-            index.resolve_bucket_ranges(&queried, lo, hi, &mut out);
+            // Several windows in one pass must give each window exactly what
+            // it gets alone: one window, then the same window beside two
+            // others, at n=1 and n=3.
+            let others = [
+                (lo, hi),
+                (0, u32::MAX),
+                (hi.saturating_add(1), hi.saturating_add(1)),
+            ];
+            let mut multi = Vec::new();
+            index.resolve_bucket_ranges_multi(&queried, &others, &mut multi);
+            assert_eq!(multi.len(), queried.len() * others.len());
+            index.resolve_bucket_ranges_multi(&queried, &[(lo, hi)], &mut out);
             assert_eq!(out.len(), queried.len());
+            assert_eq!(out[..], multi[..queried.len()]);
+            for (window, &(window_lo, window_hi)) in others.iter().enumerate().skip(1) {
+                let mut alone = Vec::new();
+                index.resolve_bucket_ranges_multi(&queried, &[(window_lo, window_hi)], &mut alone);
+                assert_eq!(
+                    alone[..],
+                    multi[window * queried.len()..(window + 1) * queried.len()],
+                    "window {window} differs when resolved beside others"
+                );
+            }
             for (&bucket, &(first, last)) in queried.iter().zip(&out) {
                 let expected = index
                     .bucket_search(bucket as usize, lo, hi)
@@ -2766,7 +2787,7 @@ fn bucket_ranges_keep_offsets_above_32_bits() {
         fragments: Vec::new(),
     };
     let mut out = Vec::new();
-    index.resolve_bucket_ranges(&[1, 0], 0, u32::MAX, &mut out);
+    index.resolve_bucket_ranges_multi(&[1, 0], &[(0, u32::MAX)], &mut out);
     assert_eq!(out, [(base + (1 << 32), base + (1 << 32)), (base, base)]);
 }
 

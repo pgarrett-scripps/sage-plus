@@ -272,11 +272,17 @@ impl FragmentIndex {
     /// searches, so up to `2 * LANES` misses are in flight together. The
     /// design follows Matteo Lacki's interleaved page-bound resolver
     /// (MatteoLacki/sage 950641f, MIT).
-    pub(super) fn resolve_bucket_ranges(
+    ///
+    /// Several precursor `windows` are resolved in the same pass, with `out`
+    /// filled window-major: `out[window * buckets.len() + bucket]`. A bucket's
+    /// search path is then read once from memory and from cache for the
+    /// remaining windows. The isotope-error hypotheses of one spectrum are
+    /// exactly this shape: the same buckets, a different precursor window
+    /// each.
+    pub(super) fn resolve_bucket_ranges_multi(
         &self,
         buckets: &[u32],
-        peptide_lo: u32,
-        peptide_hi: u32,
+        windows: &[(u32, u32)],
         out: &mut Vec<(usize, usize)>,
     ) {
         /// Buckets resolved together. Two searches each, sized against the
@@ -285,67 +291,71 @@ impl FragmentIndex {
         const SLOTS: usize = 2 * LANES;
 
         out.clear();
-        out.reserve(buckets.len());
+        out.resize(buckets.len() * windows.len(), (0, 0));
         if self.fragments.is_empty() {
-            out.extend(buckets.iter().map(|&bucket| {
-                let start = self.buckets[bucket as usize].start;
-                (start, start)
-            }));
+            for slot in out.iter_mut().enumerate() {
+                let (index, range) = slot;
+                let start = self.buckets[buckets[index % buckets.len()] as usize].start;
+                *range = (start, start);
+            }
             return;
         }
         let fragments = self.fragments.as_slice();
 
-        for chunk in buckets.chunks(LANES) {
-            // Even slots search `id < peptide_lo`, odd slots `id <= peptide_hi`,
-            // exactly the two `partition_point` predicates of `bucket_search`.
-            let mut base = [0usize; SLOTS];
-            let mut size = [0usize; SLOTS];
-            let mut longest = 0usize;
-            for (lane, &bucket) in chunk.iter().enumerate() {
-                let bucket = self.buckets[bucket as usize];
-                let (start, len) = (bucket.start, bucket.end - bucket.start);
-                // An empty bucket probes index 0 (always valid here) without
-                // moving; its result is taken from `start` below.
-                let start = if len == 0 { 0 } else { start };
-                base[2 * lane] = start;
-                base[2 * lane + 1] = start;
-                size[2 * lane] = len;
-                size[2 * lane + 1] = len;
-                longest = longest.max(len);
-            }
-
-            // Branchless halving with a fixed trip count: a converged or
-            // unused slot has `half == 0`, re-reads its own `base` and stays.
-            let steps = usize::BITS - longest.saturating_sub(1).leading_zeros();
-            for _ in 0..steps {
-                for slot in 0..SLOTS {
-                    let half = size[slot] / 2;
-                    let mid = base[slot] + half;
-                    // SAFETY: `mid < base + size <= bucket.end <= fragments.len()`
-                    // when `size > 1`; otherwise `half == 0` and `mid == base`,
-                    // which is in bounds for a non-empty bucket and is index 0
-                    // for an empty or unused slot.
-                    let id = unsafe { fragments.get_unchecked(mid) }.peptide_index();
-                    let go_right = if slot % 2 == 0 {
-                        id < peptide_lo
-                    } else {
-                        id <= peptide_hi
-                    };
-                    base[slot] = if go_right { mid } else { base[slot] };
-                    size[slot] -= half;
+        for (chunk_index, chunk) in buckets.chunks(LANES).enumerate() {
+            for (window, &(peptide_lo, peptide_hi)) in windows.iter().enumerate() {
+                // Even slots search `id < peptide_lo`, odd slots `id <= peptide_hi`,
+                // exactly the two `partition_point` predicates of `bucket_search`.
+                let mut base = [0usize; SLOTS];
+                let mut size = [0usize; SLOTS];
+                let mut longest = 0usize;
+                for (lane, &bucket) in chunk.iter().enumerate() {
+                    let bucket = self.buckets[bucket as usize];
+                    let (start, len) = (bucket.start, bucket.end - bucket.start);
+                    // An empty bucket probes index 0 (always valid here) without
+                    // moving; its result is taken from `start` below.
+                    let start = if len == 0 { 0 } else { start };
+                    base[2 * lane] = start;
+                    base[2 * lane + 1] = start;
+                    size[2 * lane] = len;
+                    size[2 * lane + 1] = len;
+                    longest = longest.max(len);
                 }
-            }
 
-            for (lane, &bucket) in chunk.iter().enumerate() {
-                let bucket = self.buckets[bucket as usize];
-                if bucket.start == bucket.end {
-                    out.push((bucket.start, bucket.start));
-                    continue;
+                // Branchless halving with a fixed trip count: a converged or
+                // unused slot has `half == 0`, re-reads its own `base` and stays.
+                let steps = usize::BITS - longest.saturating_sub(1).leading_zeros();
+                for _ in 0..steps {
+                    for slot in 0..SLOTS {
+                        let half = size[slot] / 2;
+                        let mid = base[slot] + half;
+                        // SAFETY: `mid < base + size <= bucket.end <= fragments.len()`
+                        // when `size > 1`; otherwise `half == 0` and `mid == base`,
+                        // which is in bounds for a non-empty bucket and is index 0
+                        // for an empty or unused slot.
+                        let id = unsafe { fragments.get_unchecked(mid) }.peptide_index();
+                        let go_right = if slot % 2 == 0 {
+                            id < peptide_lo
+                        } else {
+                            id <= peptide_hi
+                        };
+                        base[slot] = if go_right { mid } else { base[slot] };
+                        size[slot] -= half;
+                    }
                 }
-                let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
-                let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
-                let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
-                out.push((first, last));
+
+                for (lane, &bucket) in chunk.iter().enumerate() {
+                    let slot = window * buckets.len() + chunk_index * LANES + lane;
+                    let bucket = self.buckets[bucket as usize];
+                    if bucket.start == bucket.end {
+                        out[slot] = (bucket.start, bucket.start);
+                        continue;
+                    }
+                    let (lo, hi) = (base[2 * lane], base[2 * lane + 1]);
+                    let first = lo + usize::from(fragments[lo].peptide_index() < peptide_lo);
+                    let last = hi + usize::from(fragments[hi].peptide_index() <= peptide_hi);
+                    out[slot] = (first, last);
+                }
             }
         }
     }

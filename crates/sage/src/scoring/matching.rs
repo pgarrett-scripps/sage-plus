@@ -2,10 +2,11 @@
 //!
 //! Moved out of `scoring.rs` unchanged; every item keeps its `scoring::` path.
 
-use crate::database::{FragmentWindowPlan, Theoretical};
+use crate::database::{FragmentWindowPlan, IndexedQuery};
 use crate::heap::bounded_min_heapify;
 use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::spectrum::{Precursor, ProcessedSpectrum};
+use smallvec::SmallVec;
 use std::ops::AddAssign;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -280,33 +281,6 @@ impl<'db> Scorer<'db> {
     /// Returned hits are guaranteed to be the top-K hits (see above comment)
     /// from among all potential candidates, but the returned vector is not
     /// in sorted order.
-    fn matched_peaks_with_isotope(
-        &self,
-        plan: &mut FragmentWindowPlan,
-        precursor_mass: f32,
-        precursor_charge: u8,
-        precursor_tol: Tolerance,
-        isotope_error: i8,
-        offset: u8,
-    ) -> InitialHits {
-        let (mass, tolerance) = self.offset_query(
-            precursor_mass - isotope_error as f32 * NEUTRON,
-            precursor_tol,
-            offset,
-        );
-        self.preliminary_hits(
-            plan,
-            mass,
-            tolerance,
-            PreScore {
-                precursor_charge,
-                isotope_error,
-                offset,
-                ..Default::default()
-            },
-        )
-    }
-
     /// Count preliminary fragment matches for every indexed peptide whose
     /// mass lies in `tolerance` around `base_mass`. Fragments not carrying an
     /// offset match the indexed masses; fragments carrying it match at the
@@ -319,56 +293,83 @@ impl<'db> Scorer<'db> {
         tolerance: Tolerance,
         template: PreScore,
     ) -> InitialHits {
-        let PreScore {
-            precursor_charge,
-            isotope_error,
-            offset,
-            ..
-        } = template;
-        let candidates = self.db.query(base_mass, tolerance, self.fragment_tol);
+        let queries = [self.db.query(base_mass, tolerance, self.fragment_tol)];
+        let mut hits = Vec::with_capacity(1);
+        self.preliminary_hits_multi(plan, &queries, &[template], &mut hits);
+        hits.pop().unwrap_or_default()
+    }
 
-        let potential = candidates.pre_idx_hi - candidates.pre_idx_lo + 1;
+    /// [`Self::preliminary_hits`] for several precursor windows over one plan,
+    /// counted in a single pass over the plan's buckets.
+    ///
+    /// `queries` and `templates` are parallel: window `i` counts matches for
+    /// `queries[i]` and records `templates[i]`'s charge, isotope error and
+    /// offset on each hit. `out` receives one [`InitialHits`] per window, in
+    /// order, each exactly what that window alone would produce -- the counts
+    /// are per peptide index, so the order matches are seen in cannot change
+    /// them, and each window is then k-selected on its own.
+    pub(super) fn preliminary_hits_multi(
+        &self,
+        plan: &mut FragmentWindowPlan,
+        queries: &[IndexedQuery<'_>],
+        templates: &[PreScore],
+        out: &mut Vec<InitialHits>,
+    ) {
+        debug_assert_eq!(queries.len(), templates.len());
+        out.clear();
+        if queries.is_empty() {
+            return;
+        }
 
         PRE_SCORE_SCRATCH.with(|scratch| {
             let mut preliminary = scratch.borrow_mut();
-            preliminary.resize(potential, PreScore::default());
-            preliminary.fill(PreScore::default());
-            let mut matched_peaks = 0;
-            let mut scored_candidates = 0;
+            // One segment per window, so every window keeps the layout
+            // `preliminary[peptide - pre_idx_lo]` the single-window path used.
+            let mut segments: SmallVec<[(usize, usize); 8]> =
+                SmallVec::with_capacity(queries.len());
+            let mut total = 0;
+            for query in queries {
+                let potential = query.pre_idx_hi - query.pre_idx_lo + 1;
+                segments.push((total, potential));
+                total += potential;
+            }
+            preliminary.clear();
+            preliminary.resize(total, PreScore::default());
 
-            let mut count = |frag: Theoretical| {
-                let idx = frag.peptide_index.0 as usize - candidates.pre_idx_lo;
+            let mut matched_peaks: SmallVec<[usize; 8]> = smallvec::smallvec![0; queries.len()];
+            let mut scored_candidates: SmallVec<[usize; 8]> = smallvec::smallvec![0; queries.len()];
+
+            IndexedQuery::page_search_planned_multi(queries, plan, |window, frag| {
+                let idx =
+                    segments[window].0 + frag.peptide_index.0 as usize - queries[window].pre_idx_lo;
                 let sc = &mut preliminary[idx];
                 if sc.matched == 0 {
-                    scored_candidates += 1;
-                    sc.precursor_charge = precursor_charge;
+                    scored_candidates[window] += 1;
+                    sc.precursor_charge = templates[window].precursor_charge;
                     sc.peptide = frag.peptide_index;
-                    sc.isotope_error = isotope_error;
-                    sc.offset = offset;
+                    sc.isotope_error = templates[window].isotope_error;
+                    sc.offset = templates[window].offset;
                 }
 
                 sc.matched += 1;
-                matched_peaks += 1;
-            };
-            // Fragments retaining the offset appear at the indexed base
-            // fragment mass plus each shift; `plan` holds both lookups.
-            candidates.page_search_planned(plan, &mut count);
+                matched_peaks[window] += 1;
+            });
 
-            if matched_peaks == 0 {
-                return InitialHits::default();
+            for (window, &(start, potential)) in segments.iter().enumerate() {
+                if matched_peaks[window] == 0 {
+                    out.push(InitialHits::default());
+                    continue;
+                }
+                let segment = &mut preliminary[start..start + potential];
+                let k = 50.clamp((self.report_psms * 2).min(segment.len()), segment.len());
+                bounded_min_heapify(segment, k);
+                out.push(InitialHits {
+                    matched_peaks: matched_peaks[window],
+                    scored_candidates: scored_candidates[window],
+                    preliminary: segment[..k].to_vec(),
+                });
             }
-
-            let k = 50.clamp(
-                (self.report_psms * 2).min(preliminary.len()),
-                preliminary.len(),
-            );
-            bounded_min_heapify(&mut preliminary, k);
-            InitialHits {
-                matched_peaks,
-                scored_candidates,
-                preliminary: preliminary[..k].to_vec(),
-            }
-        })
+        });
     }
 
     pub(super) fn matched_peaks(
@@ -408,33 +409,39 @@ impl<'db> Scorer<'db> {
         // same peaks and differ only in the precursor window.
         let shift = self.fragment_shift(offset);
         self.plan_windows(fragment_index, shift.as_slice(), plan);
-        if self.min_isotope_err != self.max_isotope_err {
-            let mut hits = (self.min_isotope_err..=self.max_isotope_err).fold(
-                InitialHits::default(),
-                |mut hits, isotope| {
-                    hits += self.matched_peaks_with_isotope(
-                        plan,
-                        precursor_mass,
-                        precursor_charge,
-                        precursor_tol,
-                        isotope,
-                        offset,
-                    );
-                    hits
-                },
-            );
-            self.trim_hits(&mut hits);
-            hits
-        } else {
-            self.matched_peaks_with_isotope(
-                plan,
-                precursor_mass,
-                precursor_charge,
+
+        // All of this offset's isotope errors are counted in one pass, so each
+        // bucket's precursor range is resolved for every window while the
+        // bucket is still in cache.
+        let mut queries: SmallVec<[IndexedQuery<'_>; 8]> = SmallVec::new();
+        let mut templates: SmallVec<[PreScore; 8]> = SmallVec::new();
+        for isotope_error in self.min_isotope_err..=self.max_isotope_err {
+            let (mass, tolerance) = self.offset_query(
+                precursor_mass - isotope_error as f32 * NEUTRON,
                 precursor_tol,
-                self.min_isotope_err,
                 offset,
-            )
+            );
+            queries.push(self.db.query(mass, tolerance, self.fragment_tol));
+            templates.push(PreScore {
+                precursor_charge,
+                isotope_error,
+                offset,
+                ..Default::default()
+            });
         }
+
+        let mut per_window = Vec::with_capacity(queries.len());
+        self.preliminary_hits_multi(plan, &queries, &templates, &mut per_window);
+        let mut hits = per_window
+            .into_iter()
+            .fold(InitialHits::default(), |mut hits, window| {
+                hits += window;
+                hits
+            });
+        if self.min_isotope_err != self.max_isotope_err {
+            self.trim_hits(&mut hits);
+        }
+        hits
     }
 
     pub(super) fn initial_hits(
