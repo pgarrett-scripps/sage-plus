@@ -1,5 +1,12 @@
 use super::*;
-use crate::{database::Builder, scoring::Feature};
+
+use crate::database::Builder;
+use crate::database::{IndexedDatabase, PeptideIx};
+use crate::mass::{composition, Composition};
+use crate::ml::{matrix::Matrix, retention_alignment::Alignment};
+use crate::scoring::Feature;
+use crate::spectrum::ProcessedSpectrum;
+use std::collections::HashMap;
 
 #[test]
 fn default_rt_tolerance_preserves_existing_window() {
