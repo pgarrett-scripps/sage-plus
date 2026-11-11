@@ -54,9 +54,13 @@ The same `Alignment::transform` method is used for PSM RTs and LFQ MS1 scan time
 Synthetic unit tests cover outliers, large shifts, monotonicity, nonlinear error, sparse
 fallback, and single-run behavior. The dataset comparison below made nonlinear the
 default. Both searches used five PXD028735 Orbitrap LFQ files (HYE mixture,
-`hye-irt-defined.fasta`, LFQ enabled, 8 threads). Residuals are the absolute difference
-between each peptide's aligned RT and its across-run median, for target peptides at 1%
-peptide FDR seen in at least two runs, converted to minutes.
+`hye-irt-defined.fasta`, LFQ enabled with match-between-runs on
+(`quant.lfq_settings.mbr = true`), 8 threads). The precursor counts below depend on that
+setting: match-between-runs is what fills a precursor's missing files, so with it off the
+same searches quantify about 41% of precursors in all five files instead of 98%.
+Residuals are the absolute difference between each peptide's aligned RT and its
+across-run median, for target peptides at 1% peptide FDR seen in at least two runs,
+converted to minutes.
 
 | Metric | Linear | Nonlinear |
 | --- | ---: | ---: |
