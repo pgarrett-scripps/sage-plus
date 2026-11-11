@@ -24,8 +24,9 @@ instead of 0.45 GB with the same PSMs ([evaluation](benchmarks/MASS_OFFSET.md)).
 losses, this also covers crosslinker monolinks. See [details](DOCS.md#mass-offset-modifications).
 
 **Quantify more precursors across runs.** Retention times are aligned across runs with a nonlinear
-warp by default. On five PXD028735 LFQ runs this raised precursors at 1% q-value from 24,038 to
-31,418 and tightened the human log2 ratio spread. See [quantification](DOCS.md#quantification).
+warp by default. On five PXD028735 LFQ runs this cuts the median cross-run retention-time residual
+by 40% against linear alignment and raises precursors at 1% q-value from 32,852 to 33,020, with the
+human log2 ratio spread unchanged. See [quantification](DOCS.md#quantification).
 
 **Read instrument files directly.** Thermo RAW and mzMLb are read without conversion (upstream Sage
 reads mzML, MGF and Bruker `.d`), and timsTOF
