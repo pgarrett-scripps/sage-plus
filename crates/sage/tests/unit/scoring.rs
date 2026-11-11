@@ -1,10 +1,17 @@
 use super::*;
+
 use crate::database::Builder;
+use crate::database::{IndexedDatabase, PeptideIx};
 use crate::enzyme::Digest;
+use crate::heap::bounded_min_heapify;
 use crate::ion_series::IonSeries;
+use crate::ion_series::{IonGroupSeries, Kind};
+use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
 use crate::peptide::Peptide;
-use std::{collections::HashMap, sync::Arc};
+use crate::spectrum::{Precursor, ProcessedSpectrum};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[test]
 fn score_ordering_uses_hyperscore() {
