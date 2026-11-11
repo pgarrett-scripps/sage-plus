@@ -3,6 +3,7 @@ use base64::Engine;
 use flate2::{Decompress, FlushDecompress, Status};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use rayon::prelude::*;
 use sage_core::spectrum::{AcquisitionGroup, Activation, MassAnalyzer, Precursor, Representation};
 use sage_core::{mass::Tolerance, spectrum::RawSpectrum};
 use std::collections::HashMap;
@@ -40,6 +41,102 @@ enum Dtype {
     F64,
     I32,
     I64,
+}
+
+/// Base64 held per batch before the arrays are decoded in parallel. One
+/// 1.2 GB Thermo mzML is about 600 MB of base64, so a batch is a small part of
+/// a file and the parse loop's memory stays flat.
+const DECODE_BATCH_BYTES: usize = 32 * 1024 * 1024;
+
+/// One mzML binary data array, still base64-encoded.
+struct PendingArray {
+    kind: BinaryKind,
+    dtype: Dtype,
+    compression: bool,
+    base64: Vec<u8>,
+}
+
+/// A fully parsed spectrum whose arrays have not been decoded yet.
+struct PendingSpectrum {
+    spectrum: RawSpectrum,
+    arrays: Vec<PendingArray>,
+}
+
+/// Decode one batch of spectra in parallel and append them in file order.
+///
+/// The XML scan has to stay serial, but base64 and inflate do not, and they
+/// are most of the cost of reading an mzML. `signal_to_noise` divides
+/// intensities by the noise array for that MS level, as the serial decoder
+/// did. Buffers and the decompressor are per worker thread, so the reuse from
+/// the serial version is kept.
+fn decode_batch(
+    batch: Vec<PendingSpectrum>,
+    signal_to_noise: Option<u8>,
+    spectra: &mut Vec<RawSpectrum>,
+) -> Result<(), MzMLError> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let decoded = batch
+        .into_par_iter()
+        .map_init(
+            || (Vec::<u8>::new(), Vec::<u8>::new(), Decompress::new(true)),
+            |(base64_buffer, inflate_buffer, inflater), pending| {
+                let PendingSpectrum {
+                    mut spectrum,
+                    arrays,
+                } = pending;
+                let mut noise_array = Vec::new();
+                for array in &arrays {
+                    base64_buffer.clear();
+                    BASE64.decode_vec(&array.base64, base64_buffer)?;
+                    let bytes = match array.compression {
+                        false => &base64_buffer[..],
+                        true => {
+                            inflate_into(inflater, base64_buffer, inflate_buffer)?;
+                            &inflate_buffer[..]
+                        }
+                    };
+                    match array.kind {
+                        BinaryKind::Intensity => {
+                            spectrum.intensity = decode_float_array(bytes, array.dtype)?;
+                        }
+                        BinaryKind::Mz => {
+                            spectrum.mz = decode_float_array(bytes, array.dtype)?;
+                        }
+                        BinaryKind::Noise => {
+                            noise_array = decode_float_array(bytes, array.dtype)?;
+                        }
+                        BinaryKind::Charge => {
+                            spectrum.fragment_charges =
+                                Some(decode_charge_array(bytes, array.dtype)?);
+                        }
+                    }
+                }
+                if spectrum
+                    .fragment_charges
+                    .as_ref()
+                    .is_some_and(|charges| charges.len() != spectrum.mz.len())
+                {
+                    log::warn!(
+                        "ignoring fragment charge array with length different from m/z array for spectrum {}",
+                        spectrum.id
+                    );
+                    spectrum.fragment_charges = None;
+                }
+                if signal_to_noise == Some(spectrum.ms_level) && !noise_array.is_empty() {
+                    spectrum
+                        .intensity
+                        .iter_mut()
+                        .zip(noise_array.iter())
+                        .for_each(|(int, noise)| *int /= noise);
+                }
+                Ok(spectrum)
+            },
+        )
+        .collect::<Result<Vec<_>, MzMLError>>()?;
+    spectra.extend(decoded);
+    Ok(())
 }
 
 /// Inflate one zlib-compressed mzML binary array into `output`, reusing both
@@ -293,9 +390,9 @@ impl MzMLReader {
 
         let mut state = None;
         let mut compression = false;
-        let mut output_buffer = Vec::with_capacity(4096);
-        let mut base64_buffer = Vec::with_capacity(4096);
-        let mut inflater = Decompress::new(true);
+        let mut pending_arrays: Vec<PendingArray> = Vec::new();
+        let mut pending: Vec<PendingSpectrum> = Vec::new();
+        let mut pending_bytes = 0usize;
         let mut binary_dtype = Dtype::F64;
         let mut binary_array = None;
 
@@ -305,7 +402,6 @@ impl MzMLReader {
         let mut iso_window_hi: Option<f32> = None;
         let mut spectra = Vec::new();
 
-        let mut noise_array = Vec::new();
         let mut referenceable_params: HashMap<String, Vec<CvParam>> = HashMap::new();
         let mut current_referenceable_group: Option<String> = None;
 
@@ -522,34 +618,15 @@ impl MzMLReader {
                         if raw.is_empty() || binary_array.is_none() {
                             continue;
                         }
-                        base64_buffer.clear();
-                        BASE64.decode_vec(raw.as_bytes(), &mut base64_buffer)?;
-                        let bytes = match compression {
-                            false => &base64_buffer[..],
-                            true => {
-                                inflate_into(&mut inflater, &base64_buffer, &mut output_buffer)?;
-                                &output_buffer[..]
-                            }
-                        };
-
-                        match binary_array {
-                            Some(BinaryKind::Intensity) => {
-                                spectrum.intensity = decode_float_array(bytes, binary_dtype)?;
-                            }
-                            Some(BinaryKind::Mz) => {
-                                spectrum.mz = decode_float_array(bytes, binary_dtype)?;
-                            }
-                            Some(BinaryKind::Noise) => {
-                                noise_array = decode_float_array(bytes, binary_dtype)?;
-                            }
-                            Some(BinaryKind::Charge) => {
-                                spectrum.fragment_charges =
-                                    Some(decode_charge_array(bytes, binary_dtype)?);
-                            }
-                            None => {}
+                        if let Some(kind) = binary_array.take() {
+                            pending_bytes += raw.len();
+                            pending_arrays.push(PendingArray {
+                                kind,
+                                dtype: binary_dtype,
+                                compression,
+                                base64: raw.into_owned().into_bytes(),
+                            });
                         }
-
-                        binary_array = None;
                     }
                 }
                 Ok(Event::GeneralRef(_)) if matches!(state, Some(State::Binary)) => {
@@ -610,36 +687,23 @@ impl MzMLReader {
                                     .map(|&level| level == spectrum.ms_level)
                                     .unwrap_or(true);
 
-                            if spectrum
-                                .fragment_charges
-                                .as_ref()
-                                .is_some_and(|charges| charges.len() != spectrum.mz.len())
-                            {
-                                log::warn!(
-                                    "ignoring fragment charge array with length different from m/z array for spectrum {}",
-                                    spectrum.id
-                                );
-                                spectrum.fragment_charges = None;
+                            if allow {
+                                pending.push(PendingSpectrum {
+                                    spectrum,
+                                    arrays: std::mem::take(&mut pending_arrays),
+                                });
+                            } else {
+                                pending_arrays.clear();
                             }
-
-                            match (allow, self.signal_to_noise) {
-                                (true, Some(level))
-                                    if level == spectrum.ms_level && !noise_array.is_empty() =>
-                                {
-                                    spectrum
-                                        .intensity
-                                        .iter_mut()
-                                        .zip(noise_array.iter())
-                                        .for_each(|(int, noise)| *int /= noise);
-                                    spectra.push(spectrum);
-                                }
-                                (true, _) => {
-                                    spectra.push(spectrum);
-                                }
-                                (false, _) => {}
+                            if pending_bytes >= DECODE_BATCH_BYTES {
+                                decode_batch(
+                                    std::mem::take(&mut pending),
+                                    self.signal_to_noise,
+                                    &mut spectra,
+                                )?;
+                                pending_bytes = 0;
                             }
                             spectrum = RawSpectrum::default_with_file_id(self.file_id);
-                            noise_array.clear();
                             // Scan-level mobility of a spectrum without precursors
                             // belongs to that spectrum only.
                             precursor = Precursor::default();
@@ -658,6 +722,7 @@ impl MzMLReader {
             }
             buf.clear();
         }
+        decode_batch(pending, self.signal_to_noise, &mut spectra)?;
         Ok(spectra)
     }
 }
