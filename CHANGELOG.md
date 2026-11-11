@@ -49,6 +49,14 @@ entries are retained below for provenance.
   scan-event preamble for MS2 events whose reaction tag is unresolved, and TSF line spectra and
   miniTDF spectra reject non-finite and negative intensities as corrupt data instead of handing
   NaN intensities to the caller.
+- mzML reading is about twice as fast. The binary data arrays of one spectrum are now
+  base64-decoded and inflated in parallel on the configured thread pool, in batches of 32 MB
+  of base64, instead of one array at a time on the thread walking the document; the decoder
+  and its buffers are reused for a whole file instead of being rebuilt for each of the
+  roughly 300,000 arrays in a 1.2 GB file. On five 1.2 GB Thermo mzML files the read stage
+  falls from 37.7 s to 18.9 s and the whole search from 80.0 s to 60.5 s, with
+  byte-identical `results.sage.parquet` and `lfq.parquet` and no more memory. Whole-file
+  gzip and mzMLb input are unchanged.
 
 ### Fixed
 - LFQ integration windows contain only bins that pass both the score and spectral-angle
