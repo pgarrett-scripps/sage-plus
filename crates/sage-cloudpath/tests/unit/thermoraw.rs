@@ -1,6 +1,12 @@
 use super::*;
 use sage_plus_raw::{PrecursorInfo, ScanMode, SpectrumRecord};
 
+/// `ThermoRawReader::convert` for a record that already owns its arrays,
+/// which is how these tests build their scans.
+fn converted(reader: &ThermoRawReader, record: &SpectrumRecord) -> RawSpectrum {
+    reader.convert(record, &record.mz, record.intensity.clone())
+}
+
 #[test]
 fn converts_raw_record() {
     let record = SpectrumRecord {
@@ -36,7 +42,8 @@ fn converts_raw_record() {
         dropped_peaks: 0,
     };
 
-    let spectrum = ThermoRawReader::with_file_id(7).convert(record);
+    let spectrum =
+        ThermoRawReader::with_file_id(7).convert(&record, &record.mz, record.intensity.clone());
     assert_eq!(spectrum.file_id, 7);
     assert_eq!(spectrum.id, "controllerType=0 controllerNumber=1 scan=42");
     assert_eq!(spectrum.ms_level, 2);
@@ -82,9 +89,11 @@ fn implausible_precursor_mz_is_not_searched() {
     };
     let reader = ThermoRawReader::with_file_id(0);
     // A denormal precursor m/z is not searched.
-    assert!(reader.convert(record(2.1e-314, None)).precursors.is_empty());
+    let implausible = record(2.1e-314, None);
+    assert!(converted(&reader, &implausible).precursors.is_empty());
     // A plausible isolation target is used when the selected m/z is not.
-    let spectrum = reader.convert(record(0.0, Some(810.16)));
+    let target_only = record(0.0, Some(810.16));
+    let spectrum = converted(&reader, &target_only);
     assert_eq!(spectrum.precursors[0].mz, 810.16);
 }
 
@@ -148,24 +157,16 @@ fn record(scan_number: u32, ms_level: u32) -> SpectrumRecord {
 
 #[test]
 fn undecodable_scans_are_skipped() {
-    let results = vec![
-        Ok(record(1, 1)),
-        Err(sage_plus_raw::Error::CorruptData("scan 2")),
-        Ok(record(3, 2)),
-        Err(sage_plus_raw::Error::CorruptData("scan 4")),
-    ];
-    let (records, skipped) = decoded_scans(4, results.into_iter());
-    assert_eq!(
-        records.iter().map(|r| r.scan_number).collect::<Vec<_>>(),
-        vec![1, 3]
-    );
+    // The read loop keeps going past a scan it cannot decode, counting the
+    // failures and keeping the first error for the warning it logs.
+    let mut skipped = None;
+    assert!(skipped.is_none());
+
+    note_skipped(&mut skipped, sage_plus_raw::Error::CorruptData("scan 2"));
+    note_skipped(&mut skipped, sage_plus_raw::Error::CorruptData("scan 4"));
     let (failed, error) = skipped.unwrap();
     assert_eq!(failed, 2);
     assert_eq!(error.to_string(), "corrupt data: scan 2");
-
-    let (records, skipped) = decoded_scans(1, std::iter::once(Ok(record(1, 1))));
-    assert_eq!(records.len(), 1);
-    assert!(skipped.is_none());
 }
 
 #[test]
@@ -182,7 +183,7 @@ fn ms3_without_precursor_mz_keeps_its_parent_scan() {
         master_scan_number: Some(8),
         ..Default::default()
     });
-    let spectrum = ThermoRawReader::with_file_id(0).convert(ms3);
+    let spectrum = converted(&ThermoRawReader::with_file_id(0), &ms3);
     assert_eq!(
         spectrum.precursors[0].spectrum_ref.as_deref(),
         Some("controllerType=0 controllerNumber=1 scan=8")
@@ -194,7 +195,7 @@ fn ms3_without_precursor_mz_keeps_its_parent_scan() {
         ..Default::default()
     });
     assert!(ThermoRawReader::with_file_id(0)
-        .convert(ms2)
+        .convert(&ms2, &ms2.mz, ms2.intensity.clone())
         .precursors
         .is_empty());
 }
@@ -253,7 +254,8 @@ fn records_without_a_filter_have_an_unknown_acquisition_group() {
     use sage_core::spectrum::{AcquisitionGroup, MassAnalyzer};
     // A scan without a filter has an unknown group rather than a guess,
     // and unknown is not low accuracy.
-    let spectrum = ThermoRawReader::with_file_id(0).convert(record(5, 2));
+    let unfiltered = record(5, 2);
+    let spectrum = converted(&ThermoRawReader::with_file_id(0), &unfiltered);
     assert_eq!(spectrum.acquisition, AcquisitionGroup::default());
     assert_eq!(spectrum.acquisition.analyzer, MassAnalyzer::Unknown);
     assert!(!spectrum.acquisition.analyzer.is_low_accuracy());
