@@ -25,7 +25,7 @@ impl FileFormat {
             FileFormat::MzMLb => false,
             FileFormat::MGF => false,
             FileFormat::TDF => true,
-            FileFormat::ThermoRaw => false,
+            FileFormat::ThermoRaw => true,
             FileFormat::Unidentified => false,
         }
     }
