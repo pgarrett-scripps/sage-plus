@@ -58,6 +58,11 @@ entries are retained below for provenance.
   is unchanged (54.5 s to 54.3 s and 80.1 s to 79.3 s, from runs of the two binaries
   alternated inside one exclusive job), and `results.sage.parquet` and `lfq.parquet` are
   byte-identical.
+- The MS1 spectra retained for label-free quantification are freed as soon as quantification
+  is done, instead of at the end of the run, so output serialization and upload no longer run
+  with them resident. On five PXD028735 files resident memory at the start of the write phase
+  falls from 4.76 GiB to 4.22 GiB; the run's peak is unchanged, because it is inside
+  quantification, and `results.sage.parquet` and `lfq.parquet` are byte-identical.
 - `sage-core` API, for users of the library crate: `Peptide::label_channel` and
   `Peptide::label_group_override` are no longer fields. They are the `channel` and
   `group_override` fields of `PeptideLabel`, held as `Peptide::label`
