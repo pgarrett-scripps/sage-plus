@@ -7,7 +7,7 @@
 Sage Plus is a fork of the [Sage](https://github.com/lazear/sage) proteomics search engine. It
 keeps Sage's speed and configuration, and adds Thermo RAW input, PTM site localization with
 error rates, PTM searches without index blow-up, metaproteome-scale databases, ETD scoring, and
-better label-free quantification. Current release: **v0.1.0-beta.17** (prerelease).
+better label-free quantification. Current release: **v0.1.0-beta.18** (prerelease).
 
 ## At a glance
 

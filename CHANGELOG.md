@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.18] - 2026-11-11
+
 ### Security
 - Updated nine transitive dependencies flagged by `cargo audit`, lockfile only, no manifest
   change: rustls 0.23.45 → 0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), rustls-webpki

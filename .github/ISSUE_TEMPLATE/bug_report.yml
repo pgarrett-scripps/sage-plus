@@ -55,7 +55,7 @@ body:
       label: Sage Plus version
       description: >
         The output of `sage --version`, or the commit hash if you built from a working tree.
-      placeholder: "0.1.0-beta.17"
+      placeholder: "0.1.0-beta.18"
     validations:
       required: true
 
