@@ -32,6 +32,18 @@ entries are retained below for provenance.
   reached only on wasm targets.
 
 ### Changed
+- Required `sage-plus-tdf` 0.2.3 (was 0.2.2) and `sage-plus-raw` 0.1.2 (was 0.1.1), which make
+  reading instrument files faster with the same decoded values. Thermo RAW: each scan's peak,
+  label, noise and profile record blocks are read in one read into a reused buffer instead of
+  roughly 2,364 four-byte reads per scan, and the seeks per scan fall from six to two, which the
+  reader measures as centroid decoding of 20,000 scans in 0.147 s instead of 0.190 s and profile
+  decoding of 8,000 scans in 0.92 s instead of 1.78 s. Bruker TDF: the Zstandard frame layout is
+  split into its byte planes once instead of reading each word through a bounds-checking closure,
+  the acquisition type is decided in one pass over the frames, and the schema object list is
+  cached so opening an acquisition issues one `sqlite_master` query per database rather than one
+  per typed table; the reader measures every frame of a 1.0 GB acquisition in 9.95 s instead of
+  10.24 s. Searches of mzML, Thermo RAW and Bruker `.d` inputs produce byte-identical
+  `results.sage.parquet` and `lfq.parquet` across the bump.
 - Searching is faster, with identical output. A spectrum's fragment tolerance windows and
   the index buckets they touch are planned once per mass offset instead of once per isotope
   error, and every isotope error's per-bucket precursor range is then resolved in one pass

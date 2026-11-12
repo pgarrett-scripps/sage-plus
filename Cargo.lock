@@ -3657,9 +3657,9 @@ dependencies = [
 
 [[package]]
 name = "sage-plus-raw"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3db3ee7b1347137e099c173938cb20a345eae9773a3dcb5583ba2e6c6e4bb539"
+checksum = "030f1fb7ad22c50894135d7b7ea5365db33cf110efc31295edf126cc0aa04ec9"
 dependencies = [
  "roxmltree",
  "thiserror 2.0.18",
@@ -3667,9 +3667,9 @@ dependencies = [
 
 [[package]]
 name = "sage-plus-tdf"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5644293b5051082f93fecf54ec2e1c367cb6abdbb858e49cd4263dc803476db9"
+checksum = "7877a0bb6c994c59252aa1d47206c70fdc247942e083b46dd61301ae5e95c9db"
 dependencies = [
  "lzf",
  "parquet",
