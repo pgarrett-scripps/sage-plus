@@ -9,6 +9,16 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Security
+- Updated `rustix` 1.1.4 to 1.1.6 in the lockfile for RUSTSEC-2026-0486, an unsoundness in its
+  xattr functions, which mark unwritten bytes of a zero-length buffer as initialized. Sage Plus
+  calls none of them; `rustix` is reached through `tempfile` and `is-terminal`, and the advisory
+  was published after Beta 18's dependencies were last audited, so the release workflow's
+  `cargo audit --deny unsound` is what found it. Lockfile only, no manifest change. Cargo also
+  moved the crates whose `windows-sys` requirement spans several minor versions from 0.61.2 onto
+  the 0.60.2 and 0.52.0 entries already in the lockfile, because `rustix` 1.1.6 itself requires
+  0.52: Windows-only edges, no crate version added or removed.
+
 ## [v0.1.0-beta.18] - 2026-11-11
 
 ### Security
