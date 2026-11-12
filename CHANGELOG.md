@@ -9,6 +9,14 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Changed
+- Reading a Thermo RAW file is faster and holds less memory, with identical output. The file is
+  opened once instead of twice, each scan is decoded into an m/z buffer and a record-block buffer
+  kept for the whole file instead of three allocations per scan, and each scan becomes its Sage
+  spectrum as it is read, so the f64 m/z array of every scan in the file is no longer alive at
+  once. On a 3.5 GB Q Exactive file the read stage falls from 1,392 ms to 1,161 ms and peak
+  memory from 2.44 GiB to 2.10 GiB, with a byte-identical `results.sage.parquet`.
+
 ## [v0.1.0-beta.18] - 2026-11-11
 
 ### Security
