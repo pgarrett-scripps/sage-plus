@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.18] - 2026-11-11
+
 ### Security
 - Updated `rustix` 1.1.4 to 1.1.6 in the lockfile for RUSTSEC-2026-0486, an unsoundness in its
   xattr functions, which mark unwritten bytes of a zero-length buffer as initialized. Sage Plus
@@ -18,10 +20,6 @@ entries are retained below for provenance.
   moved the crates whose `windows-sys` requirement spans several minor versions from 0.61.2 onto
   the 0.60.2 and 0.52.0 entries already in the lockfile, because `rustix` 1.1.6 itself requires
   0.52: Windows-only edges, no crate version added or removed.
-
-## [v0.1.0-beta.18] - 2026-11-11
-
-### Security
 - Updated nine transitive dependencies flagged by `cargo audit`, lockfile only, no manifest
   change: rustls 0.23.45 → 0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), rustls-webpki
   0.103.15 → 0.103.16 (RUSTSEC-2026-0382), webpki-root-certs 1.0.9 → 1.0.11
