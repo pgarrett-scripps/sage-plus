@@ -48,6 +48,27 @@ entries are retained below for provenance.
   variable modifications (M oxidation, N-terminal acetyl) from 7.74 GiB to 7.42 GiB; wall time
   is unchanged (52.28 s to 52.57 s and 77.66 s to 77.76 s, both inside run-to-run noise) and
   `results.sage.parquet` and `lfq.parquet` are byte-identical.
+- A search uses less memory again, with identical output, by shrinking the two structs a
+  search holds millions of. `Peptide` falls from 144 to 120 bytes and `Feature` from 528 to
+  344 bytes: the labeling channel and library group identity move into one boxed
+  `PeptideLabel`, and the matched-fragment detail is boxed. Both are absent in an ordinary
+  label-free search that writes no fragment table, so an inline `None` was the common case.
+  On five PXD028735 files at 20 threads peak memory falls from 4.91 GiB to 4.78 GiB, and with
+  variable modifications (M oxidation, N-terminal acetyl) from 7.39 GiB to 7.09 GiB. Wall time
+  is unchanged (54.5 s to 54.3 s and 80.1 s to 79.3 s, from runs of the two binaries
+  alternated inside one exclusive job), and `results.sage.parquet` and `lfq.parquet` are
+  byte-identical.
+- `sage-core` API, for users of the library crate: `Peptide::label_channel` and
+  `Peptide::label_group_override` are no longer fields. They are the `channel` and
+  `group_override` fields of `PeptideLabel`, held as `Peptide::label`
+  (`Option<Box<PeptideLabel>>`), which is `None` when both are. Read them with the new
+  `label_channel()`, `label_channel_str()`, `label_group_override()` and
+  `label_group_override_str()`, and write them with `set_label_channel()` and
+  `set_label_group_override()`, which keep that invariant so peptide equality and ordering
+  are unchanged. `Feature::fragments` is now `Option<Box<Fragments>>`. No configuration key,
+  CLI flag, output column, parquet schema or serialized form changes:
+  `SpectralLibraryEntry::label_channel` and the `label_channel` output column keep their
+  names and types.
 - Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
   same problem, the Sage Plus implementation is kept: named modifications with explicit sites
   (not upstream's named PTMs), `z_dot` ions (not upstream's radical z ions), per-modification
