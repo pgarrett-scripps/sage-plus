@@ -30,6 +30,7 @@ sage-dia = { path = "../sage-dia" }
 sage-cloudpath = { path = "../sage-cloudpath", features = ["parquet"] }
 
 anyhow = "1.0"
+mimalloc = "0.1.43"
 csv = "1"
 clap = { version = "4.0", features = ["cargo", "unicode"] }
 env_logger = "0.11.11"

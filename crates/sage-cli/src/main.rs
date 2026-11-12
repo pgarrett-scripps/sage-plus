@@ -6,6 +6,12 @@ use sage_cli::input::Input;
 use std::fs::File;
 use std::io::BufWriter;
 
+/// Prototype for the 2026-11 reader-memory audit, not for landing: glibc keeps
+/// the Thermo decode's freed buffers resident, and this measures whether a
+/// returning allocator gives them back.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::default()
         .filter_level(log::LevelFilter::Error)
