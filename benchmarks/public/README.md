@@ -204,7 +204,52 @@ Two conclusions follow, and the arms are what make them separable:
   here is the vendor reader and the converter disagreeing about the spectra, not
   a scoring difference.
 
-<!-- RESULTS -->
+## Results: five PXD028735 files, 2026-11-12
+
+One run of each arm, 20 threads, each arm alone on the machine (a scheduler
+held the machine for the timing runs). The conversions were done first, one
+file at a time, outside the timing runs: 1,288.6 s for the five files
+(250.2, 251.2, 259.5, 263.5 and 264.2 s), so both mzML arms read the same
+cached mzML and report the same measured conversion cost.
+
+| | Sage Plus, `.raw` | Sage Plus, mzML | Upstream Sage, mzML |
+| --- | ---: | ---: | ---: |
+| Version | 0.1.0-beta.18 | 0.1.0-beta.18 | 0.15.0-beta.2 |
+| Conversion | none | 1,288.6 s | 1,288.6 s |
+| Search | 58.3 s | 59.6 s | 94.5 s |
+| Total | **58.3 s** | **1,348.2 s** | **1,383.1 s** |
+| Peak memory | 11.67 GiB | 7.45 GiB | 11.20 GiB |
+| PSMs at 1% FDR | 318,226 | 318,214 | 311,016 |
+| Peptides at 1% FDR | 60,429 | 60,441 | 59,051 |
+| Proteins at 1% FDR | 7,034 | 7,034 | 6,977 |
+
+Read it in three pieces, and keep them apart:
+
+- **Conversion is 21.5 minutes**, 93% of the upstream arm's total and 96% of
+  the Sage Plus mzML arm's. It is paid
+  once per file, it scales with the dataset, and it is the part a vendor-file
+  reader removes. It is not a property of either search engine.
+- **The engine, on byte-identical input** (`plus-mzml` against
+  `upstream-mzml`): 59.6 s against 94.5 s of search, so Sage Plus searched
+  1.6 times as fast, with 7,198 more PSMs (+2.3%), 1,390 more peptides (+2.4%)
+  and 57 more proteins (+0.8%), at 7.45 GiB against 11.20 GiB of peak memory.
+  The identification differences are the rows in the table above.
+- **The reader, in the same engine** (`plus-raw` against `plus-mzml`): 58.3 s
+  against 59.6 s of search — a 1.4 s difference on a laptop that throttled at
+  98 °C during both runs, which is not a difference worth naming — and 12 PSMs
+  out of 318,226, 12 peptides and no proteins. The two readers see the same
+  spectra. Reading `.raw` directly cost 4.2 GiB more peak memory than reading
+  the converted mzML.
+
+So the vendor-file path is worth 21.5 minutes of conversion on five files, and
+the engine is worth about a third of the search time; those are two separate
+numbers and neither should be multiplied into the other.
+
+Receipts, including the scheduler's record of contention and CPU clocks for
+each timing run, are in
+[`results-pxd028735.md`](results-pxd028735.md). One run per arm: see the
+caveat above before reading a few tenths of a percent as a result.
+
 
 ## Reporting honestly
 
