@@ -102,8 +102,10 @@ impl Runner {
         }
         self.cancellation.check()?;
         self.events.check()?;
+        crate::memmark::mark("database_built");
         //Collect all results into a single container
         let mut outputs = self.batch_files(&self.scorer(), parallel)?;
+        crate::memmark::mark("search_done");
         self.cancellation.check()?;
         self.events.check()?;
 

@@ -3,6 +3,7 @@ pub mod config_presets;
 pub mod config_schema;
 pub mod events;
 pub mod input;
+pub mod memmark;
 pub mod memory;
 pub mod modification_preview;
 pub mod output;

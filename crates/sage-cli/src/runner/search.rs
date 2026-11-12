@@ -551,6 +551,7 @@ impl Runner {
         chunk_idx: usize,
         batch_size: usize,
     ) -> anyhow::Result<SageResults> {
+        crate::memmark::mark("chunk_read_start");
         let spectra = match self.take_retained_spectra(chunk_idx, batch_size) {
             Some(spectra) => {
                 self.emit_retained_batch_events(chunk, chunk_idx, batch_size, &spectra);
@@ -558,6 +559,7 @@ impl Runner {
             }
             None => self.read_processed_spectra(chunk, chunk_idx, batch_size)?,
         };
+        crate::memmark::mark("chunk_read_done");
         let (features, repeated_spectrum_psms) = if self.mass_recalibration_enabled() {
             self.discover_mass_corrections(scorer, &spectra.1);
             let recalibrated = Scorer {
@@ -568,7 +570,11 @@ impl Runner {
         } else {
             self.search_processed_spectra(scorer, &spectra.1)
         };
-        Ok(self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms))
+        crate::memmark::mark("chunk_search_done");
+        let completed =
+            self.complete_features(spectra.1, spectra.0, features, repeated_spectrum_psms);
+        crate::memmark::mark("chunk_complete");
+        Ok(completed)
     }
 
     /// Take the prefilter's spectra for this file batch. Spectra retained
@@ -774,10 +780,12 @@ impl Runner {
                         anyhow::bail!("failed to read spectra file `{path}`: {message}");
                     }
                     log::trace!("- {}: read {} spectra", path, s.len());
+                    crate::memmark::raw_stats(file_id, &s);
                     let spectra = s
                         .into_par_iter()
                         .map(|spectrum| sp.process(spectrum))
                         .collect::<SpectrumAccumulator>();
+                    crate::memmark::processed_stats(file_id, &spectra.ms1, &spectra.msn);
                     if search_events {
                         self.events.emit(EventKind::FileCompleted {
                             file_id,
