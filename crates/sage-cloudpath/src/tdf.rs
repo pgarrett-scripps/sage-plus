@@ -315,13 +315,24 @@ impl TdfReader {
         let ms1_spectra: Vec<RawSpectrum> = frames
             .par_iter()
             .map_init(
-                || PeakBuffer::with_capacity(2 * MAX_PEAKS),
-                |buffer, &(id, rt, num_scans)| match reader.read_frame(id) {
-                    Ok(frame) => {
+                // Per worker, kept for the whole file: the peak buffer, the
+                // compressed frame bytes and the decoded frame.
+                || {
+                    (
+                        PeakBuffer::with_capacity(2 * MAX_PEAKS),
+                        Vec::new(),
+                        Frame::default(),
+                    )
+                },
+                |(buffer, data, frame), &(id, rt, num_scans)| match reader
+                    .read_frame_into(id, data, frame)
+                {
+                    Ok(()) => {
+                        let frame = &*frame;
                         buffer.clear();
                         let survivors = match &denoiser {
                             Some(denoiser) => {
-                                let survivors = denoise_frame(denoiser, &frame, num_scans)?;
+                                let survivors = denoise_frame(denoiser, frame, num_scans)?;
                                 raw_points.fetch_add(
                                     frame.intensities.len() as u64,
                                     AtomicOrdering::Relaxed,
@@ -339,14 +350,14 @@ impl TdfReader {
                             MobilityScale::Calibrated { calibration, .. } => {
                                 let model = calibration.frame(id as usize);
                                 buffer.load(
-                                    &frame,
+                                    frame,
                                     survivors,
                                     |scan| model.one_over_k0(scan as f64) as f32,
                                     mz_scale,
                                 )
                             }
                             MobilityScale::Linear(linear) => buffer.load(
-                                &frame,
+                                frame,
                                 survivors,
                                 |scan| {
                                     let scan =
@@ -432,76 +443,88 @@ impl TdfReader {
         let dropped = Dropped::default();
         let spectra: Vec<RawSpectrum> = tdf_spectra::dda_groups(&rows)
             .par_iter()
-            .filter_map(|(id, indices)| {
-                let spectrum = (|| {
-                    let precursor = precursors
-                        .get(id)
-                        .ok_or_else(|| format!("precursor {id} is not in Precursors"))?;
-                    let parent = precursor
-                        .parent
-                        .ok_or_else(|| format!("precursor {id} has no Parent frame"))?;
-                    let scan = precursor
-                        .scan_number
-                        .ok_or_else(|| format!("precursor {id} has no ScanNumber"))?;
-                    let rt = reader
-                        .frame(parent)
-                        .ok_or_else(|| format!("precursor {id}: unknown Parent frame {parent}"))?
-                        .retention_time_seconds;
-                    let mut tofs = Vec::new();
-                    let mut intensities = Vec::new();
-                    let mut last = &rows[indices[0]];
-                    for &index in indices {
-                        let row = &rows[index];
-                        last = row;
-                        let frame = reader.read_frame(row.frame).map_err(|e| e.to_string())?;
-                        if frame.intensities.is_empty() {
-                            continue;
+            .map_init(
+                // Per worker: the compressed frame bytes and the decoded
+                // frame, reused across every frame this worker reads.
+                || (Vec::new(), Frame::default()),
+                |(data, frame_buf), (id, indices)| {
+                    let spectrum = (|| {
+                        let precursor = precursors
+                            .get(id)
+                            .ok_or_else(|| format!("precursor {id} is not in Precursors"))?;
+                        let parent = precursor
+                            .parent
+                            .ok_or_else(|| format!("precursor {id} has no Parent frame"))?;
+                        let scan = precursor
+                            .scan_number
+                            .ok_or_else(|| format!("precursor {id} has no ScanNumber"))?;
+                        let rt = reader
+                            .frame(parent)
+                            .ok_or_else(|| {
+                                format!("precursor {id}: unknown Parent frame {parent}")
+                            })?
+                            .retention_time_seconds;
+                        let mut tofs = Vec::new();
+                        let mut intensities = Vec::new();
+                        let mut last = &rows[indices[0]];
+                        for &index in indices {
+                            let row = &rows[index];
+                            last = row;
+                            reader
+                                .read_frame_into(row.frame, data, frame_buf)
+                                .map_err(|e| e.to_string())?;
+                            let frame = &*frame_buf;
+                            if frame.intensities.is_empty() {
+                                continue;
+                            }
+                            let (t, i) = scan_slice(
+                                frame,
+                                row.scan_num_begin as usize,
+                                row.scan_num_end as usize,
+                            )?;
+                            tofs.extend_from_slice(t);
+                            intensities.extend(i.iter().map(|&x| u64::from(x)));
                         }
-                        let (t, i) = scan_slice(
-                            &frame,
-                            row.scan_num_begin as usize,
-                            row.scan_num_end as usize,
-                        )?;
-                        tofs.extend_from_slice(t);
-                        intensities.extend(i.iter().map(|&x| u64::from(x)));
-                    }
-                    let (tofs, intensities) = tdf_spectra::process(
-                        tofs,
-                        intensities,
-                        processing.smoothing_window,
-                        processing.centroiding_window,
-                    );
-                    let scan = scan as u32;
-                    let inverse_ion_mobility = scale.precursor(*id as usize, parent as usize, scan);
-                    let precursor = Precursor {
-                        mz: precursor.monoisotopic_mz.unwrap_or_default() as f32,
-                        charge: precursor
-                            .charge
-                            .and_then(|charge| i8::try_from(charge).ok())
-                            .map(|charge| charge as u8),
-                        intensity: Some(precursor.intensity as f32),
-                        spectrum_ref: Some(parent.to_string()),
-                        inverse_ion_mobility: Some(inverse_ion_mobility),
-                        ..Precursor::default()
-                    };
-                    let window = IsolationWindow::from_center(
-                        last.isolation_mz,
-                        last.isolation_width,
-                        last.collision_energy,
-                    );
-                    Ok::<_, String>(Self::ms2_spectrum(
-                        file_id,
-                        id.to_string(),
-                        precursor,
-                        rt,
-                        window,
-                        &tofs,
-                        &intensities,
-                        mz_scale,
-                    ))
-                })();
-                spectrum.map_err(|why| dropped.drop_spectrum(why)).ok()
-            })
+                        let (tofs, intensities) = tdf_spectra::process(
+                            tofs,
+                            intensities,
+                            processing.smoothing_window,
+                            processing.centroiding_window,
+                        );
+                        let scan = scan as u32;
+                        let inverse_ion_mobility =
+                            scale.precursor(*id as usize, parent as usize, scan);
+                        let precursor = Precursor {
+                            mz: precursor.monoisotopic_mz.unwrap_or_default() as f32,
+                            charge: precursor
+                                .charge
+                                .and_then(|charge| i8::try_from(charge).ok())
+                                .map(|charge| charge as u8),
+                            intensity: Some(precursor.intensity as f32),
+                            spectrum_ref: Some(parent.to_string()),
+                            inverse_ion_mobility: Some(inverse_ion_mobility),
+                            ..Precursor::default()
+                        };
+                        let window = IsolationWindow::from_center(
+                            last.isolation_mz,
+                            last.isolation_width,
+                            last.collision_energy,
+                        );
+                        Ok::<_, String>(Self::ms2_spectrum(
+                            file_id,
+                            id.to_string(),
+                            precursor,
+                            rt,
+                            window,
+                            &tofs,
+                            &intensities,
+                            mz_scale,
+                        ))
+                    })();
+                    spectrum.map_err(|why| dropped.drop_spectrum(why)).ok()
+                },
+            )
+            .flatten()
             .collect();
         dropped.log(path, "ddaPASEF");
         log::info!(
@@ -555,57 +578,72 @@ impl TdfReader {
         }
         let spectra: Vec<RawSpectrum> = by_frame
             .par_iter()
-            .flat_map_iter(|&(offset, chunk)| {
-                let frame_id = chunk[0].frame;
-                let frame = reader.read_frame(frame_id).map_err(|e| e.to_string());
-                // timsrust took the retention time of the frame before (Id - 1).
-                let rt = reader
-                    .frame(frame_id.wrapping_sub(1))
-                    .map(|info| info.retention_time_seconds)
-                    .ok_or_else(|| format!("frame {frame_id} has no preceding frame"));
-                let dropped = &dropped;
-                chunk.iter().enumerate().filter_map(move |(k, slice)| {
-                    let index = offset + k;
-                    let spectrum = (|| {
-                        let frame = frame.as_ref().map_err(Clone::clone)?;
-                        let rt = rt.clone()?;
-                        let (t, i) = scan_slice(frame, slice.scan_start, slice.scan_end)?;
-                        let (tofs, intensities) = tdf_spectra::process(
-                            t.to_vec(),
-                            i.iter().map(|&x| u64::from(x)).collect(),
-                            processing.smoothing_window,
-                            processing.centroiding_window,
-                        );
-                        let scan = ((slice.scan_start + slice.scan_end) as f32 / 2.0) as u32;
-                        let precursor = Precursor {
-                            mz: slice.window.center() as f32,
-                            spectrum_ref: Some(slice.frame.to_string()),
-                            inverse_ion_mobility: Some(scale.precursor(
-                                index,
-                                slice.frame as usize,
-                                scan,
-                            )),
-                            ..Precursor::default()
-                        };
-                        let window = IsolationWindow::from_center(
-                            slice.window.center(),
-                            slice.window.width(),
-                            slice.window.collision_energy,
-                        );
-                        Ok::<_, String>(Self::ms2_spectrum(
-                            file_id,
-                            index.to_string(),
-                            precursor,
-                            rt,
-                            window,
-                            &tofs,
-                            &intensities,
-                            mz_scale,
-                        ))
-                    })();
-                    spectrum.map_err(|why| dropped.drop_spectrum(why)).ok()
-                })
-            })
+            .map_init(
+                // Per worker: the compressed frame bytes and the decoded
+                // frame. The window spectra of one frame are built inside
+                // this closure, so the buffers stay with the worker.
+                || (Vec::new(), Frame::default()),
+                |(data, frame_buf), &(offset, chunk)| {
+                    let frame_id = chunk[0].frame;
+                    let frame = reader
+                        .read_frame_into(frame_id, data, frame_buf)
+                        .map_err(|e| e.to_string())
+                        .map(|()| &*frame_buf);
+                    // timsrust took the retention time of the frame before (Id - 1).
+                    let rt = reader
+                        .frame(frame_id.wrapping_sub(1))
+                        .map(|info| info.retention_time_seconds)
+                        .ok_or_else(|| format!("frame {frame_id} has no preceding frame"));
+                    let dropped = &dropped;
+                    chunk
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(k, slice)| {
+                            let index = offset + k;
+                            let spectrum = (|| {
+                                let frame = frame.as_ref().map_err(Clone::clone)?;
+                                let rt = rt.clone()?;
+                                let (t, i) = scan_slice(frame, slice.scan_start, slice.scan_end)?;
+                                let (tofs, intensities) = tdf_spectra::process(
+                                    t.to_vec(),
+                                    i.iter().map(|&x| u64::from(x)).collect(),
+                                    processing.smoothing_window,
+                                    processing.centroiding_window,
+                                );
+                                let scan =
+                                    ((slice.scan_start + slice.scan_end) as f32 / 2.0) as u32;
+                                let precursor = Precursor {
+                                    mz: slice.window.center() as f32,
+                                    spectrum_ref: Some(slice.frame.to_string()),
+                                    inverse_ion_mobility: Some(scale.precursor(
+                                        index,
+                                        slice.frame as usize,
+                                        scan,
+                                    )),
+                                    ..Precursor::default()
+                                };
+                                let window = IsolationWindow::from_center(
+                                    slice.window.center(),
+                                    slice.window.width(),
+                                    slice.window.collision_energy,
+                                );
+                                Ok::<_, String>(Self::ms2_spectrum(
+                                    file_id,
+                                    index.to_string(),
+                                    precursor,
+                                    rt,
+                                    window,
+                                    &tofs,
+                                    &intensities,
+                                    mz_scale,
+                                ))
+                            })();
+                            spectrum.map_err(|why| dropped.drop_spectrum(why)).ok()
+                        })
+                        .collect::<Vec<_>>()
+                },
+            )
+            .flat_map_iter(|spectra| spectra)
             .collect();
         dropped.log(path, "diaPASEF");
         log::info!(
