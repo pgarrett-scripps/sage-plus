@@ -9,6 +9,13 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `sage_core::spectral_library::write_mzspeclib` writes an mzSpecLib 1.0 library entry by entry
+  to any `io::Write` and reports a sink's error, instead of building the whole library text in
+  memory. `serialize_mzspeclib` keeps its signature and its bytes, and now calls the streaming
+  writer into a `Vec<u8>`; a test pins the two outputs byte for byte, including the header-only
+  case. No behaviour changes: the CLI still serializes and writes as before.
+
 ### Changed
 - Reading a Thermo RAW file is faster and holds less memory, with identical output. The file is
   opened once instead of twice, each scan is decoded into an m/z buffer and a record-block buffer

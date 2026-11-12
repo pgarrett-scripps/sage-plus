@@ -327,3 +327,69 @@ fn median_ignores_non_finite_values() {
     assert_eq!(median(vec![f32::NAN]), None);
     assert_eq!(median(Vec::new()), None);
 }
+
+/// A sink that refuses every write, to prove the streaming writer reports a
+/// real sink's failure instead of swallowing it.
+struct FailingSink;
+
+impl std::io::Write for FailingSink {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::StorageFull,
+            "no space",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn streamed_mzspeclib_is_byte_identical_to_the_in_memory_writer() {
+    let database = database();
+    let settings = SpectralLibrarySettings {
+        enabled: true,
+        max_fragments: 2,
+        ..Default::default()
+    };
+    let features = vec![feature(0, 1, 0.001, 8.0)];
+    let selected = select_best_psms(&features, &database, &settings);
+    let mut entries = build_entries(
+        &features,
+        &database,
+        &["sample.mzML".into()],
+        &selected,
+        &settings,
+    )
+    .unwrap();
+    entries[0].label_channel = Some("heavy".into());
+    entries[0].label_group = Some("PEPTIDE".into());
+    entries[0].label_reference = Some("light".into());
+
+    for strategy in [
+        SpectralLibraryStrategy::BestPsm,
+        SpectralLibraryStrategy::Consensus,
+    ] {
+        for library in [entries.as_slice(), &[]] {
+            let in_memory = serialize_mzspeclib(library, "0.1.0-beta.1", strategy);
+            let mut streamed = Vec::new();
+            write_mzspeclib(library, "0.1.0-beta.1", strategy, &mut streamed).unwrap();
+            assert_eq!(
+                String::from_utf8(streamed).unwrap(),
+                String::from_utf8(in_memory).unwrap(),
+                "streamed and in-memory text differ for {} entries",
+                library.len()
+            );
+        }
+    }
+
+    let failed = write_mzspeclib(
+        &entries,
+        "0.1.0-beta.1",
+        SpectralLibraryStrategy::BestPsm,
+        &mut FailingSink,
+    )
+    .expect_err("a sink that cannot be written to must fail the library");
+    assert_eq!(failed.kind(), std::io::ErrorKind::StorageFull);
+}
