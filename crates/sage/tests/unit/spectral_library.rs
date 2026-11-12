@@ -17,7 +17,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
         calcmass: 1_000.0,
         rt: 12.0,
         aligned_rt: 11.5,
-        fragments: Some(Fragments {
+        fragments: Some(Box::new(Fragments {
             kinds: vec![Kind::B, Kind::Y, Kind::Y],
             fragment_ordinals: vec![2, 3, 4],
             charges: vec![1, 1, 2],
@@ -26,7 +26,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
             mz_experimental: vec![200.01, 300.01, 400.01],
             intensities: vec![25.0, 100.0, 0.5],
             peak_indices: vec![0, 1, 2],
-        }),
+        })),
         ..Feature::default()
     }
 }

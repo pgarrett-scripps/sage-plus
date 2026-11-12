@@ -1373,3 +1373,22 @@ fn ms2_without_a_precursor_reports_no_match() {
         "a scan with no precursor must mark no candidate"
     );
 }
+
+#[test]
+fn feature_keeps_fragment_detail_boxed() {
+    // One Feature exists per reported PSM and a five-file search reports
+    // hundreds of thousands of them, while `fragments` is filled only when a
+    // fragment output or a spectral library is requested.
+    #[cfg(target_pointer_width = "64")]
+    {
+        assert_eq!(std::mem::size_of::<Fragments>(), 192);
+        // Inline, as it used to be, an absent `fragments` still cost all of
+        // it: 184 bytes of every Feature, and Feature was 528 bytes.
+        assert_eq!(std::mem::size_of::<Option<Fragments>>(), 192);
+        assert_eq!(std::mem::size_of::<Option<Box<Fragments>>>(), 8);
+        assert_eq!(std::mem::size_of::<Feature>(), 344);
+    }
+
+    let feature = Feature::default();
+    assert!(feature.fragments.is_none());
+}

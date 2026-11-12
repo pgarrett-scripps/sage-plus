@@ -107,7 +107,10 @@ pub struct Feature {
     pub protein_groups: Option<String>,
     pub num_protein_groups: u32,
 
-    pub fragments: Option<Fragments>,
+    /// Matched-fragment detail for the reported PSMs, boxed: it is `None` for
+    /// every PSM unless a fragment output or spectral library asked for it,
+    /// and `Fragments` is eight vectors wide.
+    pub fragments: Option<Box<Fragments>>,
 
     /// Generic fragment-loss evidence, when `database.fragment_losses` is
     /// configured.
@@ -267,7 +270,8 @@ impl<'db> Scorer<'db> {
 
         for idx in 0..report_psms.min(score_vector.len()) {
             let score = score_vector[idx].score;
-            let fragments: Option<Fragments> = score_vector[idx].fragments.take();
+            let fragments: Option<Box<Fragments>> =
+                score_vector[idx].fragments.take().map(Box::new);
             let coverage = std::mem::take(&mut score_vector[idx].coverage);
             let mass_offset = score_vector[idx].mass_offset;
             let psm_id = increment_psm_counter();
