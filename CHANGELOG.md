@@ -128,6 +128,17 @@ entries are retained below for provenance.
   so `#g1`/`#g2` in `localized_peptide` and the row order of `results.sage.ptm-sites.parquet` could
   change between two runs of the same search.
 
+### Notes
+- 2026-11-11: the Beta 9 entry below reports 24,038 LFQ precursors at 1% q-value for linear
+  alignment on five PXD028735 files. That was measured before the LFQ warp tie rule of upstream
+  `75a5300` (listed under Fixed above), which keeps a trace whose reference carries no signal at
+  zero shift instead of pushing it out of its window. The traces that rule used to discard are
+  almost all shifted decoys, so the surviving decoy population grows and the 1% precursor cut
+  rises. On the current code the same configuration gives 20,714 for linear and 31,376 for
+  nonlinear; target precursors and their peak scores are unchanged, as are PSMs, peptides and
+  proteins. The Beta 9 entry is left as measured; `docs/design/NONLINEAR_RT_ALIGNMENT.md` carries
+  both sets of numbers and the configuration they were measured with.
+
 ## [v0.1.0-beta.17] - 2026-10-09
 
 ### Changed

@@ -53,9 +53,14 @@ The same `Alignment::transform` method is used for PSM RTs and LFQ MS1 scan time
 
 Synthetic unit tests cover outliers, large shifts, monotonicity, nonlinear error, sparse
 fallback, and single-run behavior. The dataset comparison below made nonlinear the
-default. Both searches used five PXD028735 Orbitrap LFQ files (HYE mixture,
-`hye-irt-defined.fasta`, LFQ enabled with match-between-runs on
-(`quant.lfq_settings.mbr = true`), 8 threads). The precursor counts below depend on that
+default. Both searches used five PXD028735 Orbitrap LFQ files (HYE mixture) and the
+committed configuration
+[`benchmarks/configs/prefilter-lfq-5file.json`](../../benchmarks/configs/prefilter-lfq-5file.json):
+`hye-irt-defined.fasta`, M oxidation and N-terminal acetylation as variable modifications
+(at most one of each and two per peptide), 10 ppm precursor and 20 ppm fragment tolerance,
+LFQ enabled with match-between-runs on (`quant.lfq_settings.mbr = true`), 8 threads. The
+figures below are that configuration; a search without the two variable modifications finds
+about 11% fewer PSMs and is not comparable to them. The precursor counts below depend on that
 setting: match-between-runs is what fills a precursor's missing files, so with it off the
 same searches quantify about 41% of precursors in all five files instead of 98%.
 Residuals are the absolute difference between each peptide's aligned RT and its
@@ -77,6 +82,37 @@ Each run received 24 knots. LFQ decoys at 1% q-value stayed near 1% of targets (
 313). Alignment and LFQ take the same time with either method; end-to-end runtime
 differences were within run-to-run variation on a shared machine. A single-file HEK SILAC
 search produced byte-identical results with both methods.
+
+### The same configuration on the current code
+
+The table above is the Beta 9 measurement that made nonlinear the default, and it is kept as
+the record of that decision rather than restated. Rerunning the same configuration on the
+current code gives:
+
+| Metric | Linear | Nonlinear |
+| --- | ---: | ---: |
+| PSMs at 1% FDR | 312,867 | 312,744 |
+| Peptides at 1% FDR | 62,204 | 62,218 |
+| Protein groups at 1% FDR | 6,970 | 6,965 |
+| LFQ precursors at 1% q-value | 20,714 | 31,376 |
+| LFQ precursors quantified in all 5 files | 19,859 | 30,812 |
+
+Identifications are within 0.2% of the Beta 9 figures and the nonlinear LFQ column within
+0.2% as well. The linear column is 13.8% lower, for a reason that has nothing to do with
+either alignment method: upstream Sage commit `75a5300` changed how LFQ breaks a tie between
+candidate warp offsets. A trace whose reference carries no signal used to be pushed out of
+its own integration window by the largest offset in the search and die; it is now kept at
+zero shift, integrates, and competes. Such traces are almost all shifted decoys, so target
+precursors and their peak scores do not move while the surviving decoy population grows,
+which pushes the 1% precursor q-value cut up. Under linear alignment the target peak scores
+overlap the decoy tail, so the cut has to travel far enough to cost 3,159 precursors; under
+nonlinear alignment it travels about a fifth as far and costs 245.
+
+Both columns are therefore more conservative than they were at Beta 9, and the gain from
+nonlinear alignment measured on the current code (+51%) is larger than the +31% measured at
+Beta 9. The Beta 9 figure is the one quoted in the README and FEATURES.md, because the
+difference between the two is a correction to decoy counting rather than an improvement in
+alignment.
 
 Still worth measuring on other datasets:
 

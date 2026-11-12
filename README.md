@@ -35,7 +35,7 @@ Compared with upstream Sage v0.15.0-beta.2. Numbers link to their source.
 | False hits at a reported 1% (entrapment) | 1.64% PSMs | ✓ [1.25% PSMs](benchmarks/HEADTOHEAD-2026-10.md), lower at every level |
 | Mass recalibration, ambiguous residues (B/J/Z/X), I/L merge | ✗ | ✓ [details](DOCS.md#ambiguous-residues) |
 | **Quantification** | | |
-| Nonlinear RT alignment | linear | ✓ [+31% LFQ precursors](DOCS.md#other-settings) |
+| Nonlinear RT alignment | linear | ✓ [+31% LFQ precursors](docs/design/NONLINEAR_RT_ALIGNMENT.md#evaluation) |
 | SILAC and dimethyl channels in LFQ | ✗ | ✓ [channels](DOCS.md#modification-channels) |
 | Per-row LFQ q-value, peak shape, MS2 confirmation | ✗ | ✓ [details](DOCS.md#label-free-quantification-output) |
 | **Outputs** | | |
