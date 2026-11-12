@@ -142,9 +142,9 @@ fn competition_keys_separate_peptidoforms_and_group_library_identities() {
     assert_eq!(PeptideKey::new(&twin_a), PeptideKey::new(&plain));
 
     let mut library_target = peptide("PEPTIDE", false);
-    library_target.label_group_override = Some(Arc::from("PEPTIDE(group)"));
+    library_target.set_label_group_override(Some(Arc::from("PEPTIDE(group)")));
     let mut library_decoy = peptide("EDITPEP", true);
-    library_decoy.label_group_override = Some(Arc::from("PEPTIDE(group)"));
+    library_decoy.set_label_group_override(Some(Arc::from("PEPTIDE(group)")));
     assert_eq!(
         PeptideKey::new(&library_target),
         PeptideKey::new(&library_decoy)

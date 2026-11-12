@@ -231,7 +231,7 @@ fn preferred_channel(
 pub fn same_peptidoform(left: &Peptide, right: &Peptide) -> bool {
     left.decoy == right.decoy
         && left.sequence == right.sequence
-        && left.label_channel == right.label_channel
+        && left.label_channel() == right.label_channel()
         && chemical_modifications_eq(left, right)
 }
 
@@ -518,20 +518,21 @@ impl Parameters {
                 && (remove.modifications == keep.modifications
                     || channel_zero_provenance_eq(remove, keep))
             {
-                if remove.label_channel != keep.label_channel {
+                if remove.label_channel() != keep.label_channel() {
                     let has_channel_site = keep
                         .applied_modifications()
                         .chain(remove.applied_modifications())
                         .any(|applied| applied.kind == ModificationKind::Label);
-                    keep.label_channel = has_channel_site
+                    let channel = has_channel_site
                         .then(|| {
                             preferred_channel(
-                                keep.label_channel.as_deref(),
-                                remove.label_channel.as_deref(),
+                                keep.label_channel_str(),
+                                remove.label_channel_str(),
                                 reference,
                             )
                         })
                         .flatten();
+                    keep.set_label_channel(channel);
                 }
                 // Twins show the sequence of the one found first in
                 // protein order; the rest of `keep` is the most enzymatic.

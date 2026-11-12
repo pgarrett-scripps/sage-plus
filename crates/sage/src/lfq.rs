@@ -279,7 +279,7 @@ pub fn build_feature_map(
         .peptides
         .iter()
         .enumerate()
-        .filter(|(_, peptide)| !peptide.decoy && peptide.label_channel.is_some())
+        .filter(|(_, peptide)| !peptide.decoy && peptide.label_channel().is_some())
         .fold(
             HashMap::<String, Vec<PeptideIx>, fnv::FnvBuildHasher>::default(),
             |mut groups, (index, peptide)| {
@@ -296,8 +296,7 @@ pub fn build_feature_map(
         .for_each(|feat| {
             let peptide = &db[feat.peptide_idx];
             let members = peptide
-                .label_channel
-                .as_ref()
+                .label_channel()
                 .and_then(|_| label_groups.get(&peptide.label_group()))
                 .map(Vec::as_slice)
                 .unwrap_or(std::slice::from_ref(&feat.peptide_idx));

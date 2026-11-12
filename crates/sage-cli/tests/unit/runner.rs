@@ -33,7 +33,7 @@ fn label_group_closure_keeps_every_channel_partner() {
     assert_eq!(peptides.len(), 2);
     let heavy = peptides
         .iter()
-        .position(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .position(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap();
     let keep = AtomicBitSet::new(peptides.len());
     keep.insert(heavy);

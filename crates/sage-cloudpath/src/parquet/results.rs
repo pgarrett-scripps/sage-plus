@@ -258,8 +258,7 @@ pub fn serialize_features(
         if has_labels {
             write_col!(
                 |f: &&Feature| database[f.peptide_idx]
-                    .label_channel
-                    .as_deref()
+                    .label_channel_str()
                     .unwrap_or("")
                     .into(),
                 ByteArrayType

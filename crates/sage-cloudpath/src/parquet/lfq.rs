@@ -54,7 +54,7 @@ pub fn serialize_lfq<H: BuildHasher>(
                         }
                     };
                     let peptide = &database[peptide_idx];
-                    (peptide.label_channel.as_deref() == Some(reference)).then(|| {
+                    (peptide.label_channel_str() == Some(reference)).then(|| {
                         (
                             (peptide.label_group(), charge, *decoy),
                             quantified.intensities.as_slice(),
@@ -139,8 +139,7 @@ pub fn serialize_lfq<H: BuildHasher>(
                         PrecursorId::Combined(x) | PrecursorId::Charged((x, _)) => x,
                     };
                     let value: ByteArray = database[*peptide_idx]
-                        .label_channel
-                        .as_deref()
+                        .label_channel_str()
                         .unwrap_or("")
                         .into();
                     std::iter::repeat_n(value, filenames.len())

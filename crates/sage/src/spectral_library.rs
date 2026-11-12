@@ -536,14 +536,10 @@ pub fn build_entries(
             proforma,
             stripped_peptide: String::from_utf8_lossy(&peptide.sequence).into_owned(),
             proteins: peptide.proteins(&database.decoy_tag, database.generate_decoys),
-            label_channel: peptide.label_channel.as_deref().map(str::to_owned),
-            label_group: peptide
-                .label_channel
-                .as_ref()
-                .map(|_| peptide.label_group()),
+            label_channel: peptide.label_channel_str().map(str::to_owned),
+            label_group: peptide.label_channel().map(|_| peptide.label_group()),
             label_reference: peptide
-                .label_channel
-                .as_ref()
+                .label_channel()
                 .and(database.label_reference.as_deref())
                 .map(str::to_owned),
             precursor_charge: feature.charge,

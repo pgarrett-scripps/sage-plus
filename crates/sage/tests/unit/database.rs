@@ -587,11 +587,11 @@ fn channel_offsets_generate_complete_static_channels() {
     assert_eq!(peptides.len(), 2);
     let light = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("light"))
+        .find(|peptide| peptide.label_channel_str() == Some("light"))
         .unwrap();
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap();
     assert!((heavy.monoisotopic - light.monoisotopic - 18.022468).abs() < 1e-4);
     assert_eq!(light.label_group(), heavy.label_group());
@@ -625,7 +625,7 @@ fn channels_deduplicate_peptides_without_channel_sites() {
 
     let peptides = params.peptides_from_tsv("sequence\nPEPTIDE\n");
     assert_eq!(peptides.len(), 1);
-    assert_eq!(peptides[0].label_channel, None);
+    assert_eq!(peptides[0].label_channel(), None);
 }
 
 #[test]
@@ -647,7 +647,7 @@ fn variable_channel_offsets_preserve_site_variants_and_shared_light() {
     assert_eq!(
         peptides
             .iter()
-            .filter(|peptide| peptide.label_channel.as_deref() == Some("light"))
+            .filter(|peptide| peptide.label_channel_str() == Some("light"))
             .count(),
         1
     );
@@ -688,7 +688,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
     }]);
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap();
     assert!(heavy.to_string().ends_with("K[TMT-SILAC-K]"));
     assert_eq!(
@@ -724,7 +724,7 @@ fn channel_resolved_modification_definitions_are_interned() {
             .iter()
             .find(|peptide| {
                 peptide.sequence.as_ref() == sequence
-                    && peptide.label_channel.as_deref() == Some(channel)
+                    && peptide.label_channel_str() == Some(channel)
             })
             .unwrap()
             .applied_modifications()
@@ -1620,7 +1620,7 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
             .iter()
             .map(|peptide| {
                 (
-                    peptide.label_channel.as_deref().unwrap().to_string(),
+                    peptide.label_channel_str().unwrap().to_string(),
                     peptide.label_group(),
                 )
             })

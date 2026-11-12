@@ -81,7 +81,7 @@ fn one_identified_label_channel_seeds_all_channel_precursors() {
     let light = db
         .peptides
         .iter()
-        .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+        .position(|peptide| peptide.label_channel_str() == Some("light"))
         .unwrap();
     let feature = Feature {
         peptide_idx: crate::database::PeptideIx(light as u32),
@@ -125,7 +125,7 @@ fn shared_light_variable_channel_seeds_every_heavy_site_pattern() {
     let light = db
         .peptides
         .iter()
-        .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+        .position(|peptide| peptide.label_channel_str() == Some("light"))
         .unwrap();
     let feature = Feature {
         peptide_idx: crate::database::PeptideIx(light as u32),

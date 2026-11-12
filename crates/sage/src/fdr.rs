@@ -158,7 +158,7 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
         .iter()
         .filter_map(|(peptide_idx, q)| {
             let peptide = &db[*peptide_idx];
-            peptide.label_channel.as_ref().map(|_| {
+            peptide.label_channel().map(|_| {
                 (
                     (peptide_competition_key(db, *peptide_idx), peptide.decoy),
                     *q,
@@ -170,8 +170,7 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     features.par_iter_mut().for_each(|feat| {
         let peptide = &db[feat.peptide_idx];
         feat.peptide_q = peptide
-            .label_channel
-            .as_ref()
+            .label_channel()
             .and_then(|_| {
                 label_scores
                     .get(&(peptide_competition_key(db, feat.peptide_idx), peptide.decoy))
@@ -227,7 +226,7 @@ impl Hash for ModificationIdentity {
 
 impl PeptideKey {
     fn new(peptide: &Peptide) -> Self {
-        if let Some(group) = &peptide.label_group_override {
+        if let Some(group) = peptide.label_group_override() {
             return Self::Group(group.clone());
         }
         match peptide.label_group_peptide() {

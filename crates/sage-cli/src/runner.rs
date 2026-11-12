@@ -58,7 +58,7 @@ impl LabelGroupIndex {
         let mut peptide_groups = vec![u32::MAX; peptides.len()];
         let mut counts = Vec::<u32>::new();
         for (index, peptide) in peptides.iter().enumerate() {
-            if peptide.label_channel.is_none() && peptide.label_group_override.is_none() {
+            if peptide.label.is_none() {
                 continue;
             }
             let next = groups.len() as u32;

@@ -316,7 +316,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap()
         .clone();
     let fragment_masses = [Kind::B, Kind::Y]
@@ -366,7 +366,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     assert_eq!(features.len(), 1);
     assert_eq!(features[0].isotope_error, NEUTRON);
     assert_eq!(
-        database[features[0].peptide_idx].label_channel.as_deref(),
+        database[features[0].peptide_idx].label_channel_str(),
         Some("heavy")
     );
 }

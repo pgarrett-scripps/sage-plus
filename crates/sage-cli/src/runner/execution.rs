@@ -686,7 +686,7 @@ impl Runner {
                     .database
                     .peptides
                     .iter()
-                    .filter(|peptide| !peptide.decoy && peptide.label_channel.is_some())
+                    .filter(|peptide| !peptide.decoy && peptide.label_channel().is_some())
                     .count(),
             },
             spectral_library: SpectralLibraryRunStats {

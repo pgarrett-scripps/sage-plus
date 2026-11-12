@@ -18,18 +18,33 @@ pub const INLINE_PROTEINS: usize = 1;
 /// Shared peptides transparently spill to heap storage.
 pub type ProteinAccessions = SmallVec<[Arc<str>; INLINE_PROTEINS]>;
 
+/// Labeling provenance for a peptidoform: which precursor channel it was
+/// resolved to, and the base identity a spectral library supplied for it.
+/// Both are `None` for every peptide of a label-free FASTA search, so
+/// [`Peptide`] stores this behind a box instead of inline.
+#[derive(Clone, PartialEq, Default, Debug)]
+pub struct PeptideLabel {
+    /// Precursor-resolved labeling channel, when this peptide was generated
+    /// from a coherent database label definition.
+    pub channel: Option<Arc<str>>,
+    /// Library-provided base peptidoform identity when applied modification
+    /// provenance is unavailable after parsing ProForma mass deltas.
+    pub group_override: Option<Arc<str>>,
+}
+
 #[derive(Clone, PartialEq, Default)]
 pub struct Peptide {
     pub decoy: bool,
     pub sequence: PeptideSequence,
     /// Compact modification sites with shared definition metadata.
     pub modifications: CompactModifications,
-    /// Precursor-resolved labeling channel, when this peptide was generated
-    /// from a coherent database label definition.
-    pub label_channel: Option<Arc<str>>,
-    /// Library-provided base peptidoform identity when applied modification
-    /// provenance is unavailable after parsing ProForma mass deltas.
-    pub label_group_override: Option<Arc<str>>,
+    /// Labeling provenance, absent in a label-free search. Boxed because an
+    /// ordinary FASTA search leaves both of its fields `None` on every
+    /// peptide, and the box is `None` exactly then: the accessors
+    /// [`Peptide::label_channel`] and [`Peptide::label_group_override`] read
+    /// it, and the setters keep that invariant, so `PartialEq` and `Ord`
+    /// behave as they did with the two separate fields.
+    pub label: Option<Box<PeptideLabel>>,
     /// Modification on peptide C-terminus
     pub nterm: Option<f32>,
     /// Modification on peptide C-terminus
@@ -49,6 +64,52 @@ pub struct Peptide {
 }
 
 impl Peptide {
+    /// The precursor label channel this peptidoform was resolved to.
+    #[inline]
+    pub fn label_channel(&self) -> Option<&Arc<str>> {
+        self.label.as_ref().and_then(|label| label.channel.as_ref())
+    }
+
+    /// [`Peptide::label_channel`] as a string slice, for comparisons.
+    #[inline]
+    pub fn label_channel_str(&self) -> Option<&str> {
+        self.label_channel().map(Arc::as_ref)
+    }
+
+    /// The library-provided base peptidoform identity, when one was parsed.
+    #[inline]
+    pub fn label_group_override(&self) -> Option<&Arc<str>> {
+        self.label
+            .as_ref()
+            .and_then(|label| label.group_override.as_ref())
+    }
+
+    /// [`Peptide::label_group_override`] as a string slice.
+    #[inline]
+    pub fn label_group_override_str(&self) -> Option<&str> {
+        self.label_group_override().map(Arc::as_ref)
+    }
+
+    /// Set or clear the precursor label channel.
+    pub fn set_label_channel(&mut self, channel: Option<Arc<str>>) {
+        self.update_label(|label| label.channel = channel);
+    }
+
+    /// Set or clear the library-provided base peptidoform identity.
+    pub fn set_label_group_override(&mut self, group: Option<Arc<str>>) {
+        self.update_label(|label| label.group_override = group);
+    }
+
+    /// Edit [`Peptide::label`], dropping the box again when nothing is left in
+    /// it. Keeping `None` and an all-`None` [`PeptideLabel`] from both
+    /// occurring is what makes the derived `PartialEq` agree with the two
+    /// fields this replaced.
+    fn update_label(&mut self, edit: impl FnOnce(&mut PeptideLabel)) {
+        let mut label = self.label.take().unwrap_or_default();
+        edit(&mut label);
+        self.label = (label.channel.is_some() || label.group_override.is_some()).then_some(label);
+    }
+
     #[inline]
     pub fn modification_at(&self, index: usize) -> f32 {
         self.modifications.mass_at(index)
@@ -202,7 +263,7 @@ impl Peptide {
                     .unwrap_or(Ordering::Equal)
             })
             .then_with(|| self.modifications.semantic_cmp(&other.modifications))
-            .then_with(|| self.label_channel.cmp(&other.label_channel))
+            .then_with(|| self.label_channel().cmp(&other.label_channel()))
     }
 }
 
@@ -441,7 +502,7 @@ impl Peptide {
                 .expect("resolved label definition missing from compact lookup");
         }
         self.monoisotopic += self.modification_mass() - before;
-        self.label_channel = Some(channel);
+        self.set_label_channel(Some(channel));
         self.modifications.sort();
         self
     }
@@ -450,7 +511,7 @@ impl Peptide {
     /// This is used for channel grouping, peptide-level FDR, and protein
     /// inference without collapsing ordinary biological modifications.
     pub fn label_group(&self) -> String {
-        if let Some(group) = &self.label_group_override {
+        if let Some(group) = self.label_group_override() {
             return group.to_string();
         }
         match self.label_group_peptide() {
@@ -469,7 +530,7 @@ impl Peptide {
     /// (peptide-level FDR competition) use this instead of parsing
     /// `label_group`.
     pub fn label_group_peptide(&self) -> Option<Peptide> {
-        let channel = self.label_channel.clone()?;
+        let channel = self.label_channel().cloned()?;
         let mut base = self.clone();
         let lookup = base.modifications.lookup.clone();
         for encoded in &mut base.modifications.entries {
@@ -492,8 +553,7 @@ impl Peptide {
                 .id(record.site, unresolved, ModificationKind::ChannelBase)
                 .expect("base label definition missing from compact lookup");
         }
-        base.label_channel = None;
-        base.label_group_override = None;
+        base.label = None;
         base.modifications.sort();
         Some(base)
     }
@@ -858,8 +918,7 @@ impl TryFrom<Digest> for Peptide {
             decoy: value.decoy,
             position: value.position,
             modifications: CompactModifications::default(),
-            label_channel: None,
-            label_group_override: None,
+            label: None,
             sequence: value.sequence,
             monoisotopic: mass,
             nterm: None,
