@@ -77,8 +77,9 @@ fn combined_database_features_match_with_and_without_prefilter() -> anyhow::Resu
 
     // Build the database in process to write theoretical spectra and to check
     // that every truth has an N-terminal-consistent generated decoy.
-    let mut parameters =
-        serde_json::from_value::<sage_core::database::Builder>(database.clone())?.make_parameters();
+    let mut parameters = serde_json::from_value::<sage_core::database::Builder>(database.clone())?
+        .make_parameters()
+        .expect("valid test configuration");
     let library =
         sage_core::ptm_library::PtmLibrary::from_tsv(LIBRARY).map_err(anyhow::Error::msg)?;
     parameters

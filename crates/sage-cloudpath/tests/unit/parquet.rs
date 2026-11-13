@@ -170,7 +170,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     parameters.validate_channels().unwrap();
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let database = parameters.build_from_peptides(peptides);
@@ -745,7 +745,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let database = parameters.build_from_peptides(peptides);
     let light = database

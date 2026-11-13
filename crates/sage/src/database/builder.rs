@@ -268,7 +268,12 @@ impl Builder {
         .map(|_| ())
     }
 
-    pub fn make_parameters(self) -> Parameters {
+    /// Resolve the configured database settings. Fails only on a
+    /// modification key that is not a site specificity, which is a
+    /// configuration error; see
+    /// [`crate::modification::validate_mods`]. Every other setting has a
+    /// default.
+    pub fn make_parameters(self) -> Result<Parameters, String> {
         if self.prefilter_low_memory.is_some() {
             log::warn!("database.prefilter_low_memory is deprecated and ignored");
         }
@@ -282,7 +287,7 @@ impl Builder {
             .map(|x| x.max(1))
             .unwrap_or(max_variable_mods)
             .max(max_variable_mods);
-        Parameters {
+        Ok(Parameters {
             bucket_size,
             peptide_min_mass: self.peptide_min_mass.unwrap_or(500.0),
             peptide_max_mass: self.peptide_max_mass.unwrap_or(5000.0),
@@ -295,8 +300,8 @@ impl Builder {
             fragment_losses: self.fragment_losses,
             decoy_tag: self.decoy_tag.unwrap_or_else(|| "rev_".into()),
             enzyme: self.enzyme.unwrap_or_default(),
-            static_mods: validate_mods(self.static_mods),
-            variable_mods: validate_var_mods(self.variable_mods),
+            static_mods: validate_mods(self.static_mods)?,
+            variable_mods: validate_var_mods(self.variable_mods)?,
             max_variable_mods,
             max_combinations: self.max_combinations.map(|x| x.max(1)),
             max_total_variable_mods,
@@ -315,7 +320,7 @@ impl Builder {
             prefilter_min_matched_peaks: self.prefilter_min_matched_peaks.unwrap_or(4).max(1),
             prefilter_max_peaks: self.prefilter_max_peaks.filter(|&n| n > 0),
             loaded_ptm_library: None,
-        }
+        })
     }
 
     pub fn update_fasta(&mut self, fasta: String) {

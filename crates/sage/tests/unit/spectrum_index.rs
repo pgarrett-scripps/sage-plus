@@ -72,6 +72,7 @@ fn parameters(offset: bool) -> Parameters {
         ..Builder::default()
     }
     .make_parameters()
+    .expect("valid test configuration")
 }
 
 fn spectra(database: &IndexedDatabase, count: usize, seed: u64) -> Vec<ProcessedSpectrum> {

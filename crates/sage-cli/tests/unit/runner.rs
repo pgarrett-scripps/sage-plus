@@ -28,7 +28,7 @@ fn label_group_closure_keeps_every_channel_partner() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEK\n");
     assert_eq!(peptides.len(), 2);
     let heavy = peptides
@@ -45,7 +45,9 @@ fn label_group_closure_keeps_every_channel_partner() {
 
 #[test]
 fn pair_closure_is_target_decoy_symmetric() {
-    let parameters = sage_core::database::Builder::default().make_parameters();
+    let parameters = sage_core::database::Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let database = parameters.build_from_peptides(peptides);
     assert_eq!(

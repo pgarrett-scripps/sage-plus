@@ -46,6 +46,7 @@ fn parameters(database: serde_json::Value) -> Parameters {
     serde_json::from_value::<Builder>(database)
         .unwrap()
         .make_parameters()
+        .expect("valid test configuration")
 }
 
 fn ions(database: serde_json::Value) -> Vec<ModifiedImmoniumIon> {

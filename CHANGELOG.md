@@ -135,6 +135,15 @@ entries are retained below for provenance.
   difference of zero while unrelated pairs spread out, so the density of pairs 1 to 5 units from
   zero says how much of a flagged set could be coincidence.
 
+### Fixed
+- A modification key that is not a site specificity is reported instead of panicking.
+  `validate_mods`, `validate_var_mods` and `Database::make_parameters` now return
+  `Result`, carrying `invalid modification key \`<key>\`` — the message
+  `validate_modification_keys` already gave — so the key as written reaches the error a
+  user sees wherever the configuration is assembled, including by a caller that builds the
+  settings in Rust rather than from JSON. A configuration whose keys are all valid produces
+  exactly what it did before.
+
 ## [v0.1.0-beta.19] - 2026-11-12
 
 ### Added

@@ -1019,7 +1019,7 @@ fn startup_log_lists_defaults_only_for_unset_settings() {
     .unwrap();
     let unset = super::UnsetSearchSpace::from(&builder);
     let described = unset.describe(
-        &builder.make_parameters(),
+        &builder.make_parameters().expect("valid test configuration"),
         [
             ("min_peaks", true, "15".into()),
             ("max_peaks", false, "150".into()),
