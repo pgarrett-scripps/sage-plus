@@ -2,6 +2,7 @@
   "database": {
     "fasta": "proteome.fasta",
     "contaminant_fasta": null,
+    "entrapment_fasta": null,
     "peptides": null,
     "custom_cleavage_sites": null,
     "enzyme": {

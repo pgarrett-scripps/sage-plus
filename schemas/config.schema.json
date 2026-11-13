@@ -1805,6 +1805,13 @@
             "null"
           ]
         },
+        "entrapment_fasta": {
+          "description": "Path to a FASTA of entrapment proteins — a proteome that cannot be in\nthe sample — searched alongside `fasta`. Its proteins are ordinary\ntargets with their own decoys, so target-decoy competition stays fair;\nevery discovery of one is false, which is what makes the false\ndiscovery proportion estimable. Unset (the default) leaves every\noutput column as it was.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enzyme": {
           "anyOf": [
             {

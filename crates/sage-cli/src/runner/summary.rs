@@ -46,6 +46,10 @@ pub struct RunSummary {
     /// so a search without one writes the summary it wrote before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contaminants: Option<ContaminantRunStats>,
+    /// Entrapment proteins and the false discovery proportion they estimate;
+    /// absent when no `entrapment_fasta` was searched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrapment: Option<EntrapmentRunStats>,
     /// In-source fragmentation and neutral-loss annotation; absent when the
     /// annotation is off, so a search without it writes the summary it wrote
     /// before.
@@ -261,6 +265,35 @@ pub struct ContaminantFileStats {
     pub confident_psms: usize,
     pub contaminant_psms: usize,
     pub contaminant_psm_share: f32,
+}
+
+/// Entrapment proteins of one run, and what they say about the search's false
+/// discovery rate. Every discovery of an entrapment protein is false, so the
+/// discoveries of each class estimate the false discovery proportion; the
+/// method is named in `method` and implemented in
+/// [`sage_core::entrapment`].
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EntrapmentRunStats {
+    /// The searched `entrapment_fasta`.
+    pub path: String,
+    /// Proteins read from it, and from `fasta`.
+    pub entrapment_proteins: usize,
+    pub target_proteins: usize,
+    /// Database target peptides of each class. A peptide that any sample
+    /// protein also explains is a target peptide, not an entrapment one, so
+    /// `shared_peptides` are counted with the targets.
+    pub entrapment_peptides: usize,
+    pub target_peptides: usize,
+    pub shared_peptides: usize,
+    /// The estimate's name, so a reader knows which of the published methods
+    /// a number is.
+    pub method: String,
+    /// The estimate at each level, with that level's own database ratio.
+    /// `psms` uses the peptide-level ratio; the paper applies the estimate at
+    /// the peptide and protein level, so `psms` is reported for completeness.
+    pub psms: sage_core::entrapment::EntrapmentEstimate,
+    pub peptides: sage_core::entrapment::EntrapmentEstimate,
+    pub proteins: sage_core::entrapment::EntrapmentEstimate,
 }
 
 const fn run_summary_schema_version() -> u32 {

@@ -10,6 +10,23 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `database.entrapment_fasta` searches a proteome that cannot be in the sample alongside
+  `database.fasta`, which is how a reported q-value is tested: every discovery of an entrapment
+  protein is false by construction, so the discoveries of each class estimate the false discovery
+  proportion the search achieved. The entrapment proteins are ordinary targets with their own
+  decoys, so target-decoy competition stays fair. A PSM is an entrapment discovery only when
+  every protein of its peptide is an entrapment protein; a peptide a sample protein also explains
+  is an original target, as in the method's own foreign-proteome databases, and the summary counts
+  those as `shared_peptides`. New `is_entrapment` column in `results.sage.parquet`, null when no
+  entrapment FASTA was searched and on decoy rows, and an `entrapment` block in
+  `run-summary.json` with the protein and peptide counts of each class, the method's name, and
+  for PSMs, peptides and proteins the discoveries of each class with that level's database ratio
+  and estimated false discovery proportion. The estimate is the combined one of Wen et al. 2025
+  (Nature Methods, doi 10.1038/s41592-025-02719-x), their equation 1,
+  `N_E * (1 + 1/r) / (N_T + N_E)`, an upper bound; their paired estimate needs paired sequences a
+  foreign proteome does not give, and the two methods the paper shows cannot support a claim of
+  FDR control — the lower bound and the sample estimate — are not reported. The results schema
+  stays at version 7 (8 with precursor labels), with the new column null.
 - `qc.composition.tsv` reports the amino acid composition of what was identified against the
   composition the search database predicts for the same proteins, one row per file and residue,
   then a `total` row set for the run. The observed profile counts the residues of each file's
@@ -36,6 +53,7 @@ entries are retained below for provenance.
   trypsin) read near a log2 ratio of -3 in every run and are always the largest shift. That is
   the digest, not the sample. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
   [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
+||||||| 587f8ff
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
   decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per

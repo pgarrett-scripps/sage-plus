@@ -356,6 +356,24 @@ impl Runner {
             );
         }
 
+        // Entrapment: the discoveries of a proteome that cannot be in the
+        // sample are all false, so they estimate the false discovery
+        // proportion of this run.
+        let entrapment = self.entrapment_stats(&outputs.features);
+        if let Some(stats) = &entrapment {
+            log::info!(
+                "entrapment: {} of {} confident peptides are entrapment, estimated FDP {} ({})",
+                stats.peptides.entrapment_discoveries,
+                stats.peptides.entrapment_discoveries + stats.peptides.target_discoveries,
+                stats
+                    .peptides
+                    .estimated_fdp
+                    .map(|fdp| format!("{:.3}%", 100.0 * fdp))
+                    .unwrap_or_else(|| "undefined".into()),
+                stats.method
+            );
+        }
+
         // In-source fragmentation and neutral-loss annotation: a side table
         // keyed by PSM, read by the writers. It needs the q-values and, where
         // quantification ran, the peaks: a product and its parent are judged
@@ -740,6 +758,7 @@ impl Runner {
             },
             inputs: input_stats,
             contaminants,
+            entrapment,
             in_source: in_source.as_ref().map(|annotations| InSourceRunStats {
                 rt_tolerance: self
                     .parameters
@@ -825,6 +844,105 @@ impl Runner {
         self.events.check()?;
 
         Ok(summary)
+    }
+
+    /// What the entrapment proteins say about this run's false discovery
+    /// rate. `None` when no entrapment FASTA was searched. Counts are the
+    /// run's confident target discoveries at each level; decoys take no part,
+    /// as they are not split by class.
+    fn entrapment_stats(
+        &self,
+        features: &[sage_core::scoring::Feature],
+    ) -> Option<super::summary::EntrapmentRunStats> {
+        use sage_core::entrapment::{database_ratio, EntrapmentEstimate, METHOD};
+        let path = self.database_parameters.entrapment_fasta.clone()?;
+        let classes = self.protein_classes.as_ref()?;
+
+        // Database sizes, which give the ratio `r`. A peptide a sample
+        // protein also explains is an original target, which is how the
+        // method's own foreign-proteome databases are built.
+        let mut entrapment_peptides = 0usize;
+        let mut target_peptides = 0usize;
+        let mut shared_peptides = 0usize;
+        for peptide in self.database.peptides.iter().filter(|p| !p.decoy) {
+            let entrapment_proteins = peptide
+                .proteins
+                .iter()
+                .filter(|protein| classes.is_entrapment_protein(protein))
+                .count();
+            if entrapment_proteins == peptide.proteins.len() && entrapment_proteins > 0 {
+                entrapment_peptides += 1;
+            } else {
+                target_peptides += 1;
+                shared_peptides += usize::from(entrapment_proteins > 0);
+            }
+        }
+        let peptide_ratio = database_ratio(target_peptides, entrapment_peptides);
+        let protein_ratio =
+            database_ratio(classes.sample_proteins(), classes.entrapment_proteins());
+
+        // Confident discoveries of each level, split by class.
+        let mut psms = (0usize, 0usize);
+        let mut peptides: std::collections::HashSet<(sage_core::database::PeptideIx, bool)> =
+            std::collections::HashSet::default();
+        let mut proteins: std::collections::HashSet<(std::sync::Arc<str>, bool)> =
+            std::collections::HashSet::default();
+        for feature in features {
+            if feature.label != 1 {
+                continue;
+            }
+            let peptide = &self.database[feature.peptide_idx];
+            let entrapment = classes.is_entrapment(peptide.proteins.iter());
+            if feature.spectrum_q <= CONTAMINANT_Q_VALUE && feature.peptide_q <= CONTAMINANT_Q_VALUE
+            {
+                match entrapment {
+                    true => psms.1 += 1,
+                    false => psms.0 += 1,
+                }
+            }
+            if feature.peptide_q <= CONTAMINANT_Q_VALUE {
+                peptides.insert((feature.peptide_idx, entrapment));
+            }
+            if feature.protein_q <= CONTAMINANT_Q_VALUE {
+                for protein in peptide.proteins.iter() {
+                    proteins.insert((protein.clone(), classes.is_entrapment_protein(protein)));
+                }
+            }
+        }
+        fn split<K: std::hash::Hash + Eq>(
+            set: &std::collections::HashSet<(K, bool)>,
+        ) -> (usize, usize) {
+            set.iter().fold(
+                (0usize, 0usize),
+                |(target, entrapment), (_, is_entrapment)| match is_entrapment {
+                    true => (target, entrapment + 1),
+                    false => (target + 1, entrapment),
+                },
+            )
+        }
+        let peptide_counts = split(&peptides);
+        let protein_counts = split(&proteins);
+
+        Some(super::summary::EntrapmentRunStats {
+            path,
+            entrapment_proteins: classes.entrapment_proteins(),
+            target_proteins: classes.sample_proteins(),
+            entrapment_peptides,
+            target_peptides,
+            shared_peptides,
+            method: METHOD.into(),
+            psms: EntrapmentEstimate::combined(psms.0, psms.1, peptide_ratio),
+            peptides: EntrapmentEstimate::combined(
+                peptide_counts.0,
+                peptide_counts.1,
+                peptide_ratio,
+            ),
+            proteins: EntrapmentEstimate::combined(
+                protein_counts.0,
+                protein_counts.1,
+                protein_ratio,
+            ),
+        })
     }
 
     /// How much of the confident output came from the contaminant FASTA.

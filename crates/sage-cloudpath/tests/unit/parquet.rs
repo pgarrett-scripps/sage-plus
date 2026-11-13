@@ -1334,3 +1334,113 @@ fn is_contaminant_is_null_without_a_contaminant_fasta_and_set_with_one(
     );
     Ok(())
 }
+
+#[test]
+fn is_entrapment_is_set_only_when_every_protein_of_the_peptide_is() -> parquet::errors::Result<()> {
+    use sage_core::fasta::{Fasta, ProteinClass, ProteinClasses};
+    let mut fasta = Fasta::parse(">SAMPLE\nSAMPLEPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let entrapment = Fasta::parse(">AT1G01010\nENTRAPPEDPEPK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(entrapment, ProteinClass::Entrapment);
+    let classes = ProteinClasses::of_fasta(&fasta).expect("one entrapment protein");
+
+    let peptide = |sequence: &[u8], proteins: Vec<&str>, decoy: bool| Peptide {
+        sequence: sequence.into(),
+        proteins: proteins.into_iter().map(Arc::from).collect(),
+        decoy,
+        ..Peptide::default()
+    };
+    let mut database = IndexedDatabase::default();
+    database
+        .peptides
+        .push(peptide(b"SAMPLEPEPTIDEK", vec!["SAMPLE"], false));
+    database
+        .peptides
+        .push(peptide(b"ENTRAPPEDPEPK", vec!["AT1G01010"], false));
+    // A peptide of both: a sample protein explains it, so it is an original
+    // target and no evidence of a false discovery.
+    database
+        .peptides
+        .push(peptide(b"SHAREDPEPK", vec!["AT1G01010", "SAMPLE"], false));
+    database
+        .peptides
+        .push(peptide(b"KPEPDEPPARTNE", vec!["AT1G01010"], true));
+    let feature = |psm_id: usize, peptide: u32, label: i32| Feature {
+        psm_id,
+        peptide_idx: PeptideIx(peptide),
+        label,
+        ..Feature::default()
+    };
+    let features = [
+        feature(0, 0, 1),
+        feature(1, 1, 1),
+        feature(2, 2, 1),
+        feature(3, 3, -1),
+    ];
+
+    let read = |classes: Option<&ProteinClasses>| -> parquet::errors::Result<Vec<String>> {
+        let rows = features.iter().collect::<Vec<_>>();
+        let bytes = serialize_features(
+            &rows,
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            None,
+            classes,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        reader
+            .get_row_iter(None)?
+            .map(|row| {
+                let row = row?;
+                let value = row
+                    .get_column_iter()
+                    .find(|(name, _)| name.as_str() == "is_entrapment")
+                    .map(|(_, field)| field.to_string())
+                    .expect("the is_entrapment column is always written");
+                Ok(value)
+            })
+            .collect::<parquet::errors::Result<Vec<_>>>()
+    };
+
+    assert_eq!(read(None)?, vec!["null"; 4]);
+    assert_eq!(
+        read(Some(&classes))?,
+        vec![
+            "false".to_string(),
+            "true".to_string(),
+            "false".to_string(),
+            "null".to_string(),
+        ]
+    );
+    // The contaminant column stays null: no contaminant FASTA was searched.
+    let rows = features.iter().collect::<Vec<_>>();
+    let bytes = serialize_features(
+        &rows,
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+        &[],
+        None,
+        None,
+        None,
+        Some(&classes),
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    for row in reader.get_row_iter(None)? {
+        let row = row?;
+        let value = row
+            .get_column_iter()
+            .find(|(name, _)| name.as_str() == "is_contaminant")
+            .map(|(_, field)| field.to_string())
+            .expect("the is_contaminant column is always written");
+        assert_eq!(value, "null");
+    }
+    Ok(())
+}

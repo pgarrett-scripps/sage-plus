@@ -683,6 +683,51 @@
         }
       }
     },
+    "entrapment": {
+      "type": "object",
+      "description": "Entrapment proteins of `database.entrapment_fasta` and the false discovery proportion they estimate; absent when none was searched.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "entrapment_proteins": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_proteins": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entrapment_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Database target peptides whose every protein is an entrapment protein."
+        },
+        "target_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The remaining database target peptides, including those a sample protein and an entrapment protein both explain."
+        },
+        "shared_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of `target_peptides`, how many an entrapment protein also explains."
+        },
+        "method": {
+          "type": "string",
+          "description": "The estimate's name, e.g. `combined (Wen et al. 2025, Nature Methods, eq. 1)`."
+        },
+        "psms": {
+          "$ref": "#/$defs/EntrapmentEstimate"
+        },
+        "peptides": {
+          "$ref": "#/$defs/EntrapmentEstimate"
+        },
+        "proteins": {
+          "$ref": "#/$defs/EntrapmentEstimate"
+        }
+      }
+    },
     "in_source": {
       "type": "object",
       "description": "In-source fragmentation and in-source neutral loss annotation; absent when `in_source` is off.",
@@ -1043,6 +1088,33 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        }
+      }
+    },
+    "EntrapmentEstimate": {
+      "type": "object",
+      "description": "One level's entrapment estimate: the discoveries of each class, the database size ratio r, and the combined estimate of the false discovery proportion.",
+      "properties": {
+        "target_discoveries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "N_T, reported discoveries of original (sample) targets."
+        },
+        "entrapment_discoveries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "N_E, reported discoveries of entrapment targets."
+        },
+        "database_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "description": "r, entrapment over original target database size in this level's units; absent when there were no original targets."
+        },
+        "estimated_fdp": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "N_E * (1 + 1/r) / (N_T + N_E), an upper bound on the false discovery proportion; absent when it is undefined."
         }
       }
     },
