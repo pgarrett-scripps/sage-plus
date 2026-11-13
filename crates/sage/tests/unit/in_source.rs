@@ -96,21 +96,46 @@ fn settings(rt_tolerance: f32) -> InSourceSettings {
     }
 }
 
-/// Quantified peaks of one file: a peptide, its apex, and the peak width.
-fn apexes(file_id: usize, peaks: &[(PeptideIx, f32, Option<f32>)]) -> PeakApexes {
-    let evidence = |apex_rt: f32, fwhm: Option<f32>| {
-        Some(crate::lfq::FileEvidence {
-            apex_rt,
-            fwhm,
-            ..Default::default()
-        })
-    };
+/// A quantified peak of one precursor in one file: where it apexes, how wide
+/// it is, and the integration bounds a PSM has to fall inside.
+#[derive(Clone, Copy)]
+struct Quantified {
+    peptide: PeptideIx,
+    charge: u8,
+    apex_rt: f32,
+    fwhm: Option<f32>,
+    bounds: (f32, f32),
+}
+
+/// A peak of charge 2 whose bounds are a peak width either side of the apex,
+/// so a PSM near the apex is inside it.
+fn quantified(peptide: PeptideIx, apex_rt: f32, fwhm: Option<f32>) -> Quantified {
+    let width = fwhm.unwrap_or(0.4);
+    Quantified {
+        peptide,
+        charge: 2,
+        apex_rt,
+        fwhm,
+        bounds: (apex_rt - width, apex_rt + width),
+    }
+}
+
+fn apexes(file_id: usize, peaks: &[Quantified]) -> PeakApexes {
     let mut areas = std::collections::HashMap::new();
-    for (peptide, apex_rt, fwhm) in peaks {
+    for peak in peaks {
         let mut file_evidence = vec![None; file_id + 1];
-        file_evidence[file_id] = evidence(*apex_rt, *fwhm);
+        file_evidence[file_id] = Some(crate::lfq::FileEvidence {
+            apex_rt: peak.apex_rt,
+            peak_start_rt: peak.bounds.0,
+            peak_end_rt: peak.bounds.1,
+            fwhm: peak.fwhm,
+            ..Default::default()
+        });
         areas.insert(
-            (crate::lfq::PrecursorId::Charged((*peptide, 2)), false),
+            (
+                crate::lfq::PrecursorId::Charged((peak.peptide, peak.charge)),
+                false,
+            ),
             crate::lfq::QuantifiedPeak {
                 peak: crate::lfq::Peak::default(),
                 intensities: file_evidence.iter().map(|_| Some(10.0)).collect(),
@@ -122,6 +147,11 @@ fn apexes(file_id: usize, peaks: &[(PeptideIx, f32, Option<f32>)]) -> PeakApexes
         );
     }
     PeakApexes::from_areas(&areas)
+}
+
+/// The row of a peptide at charge 2, the charge [`quantified`] gives a peak.
+fn row(peptide: PeptideIx) -> crate::lfq::PrecursorId {
+    crate::lfq::PrecursorId::Charged((peptide, 2))
 }
 
 /// The record of one way of deciding co-elution in a file.
@@ -176,7 +206,7 @@ fn a_prefix_at_the_intact_peptide_mass_is_not_a_product() {
     let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.run_totals().candidate_pairs, 0);
+    assert!(annotations.files().iter().all(|file| file.modes.is_empty()));
 }
 
 #[test]
@@ -324,7 +354,7 @@ fn a_modification_on_another_residue_is_a_difference_not_an_equal_total() {
     );
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.run_totals().candidate_pairs, 0);
+    assert!(annotations.files().iter().all(|file| file.modes.is_empty()));
 }
 
 #[test]
@@ -340,7 +370,7 @@ fn a_heavier_product_is_not_a_product() {
     );
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.run_totals().candidate_pairs, 0);
+    assert!(annotations.files().iter().all(|file| file.modes.is_empty()));
 }
 
 #[test]
@@ -515,20 +545,20 @@ fn unconfident_and_decoy_psms_take_no_part() {
 
 #[test]
 fn an_apex_decides_a_psm_the_retention_times_would_miss() {
-    // The product's MS2 fired four minutes from the parent's, which no
+    // The parent's MS2 fired four minutes from the product's, which no
     // retention-time window of a sane width would accept. Quantification put
-    // both peaks' apexes 0.05 min apart with a width of 0.4 min, so the peaks
-    // are the same elution and the product is flagged.
+    // the two peaks' apexes 0.05 min apart in peaks 0.4 min wide, and the
+    // product's PSM fired inside its own peak, so the peaks decide.
     let db = database(vec![
         peptide("KPEPTIDE", "P1", 10),
         peptide("PEPTIDE", "P1", 11),
     ]);
-    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 34.0)];
+    let features = vec![psm(0, 0, 0, 34.0), psm(1, 1, 0, 30.05)];
     let peaks = apexes(
         0,
         &[
-            (PeptideIx(0), 30.0, Some(0.4)),
-            (PeptideIx(1), 30.05, Some(0.4)),
+            quantified(PeptideIx(0), 30.0, Some(0.4)),
+            quantified(PeptideIx(1), 30.05, Some(0.4)),
         ],
     );
 
@@ -555,9 +585,45 @@ fn an_apex_decides_a_psm_the_retention_times_would_miss() {
 }
 
 #[test]
+fn a_psm_outside_the_co_eluting_peak_is_judged_on_its_own_retention_time() {
+    // The peptide elutes twice: once as a product of the parent, once on its
+    // own five minutes later. The peak that co-elutes with the parent must
+    // not carry the later PSM with it, so a PSM outside that peak's bounds
+    // falls back to its own retention time.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.05), psm(2, 1, 0, 35.0)];
+    let peaks = apexes(
+        0,
+        &[
+            quantified(PeptideIx(0), 30.0, Some(0.4)),
+            quantified(PeptideIx(1), 30.05, Some(0.4)),
+        ],
+    );
+
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    assert!(
+        annotations.psm(1).is_some(),
+        "fired inside the product peak"
+    );
+    assert!(annotations.psm(2).is_none(), "fired in another elution");
+    // One pair each: the PSM inside the peak was judged on the apexes, the
+    // one outside it on retention times.
+    let apex = mode_of(&annotations, 0, "apex");
+    assert_eq!(apex.totals.candidate_pairs, 1);
+    assert_eq!(apex.totals.flagged_psms, 1);
+    let rt = mode_of(&annotations, 0, "rt");
+    assert_eq!(rt.totals.candidate_pairs, 1);
+    assert_eq!(rt.totals.coeluting_pairs, 0);
+}
+
+#[test]
 fn apexes_apart_are_not_co_eluting_however_close_the_psms_are() {
     // The two MS2 scans are 0.02 min apart, but the peaks they came from
-    // apex 0.3 min apart, which is more than a quarter of the 0.4 min width.
+    // apex 0.3 min apart, which is more than 0.15 of the 0.4 min width.
     let db = database(vec![
         peptide("KPEPTIDE", "P1", 10),
         peptide("PEPTIDE", "P1", 11),
@@ -566,8 +632,8 @@ fn apexes_apart_are_not_co_eluting_however_close_the_psms_are() {
     let peaks = apexes(
         0,
         &[
-            (PeptideIx(0), 30.0, Some(0.4)),
-            (PeptideIx(1), 30.3, Some(0.4)),
+            quantified(PeptideIx(0), 30.0, Some(0.4)),
+            quantified(PeptideIx(1), 30.3, Some(0.4)),
         ],
     );
 
@@ -591,7 +657,7 @@ fn a_pair_without_both_peaks_falls_back_to_the_retention_times() {
         peptide("PEPTIDE", "P1", 11),
     ]);
     let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)];
-    let peaks = apexes(0, &[(PeptideIx(0), 30.0, Some(0.4))]);
+    let peaks = apexes(0, &[quantified(PeptideIx(0), 30.0, Some(0.4))]);
 
     let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
 
@@ -608,7 +674,37 @@ fn a_pair_without_both_peaks_falls_back_to_the_retention_times() {
 }
 
 #[test]
-fn a_quantified_row_is_judged_on_its_own_apex() {
+fn a_parent_confident_in_another_file_is_no_parent_here_however_its_peaks_look() {
+    // The parent's only confident PSM is in file 1, and both peptides have a
+    // peak in file 0. A PSM flag asks the file itself to have identified the
+    // parent, so nothing in file 0 is flagged.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 1, 0, 30.05), psm(1, 0, 1, 30.0)];
+    let peaks = apexes(
+        0,
+        &[
+            quantified(PeptideIx(0), 30.0, Some(0.4)),
+            quantified(PeptideIx(1), 30.05, Some(0.4)),
+        ],
+    );
+
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    assert!(annotations.psm(0).is_none());
+    assert!(
+        annotations.files()[0].modes.is_empty(),
+        "no pair was judged"
+    );
+    // The quantified row is judged all the same: a row asks only that the
+    // parent be confident somewhere in the run and quantified in this file.
+    assert!(annotations.precursor_row(&row(PeptideIx(1)), 0).is_some());
+}
+
+#[test]
+fn a_quantified_row_is_judged_on_its_own_peak() {
     let db = database(vec![
         peptide("KPEPTIDE", "P1", 10),
         peptide("PEPTIDE", "P1", 11),
@@ -619,8 +715,8 @@ fn a_quantified_row_is_judged_on_its_own_apex() {
     let peaks = apexes(
         1,
         &[
-            (PeptideIx(0), 31.0, Some(0.4)),
-            (PeptideIx(1), 31.02, Some(0.4)),
+            quantified(PeptideIx(0), 31.0, Some(0.4)),
+            quantified(PeptideIx(1), 31.02, Some(0.4)),
         ],
     );
 
@@ -631,18 +727,87 @@ fn a_quantified_row_is_judged_on_its_own_apex() {
 
     // No PSM of the product in file 1, and its row there is annotated anyway.
     let quantified = annotations
-        .precursor_row(PeptideIx(1), 1)
+        .precursor_row(&row(PeptideIx(1)), 1)
         .expect("the row's apex agrees with the parent's");
     assert_eq!(quantified.parent, PeptideIx(0));
     // The parent is not a product of anything, and a file without peaks of
     // this row has no verdict for it.
-    assert!(annotations.precursor_row(PeptideIx(0), 1).is_none());
-    assert!(annotations.precursor_row(PeptideIx(1), 0).is_none());
+    assert!(annotations.precursor_row(&row(PeptideIx(0)), 1).is_none());
+    assert!(annotations.precursor_row(&row(PeptideIx(1)), 0).is_none());
 
     // Without quantification there are no rows to judge.
     assert!(annotate(&features, &db, &settings(0.2), None)
-        .precursor_row(PeptideIx(1), 1)
+        .precursor_row(&row(PeptideIx(1)), 1)
         .is_none());
+}
+
+#[test]
+fn a_row_is_judged_on_its_own_precursor_not_on_another_charge_state() {
+    // Charge 2 of the product was quantified in this file and co-elutes with
+    // the parent; charge 3 has no peak there. The 3+ row carries no verdict:
+    // a row is judged on the peak quantification gave that row.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.05)];
+    let peaks = apexes(
+        0,
+        &[
+            quantified(PeptideIx(0), 30.0, Some(0.4)),
+            quantified(PeptideIx(1), 30.05, Some(0.4)),
+        ],
+    );
+
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    assert!(annotations
+        .precursor_row(&crate::lfq::PrecursorId::Charged((PeptideIx(1), 2)), 0)
+        .is_some());
+    assert!(annotations
+        .precursor_row(&crate::lfq::PrecursorId::Charged((PeptideIx(1), 3)), 0)
+        .is_none());
+    assert!(annotations
+        .precursor_row(&crate::lfq::PrecursorId::Combined(PeptideIx(1)), 0)
+        .is_none());
+}
+
+#[test]
+fn a_product_contained_twice_keeps_one_candidate_whatever_the_site_order() {
+    // The parent carries "EPTID" twice. The product is water-light, so it is
+    // an internal product at either offset; at the second the parent also
+    // carries a modification on the same residue, which would make it a loss
+    // product instead. The candidate must not depend on which occurrence the
+    // protein sites happen to list first.
+    let loss = definition(79.96633, Some("Phospho"), &[79.96633]);
+    let mut parent = peptide("AAEPTIDAAEPTIDAA", "P1", 100);
+    modify(&mut parent, &[(10, loss, ModificationKind::Ordinary)]);
+    let mut product = modified("EPTID", "P1", 102, 1, -H2O);
+    let site = |start: u32| ProteinOccurrence {
+        protein: "P1".into(),
+        start: Some(start),
+        prev_aa: None,
+        next_aa: None,
+        source: None,
+        met_clipped: false,
+    };
+
+    for sites in [[102, 109], [109, 102]] {
+        product.protein_sites = Arc::from([site(sites[0]), site(sites[1])]);
+        let db = database(vec![parent.clone(), product.clone()]);
+        let annotations = annotate(
+            &[psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)],
+            &db,
+            &settings(0.2),
+            None,
+        );
+
+        let candidates = annotations.candidates(PeptideIx(1));
+        assert_eq!(candidates.len(), 1, "one candidate per parent");
+        let flagged = annotations.psm(1).expect("an internal product");
+        assert_eq!(flagged.kind.placement, Placement::Internal);
+        assert_eq!(flagged.kind.loss, None, "the first occurrence decides");
+    }
 }
 
 #[test]
@@ -707,14 +872,14 @@ fn the_check_splits_by_placement_and_estimates_what_chance_would_give() {
     assert!((rt.totals.expected_by_chance - density * 2.0 * 0.1).abs() < 1e-6);
     assert!(rt.totals.expected_by_chance < rt.totals.coeluting_pairs as f32);
 
-    // The run-level record is the files' records summed on the same grid.
-    let totals = annotations.run_totals();
-    assert_eq!(totals.candidate_pairs, rt.totals.candidate_pairs);
+    // The run-level record is the files' records of that mode summed on the
+    // same grid, and no record pools the modes.
+    let modes = annotations.run_modes();
+    assert_eq!(modes[0].totals.candidate_pairs, rt.totals.candidate_pairs);
     assert_eq!(
-        totals.rt_difference_histogram,
+        modes[0].totals.rt_difference_histogram,
         rt.totals.rt_difference_histogram
     );
-    let modes = annotations.run_modes();
     assert_eq!(modes.len(), 1);
     assert_eq!(modes[0].mode, "rt");
     assert_eq!(modes[0].tolerance, Some(0.1));

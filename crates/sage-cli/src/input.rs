@@ -221,14 +221,15 @@ pub struct Input {
     /// default true) and `tolerance` (default `fragment_tol`). Default off.
     pub immonium: Option<ImmoniumConfig>,
     /// In-source fragmentation and in-source neutral loss annotation, written
-    /// as the `in_source_root_peptide` and `in_source_type` columns of
+    /// as the `in_source_parent_peptide` and `in_source_type` columns of
     /// `results.sage.parquet` and `lfq.parquet`. A confident PSM is flagged
-    /// when its peptide is a co-eluting piece of a longer confident peptide of
-    /// the same protein, or the same peptide having lost one neutral molecule.
-    /// Nothing is removed, rescored or requantified. Unset is on for a
-    /// semi-enzymatic or non-specific digest and off otherwise; `true` and
-    /// `false` override that, and an object sets `rt_tolerance`, the
-    /// co-elution tolerance that is otherwise derived per file.
+    /// when its peptide is a co-eluting product of a longer confident peptide
+    /// of the same protein, or the same peptide having lost one neutral
+    /// molecule. Nothing is removed, rescored or requantified. Unset is on for
+    /// a semi-enzymatic or non-specific digest and off otherwise; `true` and
+    /// `false` override that, and an object sets `apex_fwhm_fraction`, the
+    /// co-elution tolerance between two quantified peaks, and `rt_tolerance`,
+    /// the retention-time tolerance that is otherwise derived per file.
     pub in_source: Option<InSourceConfig>,
 
     pub annotate_matches: Option<bool>,

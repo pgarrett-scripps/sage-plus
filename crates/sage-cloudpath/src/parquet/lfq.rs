@@ -454,24 +454,23 @@ pub fn serialize_lfq<H: BuildHasher>(
             col.close()?;
         }
     }
-    // A quantified row is judged on the peaks quantification found: its own
-    // apex in this file against the parent's apex in the same file, not on any
+    // A quantified row is judged on the peak quantification gave that row in
+    // that file — this precursor, this charge where charge states are not
+    // combined — against the parent's peaks in the same file, never on a
     // PSM's retention time, so a row transferred between runs is judged too.
-    // Decoy rows are never annotated. Both columns are always written and are
-    // null when the annotation is off.
+    // A row without a peak in the file has no verdict. Decoy rows are never
+    // annotated. Both columns are always written and are null when the
+    // annotation is off.
     let verdicts = rows
         .iter()
         .flat_map(|((id, decoy), peak)| {
-            let peptide_idx = match id {
-                PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
-            };
             let decoy = *decoy;
             (0..peak.file_evidence.len()).map(move |file_id| {
                 let annotations = in_source?;
                 if decoy {
                     return None;
                 }
-                annotations.precursor_row(peptide_idx, file_id)
+                annotations.precursor_row(id, file_id)
             })
         })
         .collect::<Vec<_>>();

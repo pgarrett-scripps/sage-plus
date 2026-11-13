@@ -54,10 +54,12 @@ pub struct RunSummary {
 }
 
 /// In-source fragmentation and in-source neutral loss annotation of one run.
-/// `flagged_psms` is how many PSMs were annotated; `totals` and `placements`
-/// are the built-in check summed over the files, for the run and for each
-/// placement of a product in its parent; `files` carries each file's own
-/// record, including its retention-time difference histogram.
+/// `flagged_psms` is how many PSMs were annotated; `modes` is the built-in
+/// check summed over the files, one record per way co-elution was decided,
+/// each with its own unit, tolerance and placements; `files` carries each
+/// file's own record, including its difference histogram per mode. There is
+/// no record pooling the modes: a difference in peak widths is not a
+/// difference in minutes.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InSourceRunStats {
     /// Configured co-elution tolerance, when one was set; otherwise each
@@ -65,7 +67,6 @@ pub struct InSourceRunStats {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rt_tolerance: Option<f32>,
     pub flagged_psms: usize,
-    pub totals: Option<sage_core::in_source::InSourcePlacementStats>,
     /// One record per way co-elution was decided: `apex` where quantification
     /// gave both the product and the parent a peak in the file, `rt` where
     /// PSM retention times were compared.

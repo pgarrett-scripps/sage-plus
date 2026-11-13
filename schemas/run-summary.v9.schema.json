@@ -634,12 +634,9 @@
           "minimum": 0,
           "description": "PSMs annotated as in-source products."
         },
-        "totals": {
-          "$ref": "#/$defs/InSourcePlacementStats"
-        },
         "modes": {
           "type": "array",
-          "description": "The check per way of deciding co-elution: `apex` where quantification gave both the product and the parent a peak in the file, `rt` where PSM retention times were compared.",
+          "description": "The check per way of deciding co-elution: `apex` where quantification gave both the product and the parent a peak in the file and the PSM fired inside the product's peak, `rt` where PSM retention times were compared. The two are never pooled: a difference in peak widths is not a difference in minutes.",
           "items": {
             "$ref": "#/$defs/InSourceModeStats"
           }

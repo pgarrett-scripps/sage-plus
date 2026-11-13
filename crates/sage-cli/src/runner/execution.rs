@@ -353,12 +353,9 @@ impl Runner {
                 settings,
                 apexes,
             );
-            let totals = annotations.run_totals();
             log::info!(
-                "flagged {} PSMs as in-source products: {} co-eluting product/parent pairs of {} candidates",
-                annotations.flagged_psms(),
-                totals.coeluting_pairs,
-                totals.candidate_pairs
+                "flagged {} PSMs as in-source products",
+                annotations.flagged_psms()
             );
             for mode in annotations.run_modes() {
                 log::info!(
@@ -727,7 +724,6 @@ impl Runner {
                     .as_ref()
                     .and_then(|settings| settings.rt_tolerance),
                 flagged_psms: annotations.flagged_psms(),
-                totals: Some(annotations.run_totals()),
                 modes: annotations.run_modes(),
                 files: annotations.files().to_vec(),
             }),

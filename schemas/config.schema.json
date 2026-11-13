@@ -2073,7 +2073,7 @@
           "type": "null"
         }
       ],
-      "description": "In-source fragmentation and in-source neutral loss annotation, written\nas the `in_source_root_peptide` and `in_source_type` columns of\n`results.sage.parquet` and `lfq.parquet`. A confident PSM is flagged\nwhen its peptide is a co-eluting piece of a longer confident peptide of\nthe same protein, or the same peptide having lost one neutral molecule.\nNothing is removed, rescored or requantified. Unset is on for a\nsemi-enzymatic or non-specific digest and off otherwise; `true` and\n`false` override that, and an object sets `rt_tolerance`, the\nco-elution tolerance that is otherwise derived per file."
+      "description": "In-source fragmentation and in-source neutral loss annotation, written\nas the `in_source_parent_peptide` and `in_source_type` columns of\n`results.sage.parquet` and `lfq.parquet`. A confident PSM is flagged\nwhen its peptide is a co-eluting product of a longer confident peptide\nof the same protein, or the same peptide having lost one neutral\nmolecule. Nothing is removed, rescored or requantified. Unset is on for\na semi-enzymatic or non-specific digest and off otherwise; `true` and\n`false` override that, and an object sets `apex_fwhm_fraction`, the\nco-elution tolerance between two quantified peaks, and `rt_tolerance`,\nthe retention-time tolerance that is otherwise derived per file."
     },
     "ion_mobility_model": {
       "anyOf": [

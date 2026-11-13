@@ -48,7 +48,7 @@ pub enum IntegrationStrategy {
     Sum,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PrecursorId {
     Combined(PeptideIx),
     Charged((PeptideIx, u8)),

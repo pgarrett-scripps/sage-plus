@@ -578,12 +578,14 @@ fn lfq_in_source_columns_judge_a_row_on_its_own_apex() -> parquet::errors::Resul
         peptide_q: 0.001,
         ..Feature::default()
     };
-    // The product's only PSM is four minutes from the parent's. Quantification
-    // gave both a peak in this file, 0.05 min apart in peaks 0.4 min wide, so
-    // the apexes decide and the retention times never come into it.
+    // The parent's PSM is four minutes from the product's. Quantification gave
+    // both a peak in this file, 0.05 min apart in peaks 0.4 min wide, and the
+    // product's PSM fired inside its own peak, so the apexes decide.
     let apex = |rt: f32| {
         Some(sage_core::lfq::FileEvidence {
             apex_rt: rt,
+            peak_start_rt: rt - 0.4,
+            peak_end_rt: rt + 0.4,
             fwhm: Some(0.4),
             ..Default::default()
         })
@@ -612,7 +614,7 @@ fn lfq_in_source_columns_judge_a_row_on_its_own_apex() -> parquet::errors::Resul
     );
 
     let annotations = annotate(
-        &[confident(0, 0, 30.0), confident(1, 1, 34.0)],
+        &[confident(0, 0, 34.0), confident(1, 1, 30.05)],
         &database,
         &InSourceSettings {
             rt_tolerance: Some(0.2),

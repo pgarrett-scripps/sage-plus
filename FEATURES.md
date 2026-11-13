@@ -40,7 +40,9 @@ having lost one neutral molecule, and names the parent it came from. The mass ha
 type: a C-terminal product carries the ordinary peptide mass of its sequence, an N-terminal or
 internal one is 18.010565 Da lighter, so a peptide merely contained in a longer one is not flagged.
 Co-elution is judged on the peaks wherever quantification found them, the two apexes within a
-fraction of the peak width, and on PSM retention times otherwise.
+quarter of the peak width, and on PSM retention times otherwise: on a semi-enzymatic PXD028735
+file that is 153 co-eluting pairs with 6.2 expected by chance (4.0%), where the same pairs judged
+on retention times give 170 with 22.6 (13.3%).
 It is on by default for semi-enzymatic and non-specific digests, whose search space contains those
 products, and it is annotation only: two columns in `results.sage.parquet` and `lfq.parquet`, no
 score, q-value or intensity changed. Every record says how many co-eluting pairs were found against
