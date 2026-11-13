@@ -54,10 +54,10 @@ pub struct RunSummary {
 }
 
 /// In-source fragmentation and in-source neutral loss annotation of one run.
-/// `flagged_psms` is how many PSMs were annotated; `coeluting_pairs` against
-/// `expected_by_chance` is the built-in check, summed over the files, and
-/// `files` carries each file's own record including its retention-time
-/// difference histogram.
+/// `flagged_psms` is how many PSMs were annotated; `totals` and `placements`
+/// are the built-in check summed over the files, for the run and for each
+/// placement of a product in its parent; `files` carries each file's own
+/// record, including its retention-time difference histogram.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InSourceRunStats {
     /// Configured co-elution tolerance, when one was set; otherwise each
@@ -65,9 +65,9 @@ pub struct InSourceRunStats {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rt_tolerance: Option<f32>,
     pub flagged_psms: usize,
-    pub candidate_pairs: usize,
-    pub coeluting_pairs: usize,
-    pub expected_by_chance: f32,
+    pub totals: Option<sage_core::in_source::InSourcePlacementStats>,
+    #[serde(default)]
+    pub placements: Vec<sage_core::in_source::InSourcePlacementStats>,
     pub files: Vec<sage_core::in_source::InSourceFileStats>,
 }
 

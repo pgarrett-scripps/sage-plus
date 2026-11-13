@@ -1367,12 +1367,12 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
       {"name": "HexHexNAc", "mz": 366.1395, "tolerance": {"da": [-0.01, 0.01]}}
     ]
     ```
+- **in_source**: Boolean or object. Flag the PSMs that are in-source fragmentation or in-source neutral loss products of a longer co-eluting peptide, in the `in_source_parent_peptide` and `in_source_type` columns of `results.sage.parquet` and `lfq.parquet` (default: on for a semi-enzymatic or non-specific digest, off otherwise). `true` and `false` override that default. Nothing is removed, rescored, requantified or reweighted: the annotation is there for you to filter or group on, and the two columns are null when it is off. See [In-source fragmentation](#in-source-fragmentation).
+  - `rt_tolerance`: Float greater than 0. Co-elution tolerance in the file's retention-time units. Without it, each file's tolerance is derived from the spread of its own repeated peptides.
 - **immonium**: Boolean or object. Record, for every PSM, which immonium ions its peptide explains, in seven `immonium_*` columns of `results.sage.parquet` and five `.pin` columns, and add the counts to the linear discriminant (default: false). `true` uses the defaults below. See [Immonium ions](#immonium-ions).
   - `rescore`: Boolean. Add the five immonium counts to the linear discriminant (default: true). `false` only reports them; scores and q-values are then those of a search without `immonium`.
   - `residue_ions`: Boolean. Global switch for the unmodified-residue ions of P, V, L/I, H, F, Y and W (default: true). With `false`, only the modified-residue ions are used, and at least one modification must declare `immonium_ions`.
   - `tolerance`: Same form as `fragment_tol`, which it defaults to.
-- **in_source**: Boolean or object. Flag the PSMs that are in-source fragments or in-source neutral losses of a longer co-eluting peptide, in the `in_source_root_peptide` and `in_source_type` columns of `results.sage.parquet` and `lfq.parquet` (default: on for a semi-enzymatic or non-specific digest, off otherwise). `true` and `false` override that default. Nothing is removed, rescored, requantified or reweighted: the annotation is there for you to filter or group on. See [In-source fragmentation](#in-source-fragmentation).
-  - `rt_tolerance`: Float greater than 0. Co-elution tolerance in the file's retention-time units. Without it, each file's tolerance is derived from the spread of its own repeated peptides.
   - Modified-residue ions are declared on the modification with `immonium_ions` (see [Modifications](#static-and-variable-behavior)); there are none by default.
   - Example:
     ```json
@@ -1727,10 +1727,11 @@ The `results.sage.parquet` file contains the following columns:
 Rows satisfy the configured `output_filter.psm_q_value` threshold. The same PSM IDs define the rows emitted to `matched_fragments.sage.parquet`, so that file never contains fragments for a PSM omitted from the main result table. Both files record the effective threshold as `sage.output_filter.spectrum_q_max` in Parquet key-value metadata.
 
 Columns are listed in file order. "Higher is better" and "lower is better" give the direction for
-scores; columns without one are descriptive. `results.sage.v5.parquet.schema` (unlabeled) and
-`results.sage.v6.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
-They are v1 and v2 plus ten nullable columns at the end: the two fragment-loss columns, the
-seven `immonium_*` columns, then `localized_peptide`.
+scores; columns without one are descriptive. `results.sage.v7.parquet.schema` (unlabeled) and
+`results.sage.v8.parquet.schema` (labeled) in [`schemas/`](schemas/) are the exact contract.
+They are v1 and v2 plus twelve nullable columns at the end: the two fragment-loss columns, the
+seven `immonium_*` columns, `localized_peptide`, then `in_source_parent_peptide` and
+`in_source_type`.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1787,7 +1788,7 @@ seven `immonium_*` columns, then `localized_peptide`.
 - `matched_loss_peaks`, `loss_intensity_pct`: Generic fragment-loss evidence (cleavage and charge pairs whose loss form matched, and the percent of MS2 intensity those loss peaks carry); see [Generic fragment losses](#generic-fragment-losses). They do not count toward `matched_peaks` or the hyperscore. Null when `database.fragment_losses` is not configured. Higher is better.
 - `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
 - `localized_peptide`: The peptide in ProForma 2.0 with each localized modification on its best sites; see [PTM site localization](#ptm-site-localization). Null when `ptm_localization` is off or the PSM was not localized.
-- `in_source_root_peptide`, `in_source_type`: The longer co-eluting peptide this PSM's ion came from, and what kind of product it is (`fragment`, `loss:<name>` or `fragment+loss:<name>`); see [In-source fragmentation](#in-source-fragmentation). Both columns are absent from the file when `in_source` is off, and null on a PSM that was not flagged.
+- `in_source_parent_peptide`, `in_source_type`: The longer co-eluting peptide this PSM's ion came from, and what kind of product it is: `fragment:suffix`, `fragment:prefix`, `fragment:internal`, `loss:<mass>`, or a fragment and a loss together, as in `fragment:suffix+loss:17.0265`; see [In-source fragmentation](#in-source-fragmentation). Null when `in_source` is off and on any PSM it did not flag.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
@@ -1842,32 +1843,55 @@ grouping off) and the grouping peptide q-value.
 - `fwhm`: Full width at half maximum of the file's traced peak, in minutes. Null when the trace does not fall to half height inside the traced window.
 - `id_apex_offset`: Retention time of this file's best accepted PSM minus `apex_rt`, in minutes. Negative means the precursor was sampled before its apex (the usual DDA case). Null when the file has no accepted PSM of this precursor.
 - `extraction_q_value`: Per-row (precursor and file) extraction q-value, given for every target row with a signal, MS2-backed and transferred alike. Each target's shifted decoy is evaluated at the target's own peak, and these paired decoy rows compete with all target rows by `file_score`. Null for decoy precursors and for rows without a signal. It is a diagnostic: it does not filter output, does not replace the precursor `q_value`, and on a pure-human control roughly a fifth of transfers passing 1% were still foreign-species, so it is not a calibrated transfer FDR. `lfq_settings.mbr` defaults are unchanged.
-- `in_source_root_peptide`, `in_source_type`: The longer co-eluting peptide this quantified precursor's signal came from, and what kind of product it is; see [In-source fragmentation](#in-source-fragmentation). A row is judged on its own `apex_rt` in its own file, not on a PSM's retention time, so a precursor can be flagged in one file and not in another. Both columns are absent from the file when `in_source` is off.
+- `in_source_parent_peptide`, `in_source_type`: The longer co-eluting peptide this quantified precursor's signal came from, and what kind of product it is; see [In-source fragmentation](#in-source-fragmentation). A row is judged on its own `apex_rt` against the parent's `apex_rt` in the same file, not on any PSM's retention time, so a row transferred between runs is judged too and a precursor can be flagged in one file and not in another. Decoy rows are never annotated, and both columns are null when `in_source` is off.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
 
 ## In-source fragmentation
 
-A peptide can reach the mass analyzer as a piece of a longer peptide, or having lost a small neutral molecule, because it fragmented in the ion source instead of the collision cell. The spectrum is real and the search identifies it correctly, but the peptide was not in the sample as a peptide: it is a piece of one that was. Left unmarked, such a PSM is counted as an experimental peptide and its intensity is quantified as one.
+A peptide can reach the mass analyzer as a fragment of a longer peptide, or having lost a small neutral molecule, because it fragmented in the ion source instead of the collision cell. The spectrum is real and the search identifies it correctly, but the peptide was not in the sample as a peptide: it is a product of one that was. Left unmarked, such a PSM is counted as an experimental peptide and its intensity is quantified as one.
 
-`in_source` annotates those PSMs. It is on by default for a semi-enzymatic or non-specific digest, whose search space contains the pieces in the first place, and off for a fully enzymatic one; `true` and `false` override that. It runs after FDR, and it is annotation only: no score, q-value, intensity or row changes, and the quantification itself is untouched. Existing configurations keep their results, and the two columns are absent from the output files when the annotation is off.
+`in_source` annotates those PSMs. It is on by default for a semi-enzymatic or non-specific digest, whose search space contains the shorter peptides in the first place, and off for a fully enzymatic one; `true` and `false` override that. It runs after FDR, and it is annotation only: no score, q-value, intensity or row changes, and quantification itself is untouched. An existing configuration keeps every value it produced before; what it gains is two columns, `in_source_parent_peptide` and `in_source_type`, which are null when the annotation is off.
 
 A confident target PSM (spectrum and peptide q-values of at most 0.01) is flagged when both hold **in the same file**:
 
-1. its peptide occupies a sub-span of a longer confident peptide of the same protein — a prefix, a suffix or an internal piece — or the same span with a lower mass, and the modifications on the shared residues are either equal or short by exactly one candidate loss; and
-2. its retention time co-elutes with that longer or heavier peptide's own PSMs.
+1. its peptide occupies a span of a longer confident peptide of the same protein, or that peptide's own span with a lower mass; the modifications on the shared residues are equal except at one site; and its mass is the mass a product of that span would have; and
+2. its retention time co-elutes with the parent's own PSMs.
 
-The flag names the **root**: the longest co-eluting peptide that contains the product. A piece of a piece therefore points at the intact peptide, with no chain to follow. The decision is per PSM, not per peptide: the same peptide can be an experimental peptide at one retention time and an in-source product at another in the same file, which is what happens when a labile modification is lost in the source.
+The flag names the **parent**: the longest co-eluting peptide that contains the product. A product of a product therefore points at the intact peptide, with no chain to follow. The decision is per PSM, not per peptide: the same peptide can be an experimental peptide at one retention time and an in-source product at another in the same file, which is what happens when a labile modification is lost in the source.
 
-Containment is decided in protein coordinates, not by searching one peptide's sequence inside another, so a product and its root come from the same place in the same protein. A peptide whose sequence also occurs in an unrelated protein is not flagged because of that other protein.
+Containment is decided in protein coordinates, not by searching one peptide's sequence inside another, so a product and its parent come from the same place in the same protein. A peptide whose sequence also occurs in an unrelated protein is not flagged because of that other protein. Modifications are compared residue by residue over the shared span, so a modification moved to another residue is a difference and not an equal total.
 
-**Candidate losses.** No new vocabulary: water (18.010565) and ammonia (17.026549), the losses configured under [`database.fragment_losses`](#generic-fragment-losses), the neutral losses the root's own modifications declare, and the full mass of each modification the root carries, which is what a product that lost a whole modification differs by. A product may carry one loss. A mass difference matches a loss within 0.005 Da, and a product that is *heavier* than its span of the root is never flagged.
+**Which mass a product must have.** Cleavage in the source gives the same two ion types as cleavage in the collision cell, and the mass follows from which terminus the product keeps:
 
-**Co-elution tolerance.** Derived from each file, not fixed: the 95th percentile of how far a peptide's repeated PSMs sit from that peptide's median retention time, over every peptide seen more than once in the file. Different charge states count as repeats, so no MS1 data and no quantification are needed. A file with fewer than 20 such observations, or whose repeats all sit at one retention time, falls back to 0.2% of its retention-time span. `in_source.rt_tolerance` replaces the derivation.
+| Where the product sits in its parent | `in_source_type` | Mass it must have |
+| --- | --- | --- |
+| Ends where the parent ends (y-type) | `fragment:suffix` | the ordinary peptide mass of its own sequence |
+| Starts where the parent starts (b-type) | `fragment:prefix` | that mass **minus 18.010565** (water) |
+| Shares neither terminus | `fragment:internal` | that mass minus 18.010565 |
+| The parent's own span | `loss:<mass>` | that mass minus one neutral loss |
 
-**What the check reports.** `run-summary.json` gains an `in_source` block: `flagged_psms`, and for the whole run and each file `candidate_pairs` (pairs that passed the sequence and mass test), `coeluting_pairs`, and `expected_by_chance`. In-source products pile up at a retention-time difference of zero while unrelated pairs spread out, so each file's `rt_difference_histogram` — one bin per tolerance — and the expected count estimated from the bins 5 to 25 tolerances away say how much of the flagged set could be coincidence. A `coeluting_pairs` count close to `expected_by_chance` means the flag found nothing but chance in that file.
+A peptide at the ordinary peptide mass of an N-terminal or internal span is therefore **not** flagged: an in-source N-terminal product is water-light, and a peptide that is not is an experimental peptide that happens to be contained in a longer one. In a search space without water-light peptidoforms — an ordinary closed search — the prefix and internal rows are consequently empty, and only suffix products are flagged.
 
-**What it does not do.** It does not rescue unidentified MS2 spectra, look for products in MS1 only, sum a product's intensity into its root, or exclude any row from quantification. Filtering is yours: the columns are there to be filtered or grouped on.
+**Candidate losses.** No new vocabulary: water (18.010565) and ammonia (17.026549), the losses configured under [`database.fragment_losses`](#generic-fragment-losses), and the losses the parent's own modifications declare in `neutral_losses` at the differing site. There is no implicit whole-modification loss: a modification's full mass counts only where you declared it among that modification's neutral losses, so an unmodified peptide co-eluting with its modified form is not flagged by itself. A labelling modification never contributes a loss, so the light channel of a labelling pair is never a product of its heavy partner. A product carries at most one loss on top of its placement's own deficit, a mass difference matches a loss within 0.005 Da, and a product that is *heavier* than its span of the parent is never flagged.
+
+**Co-elution tolerance.** Derived from each file, not fixed: the median of how far a peptide's repeated PSMs sit from that peptide's median retention time, over every peptide seen more than once in the file. Different charge states count as repeats, so no MS1 data and no quantification are needed. A file with fewer than 20 such observations, or whose repeats all sit at one retention time, falls back to 0.2% of its retention-time span. `in_source.rt_tolerance` replaces the derivation; the window is symmetric, and a pair co-elutes when the difference is smaller than the tolerance.
+
+The median rather than a high percentile, because the window sets how much of the flagged set is coincidence. On a semi-enzymatic search of one PXD028735 file the spread's percentiles, and what each would admit of the same 4,168 candidate pairs, are:
+
+| Derivation | Tolerance | Co-eluting pairs | Expected by chance |
+| --- | ---: | ---: | ---: |
+| 95th percentile | 1.04 min | 483 | 149 (31%) |
+| 90th percentile | 0.54 min | 370 | 71 (19%) |
+| 75th percentile | 0.26 min | 276 | 36 (13%) |
+| median (the default) | 0.12 min | 161 | 14 (9%) |
+| a fifth of the median | 0.05 min | 105 | 7 (7%) |
+
+Tightening the window alone does not drive the chance fraction to nothing: the background density is set by how many peptides of one protein region the search identifies, not by the window, and below about 0.05 min the window starts cutting real products, which scatter by that much between a product's and its parent's PSM retention times. Treat `expected_by_chance` as part of the result, and tighten `rt_tolerance` when your own run says to.
+
+**What the check reports.** `run-summary.json` gains an `in_source` block: `flagged_psms`, then `totals` and one `placements` entry per placement, each with `candidate_pairs` (pairs that passed the sequence and mass test), `coeluting_pairs`, `expected_by_chance` and `flagged_psms`, and the same record per file under `files`. In-source products pile up at a retention-time difference of zero while unrelated pairs spread out, so each record carries a `rt_difference_histogram` on a fixed 0.05-unit grid out to 5 units, and `expected_by_chance` is the density of candidate pairs between 1 and 5 units from zero, scaled to the window's width. A `coeluting_pairs` count close to `expected_by_chance` means the flag found nothing but chance; reading the histogram is how you choose a tighter `rt_tolerance`.
+
+**What it does not do.** It does not rescue unidentified MS2 spectra, look for products in MS1 only, sum a product's intensity into its parent, or exclude any row from quantification. Filtering is yours: the columns are there to be filtered or grouped on.
 
 ## Quality-control outputs
 

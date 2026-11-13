@@ -22,6 +22,6 @@ message schema {
     optional float peak_end_rt;
     optional float fwhm;
     optional float id_apex_offset;
-    optional byte_array in_source_root_peptide (utf8);
+    optional byte_array in_source_parent_peptide (utf8);
     optional byte_array in_source_type (utf8);
 }

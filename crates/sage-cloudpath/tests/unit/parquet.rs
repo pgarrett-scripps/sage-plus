@@ -58,7 +58,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         .iter()
         .any(|entry| { entry.key == "sage.schema.name" && entry.value.as_deref() == Some("lfq") }));
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("9")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -209,7 +209,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("8")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("10")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -285,7 +285,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("5")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
     }));
     let rows = reader
         .get_row_iter(None)?
@@ -437,6 +437,231 @@ fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::e
 }
 
 #[test]
+fn in_source_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
+    use sage_core::in_source::{annotate, InSourceSettings};
+    // KPEPTIDE and its C-terminal PEPTIDE, co-eluting in one file: the
+    // suffix is an in-source product of the longer peptide.
+    let occurrence = |start: u32| -> Arc<[ProteinOccurrence]> {
+        Arc::from([ProteinOccurrence {
+            protein: "P12345".into(),
+            start: Some(start),
+            prev_aa: None,
+            next_aa: None,
+            source: None,
+            met_clipped: false,
+        }])
+    };
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"KPEPTIDE".as_slice().into(),
+        protein_sites: occurrence(10),
+        ..Peptide::default()
+    });
+    database.peptides.push(Peptide {
+        sequence: b"PEPTIDE".as_slice().into(),
+        protein_sites: occurrence(11),
+        ..Peptide::default()
+    });
+    let confident = |psm_id: usize, peptide: u32, rt: f32| Feature {
+        psm_id,
+        peptide_idx: PeptideIx(peptide),
+        rt,
+        label: 1,
+        spectrum_q: 0.001,
+        peptide_q: 0.001,
+        ..Feature::default()
+    };
+    let features = vec![confident(0, 0, 30.0), confident(1, 1, 30.02)];
+    let annotations = annotate(
+        &features,
+        &database,
+        &InSourceSettings {
+            rt_tolerance: Some(0.2),
+        },
+    );
+    assert_eq!(annotations.flagged_psms(), 1);
+
+    let read = |annotations: Option<&sage_core::in_source::InSourceAnnotations>| -> parquet::errors::Result<Vec<Vec<String>>> {
+        let rows = features.iter().collect::<Vec<_>>();
+        let bytes = serialize_features(
+            &rows,
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            annotations,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let metadata = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .expect("results schema metadata");
+        // The columns live in schema version 7, written whether the
+        // annotation ran or not.
+        assert!(metadata.iter().any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("7")
+        }));
+        reader
+            .get_row_iter(None)?
+            .map(|row| {
+                let row = row?;
+                let values = row
+                    .get_column_iter()
+                    .map(|(name, field)| (name.clone(), field.to_string()))
+                    .collect::<HashMap<_, _>>();
+                Ok(vec![
+                    values["in_source_parent_peptide"].clone(),
+                    values["in_source_type"].clone(),
+                ])
+            })
+            .collect()
+    };
+
+    // Off: both columns exist and are null on every row.
+    assert_eq!(
+        read(None)?,
+        vec![vec!["null", "null"], vec!["null", "null"]]
+    );
+    // On: the parent keeps its own null row, the product names it.
+    assert_eq!(
+        read(Some(&annotations))?,
+        vec![
+            vec!["null".to_string(), "null".to_string()],
+            vec![
+                "\"KPEPTIDE\"".to_string(),
+                "\"fragment:suffix\"".to_string()
+            ],
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn lfq_in_source_columns_judge_a_row_on_its_own_apex() -> parquet::errors::Result<()> {
+    use sage_core::in_source::{annotate, InSourceSettings};
+    let occurrence = |start: u32| -> Arc<[ProteinOccurrence]> {
+        Arc::from([ProteinOccurrence {
+            protein: "P12345".into(),
+            start: Some(start),
+            prev_aa: None,
+            next_aa: None,
+            source: None,
+            met_clipped: false,
+        }])
+    };
+    let mut database = IndexedDatabase::default();
+    database.peptides.push(Peptide {
+        sequence: b"KPEPTIDE".as_slice().into(),
+        proteins: vec![Arc::from("P12345")].into(),
+        protein_sites: occurrence(10),
+        ..Peptide::default()
+    });
+    database.peptides.push(Peptide {
+        sequence: b"PEPTIDE".as_slice().into(),
+        proteins: vec![Arc::from("P12345")].into(),
+        protein_sites: occurrence(11),
+        ..Peptide::default()
+    });
+    let confident = |psm_id: usize, peptide: u32, rt: f32| Feature {
+        psm_id,
+        peptide_idx: PeptideIx(peptide),
+        rt,
+        label: 1,
+        spectrum_q: 0.001,
+        peptide_q: 0.001,
+        ..Feature::default()
+    };
+    // The product's only PSM is four minutes from the parent's, so no PSM is
+    // flagged; its quantified peak in the same file apexes with the parent.
+    let annotations = annotate(
+        &[confident(0, 0, 30.0), confident(1, 1, 34.0)],
+        &database,
+        &InSourceSettings {
+            rt_tolerance: Some(0.2),
+        },
+    );
+    assert_eq!(annotations.flagged_psms(), 0);
+
+    let apex = |rt: f32| {
+        Some(sage_core::lfq::FileEvidence {
+            apex_rt: rt,
+            ..Default::default()
+        })
+    };
+    let peak = |evidence: Vec<Option<sage_core::lfq::FileEvidence>>| QuantifiedPeak {
+        peak: sage_core::lfq::Peak::default(),
+        intensities: evidence.iter().map(|_| Some(10.0)).collect(),
+        ms2_confirmed: evidence.iter().map(|_| true).collect(),
+        ms2_confirmed_strict: evidence.iter().map(|_| true).collect(),
+        file_evidence: evidence,
+        paired_decoy_evidence: Vec::new(),
+    };
+    let mut areas = HashMap::new();
+    areas.insert(
+        (PrecursorId::Charged((PeptideIx(0), 2)), false),
+        peak(vec![apex(30.0)]),
+    );
+    areas.insert(
+        (PrecursorId::Charged((PeptideIx(1), 2)), false),
+        peak(vec![apex(30.05)]),
+    );
+    // A decoy row of the product, which must never be annotated.
+    areas.insert(
+        (PrecursorId::Charged((PeptideIx(1), 2)), true),
+        peak(vec![apex(30.05)]),
+    );
+
+    let bytes = serialize_lfq(
+        &areas,
+        &["run-a".into()],
+        &database,
+        &[],
+        "elution_apex",
+        Some(&annotations),
+    )?;
+    let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+    assert!(reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .expect("LFQ schema metadata")
+        .iter()
+        .any(|entry| {
+            entry.key == "sage.schema.version" && entry.value.as_deref() == Some("9")
+        }));
+    let rows = reader
+        .get_row_iter(None)?
+        .map(|row| {
+            let row = row?;
+            let values = row
+                .get_column_iter()
+                .map(|(name, field)| (name.clone(), field.to_string()))
+                .collect::<HashMap<_, _>>();
+            Ok((
+                values["peptide"].clone(),
+                values["is_decoy"].clone(),
+                values["in_source_parent_peptide"].clone(),
+                values["in_source_type"].clone(),
+            ))
+        })
+        .collect::<parquet::errors::Result<Vec<_>>>()?;
+    let flagged = rows
+        .iter()
+        .filter(|(_, _, parent, _)| parent != "null")
+        .collect::<Vec<_>>();
+    assert_eq!(flagged.len(), 1, "{rows:?}");
+    assert_eq!(flagged[0].1, "false");
+    assert_eq!(flagged[0].2, "\"KPEPTIDE\"");
+    assert_eq!(flagged[0].3, "\"fragment:suffix\"");
+    Ok(())
+}
+
+#[test]
 fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::Result<()> {
     use sage_core::fragment_loss::{FragmentLoss, FragmentLosses};
     use sage_core::scoring::FragmentLossFeatures;
@@ -539,7 +764,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         .key_value_metadata()
         .unwrap();
     assert!(metadata.iter().any(|entry| {
-        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("6")
+        entry.key == "sage.schema.version" && entry.value.as_deref() == Some("8")
     }));
     let rows = reader
         .get_row_iter(None)?

@@ -886,12 +886,7 @@ impl Input {
             || database.enzyme.cleave_at.as_deref() == Some("");
         let in_source = InSourceConfig::resolve(self.in_source, semi_or_nonspecific);
         if let Some(settings) = in_source.as_ref() {
-            anyhow::ensure!(
-                settings
-                    .rt_tolerance
-                    .is_none_or(|tolerance| tolerance.is_finite() && tolerance > 0.0),
-                "in_source.rt_tolerance must be greater than zero"
-            );
+            settings.validate().map_err(anyhow::Error::msg)?;
         }
 
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();

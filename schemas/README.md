@@ -15,10 +15,9 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
   v3 and v4 plus a nullable `localized_peptide` column at the end: the peptide in ProForma 2.0
   with localized modifications on their best sites, filled when `ptm_localization` is on.
 - `results.sage.v7.parquet.schema` (unlabeled) and `results.sage.v8.parquet.schema` (labeled) are
-  v5 and v6 plus two nullable columns at the end, `in_source_root_peptide` and `in_source_type`,
-  filled when `in_source` is on. Sage writes v7 or v8 only then, and v5 or v6 otherwise, so a
-  search without the annotation writes the file it wrote before.
-  Current Sage writes v5, v6, v7 or v8.
+  v5 and v6 plus two nullable columns at the end, `in_source_parent_peptide` and `in_source_type`,
+  filled when `in_source` is on and null when it is off, as every optional column before them.
+  Current Sage writes v7 or v8.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.
@@ -28,7 +27,7 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `lfq.v7.parquet.schema` adds peak geometry (`apex_rt`, `peak_start_rt`, `peak_end_rt`, `fwhm`, `id_apex_offset`) to unlabeled LFQ.
 - `lfq.v8.parquet.schema` adds it to labeled LFQ.
 - `lfq.v9.parquet.schema` (unlabeled) and `lfq.v10.parquet.schema` (labeled) add the same two
-  `in_source_*` columns to v7 and v8, written only when `in_source` is on.
+  `in_source_*` columns to v7 and v8, null when `in_source` is off. Current Sage writes v9 or v10.
 - `spectral_library.sage.v1.parquet.schema` describes the empirical, long-form
   `spectral_library.sage.parquet` transition table.
 - `spectral_library.sage.v2.parquet.schema` preserves label channel, group, and reference metadata.

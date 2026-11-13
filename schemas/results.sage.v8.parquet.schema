@@ -80,6 +80,6 @@ message schema {
     optional int32 immonium_modified_unexplained;
     optional byte_array immonium_modified_ions (utf8);
     optional byte_array localized_peptide (utf8);
-    optional byte_array in_source_root_peptide (utf8);
+    optional byte_array in_source_parent_peptide (utf8);
     optional byte_array in_source_type (utf8);
 }

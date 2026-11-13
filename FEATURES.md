@@ -35,12 +35,15 @@ as the conservative one. See [quantification](DOCS.md#quantification) and the
 [evaluation](docs/design/NONLINEAR_RT_ALIGNMENT.md#evaluation).
 
 **Tell in-source products from experimental peptides.** `in_source` flags a confident PSM whose
-peptide is a co-eluting piece of a longer confident peptide of the same protein, or the same
-peptide having lost one neutral molecule, and names the root peptide it came from. It is on by
-default for semi-enzymatic and non-specific digests, whose search space contains those pieces, and
-it is annotation only: two columns in `results.sage.parquet` and `lfq.parquet`, no score, q-value
-or intensity changed. Each file's record says how many co-eluting pairs were found against how
-many chance would give. See [in-source fragmentation](DOCS.md#in-source-fragmentation).
+peptide is a co-eluting fragment of a longer confident peptide of the same protein, or that peptide
+having lost one neutral molecule, and names the parent it came from. The mass has to match the ion
+type: a C-terminal product carries the ordinary peptide mass of its sequence, an N-terminal or
+internal one is 18.010565 Da lighter, so a peptide merely contained in a longer one is not flagged.
+It is on by default for semi-enzymatic and non-specific digests, whose search space contains those
+products, and it is annotation only: two columns in `results.sage.parquet` and `lfq.parquet`, no
+score, q-value or intensity changed. Every record says how many co-eluting pairs were found against
+how many chance would give, split by where the product sits in its parent. See
+[in-source fragmentation](DOCS.md#in-source-fragmentation).
 
 **Read instrument files directly.** Thermo RAW and mzMLb are read without conversion (upstream Sage
 reads mzML, MGF and Bruker `.d`), and timsTOF

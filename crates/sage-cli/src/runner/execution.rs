@@ -268,22 +268,24 @@ impl Runner {
         let in_source = self.parameters.in_source.as_ref().map(|settings| {
             let annotations =
                 sage_core::in_source::annotate(&outputs.features, &self.database, settings);
-            let coeluting = annotations
-                .files()
-                .iter()
-                .map(|file| file.coeluting_pairs)
-                .sum::<usize>();
-            let expected = annotations
-                .files()
-                .iter()
-                .map(|file| file.expected_by_chance)
-                .sum::<f32>();
+            let totals = annotations.run_totals();
             log::info!(
-                "flagged {} PSMs as in-source products: {} co-eluting product/root pairs against {:.1} expected by chance",
+                "flagged {} PSMs as in-source products: {} co-eluting product/parent pairs of {} candidates, against {:.1} expected by chance",
                 annotations.flagged_psms(),
-                coeluting,
-                expected
+                totals.coeluting_pairs,
+                totals.candidate_pairs,
+                totals.expected_by_chance
             );
+            for placement in annotations.run_placements() {
+                log::info!(
+                    "  {}: {} of {} candidate pairs co-elute, {:.1} expected by chance, {} PSMs flagged",
+                    placement.placement,
+                    placement.coeluting_pairs,
+                    placement.candidate_pairs,
+                    placement.expected_by_chance,
+                    placement.flagged_psms
+                );
+            }
             annotations
         });
 
@@ -706,21 +708,8 @@ impl Runner {
                     .as_ref()
                     .and_then(|settings| settings.rt_tolerance),
                 flagged_psms: annotations.flagged_psms(),
-                candidate_pairs: annotations
-                    .files()
-                    .iter()
-                    .map(|file| file.candidate_pairs)
-                    .sum(),
-                coeluting_pairs: annotations
-                    .files()
-                    .iter()
-                    .map(|file| file.coeluting_pairs)
-                    .sum(),
-                expected_by_chance: annotations
-                    .files()
-                    .iter()
-                    .map(|file| file.expected_by_chance)
-                    .sum(),
+                totals: Some(annotations.run_totals()),
+                placements: annotations.run_placements(),
                 files: annotations.files().to_vec(),
             }),
             modifications: ModificationRunStats {

@@ -634,20 +634,15 @@
           "minimum": 0,
           "description": "PSMs annotated as in-source products."
         },
-        "candidate_pairs": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Product/root pairs that passed the sequence and mass test, before co-elution."
+        "totals": {
+          "$ref": "#/$defs/InSourcePlacementStats"
         },
-        "coeluting_pairs": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Candidate pairs inside the co-elution window."
-        },
-        "expected_by_chance": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Co-eluting pairs expected from the rate at which candidate pairs fall 5 to 25 tolerances from zero."
+        "placements": {
+          "type": "array",
+          "description": "The same check per placement of a product in its parent.",
+          "items": {
+            "$ref": "#/$defs/InSourcePlacementStats"
+          }
         },
         "files": {
           "type": "array",
@@ -849,27 +844,17 @@
           "type": "integer",
           "minimum": 0
         },
-        "candidate_pairs": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "coeluting_pairs": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "expected_by_chance": {
-          "type": "number",
-          "minimum": 0
-        },
         "flagged_psms": {
           "type": "integer",
           "minimum": 0
         },
-        "rt_difference_histogram": {
+        "totals": {
+          "$ref": "#/$defs/InSourcePlacementStats"
+        },
+        "placements": {
           "type": "array",
-          "description": "Retention-time differences of every candidate pair, in bins one tolerance wide.",
           "items": {
-            "$ref": "#/$defs/InSourceHistogramBin"
+            "$ref": "#/$defs/InSourcePlacementStats"
           }
         }
       }
@@ -879,7 +864,7 @@
       "properties": {
         "bin": {
           "type": "integer",
-          "description": "Bin index in tolerances from zero; bin 0 spans [0, tolerance)."
+          "description": "Bin index on the fixed grid; bin 0 is symmetric about zero."
         },
         "start": {
           "type": "number"
@@ -890,6 +875,53 @@
         "pairs": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "InSourcePlacementStats": {
+      "type": "object",
+      "description": "The in-source check for one placement of a product in its parent, or for all of them.",
+      "properties": {
+        "placement": {
+          "type": "string",
+          "enum": [
+            "all",
+            "same_span",
+            "suffix",
+            "prefix",
+            "internal"
+          ]
+        },
+        "candidate_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Product/parent pairs that passed the sequence and mass test."
+        },
+        "coeluting_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate pairs inside the co-elution window."
+        },
+        "expected_by_chance": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Co-eluting pairs expected from the density of candidate pairs 1 to 5 retention-time units from zero, scaled to the window's width."
+        },
+        "flagged_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "outside_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate pairs further from zero than the histogram's half-width."
+        },
+        "rt_difference_histogram": {
+          "type": "array",
+          "description": "Retention-time differences of the candidate pairs on a fixed 0.05-unit grid.",
+          "items": {
+            "$ref": "#/$defs/InSourceHistogramBin"
+          }
         }
       }
     }

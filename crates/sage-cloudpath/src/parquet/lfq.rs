@@ -1,33 +1,30 @@
 use super::*;
+use sage_core::database::PeptideIx;
 use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
-        "../../../../schemas/lfq.v7.parquet.schema"
+        "../../../../schemas/lfq.v9.parquet.schema"
     ))
 }
 
-/// Schema version of `lfq.parquet`: 7 without precursor labels, 8 with them;
-/// 9 and 10 are those plus the two in-source columns, written only when
-/// in-source annotation is on.
-fn lfq_schema_version(has_labels: bool, has_in_source: bool) -> &'static str {
-    match (has_in_source, has_labels) {
-        (false, false) => "7",
-        (false, true) => "8",
-        (true, false) => "9",
-        (true, true) => "10",
+/// Schema version of `lfq.parquet`: 9 without precursor labels, 10 with them.
+/// Versions 9 and 10 are 7 and 8 plus `in_source_parent_peptide` and
+/// `in_source_type`, which are always written and null when the annotation is
+/// off, as every optional column before them.
+fn lfq_schema_version(has_labels: bool) -> &'static str {
+    if has_labels {
+        "10"
+    } else {
+        "9"
     }
 }
 
-fn build_lfq_schema_version(
-    has_labels: bool,
-    has_in_source: bool,
-) -> parquet::errors::Result<Type> {
-    parquet::schema::parser::parse_message_type(match (has_in_source, has_labels) {
-        (false, false) => include_str!("../../../../schemas/lfq.v7.parquet.schema"),
-        (false, true) => include_str!("../../../../schemas/lfq.v8.parquet.schema"),
-        (true, false) => include_str!("../../../../schemas/lfq.v9.parquet.schema"),
-        (true, true) => include_str!("../../../../schemas/lfq.v10.parquet.schema"),
+fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(if has_labels {
+        include_str!("../../../../schemas/lfq.v10.parquet.schema")
+    } else {
+        include_str!("../../../../schemas/lfq.v9.parquet.schema")
     })
 }
 
@@ -57,7 +54,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     let mut rows = areas.iter().collect::<Vec<_>>();
     rows.sort_unstable_by(|left, right| left.0.cmp(right.0));
     let has_labels = !database.label_channels.is_empty();
-    let schema = build_lfq_schema_version(has_labels, in_source.is_some())?;
+    let schema = build_lfq_schema_version(has_labels)?;
     let reference_intensities = database
         .label_reference
         .as_deref()
@@ -101,7 +98,7 @@ pub fn serialize_lfq<H: BuildHasher>(
             KeyValue::new("sage.lfq.peak_center".into(), Some(peak_center.into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(lfq_schema_version(has_labels, in_source.is_some()).into()),
+                Some(lfq_schema_version(has_labels).into()),
             ),
         ],
         provenance,
@@ -458,57 +455,95 @@ pub fn serialize_lfq<H: BuildHasher>(
             col.close()?;
         }
     }
-    // A quantified row is judged on its own peak: the apex retention time in
-    // this file against the root's, not the PSM's retention time. Both columns
-    // exist only in schema versions 9 and 10.
-    if let Some(annotations) = in_source {
-        let verdicts = rows
-            .iter()
-            .flat_map(|((id, _), peak)| {
-                let peptide_idx = match id {
-                    PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
-                };
-                peak.file_evidence
-                    .iter()
-                    .enumerate()
-                    .map(move |(file_id, evidence)| {
-                        let apex = evidence.as_ref().map(|evidence| evidence.apex_rt)?;
-                        annotations.precursor(peptide_idx, file_id, apex)
+    // A quantified row is judged on its own peak: its apex retention time in
+    // this file against the parent's apex in the same file, not on a PSM's
+    // retention time, so a row transferred between runs is judged too. Decoy
+    // rows are never annotated. Both columns are always written and are null
+    // when the annotation is off.
+    let parent_apexes = in_source.map(|_| {
+        let mut apexes: HashMap<(PeptideIx, usize), Vec<f32>> = HashMap::new();
+        for ((id, decoy), peak) in areas.iter() {
+            if *decoy {
+                continue;
+            }
+            let peptide_idx = match id {
+                PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
+            };
+            for (file_id, evidence) in peak.file_evidence.iter().enumerate() {
+                if let Some(apex) = evidence
+                    .as_ref()
+                    .map(|evidence| evidence.apex_rt)
+                    .filter(|apex| apex.is_finite())
+                {
+                    apexes.entry((peptide_idx, file_id)).or_default().push(apex);
+                }
+            }
+        }
+        apexes
+    });
+    let parent_apexes = parent_apexes.as_ref();
+    let verdicts = rows
+        .iter()
+        .flat_map(|((id, decoy), peak)| {
+            let peptide_idx = match id {
+                PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
+            };
+            let decoy = *decoy;
+            peak.file_evidence
+                .iter()
+                .enumerate()
+                .map(move |(file_id, evidence)| {
+                    let annotations = in_source?;
+                    let apexes = parent_apexes?;
+                    if decoy {
+                        return None;
+                    }
+                    let apex = evidence
+                        .as_ref()
+                        .map(|evidence| evidence.apex_rt)
+                        .filter(|apex| apex.is_finite())?;
+                    let candidates = annotations.candidates(peptide_idx);
+                    annotations.coeluting(file_id, apex, candidates, |parent| {
+                        apexes.get(&(parent, file_id)).and_then(|parent_apexes| {
+                            parent_apexes.iter().copied().min_by(|left, right| {
+                                (left - apex).abs().total_cmp(&(right - apex).abs())
+                            })
+                        })
                     })
-            })
-            .collect::<Vec<_>>();
-        if let Some(mut col) = rg.next_column()? {
-            let mut values = Vec::new();
-            let mut levels = Vec::new();
-            for verdict in &verdicts {
-                match verdict {
-                    Some(annotation) => {
-                        values.push(database[annotation.root].to_string().into_bytes().into());
-                        levels.push(1);
-                    }
-                    None => levels.push(0),
+                })
+        })
+        .collect::<Vec<_>>();
+    if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::new();
+        let mut levels = Vec::new();
+        for verdict in &verdicts {
+            match verdict {
+                Some(annotation) => {
+                    values.push(database[annotation.parent].to_string().into_bytes().into());
+                    levels.push(1);
                 }
+                None => levels.push(0),
             }
-            col.typed::<ByteArrayType>()
-                .write_batch(&values, Some(&levels), None)?;
-            col.close()?;
         }
-        if let Some(mut col) = rg.next_column()? {
-            let mut values = Vec::new();
-            let mut levels = Vec::new();
-            for verdict in &verdicts {
-                match verdict {
-                    Some(annotation) => {
-                        values.push(annotation.kind.label().into_bytes().into());
-                        levels.push(1);
-                    }
-                    None => levels.push(0),
+        col.typed::<ByteArrayType>()
+            .write_batch(&values, Some(&levels), None)?;
+        col.close()?;
+    }
+    if let Some(mut col) = rg.next_column()? {
+        let mut values = Vec::new();
+        let mut levels = Vec::new();
+        for verdict in &verdicts {
+            match verdict {
+                Some(annotation) => {
+                    values.push(annotation.kind.label().into_bytes().into());
+                    levels.push(1);
                 }
+                None => levels.push(0),
             }
-            col.typed::<ByteArrayType>()
-                .write_batch(&values, Some(&levels), None)?;
-            col.close()?;
         }
+        col.typed::<ByteArrayType>()
+            .write_batch(&values, Some(&levels), None)?;
+        col.close()?;
     }
     rg.close()?;
     writer.into_inner()

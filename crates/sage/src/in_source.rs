@@ -1,29 +1,29 @@
 //! In-source fragmentation and in-source neutral loss annotation.
 //!
-//! A peptide can reach the mass analyser as a piece of a longer peptide, or
+//! A peptide can reach the mass analyser as a fragment of a longer peptide, or
 //! having lost a small neutral molecule, because it fragmented in the ion
-//! source rather than in the collision cell. Such a product is a real
-//! spectrum of a real ion, so the search identifies it, but it is not an
-//! experimental peptide: it is a piece of one that was in the sample.
+//! source rather than in the collision cell. Such a product is a real spectrum
+//! of a real ion, so the search identifies it, but it is not an experimental
+//! peptide: it is a product of one that was in the sample.
 //!
 //! This module annotates those PSMs. It changes no score, removes no row and
-//! reweights nothing: every annotated PSM keeps the identification it had.
-//! Two things are reported per flagged PSM, the *root* peptide the product
-//! came from and what kind of product it is, so a downstream analysis can
-//! filter or group on them.
+//! reweights nothing: every annotated PSM keeps the identification it had. Two
+//! things are reported per flagged PSM, the *parent* peptide the product came
+//! from and what kind of product it is, so a downstream analysis can filter or
+//! group on them.
 //!
 //! A confident target PSM is flagged when both hold in the same file:
 //!
-//! 1. its peptide occupies a sub-span of a longer confident peptide of the
-//!    same protein (a prefix, a suffix or an internal piece), or the same span
-//!    with a lower mass, and the modifications on the shared residues are
-//!    equal or differ by exactly one candidate loss; and
-//! 2. its retention time co-elutes with the longer or heavier peptide's own
-//!    PSMs, within a tolerance derived from the file itself.
+//! 1. its peptide occupies a span of a longer confident peptide of the same
+//!    protein, or the same span with a lower mass; the modifications on the
+//!    shared residues are equal except at one site; and its mass is the mass a
+//!    product of that span would have (see [`Placement`]); and
+//! 2. its retention time co-elutes with the parent's own PSMs, within a
+//!    tolerance derived from the file itself.
 //!
-//! The flag names the root: the longest co-eluting peptide that contains the
-//! product. A piece of a piece therefore points at the intact peptide, with no
-//! chain to follow.
+//! The flag names the parent: the longest co-eluting peptide that contains the
+//! product. A product of a product therefore points at the intact peptide,
+//! with no chain to follow.
 //!
 //! The decision is per PSM, not per peptide. The same peptide can be an
 //! experimental peptide at one retention time and an in-source product at
@@ -32,28 +32,32 @@
 //!
 //! Containment is decided in protein coordinates, from
 //! [`Peptide::protein_sites`], not by searching one peptide's sequence inside
-//! another: a product and its root then come from the same place in the same
+//! another: a product and its parent then come from the same place in the same
 //! protein, which is what in-source fragmentation means.
 
 use crate::database::{IndexedDatabase, PeptideIx};
 use crate::mass::{H2O, NH3};
-use crate::peptide::Peptide;
+use crate::peptide::{ModificationKind, Peptide, Site};
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// Maximum spectrum q-value for a PSM to be a product or a parent.
 pub const PSM_Q_VALUE: f32 = 0.01;
 /// Maximum peptide q-value for a PSM to be a product or a parent.
 pub const PEPTIDE_Q_VALUE: f32 = 0.01;
-/// Window in daltons for matching a modification-mass difference to a loss.
-/// Peptide and modification masses are `f32`, so a difference around 2,000 Da
-/// carries about 1e-4 Da of representation error.
+/// Window in daltons for matching a mass difference to a loss. Peptide and
+/// modification masses are `f32`, so a difference around 2,000 Da carries
+/// about 1e-4 Da of representation error.
 pub const LOSS_EPSILON: f32 = 0.005;
 /// Percentile of a peptide's retention-time spread taken as the co-elution
-/// tolerance.
-pub const RT_PERCENTILE: f32 = 95.0;
+/// tolerance. The median, not a high percentile: on a semi-enzymatic search of
+/// one PXD028735 file the spread's 95th percentile is 1.04 min, which admits
+/// 483 co-eluting product/parent pairs of which 149 are expected by chance
+/// (31%), while its median is 0.12 min, which admits 161 pairs with 14
+/// expected (9%). The chance fraction falls with the window and nothing else:
+/// see [`BACKGROUND_BAND`].
+pub const RT_PERCENTILE: f32 = 50.0;
 /// Fewest spread observations needed to derive a tolerance from a file.
 pub const MIN_SPREAD_OBSERVATIONS: usize = 20;
 /// Fallback co-elution tolerance, as a fraction of a file's retention-time
@@ -61,11 +65,19 @@ pub const MIN_SPREAD_OBSERVATIONS: usize = 20;
 pub const FALLBACK_RT_FRACTION: f32 = 0.002;
 /// Fallback co-elution tolerance when a file's retention-time span is unusable.
 pub const FALLBACK_RT_TOLERANCE: f32 = 0.1;
-/// Half-width of the retention-time difference histogram, in tolerances.
-pub const HISTOGRAM_HALF_WIDTH_BINS: i32 = 25;
-/// Distance from zero, in tolerances, of the histogram bins that estimate the
-/// rate at which unrelated pairs fall inside the co-elution window.
-pub const BACKGROUND_BIN_RANGE: std::ops::Range<i32> = 5..HISTOGRAM_HALF_WIDTH_BINS;
+/// Width of a retention-time difference histogram bin, in the file's
+/// retention-time units. The grid is fixed rather than a function of the
+/// tolerance, so the distribution can be read, and a tolerance chosen, after
+/// the fact.
+pub const HISTOGRAM_BIN: f32 = 0.05;
+/// Half-width of the histogram, in the file's retention-time units. Pairs
+/// further out are counted in [`InSourcePlacementStats::outside_pairs`].
+pub const HISTOGRAM_HALF_WIDTH: f32 = 5.0;
+/// Retention-time differences, in the file's units, whose pair density
+/// estimates the rate at which unrelated pairs fall inside the co-elution
+/// window. Products co-elute, so a band this far from zero holds pairs that
+/// are related in sequence and not in time.
+pub const BACKGROUND_BAND: std::ops::Range<f32> = 1.0..HISTOGRAM_HALF_WIDTH;
 
 /// `in_source` configuration: `true` or `false` to override the automatic
 /// choice, or an object to set the co-elution tolerance.
@@ -79,8 +91,8 @@ pub enum InSourceConfig {
 impl InSourceConfig {
     /// Settings to use; `None` when the annotation is off. `automatic` is what
     /// an unset key means: the annotation is on for a semi-enzymatic or
-    /// non-specific digest, whose own pieces of longer peptides are exactly
-    /// what in-source fragmentation produces, and off otherwise.
+    /// non-specific digest, whose own shorter peptides are exactly what
+    /// in-source fragmentation produces, and off otherwise.
     pub fn resolve(config: Option<Self>, automatic: bool) -> Option<InSourceSettings> {
         match config {
             None => automatic.then(InSourceSettings::default),
@@ -99,58 +111,115 @@ pub struct InSourceSettings {
     /// each file's tolerance is derived from the spread of its own repeated
     /// peptides; see [`derive_rt_tolerance`].
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(range(min = 0.0))]
+    #[schemars(extend("exclusiveMinimum" = 0.0))]
     pub rt_tolerance: Option<f32>,
 }
 
-/// What kind of in-source product a PSM is.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum InSourceKind {
-    /// A piece of the root peptide, carrying the root's modifications on every
-    /// shared residue.
-    Fragment,
-    /// The root's own span, having lost one neutral molecule.
-    Loss(Arc<str>),
-    /// A piece of the root peptide that also lost one neutral molecule.
-    FragmentWithLoss(Arc<str>),
-}
-
-impl InSourceKind {
-    /// The value written to the `in_source_type` column.
-    pub fn label(&self) -> String {
-        match self {
-            InSourceKind::Fragment => "fragment".into(),
-            InSourceKind::Loss(name) => format!("loss:{name}"),
-            InSourceKind::FragmentWithLoss(name) => format!("fragment+loss:{name}"),
+impl InSourceSettings {
+    /// Why these settings cannot be used, if so.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.rt_tolerance {
+            Some(tolerance) if !(tolerance.is_finite() && tolerance > 0.0) => {
+                Err("`in_source.rt_tolerance` must be a finite value greater than zero".into())
+            }
+            _ => Ok(()),
         }
     }
 }
 
-/// The root peptide a PSM's ion came from, and how.
-#[derive(Clone, Debug, PartialEq)]
+/// Where a product sits inside its parent, which fixes the mass it must have.
+///
+/// Backbone cleavage in the source gives the same two ion types as cleavage in
+/// the collision cell. The C-terminal piece keeps the parent's C-terminal OH
+/// and gains a hydrogen at its new N-terminus, so it has the ordinary peptide
+/// mass of its own sequence, like a y ion. The N-terminal piece does not: it
+/// is a b-type species, 18.010565 Da (water) lighter than the peptide of the
+/// same sequence. An internal piece has both of those new termini, so it too
+/// is water-light. A peptide at the ordinary peptide mass of an N-terminal or
+/// internal span is therefore not an in-source product of that parent, and is
+/// not flagged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Placement {
+    /// The product covers the parent's own span: only a loss can make it
+    /// lighter.
+    SameSpan,
+    /// The product ends where the parent ends (a y-type product).
+    Suffix,
+    /// The product starts where the parent starts (a b-type product).
+    Prefix,
+    /// The product shares neither terminus with the parent.
+    Internal,
+}
+
+impl Placement {
+    /// Mass the product lacks relative to the ordinary peptide mass of its
+    /// span of the parent, before any neutral loss.
+    pub fn structural_deficit(self) -> f32 {
+        match self {
+            Placement::SameSpan | Placement::Suffix => 0.0,
+            Placement::Prefix | Placement::Internal => H2O,
+        }
+    }
+
+    /// The name used in `in_source_type` and in the run summary.
+    pub fn label(self) -> &'static str {
+        match self {
+            Placement::SameSpan => "same_span",
+            Placement::Suffix => "suffix",
+            Placement::Prefix => "prefix",
+            Placement::Internal => "internal",
+        }
+    }
+}
+
+/// What kind of in-source product a PSM is: where it sits in its parent, and
+/// the neutral loss it carries on top of that, if any.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InSourceKind {
+    pub placement: Placement,
+    /// Neutral mass lost on top of the placement's own deficit.
+    pub loss: Option<f32>,
+}
+
+impl InSourceKind {
+    /// The value written to the `in_source_type` column. A loss is written as
+    /// its mass to four decimal places, because a mass is unambiguous where a
+    /// name is not: 18.0106 is water however it was configured, and a loss
+    /// declared by a modification cannot be confused with the modification.
+    pub fn label(&self) -> String {
+        match self.loss {
+            None => format!("fragment:{}", self.placement.label()),
+            Some(loss) if self.placement == Placement::SameSpan => format!("loss:{loss:.4}"),
+            Some(loss) => format!("fragment:{}+loss:{loss:.4}", self.placement.label()),
+        }
+    }
+}
+
+/// The parent peptide a PSM's ion came from, and how.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct InSourceAnnotation {
-    pub root: PeptideIx,
+    pub parent: PeptideIx,
     pub kind: InSourceKind,
 }
 
-/// A structural product/parent pair within one file, before co-elution is
-/// checked. Keeping these is what lets a quantified LFQ row be judged on its
-/// own apex retention time instead of on a PSM's.
-#[derive(Clone, Debug, PartialEq)]
-struct ParentWindow {
-    root: PeptideIx,
-    kind: InSourceKind,
-    /// Median retention time of the root's confident PSMs in this file.
-    rt: f32,
-    /// Residues of the root; the first tie-break for the longest root.
-    root_len: usize,
+/// A product/parent pair that passed the sequence and mass test. Whether the
+/// two co-elute is a per-file question, asked separately for a PSM (against
+/// the parent's PSMs) and for a quantified row (against the parent's own peak
+/// in that file), so a candidate itself is file-independent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InSourceCandidate {
+    pub parent: PeptideIx,
+    pub kind: InSourceKind,
+    /// Residues of the parent; the first tie-break for the longest parent.
+    pub parent_len: usize,
 }
 
-/// One retention-time difference bin of a file's built-in check.
+/// One retention-time difference bin, [`HISTOGRAM_BIN`] wide.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HistogramBin {
-    /// Bin index in tolerances from zero; bin 0 spans `[0, tolerance)` and
-    /// bin -1 spans `[-tolerance, 0)`.
+    /// Bin index; bin 0 spans `(-HISTOGRAM_BIN, HISTOGRAM_BIN)` and bin 1
+    /// `[HISTOGRAM_BIN, 2 * HISTOGRAM_BIN)`, so the bins are symmetric about
+    /// zero.
     pub bin: i32,
     /// Lower edge of the bin, in the file's retention-time units.
     pub start: f32,
@@ -159,8 +228,70 @@ pub struct HistogramBin {
     pub pairs: usize,
 }
 
-/// The built-in check, per file: how many candidate pairs co-eluted, and how
-/// many would be expected to by chance.
+/// The built-in check for one placement within one file: how many candidate
+/// pairs co-eluted, and how many would be expected to by chance.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InSourcePlacementStats {
+    /// `same_span`, `suffix`, `prefix`, `internal`, or `all`.
+    pub placement: String,
+    /// Product/parent pairs that passed the sequence and mass test.
+    pub candidate_pairs: usize,
+    /// Candidate pairs inside the co-elution window.
+    pub coeluting_pairs: usize,
+    /// Co-eluting pairs expected from the density of candidate pairs
+    /// [`BACKGROUND_BAND`] away from zero, scaled to the window's width.
+    pub expected_by_chance: f32,
+    /// PSMs flagged with this placement.
+    pub flagged_psms: usize,
+    /// Candidate pairs further from zero than [`HISTOGRAM_HALF_WIDTH`].
+    pub outside_pairs: usize,
+    /// Retention-time differences of the candidate pairs, on the fixed
+    /// [`HISTOGRAM_BIN`] grid. Empty bins are left out.
+    pub rt_difference_histogram: Vec<HistogramBin>,
+}
+
+impl InSourcePlacementStats {
+    /// Sum the same placement's records from several files into one. The
+    /// histogram grid is fixed, so the bins add; each file contributes its own
+    /// chance estimate, computed with its own tolerance.
+    pub fn merge<'a>(label: &str, parts: impl Iterator<Item = &'a Self>) -> Self {
+        let mut merged = Self {
+            placement: label.into(),
+            candidate_pairs: 0,
+            coeluting_pairs: 0,
+            expected_by_chance: 0.0,
+            flagged_psms: 0,
+            outside_pairs: 0,
+            rt_difference_histogram: Vec::new(),
+        };
+        let mut bins: FnvHashMap<i32, usize> = FnvHashMap::default();
+        for part in parts {
+            merged.candidate_pairs += part.candidate_pairs;
+            merged.coeluting_pairs += part.coeluting_pairs;
+            merged.expected_by_chance += part.expected_by_chance;
+            merged.flagged_psms += part.flagged_psms;
+            merged.outside_pairs += part.outside_pairs;
+            for entry in &part.rt_difference_histogram {
+                *bins.entry(entry.bin).or_default() += entry.pairs;
+            }
+        }
+        merged.rt_difference_histogram = bins
+            .into_iter()
+            .map(|(bin, pairs)| HistogramBin {
+                bin,
+                start: bin as f32 * HISTOGRAM_BIN,
+                end: (bin + 1) as f32 * HISTOGRAM_BIN,
+                pairs,
+            })
+            .collect();
+        merged
+            .rt_difference_histogram
+            .sort_unstable_by_key(|entry| entry.bin);
+        merged
+    }
+}
+
+/// The built-in check, per file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InSourceFileStats {
     pub file_id: usize,
@@ -170,28 +301,19 @@ pub struct InSourceFileStats {
     pub rt_tolerance_source: String,
     /// Confident target PSMs that could be a product or a parent.
     pub confident_psms: usize,
-    /// Product/parent pairs that passed the sequence and mass test, before
-    /// co-elution.
-    pub candidate_pairs: usize,
-    /// Candidate pairs inside the co-elution window.
-    pub coeluting_pairs: usize,
-    /// Co-eluting pairs expected from the rate at which candidate pairs fall
-    /// `BACKGROUND_BIN_RANGE` tolerances away from zero. A co-eluting count
-    /// far above this is the evidence that the flag finds in-source products
-    /// rather than coincidences.
-    pub expected_by_chance: f32,
     /// PSMs flagged in this file.
     pub flagged_psms: usize,
-    /// Retention-time differences of every candidate pair, in bins one
-    /// tolerance wide.
-    pub rt_difference_histogram: Vec<HistogramBin>,
+    /// The check for the file as a whole, then for each placement that has a
+    /// candidate pair.
+    pub totals: InSourcePlacementStats,
+    pub placements: Vec<InSourcePlacementStats>,
 }
 
 /// Per-PSM in-source annotations of a whole run.
 #[derive(Clone, Debug, Default)]
 pub struct InSourceAnnotations {
     by_psm: FnvHashMap<usize, InSourceAnnotation>,
-    by_precursor: FnvHashMap<(PeptideIx, usize), Vec<ParentWindow>>,
+    candidates: FnvHashMap<PeptideIx, Vec<InSourceCandidate>>,
     rt_tolerance: FnvHashMap<usize, f32>,
     files: Vec<InSourceFileStats>,
 }
@@ -202,22 +324,46 @@ impl InSourceAnnotations {
         self.by_psm.get(&psm_id)
     }
 
-    /// The annotation of a quantified precursor in one file, judged on the
-    /// retention time the caller measured (an LFQ peak's apex) rather than on
-    /// any PSM's. The longest co-eluting root wins, as it does for a PSM.
-    pub fn precursor(
+    /// The product/parent pairs of a peptide that passed the sequence and mass
+    /// test, in any file. A caller with retention times of its own — a
+    /// quantified row's apex and its parent's apex in the same file — asks
+    /// [`InSourceAnnotations::coeluting`] which of them co-elute, so a row
+    /// transferred between runs is judged on its peak and not on a PSM.
+    pub fn candidates(&self, peptide: PeptideIx) -> &[InSourceCandidate] {
+        self.candidates
+            .get(&peptide)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// The co-elution tolerance of a file, if the file took part.
+    pub fn rt_tolerance(&self, file_id: usize) -> Option<f32> {
+        self.rt_tolerance.get(&file_id).copied()
+    }
+
+    /// Of `candidates`, the annotation to report for a product observed at
+    /// `rt`, given each parent's retention time in the same file from
+    /// `parent_rt`. The longest co-eluting parent wins, so a product of a
+    /// product names the intact peptide. `None` when the file did not take
+    /// part, or nothing co-elutes.
+    pub fn coeluting(
         &self,
-        peptide: PeptideIx,
         file_id: usize,
         rt: f32,
+        candidates: &[InSourceCandidate],
+        mut parent_rt: impl FnMut(PeptideIx) -> Option<f32>,
     ) -> Option<InSourceAnnotation> {
-        let tolerance = *self.rt_tolerance.get(&file_id)?;
-        let windows = self.by_precursor.get(&(peptide, file_id))?;
-        let window = best_window(windows.iter().filter(|w| (w.rt - rt).abs() <= tolerance))?;
-        Some(InSourceAnnotation {
-            root: window.root,
-            kind: window.kind.clone(),
-        })
+        let tolerance = self.rt_tolerance(file_id)?;
+        candidates
+            .iter()
+            .filter(|candidate| {
+                parent_rt(candidate.parent).is_some_and(|parent| (rt - parent).abs() < tolerance)
+            })
+            .reduce(preferred_parent)
+            .map(|candidate| InSourceAnnotation {
+                parent: candidate.parent,
+                kind: candidate.kind,
+            })
     }
 
     /// The per-file record of the built-in check.
@@ -234,139 +380,197 @@ impl InSourceAnnotations {
     pub fn is_empty(&self) -> bool {
         self.by_psm.is_empty()
     }
+
+    /// The built-in check for the whole run.
+    pub fn run_totals(&self) -> InSourcePlacementStats {
+        InSourcePlacementStats::merge("all", self.files.iter().map(|file| &file.totals))
+    }
+
+    /// The built-in check for the whole run, per placement, in the order
+    /// [`Placement`] declares.
+    pub fn run_placements(&self) -> Vec<InSourcePlacementStats> {
+        let mut labels = self
+            .files
+            .iter()
+            .flat_map(|file| file.placements.iter().map(|stats| stats.placement.as_str()))
+            .collect::<Vec<_>>();
+        labels.sort_unstable_by_key(|label| placement_order(label));
+        labels.dedup();
+        labels
+            .into_iter()
+            .map(|label| {
+                InSourcePlacementStats::merge(
+                    label,
+                    self.files
+                        .iter()
+                        .flat_map(|file| file.placements.iter())
+                        .filter(|stats| stats.placement == label),
+                )
+            })
+            .collect()
+    }
 }
 
-/// Pick the root among candidate windows: the longest peptide, then the lower
+/// Sort key putting placement records in the order [`Placement`] declares.
+fn placement_order(label: &str) -> usize {
+    [
+        Placement::SameSpan,
+        Placement::Suffix,
+        Placement::Prefix,
+        Placement::Internal,
+    ]
+    .iter()
+    .position(|placement| placement.label() == label)
+    .unwrap_or(usize::MAX)
+}
+
+/// The parent to report of two candidates: the longer peptide, then the lower
 /// peptide index, so the choice never depends on iteration order.
-fn best_window<'a>(windows: impl Iterator<Item = &'a ParentWindow>) -> Option<&'a ParentWindow> {
-    windows.reduce(|best, window| {
-        if (window.root_len, std::cmp::Reverse(window.root.0))
-            > (best.root_len, std::cmp::Reverse(best.root.0))
-        {
-            window
-        } else {
-            best
+fn preferred_parent<'a>(
+    best: &'a InSourceCandidate,
+    candidate: &'a InSourceCandidate,
+) -> &'a InSourceCandidate {
+    if (candidate.parent_len, std::cmp::Reverse(candidate.parent.0))
+        > (best.parent_len, std::cmp::Reverse(best.parent.0))
+    {
+        candidate
+    } else {
+        best
+    }
+}
+
+/// A site where a product and its span of the parent carry different
+/// modification mass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SiteDifference {
+    /// The site within the parent, where a declared loss is looked up.
+    site: Site,
+    /// Product mass minus parent mass at that site.
+    difference: f32,
+}
+
+/// Modification differences between a product and its span of a parent,
+/// compared site by site, so a modification moved to another residue is a
+/// difference rather than an equal total. `Ok(None)` is a product whose
+/// modifications match the parent's everywhere; `Err(())` is more than one
+/// differing site, which one neutral loss cannot explain.
+#[allow(clippy::result_unit_err)]
+fn site_differences(
+    product: &Peptide,
+    parent: &Peptide,
+    offset: usize,
+) -> Result<Option<SiteDifference>, ()> {
+    let length = product.sequence.len();
+    let mut found: Option<SiteDifference> = None;
+    let mut record = |site: Site, difference: f32| -> bool {
+        if difference.abs() <= LOSS_EPSILON {
+            return true;
         }
-    })
-}
-
-/// A candidate loss: the name written to the output and the neutral mass.
-#[derive(Clone, Debug, PartialEq)]
-struct CandidateLoss {
-    name: Arc<str>,
-    mass: f32,
-}
-
-/// The losses a product of `parent` may carry: water and ammonia, the losses
-/// configured under `database.fragment_losses`, the neutral losses the
-/// parent's own modifications declare, and the full mass of each modification
-/// the parent carries, which is what a product that lost a whole modification
-/// differs by.
-fn candidate_losses(parent: &Peptide, database: &IndexedDatabase) -> Vec<CandidateLoss> {
-    let mut losses = vec![
-        CandidateLoss {
-            name: "water".into(),
-            mass: H2O,
-        },
-        CandidateLoss {
-            name: "ammonia".into(),
-            mass: NH3,
-        },
-    ];
-    if let Some(configured) = database.fragment_losses.as_ref() {
-        for loss in &configured.losses {
-            losses.push(CandidateLoss {
-                name: loss.name.clone(),
-                mass: loss.mass,
-            });
+        if found.is_some() {
+            return false;
+        }
+        found = Some(SiteDifference { site, difference });
+        true
+    };
+    for index in 0..length {
+        let difference = product.modification_at(index) - parent.modification_at(index + offset);
+        if !record(Site::Sequence((index + offset) as u32), difference) {
+            return Err(());
         }
     }
-    for applied in parent.applied_modifications() {
-        let definition = applied.modification;
-        let name: Arc<str> = definition
-            .name
-            .clone()
-            .unwrap_or_else(|| format!("{:.4}", definition.mass).into());
-        let declared = definition
-            .neutral_losses
-            .iter()
-            .copied()
-            .chain(
-                definition
-                    .site_losses
-                    .iter()
-                    .flat_map(|rules| rules.iter())
-                    .flat_map(|(_, masses)| masses.iter().copied()),
-            )
-            .chain(std::iter::once(definition.mass));
-        for mass in declared {
-            if mass > 0.0 {
-                losses.push(CandidateLoss {
-                    name: name.clone(),
-                    mass,
-                });
+    // A terminal modification of the parent is on the product only where the
+    // product keeps that terminus.
+    let parent_nterm = if offset == 0 {
+        parent.nterm.unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let parent_cterm = if offset + length == parent.sequence.len() {
+        parent.cterm.unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    if !record(Site::Nterm, product.nterm.unwrap_or(0.0) - parent_nterm) {
+        return Err(());
+    }
+    if !record(Site::Cterm, product.cterm.unwrap_or(0.0) - parent_cterm) {
+        return Err(());
+    }
+    Ok(found)
+}
+
+/// Neutral losses a product of `parent` may carry: water and ammonia, every
+/// loss configured under `database.fragment_losses`, and the losses the
+/// parent's own modifications declare at the site in question. There is no
+/// implicit whole-modification loss: a modification's full mass counts only
+/// where the user declared it among that modification's neutral losses, and a
+/// labelling modification contributes nothing, so the light channel of a
+/// labelling pair is never a product of its heavy partner.
+fn declared_losses(parent: &Peptide, database: &IndexedDatabase, site: Option<Site>) -> Vec<f32> {
+    let mut losses = vec![H2O, NH3];
+    if let Some(configured) = database.fragment_losses.as_ref() {
+        losses.extend(configured.losses.iter().map(|loss| loss.mass));
+    }
+    if let Some(site) = site {
+        let sequence = parent.sequence.as_bytes();
+        for applied in parent.applied_modifications() {
+            if applied.kind == ModificationKind::Label {
+                continue;
             }
+            losses.extend(
+                applied
+                    .modification
+                    .losses_at(sequence, site)
+                    .iter()
+                    .copied()
+                    .filter(|loss| *loss > 0.0),
+            );
         }
     }
     losses
 }
 
-/// Total modification mass a product carries that its span of the parent does
-/// not. Both peptides cover the same residues, so this difference is the whole
-/// mass difference between the product and that span.
-fn modification_delta(piece: &Peptide, parent: &Peptide, offset: usize) -> f32 {
-    let piece_len = piece.sequence.len();
-    let mut delta = piece.nterm.unwrap_or(0.0) + piece.cterm.unwrap_or(0.0);
-    for index in 0..piece_len {
-        delta += piece.modification_at(index) - parent.modification_at(index + offset);
-    }
-    if offset == 0 {
-        delta -= parent.nterm.unwrap_or(0.0);
-    }
-    if offset + piece_len == parent.sequence.len() {
-        delta -= parent.cterm.unwrap_or(0.0);
-    }
-    delta
-}
-
 /// Classify a product against a parent whose residues it shares from `offset`,
-/// or `None` when the mass difference is not zero and not one candidate loss.
+/// or `None` when it is not a product of that parent.
 fn classify(
-    piece: &Peptide,
+    product: &Peptide,
     parent: &Peptide,
     offset: usize,
-    losses: &[CandidateLoss],
+    placement: Placement,
+    database: &IndexedDatabase,
 ) -> Option<InSourceKind> {
-    let same_span = piece.sequence.len() == parent.sequence.len();
-    let delta = modification_delta(piece, parent, offset);
-    if delta.abs() <= LOSS_EPSILON {
-        // The same span with the same modifications is the same peptidoform,
-        // not a product of it.
-        return (!same_span).then_some(InSourceKind::Fragment);
+    let difference = site_differences(product, parent, offset).ok()?;
+    let deficit = placement.structural_deficit();
+    // Mass the product lacks against the ordinary peptide mass of its span of
+    // the parent. A product is only ever lighter.
+    let missing = -difference.map_or(0.0, |site| site.difference);
+    if (missing - deficit).abs() <= LOSS_EPSILON {
+        // The placement's own deficit and nothing else. The same span with the
+        // same modifications is the same peptidoform, not a product of it.
+        return (placement != Placement::SameSpan).then_some(InSourceKind {
+            placement,
+            loss: None,
+        });
     }
-    if delta > 0.0 {
-        // A product cannot be heavier than the span of the parent it came from.
+    let lost = missing - deficit;
+    if lost <= LOSS_EPSILON {
         return None;
     }
-    let lost = -delta;
+    let losses = declared_losses(parent, database, difference.map(|site| site.site));
     let matched = losses
         .iter()
-        .filter(|candidate| (candidate.mass - lost).abs() <= LOSS_EPSILON)
-        .min_by(|left, right| {
-            (left.mass - lost)
-                .abs()
-                .total_cmp(&(right.mass - lost).abs())
-        })?;
-    Some(if same_span {
-        InSourceKind::Loss(matched.name.clone())
-    } else {
-        InSourceKind::FragmentWithLoss(matched.name.clone())
+        .copied()
+        .filter(|loss| (loss - lost).abs() <= LOSS_EPSILON)
+        .min_by(|left, right| (left - lost).abs().total_cmp(&(right - lost).abs()))?;
+    Some(InSourceKind {
+        placement,
+        loss: Some(matched),
     })
 }
 
-/// Co-elution tolerance of one file: the [`RT_PERCENTILE`]th percentile of how
-/// far a peptide's repeated PSMs sit from that peptide's median retention
-/// time, over every peptide seen more than once in the file. Different charge
+/// Co-elution tolerance of one file: the [`RT_PERCENTILE`]th percentile (the
+/// median) of how far a peptide's repeated PSMs sit from that peptide's median
+/// retention time, over every peptide seen more than once in the file. Different charge
 /// states of one peptide count as repeats, so the estimate needs neither MS1
 /// data nor quantification. A file with fewer than
 /// [`MIN_SPREAD_OBSERVATIONS`] repeats, or whose repeats all sit at one
@@ -396,12 +600,11 @@ struct ConfidentPsm {
     rt: f32,
 }
 
-/// A confident peptide's occurrence in a protein, within one file.
+/// A confident peptide's occurrence in a protein.
 struct Occurrence {
     peptide_idx: PeptideIx,
     start: u32,
     end: u32,
-    rt: f32,
     len: usize,
 }
 
@@ -419,6 +622,84 @@ fn median(values: &mut [f32]) -> f32 {
         (values[middle - 1] + values[middle]) / 2.0
     } else {
         values[middle]
+    }
+}
+
+/// The bin of a retention-time difference on the fixed [`HISTOGRAM_BIN`] grid,
+/// truncated towards zero so the bins are symmetric about it, or `None` when
+/// the difference lies further out than [`HISTOGRAM_HALF_WIDTH`].
+fn histogram_bin(difference: f32) -> Option<i32> {
+    if !difference.is_finite() || difference.abs() >= HISTOGRAM_HALF_WIDTH {
+        return None;
+    }
+    Some((difference / HISTOGRAM_BIN).trunc() as i32)
+}
+
+/// Candidate pairs per retention-time unit in [`BACKGROUND_BAND`], either side
+/// of zero, from which the chance rate inside the window is estimated.
+fn background_density(histogram: &FnvHashMap<i32, usize>) -> f32 {
+    let low = (BACKGROUND_BAND.start / HISTOGRAM_BIN).round() as i32;
+    let high = (BACKGROUND_BAND.end / HISTOGRAM_BIN).round() as i32;
+    let pairs: usize = histogram
+        .iter()
+        .filter(|(bin, _)| {
+            let distance = bin.saturating_abs();
+            (low..high).contains(&distance)
+        })
+        .map(|(_, pairs)| *pairs)
+        .sum();
+    let width = 2.0 * (BACKGROUND_BAND.end - BACKGROUND_BAND.start);
+    if width > 0.0 {
+        pairs as f32 / width
+    } else {
+        0.0
+    }
+}
+
+/// The counts of one placement, built while a file is scanned.
+#[derive(Default)]
+struct PlacementCounts {
+    candidate_pairs: usize,
+    coeluting_pairs: usize,
+    flagged_psms: usize,
+    outside_pairs: usize,
+    histogram: FnvHashMap<i32, usize>,
+}
+
+impl PlacementCounts {
+    fn record(&mut self, difference: f32, tolerance: f32) {
+        self.candidate_pairs += 1;
+        if difference.abs() < tolerance {
+            self.coeluting_pairs += 1;
+        }
+        match histogram_bin(difference) {
+            Some(bin) => *self.histogram.entry(bin).or_default() += 1,
+            None => self.outside_pairs += 1,
+        }
+    }
+
+    fn finish(&self, placement: &str, tolerance: f32) -> InSourcePlacementStats {
+        let mut rt_difference_histogram = self
+            .histogram
+            .iter()
+            .map(|(bin, pairs)| HistogramBin {
+                bin: *bin,
+                start: *bin as f32 * HISTOGRAM_BIN,
+                end: (*bin + 1) as f32 * HISTOGRAM_BIN,
+                pairs: *pairs,
+            })
+            .collect::<Vec<_>>();
+        rt_difference_histogram.sort_unstable_by_key(|entry| entry.bin);
+        InSourcePlacementStats {
+            placement: placement.into(),
+            candidate_pairs: self.candidate_pairs,
+            coeluting_pairs: self.coeluting_pairs,
+            // The window is two tolerances wide, one either side of zero.
+            expected_by_chance: background_density(&self.histogram) * 2.0 * tolerance,
+            flagged_psms: self.flagged_psms,
+            outside_pairs: self.outside_pairs,
+            rt_difference_histogram,
+        }
     }
 }
 
@@ -447,11 +728,45 @@ pub fn annotate(
         }
     }
 
+    // Every peptide confident in any file, in protein coordinates. A pair is
+    // a candidate on sequence and mass alone, which is file-independent; a
+    // parent still has to be confident in the file where the product is
+    // flagged, which the per-file pass checks.
+    let mut by_protein: FnvHashMap<&str, Vec<Occurrence>> = FnvHashMap::default();
+    let mut indexed: Vec<PeptideIx> = by_file
+        .values()
+        .flat_map(|psms| psms.iter().map(|psm| psm.peptide_idx))
+        .collect();
+    indexed.sort_unstable();
+    indexed.dedup();
+    for peptide_idx in indexed {
+        let peptide = &database[peptide_idx];
+        let len = peptide.sequence.len();
+        for site in peptide.protein_sites.iter() {
+            let Some(start) = site.start else { continue };
+            by_protein
+                .entry(site.protein.as_ref())
+                .or_default()
+                .push(Occurrence {
+                    peptide_idx,
+                    start,
+                    end: start + len as u32,
+                    len,
+                });
+        }
+    }
+
     let mut file_ids = by_file.keys().copied().collect::<Vec<_>>();
     file_ids.sort_unstable();
     for file_id in file_ids {
-        let psms = &by_file[&file_id];
-        annotate_file(file_id, psms, database, settings, &mut annotations);
+        annotate_file(
+            file_id,
+            &by_file[&file_id],
+            database,
+            settings,
+            &by_protein,
+            &mut annotations,
+        );
     }
     annotations
 }
@@ -461,9 +776,10 @@ fn annotate_file(
     psms: &[ConfidentPsm],
     database: &IndexedDatabase,
     settings: &InSourceSettings,
+    by_protein: &FnvHashMap<&str, Vec<Occurrence>>,
     annotations: &mut InSourceAnnotations,
 ) {
-    // Retention times of every peptide seen in this file, which give both the
+    // Retention times of every peptide in this file, which give both the
     // parents' retention times and the spread the tolerance comes from.
     let mut rts: FnvHashMap<PeptideIx, Vec<f32>> = FnvHashMap::default();
     let mut rt_min = f32::MAX;
@@ -488,154 +804,123 @@ fn annotate_file(
     };
     annotations.rt_tolerance.insert(file_id, rt_tolerance);
 
-    // Confident peptides by protein, in protein coordinates.
-    let mut by_protein: FnvHashMap<Arc<str>, Vec<Occurrence>> = FnvHashMap::default();
-    for (peptide_idx, median_rt) in &medians {
-        let peptide = &database[*peptide_idx];
-        let len = peptide.sequence.len();
-        for site in peptide.protein_sites.iter() {
-            let Some(start) = site.start else { continue };
-            by_protein
-                .entry(site.protein.clone())
-                .or_default()
-                .push(Occurrence {
-                    peptide_idx: *peptide_idx,
-                    start,
-                    end: start + len as u32,
-                    rt: *median_rt,
-                    len,
-                });
-        }
-    }
-
-    // One parent is the parent of many products; its candidate losses depend
-    // only on the parent, so they are built once.
-    let mut losses_by_parent: FnvHashMap<PeptideIx, Vec<CandidateLoss>> = FnvHashMap::default();
-    let mut histogram: FnvHashMap<i32, usize> = FnvHashMap::default();
-    let mut candidate_pairs = 0usize;
-    let mut coeluting_pairs = 0usize;
+    let mut counts: FnvHashMap<Placement, PlacementCounts> = FnvHashMap::default();
+    let mut totals = PlacementCounts::default();
     let mut flagged_psms = 0usize;
 
     for psm in psms {
-        let piece = &database[psm.peptide_idx];
-        let piece_len = piece.sequence.len();
-        let mut windows: Vec<ParentWindow> = Vec::new();
-        for site in piece.protein_sites.iter() {
-            let Some(piece_start) = site.start else {
-                continue;
-            };
-            let Some(occurrences) = by_protein.get(&site.protein) else {
-                continue;
-            };
-            let piece_end = piece_start + piece_len as u32;
-            for parent in occurrences {
-                if parent.peptide_idx == psm.peptide_idx
-                    || parent.start > piece_start
-                    || parent.end < piece_end
-                {
-                    continue;
-                }
-                let parent_peptide = &database[parent.peptide_idx];
-                let offset = (piece_start - parent.start) as usize;
-                // Expanded ambiguous residues can give two peptides the same
-                // protein span with different residues; compare the residues
-                // before trusting the coordinates.
-                if piece.sequence.as_bytes()
-                    != &parent_peptide.sequence.as_bytes()[offset..offset + piece_len]
-                {
-                    continue;
-                }
-                let losses = losses_by_parent
-                    .entry(parent.peptide_idx)
-                    .or_insert_with(|| candidate_losses(parent_peptide, database));
-                let Some(kind) = classify(piece, parent_peptide, offset, losses) else {
-                    continue;
-                };
-                if windows
-                    .iter()
-                    .any(|window| window.root == parent.peptide_idx)
-                {
-                    continue;
-                }
-                windows.push(ParentWindow {
-                    root: parent.peptide_idx,
-                    kind,
-                    rt: parent.rt,
-                    root_len: parent.len,
-                });
-            }
-        }
-        if windows.is_empty() {
+        // A peptide's candidates depend only on the peptide, so the first PSM
+        // of a peptide in the run pays for the scan.
+        let candidates = annotations
+            .candidates
+            .entry(psm.peptide_idx)
+            .or_insert_with(|| candidates_of(psm.peptide_idx, database, by_protein))
+            .clone();
+        if candidates.is_empty() {
             continue;
         }
-        candidate_pairs += windows.len();
-        for window in &windows {
-            let difference = psm.rt - window.rt;
-            let bin = (difference / rt_tolerance).floor() as i32;
-            if bin.abs() <= HISTOGRAM_HALF_WIDTH_BINS {
-                *histogram.entry(bin).or_default() += 1;
-            }
-            if difference.abs() <= rt_tolerance {
-                coeluting_pairs += 1;
-            }
+        for candidate in &candidates {
+            // A candidate's parent may be confident in another file and not in
+            // this one; it is then no parent here.
+            let Some(parent_rt) = medians.get(&candidate.parent) else {
+                continue;
+            };
+            let difference = psm.rt - parent_rt;
+            counts
+                .entry(candidate.kind.placement)
+                .or_default()
+                .record(difference, rt_tolerance);
+            totals.record(difference, rt_tolerance);
         }
-        if let Some(window) = best_window(
-            windows
-                .iter()
-                .filter(|window| (psm.rt - window.rt).abs() <= rt_tolerance),
-        ) {
-            annotations.by_psm.insert(
-                psm.psm_id,
-                InSourceAnnotation {
-                    root: window.root,
-                    kind: window.kind.clone(),
-                },
-            );
+        if let Some(annotation) = annotations.coeluting(file_id, psm.rt, &candidates, |parent| {
+            medians.get(&parent).copied()
+        }) {
+            annotations.by_psm.insert(psm.psm_id, annotation);
             flagged_psms += 1;
+            totals.flagged_psms += 1;
+            counts
+                .entry(annotation.kind.placement)
+                .or_default()
+                .flagged_psms += 1;
         }
-        // The windows depend only on the peptide, so the first PSM of a
-        // peptide in this file records them for the quantified rows.
-        annotations
-            .by_precursor
-            .entry((psm.peptide_idx, file_id))
-            .or_insert(windows);
     }
 
-    let background_bins = BACKGROUND_BIN_RANGE.len() * 2;
-    let background_pairs: usize = histogram
-        .iter()
-        .filter(|(bin, _)| BACKGROUND_BIN_RANGE.contains(&bin.abs()))
-        .map(|(_, pairs)| *pairs)
-        .sum();
-    // The co-elution window is two bins wide, one either side of zero.
-    let expected_by_chance = if background_bins == 0 {
-        0.0
-    } else {
-        2.0 * background_pairs as f32 / background_bins as f32
-    };
-
-    let mut rt_difference_histogram = histogram
+    let mut ordered = counts.keys().copied().collect::<Vec<_>>();
+    ordered.sort_unstable();
+    let placements = ordered
         .into_iter()
-        .map(|(bin, pairs)| HistogramBin {
-            bin,
-            start: bin as f32 * rt_tolerance,
-            end: (bin + 1) as f32 * rt_tolerance,
-            pairs,
-        })
+        .map(|placement| counts[&placement].finish(placement.label(), rt_tolerance))
         .collect::<Vec<_>>();
-    rt_difference_histogram.sort_unstable_by_key(|entry| entry.bin);
 
     annotations.files.push(InSourceFileStats {
         file_id,
         rt_tolerance,
         rt_tolerance_source: rt_tolerance_source.into(),
         confident_psms: psms.len(),
-        candidate_pairs,
-        coeluting_pairs,
-        expected_by_chance,
         flagged_psms,
-        rt_difference_histogram,
+        totals: totals.finish("all", rt_tolerance),
+        placements,
     });
+}
+
+/// Every parent of `peptide` that passes the sequence and mass test.
+fn candidates_of(
+    peptide: PeptideIx,
+    database: &IndexedDatabase,
+    by_protein: &FnvHashMap<&str, Vec<Occurrence>>,
+) -> Vec<InSourceCandidate> {
+    let product = &database[peptide];
+    let length = product.sequence.len();
+    let mut candidates: Vec<InSourceCandidate> = Vec::new();
+    for site in product.protein_sites.iter() {
+        let Some(product_start) = site.start else {
+            continue;
+        };
+        let Some(occurrences) = by_protein.get(site.protein.as_ref()) else {
+            continue;
+        };
+        let product_end = product_start + length as u32;
+        for parent in occurrences {
+            if parent.peptide_idx == peptide
+                || parent.start > product_start
+                || parent.end < product_end
+            {
+                continue;
+            }
+            if candidates
+                .iter()
+                .any(|candidate| candidate.parent == parent.peptide_idx)
+            {
+                continue;
+            }
+            let parent_peptide = &database[parent.peptide_idx];
+            let offset = (product_start - parent.start) as usize;
+            // Expanded ambiguous residues, and I/L twins when
+            // `merge_isoleucine_leucine` is on, can give two peptides the same
+            // protein span with different residues written, so the residues
+            // are compared before the coordinates are trusted.
+            if !crate::ambiguous_residues::isoleucine_leucine_eq(
+                product.sequence.as_bytes(),
+                &parent_peptide.sequence.as_bytes()[offset..offset + length],
+            ) {
+                continue;
+            }
+            let placement = match (offset == 0, offset + length == parent.len) {
+                (true, true) => Placement::SameSpan,
+                (false, true) => Placement::Suffix,
+                (true, false) => Placement::Prefix,
+                (false, false) => Placement::Internal,
+            };
+            if let Some(kind) = classify(product, parent_peptide, offset, placement, database) {
+                candidates.push(InSourceCandidate {
+                    parent: parent.peptide_idx,
+                    kind,
+                    parent_len: parent.len,
+                });
+            }
+        }
+    }
+    candidates
 }
 
 #[cfg(test)]

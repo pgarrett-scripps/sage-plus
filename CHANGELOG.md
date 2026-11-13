@@ -12,34 +12,50 @@ entries are retained below for provenance.
 ### Added
 - `in_source` flags the PSMs that are in-source fragmentation or in-source neutral loss products
   of a longer peptide, in two new nullable columns of `results.sage.parquet` and `lfq.parquet`,
-  `in_source_root_peptide` and `in_source_type` (`fragment`, `loss:<name>` or
-  `fragment+loss:<name>`). A confident target PSM is flagged when, in the same file, its peptide
-  occupies a sub-span of a longer confident peptide of the same protein (or the same span with a
-  lower mass), the modifications on the shared residues are equal or short by exactly one
-  candidate loss, and it co-elutes with that peptide's own PSMs; the flag names the longest such
-  root, so a piece of a piece points at the intact peptide. The decision is per PSM, not per
-  peptide, so a peptide can be an experimental peptide at one retention time and a product at
-  another in the same file. Candidate losses are water, ammonia, the losses configured under
-  `database.fragment_losses`, the neutral losses the root's modifications declare, and the full
-  mass of each modification the root carries, matched within 0.005 Da. The co-elution tolerance
-  is derived per file from the spread of its own repeated peptides (95th percentile of the
-  distance from a peptide's median retention time), which needs no MS1 data and no
-  quantification; `in_source.rt_tolerance` replaces it. A quantified LFQ row is judged on its own
-  peak apex in its own file rather than on a PSM's retention time.
+  `in_source_parent_peptide` and `in_source_type`. A confident target PSM is flagged when, in the
+  same file, its peptide occupies a span of a longer confident peptide of the same protein (or
+  that peptide's own span with a lower mass), the modifications on the shared residues are equal
+  except at one site, its mass is the mass a product of that span would have, and it co-elutes
+  with the parent's own PSMs. The flag names the longest such parent, so a product of a product
+  points at the intact peptide. The decision is per PSM, not per peptide, so a peptide can be an
+  experimental peptide at one retention time and a product at another in the same file.
+
+  The mass follows the ion type: a C-terminal (y-type) product carries the ordinary peptide mass
+  of its own sequence, while an N-terminal (b-type) or internal product is 18.010565 Da lighter,
+  so a peptide at the ordinary mass of an N-terminal or internal span is not a product of that
+  parent and is not flagged. `in_source_type` records which case it is: `fragment:suffix`,
+  `fragment:prefix`, `fragment:internal`, `loss:<mass>`, or a fragment and a loss together, as in
+  `fragment:suffix+loss:17.0265`. Candidate losses are water, ammonia, the losses configured under
+  `database.fragment_losses`, and the losses the parent's own modifications declare at the
+  differing site; a modification's full mass counts only where it was declared as one of that
+  modification's neutral losses, and a labelling modification contributes nothing, so the light
+  channel of a labelling pair is never a product of its heavy partner. Modifications are compared
+  residue by residue, so a modification moved to another residue is a difference and not an equal
+  total. The co-elution tolerance is derived per file from the spread of its own repeated peptides,
+  the median distance from a peptide's median retention time, which needs no MS1 data and no
+  quantification; `in_source.rt_tolerance` replaces it. The median rather than a high percentile
+  because the window decides how much of the flagged set is coincidence: on a semi-enzymatic
+  search of one PXD028735 file the 95th percentile is 1.04 min, which admits 483 of 4,168
+  candidate pairs with 149 expected by chance (31%), while the median is 0.12 min, which admits
+  161 with 14 expected (9%). A quantified LFQ row is judged
+  on its own peak apex against the parent's apex in the same file, so a row transferred between
+  runs is judged too, and decoy rows are never annotated.
 
   The annotation runs after FDR and changes nothing else: no score, q-value, intensity or row
   moves, and quantification is untouched. It is on by default for a semi-enzymatic or
-  non-specific digest, whose search space contains those pieces, and off otherwise; `true` and
-  `false` override that. A search with the annotation off writes byte-identical output to a
-  search before this change, because the two columns exist only in the new schema versions
-  `results.sage.v7`/`v8` and `lfq.v9`/`v10`, which are written only when it is on, and the
-  `in_source` keys of `results.json` and `run-summary.json` are omitted then.
+  non-specific digest, whose search space contains those products, and off otherwise; `true` and
+  `false` override that. An existing configuration keeps every value it produced before and gains
+  the two columns, which are null when the annotation is off, as every optional column before
+  them: `results.sage.parquet` moves to schema version 7 (8 with precursor labels) and
+  `lfq.parquet` to 9 (10 with labels), and the `in_source` keys of `results.json` and
+  `run-summary.json` are omitted when it is off.
 
   `run-summary.json` gains an `in_source` block with the built-in check: candidate pairs,
-  co-eluting pairs, PSMs flagged, and the pairs expected by chance, for the run and per file with
-  each file's retention-time difference histogram. In-source products pile up at a difference of
-  zero while unrelated pairs spread out, so the estimate from the bins 5 to 25 tolerances away
-  says how much of a flagged set could be coincidence.
+  co-eluting pairs, PSMs flagged, and the pairs expected by chance, for the run, for each
+  placement of a product in its parent, and per file with that file's retention-time difference
+  histogram on a fixed 0.05-unit grid. In-source products pile up at a difference of zero while
+  unrelated pairs spread out, so the density of pairs 1 to 5 units from zero says how much of a
+  flagged set could be coincidence.
 
 ## [v0.1.0-beta.19] - 2026-11-12
 

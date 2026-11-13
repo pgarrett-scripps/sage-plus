@@ -3,33 +3,28 @@ use sage_core::immonium::ImmoniumSettings;
 use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    build_results_schema(false, false)
+    build_results_schema(false)
 }
 
-/// Schema version of `results.sage.parquet`: 5 without precursor labels, 6
+/// Schema version of `results.sage.parquet`: 7 without precursor labels, 8
 /// with them. Versions 3 and 4 added the nullable fragment-loss and immonium
-/// columns to versions 1 and 2; versions 5 and 6 add `localized_peptide`;
-/// versions 7 and 8 add the two in-source columns, and are written only when
-/// in-source annotation is on, so a search without it writes the same file it
-/// wrote before.
-fn results_schema_version(has_labels: bool, has_in_source: bool) -> &'static str {
-    match (has_in_source, has_labels) {
-        (false, false) => "5",
-        (false, true) => "6",
-        (true, false) => "7",
-        (true, true) => "8",
+/// columns to versions 1 and 2; versions 5 and 6 added `localized_peptide`;
+/// versions 7 and 8 add `in_source_parent_peptide` and `in_source_type`. As
+/// with every optional column before them, the columns are always written and
+/// are null when the option is off.
+fn results_schema_version(has_labels: bool) -> &'static str {
+    if has_labels {
+        "8"
+    } else {
+        "7"
     }
 }
 
-fn build_results_schema(
-    has_labels: bool,
-    has_in_source: bool,
-) -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(match (has_in_source, has_labels) {
-        (false, false) => include_str!("../../../../schemas/results.sage.v5.parquet.schema"),
-        (false, true) => include_str!("../../../../schemas/results.sage.v6.parquet.schema"),
-        (true, false) => include_str!("../../../../schemas/results.sage.v7.parquet.schema"),
-        (true, true) => include_str!("../../../../schemas/results.sage.v8.parquet.schema"),
+fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
+    parquet::schema::parser::parse_message_type(if has_labels {
+        include_str!("../../../../schemas/results.sage.v8.parquet.schema")
+    } else {
+        include_str!("../../../../schemas/results.sage.v7.parquet.schema")
     })
 }
 
@@ -173,14 +168,14 @@ pub fn serialize_features(
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let has_fragment_losses = database.fragment_losses.is_some();
-    let schema = build_results_schema(has_labels, in_source.is_some())?;
+    let schema = build_results_schema(has_labels)?;
 
     let options = writer_properties(
         vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(results_schema_version(has_labels, in_source.is_some()).into()),
+                Some(results_schema_version(has_labels).into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
@@ -497,30 +492,30 @@ pub fn serialize_features(
             )?;
         }
 
-        // The in-source product's root peptide and what kind of product it
-        // is. Both columns exist only in schema versions 7 and 8, so a search
-        // without the annotation writes neither.
-        if let Some(annotations) = in_source {
-            if let Some(column) = rg.next_column()? {
-                write_optional_column::<ByteArrayType>(
-                    column,
-                    features.iter().map(|f| {
-                        annotations.psm(f.psm_id).map(|annotation| {
-                            database[annotation.root].to_string().into_bytes().into()
+        // The in-source product's parent peptide and what kind of product it
+        // is: null on every row when the annotation is off, and on every PSM
+        // it did not flag.
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                features.iter().map(|f| {
+                    in_source
+                        .and_then(|annotations| annotations.psm(f.psm_id))
+                        .map(|annotation| {
+                            database[annotation.parent].to_string().into_bytes().into()
                         })
-                    }),
-                )?;
-            }
-            if let Some(column) = rg.next_column()? {
-                write_optional_column::<ByteArrayType>(
-                    column,
-                    features.iter().map(|f| {
-                        annotations
-                            .psm(f.psm_id)
-                            .map(|annotation| annotation.kind.label().into_bytes().into())
-                    }),
-                )?;
-            }
+                }),
+            )?;
+        }
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<ByteArrayType>(
+                column,
+                features.iter().map(|f| {
+                    in_source
+                        .and_then(|annotations| annotations.psm(f.psm_id))
+                        .map(|annotation| annotation.kind.label().into_bytes().into())
+                }),
+            )?;
         }
 
         rg.close()?;
