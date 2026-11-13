@@ -38,6 +38,10 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `digestion.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are Frictionless
   Table Schemas giving the column order, types and meaning of `digestion.tsv` and
   `diagnostic_ions.tsv`.
+- `qc.v1.tsv.schema.json` describes `qc.tsv`, one row per searched file carrying the headline
+  number of every quality-control output.
+- `qc_gradient.v1.tsv.schema.json` describes `qc.gradient.tsv`, one row per file and
+  retention-time bin: MS2 spectra acquired and identified, and summed MS1 total ion current.
 - `scores.v1.md` defines the score and evidence fields used by those schemas.
 
 Within a schema major version, fields may be added only when existing readers can safely ignore them. Removing a field, changing its physical type or nullability, changing row granularity, or changing a score's meaning requires a new schema major version. Files embed `sage.schema.name` and `sage.schema.version` in their Parquet key-value metadata.

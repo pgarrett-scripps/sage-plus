@@ -1,0 +1,132 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc",
+  "title": "qc.tsv",
+  "description": "One row per searched file: the headline quality-control number of every QC output, so one table shows a whole run. There is no total row, because a retention-time span and an identification rate do not pool across files. The per-bin detail is in qc.gradient.tsv, the digestion detail in digestion.tsv, and the polymer detail in run-summary.json under qc.polymers.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, as it appears in digestion.tsv and results.sage.parquet."
+    },
+    {
+      "name": "ms1_spectra",
+      "type": "integer",
+      "description": "MS1 spectra read from the file; zero when the search did not need MS1."
+    },
+    {
+      "name": "ms2_spectra",
+      "type": "integer",
+      "description": "Spectra of MS level 2 or above read from the file: the denominator of ms2_identified_pct."
+    },
+    {
+      "name": "rt_start_min",
+      "type": "number",
+      "description": "First scan start time read, in minutes."
+    },
+    {
+      "name": "rt_end_min",
+      "type": "number",
+      "description": "Last scan start time read, in minutes."
+    },
+    {
+      "name": "ms1_read",
+      "type": "integer",
+      "description": "1 when the file's MS1 spectra were read, 0 when they were not. Every MS1 column is zero because nothing was measured when this is 0, not because the measurement was zero."
+    },
+    {
+      "name": "ms1_tic",
+      "type": "number",
+      "description": "MS1 total ion current summed over the file: each spectrum's stated total ion current, or its summed peak intensity where the file states none. Includes profile spectra, unlike qc.polymers in run-summary.json."
+    },
+    {
+      "name": "psms",
+      "type": "integer",
+      "description": "Rank-1 target peptide-spectrum matches at the q_value threshold."
+    },
+    {
+      "name": "ms2_identified",
+      "type": "integer",
+      "description": "MS2 spectra carrying at least one of those PSMs. Lower than psms where a chimeric search reported several rank-1 PSMs for one spectrum."
+    },
+    {
+      "name": "ms2_identified_pct",
+      "type": "number",
+      "description": "100 * ms2_identified / ms2_spectra. With dia.mode = \"pseudo\" the denominator is the acquired isolation windows while the PSMs come from pseudo-spectra built from them, so this can exceed 100."
+    },
+    {
+      "name": "peptides",
+      "type": "integer",
+      "description": "Distinct target peptide sequences (modifications ignored) among PSMs that also pass the peptide q-value. Not decoy-corrected, unlike digestion_peptides."
+    },
+    {
+      "name": "proteins",
+      "type": "integer",
+      "description": "Distinct protein accessions of PSMs that also pass the protein q-value, which only proteotypic peptides can."
+    },
+    {
+      "name": "q_value",
+      "type": "number",
+      "description": "Spectrum, peptide and protein q-value threshold every count in this row used."
+    },
+    {
+      "name": "digestion_peptides",
+      "type": "integer",
+      "description": "The `peptides` column of this file's digestion.tsv row: distinct target peptide sequences minus distinct decoy sequences, floored at zero."
+    },
+    {
+      "name": "missed_cleavage_pct",
+      "type": "number",
+      "description": "Percent of digestion_peptides with at least one missed cleavage."
+    },
+    {
+      "name": "semi_n_pct",
+      "type": "number",
+      "description": "Percent of digestion_peptides with a non-enzymatic N-terminus only."
+    },
+    {
+      "name": "semi_c_pct",
+      "type": "number",
+      "description": "Percent of digestion_peptides with a non-enzymatic C-terminus only."
+    },
+    {
+      "name": "non_enzymatic_pct",
+      "type": "number",
+      "description": "Percent of digestion_peptides with two non-enzymatic termini."
+    },
+    {
+      "name": "top_polymer",
+      "type": "string",
+      "description": "Polymer carrying the largest share of this file's MS1 total ion current, or `-` when the file's MS1 spectra were not read or no polymer is configured."
+    },
+    {
+      "name": "top_polymer_tic_pct",
+      "type": "number",
+      "description": "That polymer's percent of the scanned centroided MS1 total ion current, as reported in run-summary.json under qc.polymers; zero when top_polymer is `-`."
+    },
+    {
+      "name": "gradient_bins",
+      "type": "integer",
+      "description": "Retention-time bins this file was split into in qc.gradient.tsv; 10 for a file with spectra, 0 for one without."
+    },
+    {
+      "name": "empty_gradient_bins",
+      "type": "integer",
+      "description": "Bins that acquired MS2 spectra and identified none: a dead region of the gradient, or a spray dropout."
+    },
+    {
+      "name": "min_bin_identified_pct",
+      "type": "number",
+      "description": "Lowest ms2_identified_pct among the bins that acquired MS2 spectra; zero when none did."
+    },
+    {
+      "name": "max_bin_identified_pct",
+      "type": "number",
+      "description": "Highest ms2_identified_pct among those bins; zero when none did."
+    }
+  ]
+}

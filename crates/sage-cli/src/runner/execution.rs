@@ -492,6 +492,10 @@ impl Runner {
         }
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
+        let identification = self.identification_stats(&outputs.features, &filenames);
+        for path in self.write_qc_tables(&identification, &digestion, &polymers)? {
+            self.parameters.output_paths.push(path);
+        }
 
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(

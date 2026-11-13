@@ -1,0 +1,57 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc_gradient",
+  "title": "qc.gradient.tsv",
+  "description": "Identification rate across the gradient: one row per searched file and retention-time bin, ten equal-width bins per file over its own first and last scan start time. Headline numbers of the same bins are in qc.tsv.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, as it appears in qc.tsv."
+    },
+    {
+      "name": "bin",
+      "type": "integer",
+      "description": "Zero-based bin index in retention-time order, 0 to 9."
+    },
+    {
+      "name": "rt_start_min",
+      "type": "number",
+      "description": "Start of the bin, in minutes. Bin edges divide the file's own retention-time span into ten equal widths, so they differ between files."
+    },
+    {
+      "name": "rt_end_min",
+      "type": "number",
+      "description": "End of the bin, in minutes; the last bin includes its end."
+    },
+    {
+      "name": "ms2_acquired",
+      "type": "integer",
+      "description": "Spectra of MS level 2 or above whose scan start time falls in the bin."
+    },
+    {
+      "name": "ms2_identified",
+      "type": "integer",
+      "description": "Those spectra carrying a rank-1 target PSM at the q_value threshold of qc.tsv, binned by the PSM's retention time."
+    },
+    {
+      "name": "ms2_identified_pct",
+      "type": "number",
+      "description": "100 * ms2_identified / ms2_acquired, zero when the bin acquired nothing."
+    },
+    {
+      "name": "ms1_spectra",
+      "type": "integer",
+      "description": "MS1 spectra in the bin; zero when the search did not read MS1."
+    },
+    {
+      "name": "ms1_tic",
+      "type": "number",
+      "description": "MS1 total ion current summed over the bin, defined as in qc.tsv; zero when the search did not read MS1."
+    }
+  ]
+}

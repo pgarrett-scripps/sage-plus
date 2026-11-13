@@ -10,6 +10,21 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- Every search writes `qc.tsv`, one row per input file and one column per metric: spectra read,
+  retention-time span, summed MS1 total ion current, PSMs, peptides, proteins, the share of
+  acquired MS2 spectra that were identified, this file's `digestion.tsv` headline numbers, its
+  largest polymer share, and a summary of its gradient bins. It repeats the per-file headline
+  number of every other QC output so one table shows a whole run, and it has no `total` row
+  because a retention-time span and an identification rate do not pool across files.
+- Every search also writes `qc.gradient.tsv`: each file split into ten equal-width
+  retention-time bins over its own span, with MS2 spectra acquired, MS2 spectra identified and
+  summed MS1 total ion current per bin, which is where a spray dropout or a dead region of the
+  gradient becomes visible. Both tables have published Table Schemas
+  (`schemas/qc.v1.tsv.schema.json`, `schemas/qc_gradient.v1.tsv.schema.json`) checked against a
+  real run by `crates/sage-cli/tests/integration.rs`. The numbers come from data the search
+  already holds: one pass over each file's spectra where the polymer scan already runs, and one
+  pass over the PSMs after FDR. Nothing existing changes; `run-summary.json` gains only the two
+  new paths in `output_paths`.
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
   decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per

@@ -906,6 +906,70 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     assert!(lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\t"));
     assert!(lines[2].starts_with("total\t"));
 
+    // qc.tsv is one row per file with no total row; qc.gradient.tsv splits
+    // each file into ten retention-time bins. This fixture is one MS2
+    // spectrum with no MS1, and one spectrum cannot support an FDR estimate,
+    // so nothing passes 1% FDR: the row records an acquired spectrum that
+    // was not identified, which is what the table is for.
+    let qc = std::fs::read_to_string(root.join("output/qc.tsv"))?;
+    let lines = qc.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "one header and one file row: {qc}");
+    let header = lines[0].split('\t').collect::<Vec<_>>();
+    let row = lines[1].split('\t').collect::<Vec<_>>();
+    assert_eq!(header.len(), row.len(), "{qc}");
+    let column = |name: &str| row[header.iter().position(|&h| h == name).expect(name)];
+    let qc_summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
+    assert_eq!(column("file"), "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert_eq!(column("ms2_spectra"), "1");
+    assert_eq!(column("ms1_spectra"), "0");
+    // The fixture has no MS1 spectra, so nothing about MS1 was measured.
+    assert_eq!(column("ms1_read"), "0");
+    assert_eq!(column("ms1_tic"), "0.0");
+    assert_eq!(column("top_polymer"), "-");
+    // The PSM count is the run summary's own count at 1% FDR.
+    assert_eq!(
+        column("psms"),
+        qc_summary["psms_at_one_percent_fdr"]
+            .as_u64()
+            .unwrap()
+            .to_string()
+    );
+    assert_eq!(column("psms"), "0");
+    assert_eq!(column("ms2_identified"), "0");
+    assert_eq!(column("ms2_identified_pct"), "0.000");
+    assert_eq!(column("peptides"), "0");
+    assert_eq!(column("proteins"), "0");
+    assert_eq!(column("q_value"), "0.01");
+    assert_eq!(column("rt_start_min"), column("rt_end_min"));
+    assert_eq!(column("gradient_bins"), "10");
+    // One bin acquired the spectrum and identified nothing.
+    assert_eq!(column("empty_gradient_bins"), "1");
+    assert_eq!(column("min_bin_identified_pct"), "0.000");
+    assert_eq!(column("max_bin_identified_pct"), "0.000");
+    assert!(
+        stderr.contains(
+            "identification: LQSRPAAPPAPGPGQLTLR.mzML: 0 of 1 MS2 spectra identified (0.0%), 0 PSMs, 0 peptides, 0 proteins at 1% FDR"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("none of its 1 MS2 spectra were identified"),
+        "{stderr}"
+    );
+
+    let gradient = std::fs::read_to_string(root.join("output/qc.gradient.tsv"))?;
+    let lines = gradient.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 11, "one header and ten bins: {gradient}");
+    assert!(lines[0].starts_with("file\tbin\trt_start_min\trt_end_min\tms2_acquired\t"));
+    // The bins account for every acquired MS2 spectrum exactly once.
+    let acquired = lines[1..]
+        .iter()
+        .map(|row| row.split('\t').nth(4).expect("ms2_acquired"))
+        .map(|value| value.parse::<usize>().expect("integer"))
+        .sum::<usize>();
+    assert_eq!(acquired, 1, "{gradient}");
+
     let summary: serde_json::Value =
         serde_json::from_slice(&std::fs::read(root.join("output/run-summary.json"))?)?;
     assert_eq!(summary["schema_version"], 9);
@@ -924,6 +988,16 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         .unwrap()
         .iter()
         .any(|path| path.as_str().unwrap().ends_with("digestion.tsv")));
+    for name in ["qc.tsv", "qc.gradient.tsv"] {
+        assert!(
+            summary["output_paths"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|path| path.as_str().unwrap().ends_with(name)),
+            "{name} missing from output_paths"
+        );
+    }
     // The test file has no MS1 spectra, so no polymer rows are reported.
     assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
 
@@ -1230,6 +1304,8 @@ fn assert_matches_published_schemas(
 
     for (file, schema, required) in [
         ("digestion.tsv", "digestion.v1.tsv.schema.json", true),
+        ("qc.tsv", "qc.v1.tsv.schema.json", true),
+        ("qc.gradient.tsv", "qc_gradient.v1.tsv.schema.json", true),
         (
             "diagnostic_ions.tsv",
             "diagnostic_ions.v1.tsv.schema.json",

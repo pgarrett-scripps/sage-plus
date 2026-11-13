@@ -35,6 +35,8 @@ pub(crate) fn prepare_local_directory(
         "results.sage.report.html",
         "digestion.tsv",
         "diagnostic_ions.tsv",
+        "qc.tsv",
+        "qc.gradient.tsv",
     ];
     let existing = names
         .iter()
