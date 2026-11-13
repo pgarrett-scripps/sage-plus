@@ -159,6 +159,82 @@ fn composition_run_stats_omit_absent_numbers_from_json() {
     assert!(!json.contains("largest_shift_residue"), "{json}");
 }
 
+fn chromatography(charges: &[u8]) -> ChromatographyStats {
+    let mut stats = ChromatographyStats::default();
+    for &charge in charges {
+        stats.add_charge(charge);
+    }
+    stats
+}
+
+#[test]
+fn chromatography_tsv_labels_which_width_each_row_carries() {
+    let mut quantified = chromatography(&[2, 2, 3, 5]);
+    quantified.peak_width = Some(0.25);
+    quantified.peak_width_kind = Some(PeakWidth::LfqMedianFwhm);
+    quantified.quantified_precursors = Some(100);
+    quantified.transferred_precursors = Some(25);
+    let mut unquantified = chromatography(&[2, 0]);
+    unquantified.peak_width = Some(0.5);
+    unquantified.peak_width_kind = Some(PeakWidth::RepeatPsmSpread);
+    let stats = ChromatographyRunStats {
+        q_value: 0.01,
+        files: vec![
+            ChromatographyFileStats {
+                file: "lfq.mzML".into(),
+                stats: quantified,
+            },
+            ChromatographyFileStats {
+                file: "plain.mzML".into(),
+                stats: unquantified,
+            },
+        ],
+        total: chromatography(&[2, 2, 3, 5, 2, 0]),
+    };
+    let text = String::from_utf8(serialize_chromatography(&stats).unwrap()).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "file\tconfident_precursors\tcharge_1_pct\tcharge_2_pct\tcharge_3_pct\tcharge_4_plus_pct\tcharge_unknown_pct\tpeak_width\tpeak_width_kind\tquantified_precursors\ttransferred_precursors\ttransferred_pct"
+    );
+    let rows = lines.collect::<Vec<_>>();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        "lfq.mzML\t4\t0.000\t50.000\t25.000\t25.000\t0.000\t0.2500\tlfq_median_fwhm\t100\t25\t25.000"
+    );
+    // Without quantification the three LFQ columns are empty, and the width is
+    // named as the repeat-PSM spread it is.
+    assert_eq!(
+        rows[1],
+        "plain.mzML\t2\t0.000\t50.000\t0.000\t0.000\t50.000\t0.5000\trepeat_psm_spread\t\t\t"
+    );
+    // The total pools the charges and leaves the width out.
+    assert!(rows[2].starts_with("total\t6\t"));
+    assert!(rows[2].ends_with("\t\t\t\t\t"), "{}", rows[2]);
+}
+
+#[test]
+fn chromatography_run_stats_keep_the_kind_in_json() {
+    let mut stats = chromatography(&[2]);
+    stats.peak_width = Some(0.3);
+    stats.peak_width_kind = Some(PeakWidth::RepeatPsmSpreadFallback);
+    let json = serde_json::to_string(&ChromatographyRunStats {
+        q_value: 0.01,
+        files: vec![ChromatographyFileStats {
+            file: "one.mzML".into(),
+            stats,
+        }],
+        total: chromatography(&[2]),
+    })
+    .unwrap();
+    assert!(
+        json.contains("\"peak_width_kind\":\"repeat_psm_spread_fallback\""),
+        "{json}"
+    );
+    assert!(json.contains("\"quantified_precursors\":null"), "{json}");
+}
+
 fn occupancy(
     site_rule: &str,
     modified_sites: usize,

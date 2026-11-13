@@ -1,0 +1,89 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc_chromatography",
+  "title": "qc.chromatography.tsv",
+  "description": "Charge states, chromatographic peak width and quantification counts of each searched file's confident identifications: one row per file, then a `total` row. Also written to run-summary.json under qc.chromatography.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, or `total` for the final row covering all files."
+    },
+    {
+      "name": "confident_precursors",
+      "type": "integer",
+      "description": "Rank-1 target PSMs at 1% spectrum and peptide q-value. Counted as PSMs, because a charge state belongs to a PSM rather than to a peptide."
+    },
+    {
+      "name": "charge_1_pct",
+      "type": "number",
+      "description": "Percent of those precursors at charge 1, three decimals."
+    },
+    {
+      "name": "charge_2_pct",
+      "type": "number",
+      "description": "Percent at charge 2, three decimals."
+    },
+    {
+      "name": "charge_3_pct",
+      "type": "number",
+      "description": "Percent at charge 3, three decimals."
+    },
+    {
+      "name": "charge_4_plus_pct",
+      "type": "number",
+      "description": "Percent at charge 4 or above, three decimals."
+    },
+    {
+      "name": "charge_unknown_pct",
+      "type": "number",
+      "description": "Percent whose charge the file did not state, three decimals. The five percentages sum to 100."
+    },
+    {
+      "name": "peak_width",
+      "type": "number",
+      "description": "Chromatographic width in the file's own retention-time unit, four decimals. Which quantity it is depends on `peak_width_kind`, and the two are not interchangeable. Empty when the file had neither integrated peaks nor repeat PSMs to measure.",
+      "constraints": {
+        "required": false
+      }
+    },
+    {
+      "name": "peak_width_kind",
+      "type": "string",
+      "description": "`lfq_median_fwhm`: median full width at half maximum of the file's integrated LFQ peaks, a real peak width. `repeat_psm_spread`: the median of half the distance between every pair of PSMs of one peptide in this file, the quantity the in-source check derives its co-elution tolerance from, used when no peaks were integrated. `repeat_psm_spread_fallback`: the same, for a file with too few repeats, where a fraction of the retention-time span stands in. Empty when `peak_width` is.",
+      "constraints": {
+        "required": false,
+        "enum": ["lfq_median_fwhm", "repeat_psm_spread", "repeat_psm_spread_fallback"]
+      }
+    },
+    {
+      "name": "quantified_precursors",
+      "type": "integer",
+      "description": "Precursors with an integrated MS1 intensity in this file. Empty when quantification did not run.",
+      "constraints": {
+        "required": false
+      }
+    },
+    {
+      "name": "transferred_precursors",
+      "type": "integer",
+      "description": "Of those, the ones with no direct MS2 evidence in this file, which is how match-between-runs carries a quantity into a file that did not identify the precursor. Empty when quantification did not run, and zero when match-between-runs is off.",
+      "constraints": {
+        "required": false
+      }
+    },
+    {
+      "name": "transferred_pct",
+      "type": "number",
+      "description": "`transferred_precursors` as a percent of `quantified_precursors`, three decimals. Empty when quantification did not run or quantified nothing in this file.",
+      "constraints": {
+        "required": false
+      }
+    }
+  ],
+  "missingValues": [""]
+}

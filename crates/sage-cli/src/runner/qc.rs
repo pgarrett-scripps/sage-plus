@@ -1,10 +1,15 @@
 //! Run-level quality-control summaries written next to the search results.
 
 use super::*;
+use fnv::FnvHashMap;
+use sage_core::chromatography::{
+    quantification_by_file, repeat_psm_spread, ChromatographyStats, PeakWidth, RepeatRts,
+};
 use sage_core::composition::{CompositionProfile, CompositionSummary};
 use sage_core::diagnostic::{find_ions, DiagnosticIon};
 use sage_core::digestion::DigestionSummary;
 use sage_core::enzyme::EnzymeParameters;
+use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::occupancy::{OccupancyCounts, OccupancyRule};
 use sage_core::polymer::{PolymerFileStats, PolymerScanner};
 use sage_core::spectrum::{RawSpectrum, Representation};
@@ -24,6 +29,9 @@ const POLYMER_WARNING_TIC_PCT: f64 = 5.0;
 /// Spectrum- and peptide-level q-value a PSM must pass to count towards the
 /// amino acid composition profile, matching the digestion summary.
 const COMPOSITION_Q_VALUE: f32 = 0.01;
+
+/// The same for the charge and chromatography summary.
+const CHROMATOGRAPHY_Q_VALUE: f32 = 0.01;
 
 /// Quality-control scans of one file's raw spectra.
 #[derive(Debug, Clone, Default)]
@@ -53,6 +61,28 @@ pub struct QcRunStats {
     /// table is `qc.composition.tsv`.
     #[serde(default)]
     pub composition: CompositionRunStats,
+    /// Charge states and peak width per file; the same rows are
+    /// `qc.chromatography.tsv`.
+    #[serde(default)]
+    pub chromatography: ChromatographyRunStats,
+}
+
+/// Charge-state shares, peak width and quantification counts per file.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChromatographyRunStats {
+    pub q_value: f32,
+    pub files: Vec<ChromatographyFileStats>,
+    /// Every file together. The charge shares and the quantification counts
+    /// pool; the peak width does not, because a width in one file's
+    /// retention-time unit is not comparable with another's.
+    pub total: ChromatographyStats,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChromatographyFileStats {
+    pub file: String,
+    #[serde(flatten)]
+    pub stats: ChromatographyStats,
 }
 
 /// Headline numbers of the amino acid composition comparison, per file and for
@@ -617,6 +647,104 @@ impl Runner {
         }
     }
 
+    /// Charge states of each file's confident precursors, a labelled peak
+    /// width, and what quantification did in that file.
+    ///
+    /// `areas` is the LFQ feature map when quantification ran. With it the peak
+    /// width is the median full width at half maximum of the file's integrated
+    /// peaks; without it, or for a file whose peaks never fell to half height,
+    /// the width is the spread of that file's repeat PSMs instead, and the kind
+    /// column says which of the two a row carries.
+    pub(super) fn chromatography_stats(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+        areas: Option<&FnvHashMap<(PrecursorId, bool), QuantifiedPeak>>,
+    ) -> ChromatographyRunStats {
+        let start = Instant::now();
+        let mut files = vec![ChromatographyStats::default(); filenames.len()];
+        let mut total = ChromatographyStats::default();
+        let mut rts = vec![RepeatRts::default(); filenames.len()];
+        for feature in features {
+            if feature.rank != 1
+                || feature.label != 1
+                || feature.spectrum_q > CHROMATOGRAPHY_Q_VALUE
+                || feature.peptide_q > CHROMATOGRAPHY_Q_VALUE
+            {
+                continue;
+            }
+            let Some(file) = files.get_mut(feature.file_id) else {
+                continue;
+            };
+            file.add_charge(feature.charge);
+            total.add_charge(feature.charge);
+            rts[feature.file_id]
+                .entry(feature.peptide_idx)
+                .or_default()
+                .push(feature.rt);
+        }
+
+        let quantification = areas.map(|areas| quantification_by_file(areas, filenames.len()));
+        for (file_id, stats) in files.iter_mut().enumerate() {
+            let fwhm = quantification.as_ref().and_then(|by_file| {
+                let (quantified, transferred, fwhm) = by_file[file_id];
+                stats.quantified_precursors = Some(quantified);
+                stats.transferred_precursors = Some(transferred);
+                fwhm
+            });
+            match fwhm {
+                Some(fwhm) => {
+                    stats.peak_width = Some(fwhm);
+                    stats.peak_width_kind = Some(PeakWidth::LfqMedianFwhm);
+                }
+                // No peaks to measure: the repeat-PSM spread stands in, and the
+                // kind column keeps the two apart.
+                None => {
+                    if let Some((spread, kind)) = repeat_psm_spread(&rts[file_id]) {
+                        stats.peak_width = Some(spread);
+                        stats.peak_width_kind = Some(kind);
+                    }
+                }
+            }
+        }
+        if let Some(by_file) = quantification.as_ref() {
+            total.quantified_precursors =
+                Some(by_file.iter().map(|&(quantified, _, _)| quantified).sum());
+            total.transferred_precursors =
+                Some(by_file.iter().map(|&(_, transferred, _)| transferred).sum());
+        }
+        info!(
+            "chromatography: charges 1+ {:.1}%, 2+ {:.1}%, 3+ {:.1}%, 4+ and above {:.1}% of {} confident precursors{} ({} ms)",
+            total.charge_pct(1),
+            total.charge_pct(2),
+            total.charge_pct(3),
+            total.charge_pct(4),
+            total.confident_precursors,
+            match (total.quantified_precursors, total.transferred_pct()) {
+                (Some(quantified), Some(transferred)) => format!(
+                    "; {quantified} quantified precursor/file pairs, {transferred:.1}% without direct MS2 evidence in their file"
+                ),
+                (Some(quantified), None) => format!("; {quantified} quantified precursor/file pairs"),
+                _ => String::new(),
+            },
+            start.elapsed().as_millis(),
+        );
+        for (file, stats) in filenames.iter().zip(&files) {
+            if let (Some(width), Some(kind)) = (stats.peak_width, stats.peak_width_kind) {
+                info!("- {file}: {} {width:.4}", kind.label());
+            }
+        }
+        ChromatographyRunStats {
+            q_value: CHROMATOGRAPHY_Q_VALUE,
+            files: filenames
+                .iter()
+                .cloned()
+                .zip(files)
+                .map(|(file, stats)| ChromatographyFileStats { file, stats })
+                .collect(),
+            total,
+        }
+    }
     /// Occupancy of every searched variable modification per file; `None`
     /// when the search has no variable modification.
     ///
@@ -773,6 +901,15 @@ impl Runner {
         Ok(Some(path))
     }
 
+    pub(super) fn write_chromatography(
+        &self,
+        stats: &ChromatographyRunStats,
+    ) -> anyhow::Result<Url> {
+        let path = self.make_path("qc.chromatography.tsv");
+        sage_cloudpath::write_bytes_sync(&path, serialize_chromatography(stats)?)?;
+        Ok(path)
+    }
+
     pub(super) fn write_composition(&self, profiles: &CompositionProfiles) -> anyhow::Result<Url> {
         let path = self.make_path("qc.composition.tsv");
         sage_cloudpath::write_bytes_sync(&path, serialize_composition(profiles)?)?;
@@ -925,6 +1062,60 @@ pub(super) fn serialize_composition(profiles: &CompositionProfiles) -> anyhow::R
                     .unwrap_or_default(),
             ])?;
         }
+    }
+    writer.flush()?;
+    Ok(writer.into_inner()?)
+}
+
+pub(super) fn serialize_chromatography(stats: &ChromatographyRunStats) -> anyhow::Result<Vec<u8>> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    writer.write_record([
+        "file",
+        "confident_precursors",
+        "charge_1_pct",
+        "charge_2_pct",
+        "charge_3_pct",
+        "charge_4_plus_pct",
+        "charge_unknown_pct",
+        "peak_width",
+        "peak_width_kind",
+        "quantified_precursors",
+        "transferred_precursors",
+        "transferred_pct",
+    ])?;
+    let rows = stats
+        .files
+        .iter()
+        .map(|file| (file.file.as_str(), &file.stats))
+        .chain(std::iter::once(("total", &stats.total)));
+    let optional = |value: Option<u64>| value.map(|v| v.to_string()).unwrap_or_default();
+    for (file, stats) in rows {
+        writer.write_record([
+            file.to_string(),
+            stats.confident_precursors.to_string(),
+            format!("{:.3}", stats.charge_pct(1)),
+            format!("{:.3}", stats.charge_pct(2)),
+            format!("{:.3}", stats.charge_pct(3)),
+            format!("{:.3}", stats.charge_pct(4)),
+            format!("{:.3}", stats.charge_unknown_pct()),
+            // Empty when the file had neither peaks nor repeat PSMs to measure.
+            stats
+                .peak_width
+                .map(|width| format!("{width:.4}"))
+                .unwrap_or_default(),
+            stats
+                .peak_width_kind
+                .map(|kind| kind.label().to_string())
+                .unwrap_or_default(),
+            optional(stats.quantified_precursors),
+            optional(stats.transferred_precursors),
+            stats
+                .transferred_pct()
+                .map(|pct| format!("{pct:.3}"))
+                .unwrap_or_default(),
+        ])?;
     }
     writer.flush()?;
     Ok(writer.into_inner()?)
