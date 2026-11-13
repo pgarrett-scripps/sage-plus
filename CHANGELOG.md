@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.19] - 2026-11-12
+
 ### Added
 - `sage_core::spectral_library::write_mzspeclib` writes an mzSpecLib 1.0 library entry by entry
   to any `io::Write` and reports a sink's error, instead of building the whole library text in
@@ -17,6 +19,25 @@ entries are retained below for provenance.
   case. No behaviour changes: the CLI still serializes and writes as before.
 
 ### Changed
+- Required `sage-plus-raw` 0.2.0 (was 0.1.2) in `sage-cloudpath`. Opening a Thermo `.raw` file
+  no longer keeps every scan's trailer and instrument-log record, only the compact trailer
+  table that decoding reads: 0.2.0 makes that the default for `SpectrumReader::open_path`, and
+  one open of a 136k-scan Orbitrap file goes from 10,027,700 allocations and 756 MiB resident
+  to 543,991 and 79 MiB. Over the five PXD028735 files at 20 threads, peak resident memory of
+  the whole search falls from 11.710 GiB to 7.750 GiB, sampled ten times a second (the
+  program's own figure, 11.708 to 7.801 GiB, agrees), and over one 3.5 GB file from 2.939 to
+  2.246 GiB. Search time is unchanged within the run-to-run spread: 61 s for the reference
+  against 63 s pinned, both binaries measured alone on the machine in one job whose busy cores
+  averaged 2,536 MHz against their usual 2,826. Output is unchanged: all 405,032 PSM rows of
+  the five-file run hash the same, as do the single-file `.raw`, mzML and `.d` runs. No source
+  line changed, because 0.2.0's two breaking changes are in the per-scan record accessors that
+  Sage Plus never calls (`OpenOptions::default` is now `spectra_only`, and `scan_parameters`,
+  `scan_params`, `inst_log_record` and `status_log_entry` return `Result` instead of `Option`).
+- Required `sage-plus-tdf` 0.2.4 (was 0.2.3) in `sage-cloudpath` and `sage-dia`, which adds
+  `DecodeBuffers` and the `*_into_buffers` readers, keeping the buffer the Zstandard decoder
+  writes into as well as the output vectors; the crate reads every frame of a 2.0 GB
+  acquisition in 9.03 s against 9.39 s. Sage Plus calls none of the new methods, so it takes
+  the existing ones unchanged, and a `.d` search returns identical rows.
 - Reading a Thermo RAW file is faster and holds less memory, with identical output. The file is
   opened once instead of twice, each scan is decoded into an m/z buffer and a record-block buffer
   kept for the whole file instead of three allocations per scan, and each scan becomes its Sage
