@@ -929,9 +929,9 @@ dependencies = [
 
 [[package]]
 name = "dnoise-core"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d51a5ec6cdc5e3fe059ee0db38d6c565117f4ffe87ec7e1f6fd3f1f11aa0109"
+checksum = "710091dc05aacca0bc79e283067c9cf39555b8425cdff123784643bb1cca514e"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
