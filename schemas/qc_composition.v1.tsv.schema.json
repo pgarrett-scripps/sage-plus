@@ -1,0 +1,56 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc_composition",
+  "title": "qc.composition.tsv",
+  "description": "Amino acid composition of identified peptides against the composition the search database predicts for the same proteins, matched on the observed missed-cleavage distribution: one row per file and residue, then the same residues for a `total` row covering the run. Interior residues only. Headline numbers are in run-summary.json under qc.composition.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, or `total` for the rows covering all files."
+    },
+    {
+      "name": "residue",
+      "type": "string",
+      "description": "One-letter amino acid code, uppercase. A row is present when the residue was counted in either profile, so the residues present vary with the data.",
+      "constraints": {
+        "pattern": "^[A-Z]$"
+      }
+    },
+    {
+      "name": "observed",
+      "type": "integer",
+      "description": "Interior residues of this kind in the distinct confident target peptide sequences of this file."
+    },
+    {
+      "name": "observed_fraction",
+      "type": "number",
+      "description": "`observed` divided by all interior residues observed in this file, six decimals."
+    },
+    {
+      "name": "expected",
+      "type": "integer",
+      "description": "Interior residues of this kind in the distinct database peptide sequences of the proteins identified in this file: the raw count, not reweighted."
+    },
+    {
+      "name": "expected_fraction",
+      "type": "number",
+      "description": "Expected share of this residue, six decimals: the database fraction of each missed-cleavage class, weighted by the share of this file's observed interior residues in the same class. Not `expected` divided by the total of that column."
+    },
+    {
+      "name": "log2_ratio",
+      "type": "number",
+      "description": "`log2(observed_fraction / expected_fraction)`, four decimals. Empty when either fraction is zero, where the ratio has no finite value. Negative means the residue is seen less often than the database predicts.",
+      "constraints": {
+        "required": false
+      }
+    }
+  ],
+  "missingValues": [
+    ""
+  ]
+}

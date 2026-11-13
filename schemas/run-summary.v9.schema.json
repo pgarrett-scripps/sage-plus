@@ -507,6 +507,29 @@
             "files"
           ]
         },
+        "composition": {
+          "type": "object",
+          "description": "Headline numbers of the amino acid composition comparison; the per-residue rows are in qc.composition.tsv.",
+          "properties": {
+            "q_value": {
+              "type": "number"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CompositionHeadline"
+              }
+            },
+            "total": {
+              "$ref": "#/$defs/CompositionHeadline"
+            }
+          },
+          "required": [
+            "q_value",
+            "files",
+            "total"
+          ]
+        },
         "modifications": {
           "type": "object",
           "description": "Present when the search has at least one variable modification. Same rows as qc.modifications.tsv.",
@@ -1135,6 +1158,55 @@
           "description": "N_E * (1 + 1/r) / (N_T + N_E), an upper bound on the false discovery proportion; absent when it is undefined."
         }
       }
+    },
+    "CompositionHeadline": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Spectrum file name, or `total`."
+        },
+        "observed_peptides": {
+          "type": "integer",
+          "description": "Distinct confident target peptide sequences."
+        },
+        "observed_residues": {
+          "type": "integer",
+          "description": "Interior residues counted in them."
+        },
+        "expected_peptides": {
+          "type": "integer",
+          "description": "Distinct database peptide sequences of the identified proteins."
+        },
+        "expected_residues": {
+          "type": "integer",
+          "description": "Interior residues counted in those."
+        },
+        "largest_shift_residue": {
+          "type": "string",
+          "description": "Residue whose observed share differs most from the expected one. Absent when no residue has a finite ratio."
+        },
+        "largest_shift_log2_ratio": {
+          "type": "number",
+          "description": "That residue's log2 ratio of observed to expected fraction."
+        },
+        "jensen_shannon_distance": {
+          "type": "number",
+          "description": "Distance between the whole profiles, 0 identical to 1 disjoint. Absent when either profile counted no residues."
+        },
+        "matched_observed_residues": {
+          "type": "integer",
+          "description": "Observed interior residues whose missed-cleavage class the database could match, which carry the weights of the expected profile."
+        }
+      },
+      "required": [
+        "file",
+        "observed_peptides",
+        "observed_residues",
+        "expected_peptides",
+        "expected_residues",
+        "matched_observed_residues"
+      ]
     },
     "ModificationOccupancy": {
       "type": "object",

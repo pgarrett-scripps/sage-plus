@@ -47,6 +47,118 @@ fn polymer_scan_needs_ms1() {
     assert!(scan_polymers(&spectra).is_none());
 }
 
+fn residue_counts(sequences: &[&str]) -> CompositionProfile {
+    use sage_core::digestion::TerminusClass;
+    let mut profile = CompositionProfile::default();
+    for sequence in sequences {
+        // One missed-cleavage class, so the weighting cannot move a fraction.
+        profile.add_sequence(sequence.as_bytes(), Some(TerminusClass::NonEnzymatic), 0);
+    }
+    profile
+}
+
+fn profiles() -> CompositionProfiles {
+    // One file sees half the cysteine the database predicts; the other matches.
+    let short = CompositionSummary::new(&residue_counts(&["CAAA"]), &residue_counts(&["CCAA"]));
+    let exact = CompositionSummary::new(&residue_counts(&["CAAA"]), &residue_counts(&["CAAA"]));
+    CompositionProfiles {
+        q_value: 0.01,
+        files: vec![
+            CompositionFileProfile {
+                file: "alkylated.mzML".into(),
+                summary: short,
+            },
+            CompositionFileProfile {
+                file: "control.mzML".into(),
+                summary: exact.clone(),
+            },
+        ],
+        total: exact,
+    }
+}
+
+#[test]
+fn composition_tsv_has_one_row_per_file_and_residue() {
+    let bytes = serialize_composition(&profiles()).unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "file\tresidue\tobserved\tobserved_fraction\texpected\texpected_fraction\tlog2_ratio"
+    );
+    let rows = lines.collect::<Vec<_>>();
+    // Two residues for each of two files, then the total rows.
+    assert_eq!(rows.len(), 6);
+    assert_eq!(
+        rows[0],
+        "alkylated.mzML\tA\t3\t0.750000\t2\t0.500000\t0.5850"
+    );
+    assert_eq!(
+        rows[1],
+        "alkylated.mzML\tC\t1\t0.250000\t2\t0.500000\t-1.0000"
+    );
+    assert!(rows[4].starts_with("total\tA\t"));
+    assert!(rows[5].starts_with("total\tC\t"));
+}
+
+#[test]
+fn composition_tsv_leaves_an_undefined_ratio_empty() {
+    let summary = CompositionSummary::new(&residue_counts(&["AAAA"]), &residue_counts(&["AACC"]));
+    let profiles = CompositionProfiles {
+        q_value: 0.01,
+        files: Vec::new(),
+        total: summary,
+    };
+    let text = String::from_utf8(serialize_composition(&profiles).unwrap()).unwrap();
+    let carbon = text
+        .lines()
+        .find(|line| line.starts_with("total\tC\t"))
+        .unwrap();
+    // Observed none of it, so the ratio is written as nothing at all.
+    assert_eq!(carbon, "total\tC\t0\t0.000000\t2\t0.500000\t");
+}
+
+#[test]
+fn composition_run_stats_carry_the_headline_numbers_only() {
+    let stats = profiles().run_stats();
+    assert_eq!(stats.q_value, 0.01);
+    assert_eq!(stats.files.len(), 2);
+    let flagged = &stats.files[0];
+    assert_eq!(flagged.file, "alkylated.mzML");
+    assert_eq!(flagged.observed_peptides, 1);
+    assert_eq!(flagged.observed_residues, 4);
+    assert_eq!(flagged.matched_observed_residues, 4);
+    assert_eq!(flagged.expected_peptides, 1);
+    assert_eq!(flagged.expected_residues, 4);
+    assert_eq!(flagged.largest_shift_residue, Some('C'));
+    assert_eq!(flagged.largest_shift_log2_ratio, Some(-1.0));
+    assert!(flagged.jensen_shannon_distance.unwrap() > 0.0);
+    // The file that matches its database has nothing to report.
+    assert_eq!(stats.files[1].largest_shift_log2_ratio, Some(0.0));
+    assert_eq!(stats.files[1].jensen_shannon_distance, Some(0.0));
+    assert_eq!(stats.total.file, "total");
+}
+
+#[test]
+fn composition_run_stats_omit_absent_numbers_from_json() {
+    let profiles = CompositionProfiles {
+        q_value: 0.01,
+        files: vec![CompositionFileProfile {
+            file: "empty.mzML".into(),
+            summary: CompositionSummary::new(
+                &CompositionProfile::default(),
+                &residue_counts(&["AC"]),
+            ),
+        }],
+        total: CompositionSummary::default(),
+    };
+    let json = serde_json::to_string(&profiles.run_stats()).unwrap();
+    // A file with no identifications states its zeros and claims no distance.
+    assert!(json.contains("\"observed_peptides\":0"), "{json}");
+    assert!(!json.contains("jensen_shannon_distance"), "{json}");
+    assert!(!json.contains("largest_shift_residue"), "{json}");
+}
+
 fn occupancy(
     site_rule: &str,
     modified_sites: usize,

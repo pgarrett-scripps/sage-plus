@@ -503,12 +503,15 @@ impl Runner {
         self.parameters.output_paths.push(path);
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let composition = self.composition_stats(&outputs.features, &filenames);
         let polymers = self.polymer_stats(&filenames);
         let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
             self.parameters.output_paths.push(path);
         }
         let path = self.write_digestion(&digestion)?;
+        self.parameters.output_paths.push(path);
+        let path = self.write_composition(&composition)?;
         self.parameters.output_paths.push(path);
         let modifications = self.modification_occupancy_stats(&outputs.features, &filenames);
         if let Some(path) = self.write_modification_occupancy(modifications.as_ref())? {
@@ -822,6 +825,7 @@ impl Runner {
                 digestion,
                 polymers,
                 diagnostic_ions,
+                composition: composition.run_stats(),
                 modifications,
             },
             output_paths,
