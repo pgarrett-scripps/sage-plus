@@ -537,6 +537,7 @@ For additional information about configuration options and output file formats, 
     "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "contaminant_fasta": "contaminants.fasta", // Optional[str] {default=null}: searched alongside `fasta`, flagged in `is_contaminant`
+    "entrapment_fasta": "arabidopsis.fasta", // Optional[str] {default=null}: a proteome that cannot be in the sample, for the FDP estimate
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
     "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
     "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
@@ -1190,6 +1191,13 @@ alongside the library, because the location table does not embed chemical masses
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
+- **entrapment_fasta**: String. Path to a FASTA of entrapment proteins — a proteome that cannot
+  be in the sample (default: unset). Its proteins are ordinary targets with their own decoys, so
+  target-decoy competition stays fair; because no discovery of one can be true, the discoveries
+  of each class estimate how well the search controlled its false discovery rate. Every PSM says
+  whether its peptide is entrapment, in `is_entrapment`, and `run-summary.json` reports the
+  estimate for PSMs, peptides and proteins. Unset leaves every output column as it was. See
+  [Entrapment proteins](#entrapment-proteins).
 - **contaminant_fasta**: String. Path to a FASTA of common contaminant proteins, searched
   alongside `fasta` (default: unset). Its proteins are ordinary targets with the same enzyme,
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
@@ -1760,6 +1768,9 @@ seven `immonium_*` columns, `localized_peptide`, then `in_source_parent_peptide`
 - `is_contaminant`: Whether the peptide belongs to at least one protein of
   `database.contaminant_fasta`. Null on every row when no contaminant FASTA was searched, and on
   decoy rows, which are never split by class; see [Contaminant proteins](#contaminant-proteins).
+- `is_entrapment`: Whether **every** protein of the peptide comes from `database.entrapment_fasta`.
+  Null on every row when no entrapment FASTA was searched, and on decoy rows; see
+  [Entrapment proteins](#entrapment-proteins).
 - `expmass`: Experimental mass of the peptide.
 - `calcmass`: Calculated mass of the peptide.
 - `charge`: Reported precursor charge.
@@ -1858,6 +1869,62 @@ grouping off) and the grouping peptide q-value.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
 
+## Entrapment proteins
+
+A q-value is a claim about how many of the reported identifications are wrong. An entrapment
+experiment tests that claim: search a proteome that cannot be in the sample alongside the one
+that can, and every discovery of the foreign proteome is false by construction. The count of
+those discoveries, against the count of sample discoveries, estimates the false discovery
+proportion the search actually achieved.
+
+`database.entrapment_fasta` searches that second proteome. Its proteins are ordinary targets —
+same enzyme, same modifications, and their own decoys, so target-decoy competition is fair and
+the entrapment proteins compete for spectra as the sample's do.
+
+A PSM is an entrapment discovery when **every** protein of its peptide comes from the entrapment
+FASTA. A peptide a sample protein also explains is an original target: the spectrum is not
+evidence of a false discovery, and counting it as one would inflate the estimate. The method's own
+foreign-proteome databases are built the same way — entrapment peptides that match an original
+target peptide are removed — so such peptides count with the targets, and `shared_peptides` in
+the summary says how many there were.
+
+**The estimate.** Wen *et al.* (*Assessment of false discovery rate control in tandem mass
+spectrometry analysis using entrapment*, Nature Methods 2025,
+[doi 10.1038/s41592-025-02719-x](https://doi.org/10.1038/s41592-025-02719-x)) compare four ways of
+turning entrapment counts into an estimate and show that two of them cannot support a claim of FDR
+control. Sage Plus reports their **combined** estimate, their equation 1, and names it in the
+output:
+
+```
+FDP = N_E * (1 + 1/r) / (N_T + N_E)
+```
+
+`N_E` is the entrapment discoveries, `N_T` the original target discoveries, and `r` the ratio of
+the entrapment to the original target database size, in the units of the level being estimated:
+peptides for the peptide level, proteins for the protein level. The estimate is an upper bound on
+the proportion of false discoveries among all reported discoveries.
+
+The three methods not used, and why:
+
+| Method | Formula | Why not |
+| --- | --- | --- |
+| paired (their eq. 4) | tighter upper bound | needs each entrapment sequence paired with an original target sequence, which a foreign proteome does not give |
+| lower bound (their eq. 2) | `N_E / (N_T + N_E)` | a lower bound: it can show that a search fails to control the FDR, never that it controls it |
+| sample (their eq. 3) | `N_E * (1/r) / N_T` | the paper calls it inherently flawed; it supports neither conclusion |
+
+**What it writes.** `is_entrapment` in `results.sage.parquet`, null when no entrapment FASTA was
+searched and on decoy rows, and an `entrapment` block in `run-summary.json`: the file, the
+protein and peptide counts of each class, `shared_peptides`, the `method` name, and for PSMs,
+peptides and proteins the discoveries of each class, that level's `database_ratio` and
+`estimated_fdp`. The paper applies the estimate at the peptide and protein level; the PSM row is
+reported for completeness and uses the peptide-level ratio. Counts are the run's confident
+discoveries: PSMs at 1% spectrum and peptide q-value, peptides at 1% peptide q-value, proteins at
+1% protein q-value. Decoys take no part, since they are not split by class.
+
+An estimate much larger than the q-value threshold it is compared against means the search did
+not control the FDR at that threshold on this data — not that this run is broken. Read it with
+the ratio: a small entrapment database makes `1/r` large and the bound loose.
+
 ## Contaminant proteins
 
 Keratins, trypsin, serum albumin and the rest of the laboratory background are identified by
@@ -1881,9 +1948,11 @@ What it writes:
 - `is_contaminant` in `results.sage.parquet`, null on every row when no contaminant FASTA was
   searched, and null on decoy rows.
 - `contaminants` in `run-summary.json`: the file, its protein count, how many database peptides
-  belong to a contaminant, and the confident PSMs with the contaminant share, for the run and
-  per acquisition file. Only confident target PSMs count, at the 1% spectrum and peptide
-  q-value the run reports at.
+  belong to a contaminant, and the contaminant share of the **confident PSMs**, for the run and
+  per acquisition file. `confident_psms` is the denominator of that share: target PSMs whose
+  `spectrum_q` **and** `peptide_q` are both at most 0.01. It is therefore smaller than
+  `psms_at_one_percent_fdr`, which counts target PSMs at 1% spectrum q-value alone — on one
+  PXD028735 file, 51,164 against 51,729.
 - The file's path and SHA-256 in the provenance, under `database_inputs`, with role
   `contaminant_fasta`.
 

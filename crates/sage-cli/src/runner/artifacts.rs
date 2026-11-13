@@ -336,15 +336,25 @@ impl Runner {
             self.database_parameters.generate_decoys,
         )?;
         // The library locates peptides in their proteins, and a contaminant
-        // peptide's protein is in the contaminant file.
-        if let Some(path) = self.database_parameters.contaminant_fasta.as_deref() {
+        // or entrapment peptide's protein is in one of those files.
+        for (path, class) in [
+            (
+                self.database_parameters.contaminant_fasta.as_deref(),
+                sage_core::fasta::ProteinClass::Contaminant,
+            ),
+            (
+                self.database_parameters.entrapment_fasta.as_deref(),
+                sage_core::fasta::ProteinClass::Entrapment,
+            ),
+        ] {
+            let Some(path) = path else { continue };
             let url = sage_cloudpath::to_url(path)?;
-            let contaminants = sage_cloudpath::util::read_fasta(
+            let proteins = sage_cloudpath::util::read_fasta(
                 &url,
                 &self.database_parameters.decoy_tag,
                 self.database_parameters.generate_decoys,
             )?;
-            fasta.extend_with_class(contaminants, sage_core::fasta::ProteinClass::Contaminant);
+            fasta.extend_with_class(proteins, class);
         }
         let proteins = fasta
             .targets

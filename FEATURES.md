@@ -34,6 +34,16 @@ the linear baseline fell for a reason unrelated to alignment, so the Beta 9 figu
 as the conservative one. See [quantification](DOCS.md#quantification) and the
 [evaluation](docs/design/NONLINEAR_RT_ALIGNMENT.md#evaluation).
 
+**Test the q-values with an entrapment proteome.** `database.entrapment_fasta` searches a
+proteome that cannot be in the sample as ordinary targets with their own decoys, so every
+discovery of it is false and the counts estimate the false discovery proportion the search
+achieved. The estimate is the combined one of
+[Wen et al. 2025](https://doi.org/10.1038/s41592-025-02719-x), named in the output, with the
+database ratio beside it, for PSMs, peptides and proteins; the two methods that paper shows
+cannot support a claim of FDR control are not used. A peptide a sample protein also explains is
+an original target, not an entrapment discovery. See
+[entrapment proteins](DOCS.md#entrapment-proteins).
+
 **Keep contaminants in the search and out of the conclusions.** `database.contaminant_fasta`
 searches a second FASTA of keratins, proteases and the rest of the laboratory background as
 ordinary targets — same enzyme, same modifications, same decoys — and reports in

@@ -87,6 +87,9 @@ impl ProteinClassSet {
 pub struct ProteinClasses {
     contaminant: fnv::FnvHashSet<Arc<str>>,
     entrapment: fnv::FnvHashSet<Arc<str>>,
+    /// Proteins of `database.fasta` itself, the original targets an
+    /// entrapment ratio is taken against.
+    sample: usize,
 }
 
 impl ProteinClasses {
@@ -96,7 +99,7 @@ impl ProteinClasses {
         let mut classes = Self::default();
         for (index, (accession, _)) in fasta.targets.iter().enumerate() {
             match fasta.class(index) {
-                ProteinClass::Sample => {}
+                ProteinClass::Sample => classes.sample += 1,
                 ProteinClass::Contaminant => {
                     classes.contaminant.insert(accession.clone());
                 }
@@ -133,6 +136,31 @@ impl ProteinClasses {
         proteins
             .into_iter()
             .any(|protein| self.contaminant.contains(protein))
+    }
+
+    /// Whether **every** protein of this peptide is an entrapment protein,
+    /// which is what makes the peptide one: a peptide a sample protein also
+    /// explains is not evidence of a false discovery. A peptide without
+    /// proteins is not entrapment.
+    pub fn is_entrapment<'a>(&self, proteins: impl IntoIterator<Item = &'a Arc<str>>) -> bool {
+        let mut proteins = proteins.into_iter().peekable();
+        proteins.peek().is_some() && proteins.all(|protein| self.entrapment.contains(protein))
+    }
+
+    /// Whether an accession is one of the entrapment proteins, which is what
+    /// makes a protein-level discovery false.
+    pub fn is_entrapment_protein(&self, protein: &Arc<str>) -> bool {
+        self.entrapment.contains(protein)
+    }
+
+    /// Entrapment proteins the FASTA contributed.
+    pub fn entrapment_proteins(&self) -> usize {
+        self.entrapment.len()
+    }
+
+    /// Proteins of `database.fasta` itself, the original targets.
+    pub fn sample_proteins(&self) -> usize {
+        self.sample
     }
 
     /// Contaminant proteins the FASTA contributed.

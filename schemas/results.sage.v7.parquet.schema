@@ -81,4 +81,5 @@ message schema {
     optional byte_array in_source_parent_peptide (utf8);
     optional byte_array in_source_type (utf8);
     optional boolean is_contaminant;
+    optional boolean is_entrapment;
 }

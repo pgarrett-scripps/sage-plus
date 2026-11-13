@@ -36,9 +36,10 @@ pub struct Provenance {
     pub inputs: Vec<InputFile>,
     /// The searched FASTA; `None` for peptide-list-only searches.
     pub fasta: Option<FastaProvenance>,
-    /// The contaminant FASTA, peptide lists, custom cleavage sites and PTM
-    /// libraries, each with its own path and checksum. Protein counts of the
-    /// contaminant FASTA are in the run summary's `contaminants` block.
+    /// The contaminant and entrapment FASTA files, peptide lists, custom
+    /// cleavage sites and PTM libraries, each with its own path and checksum.
+    /// Their protein counts are in the run summary's `contaminants` and
+    /// `entrapment` blocks.
     pub database_inputs: Vec<InputFile>,
     pub protein_inference: ProteinInference,
 }
@@ -48,7 +49,7 @@ pub struct Provenance {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct InputFile {
     /// Spectrum files: the name used in the `filename` output columns.
-    /// Database files: `contaminant_fasta`, `peptides`,
+    /// Database files: `contaminant_fasta`, `entrapment_fasta`, `peptides`,
     /// `custom_cleavage_sites` or `ptm_library`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
