@@ -21,6 +21,11 @@ One Cargo workspace, four crates. Dependencies point downward only: nothing depe
 `sage-core`'s crate name is `sage-core` but its directory is `crates/sage`, and the binary
 `sage` is built from `sage-cli`. Both surprise newcomers.
 
+On the `feat/crosslink` branch a fifth crate, `sage-xlink` (`crates/sage-xlink`), holds the
+MS-cleavable crosslink search. It depends on `sage-core` only and is linked into `sage-cli`
+only by the `crosslink` Cargo feature, which is off by default; see
+`docs/explore/CROSSLINK_SEARCH.md`.
+
 ## The pipeline, in order
 
 `Runner::run` (`sage-cli/src/runner/execution.rs`) drives all of it. One chunk of

@@ -4,8 +4,10 @@ Status: milestone 1 (cleavable DSSO/DSBU) is implemented on the `feat/crosslink`
 The search lives in `crates/sage-xlink`. It is built into `sage` only with the `crosslink`
 Cargo feature and runs only when the config has a `"crosslink"` block. See
 [Milestone 1](#milestone-1-implementation) at the end of this document. Nothing here ships
-in a release. The branch was last caught up with main at `cbc6969` (Beta 17 plus unreleased
-work) on 2026-10-11; see [Caught up with main](#caught-up-with-main-cbc6969-2026-10-11).
+in a release. The branch was last caught up with main at `1da0191` (Beta 19) on 2026-11-12;
+see [Caught up with main 1da0191](#caught-up-with-main-1da0191-2026-11-12). The benchmark
+numbers in this document were last re-measured at `cbc6969` (Beta 17 plus unreleased work) on
+2026-10-11; see [Caught up with main](#caught-up-with-main-cbc6969-2026-10-11).
 
 ## Recommendation in one paragraph
 
@@ -703,3 +705,24 @@ column. Each cell gives correct target matches and the true FDR:
   (964 MB before), from main's QC outputs and 64-bit index offsets. The crosslink step took
   11–23 s on Beveridge and 18–44 s on ribosome. Another agent was building at the same
   time, so wall times are not comparable with the earlier table.
+
+### Caught up with main 1da0191, 2026-11-12
+
+`origin/main` (Beta 18 and 19, 81 commits) was merged into the branch.
+
+- **Conflicts:** none.
+- **Ports:** none needed. `sage-xlink` does not read `Peptide.label` or `Feature.fragments`,
+  the two fields main boxed, and the `sage_core::database` and `sage_core::scoring` paths it
+  imports are unchanged by main's split of those files into module directories.
+- **Runner:** main now frees the retained MS1 spectra after quantification and drops their
+  charge columns in `complete_features`. The crosslink search reads only the MS2 spectra of a
+  chunk, before `complete_features`, and `write_crosslinks` reads only the CSMs, the database
+  and the file names, so neither change reaches it.
+- **Tests:** the inline test modules of `doublets.rs`, `fdr.rs`, `linker.rs` and `output.rs`
+  moved to `crates/sage-xlink/tests/unit/`, following main's convention. Test bodies are
+  unchanged.
+- fmt, clippy (`-D warnings`, all features) and 922 workspace tests pass; `sage-cli` built with
+  the `crosslink` feature passes its 134 tests.
+- **Not re-measured.** The ground-truth runs (PXD014337, PXD029252) were not repeated after
+  this merge, so the tables above still describe `cbc6969`. The file and line references in
+  section 3 (`database.rs`, `scoring.rs`, `peptide.rs`) predate main's module split.
