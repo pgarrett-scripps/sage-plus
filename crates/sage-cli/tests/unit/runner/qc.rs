@@ -159,6 +159,137 @@ fn composition_run_stats_omit_absent_numbers_from_json() {
     assert!(!json.contains("largest_shift_residue"), "{json}");
 }
 
+fn chromatography(charges: &[u8]) -> ChromatographyStats {
+    let mut stats = ChromatographyStats::default();
+    for &charge in charges {
+        stats.add_charge(charge);
+    }
+    stats
+}
+
+#[test]
+fn chromatography_tsv_labels_which_width_each_row_carries() {
+    let mut quantified = chromatography(&[2, 2, 3, 5]);
+    quantified.peak_width = Some(0.25);
+    quantified.peak_width_kind = Some(PeakWidth::LfqMedianFwhm);
+    quantified.quantified_precursors = Some(100);
+    quantified.transferred_precursors = Some(25);
+    let mut unquantified = chromatography(&[2, 0]);
+    unquantified.peak_width = Some(0.5);
+    unquantified.peak_width_kind = Some(PeakWidth::RepeatPsmSpread);
+    let stats = ChromatographyRunStats {
+        q_value: 0.01,
+        files: vec![
+            ChromatographyFileStats {
+                file: "lfq.mzML".into(),
+                stats: quantified,
+            },
+            ChromatographyFileStats {
+                file: "plain.mzML".into(),
+                stats: unquantified,
+            },
+        ],
+        total: chromatography(&[2, 2, 3, 5, 2, 0]),
+    };
+    let text = String::from_utf8(serialize_chromatography(&stats).unwrap()).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        "file\tconfident_precursors\tcharge_1_pct\tcharge_2_pct\tcharge_3_pct\tcharge_4_plus_pct\tcharge_unknown_pct\tpeak_width\tpeak_width_kind\tquantified_precursors\ttransferred_precursors\ttransferred_pct"
+    );
+    let rows = lines.collect::<Vec<_>>();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0],
+        "lfq.mzML\t4\t0.000\t50.000\t25.000\t25.000\t0.000\t0.2500\tlfq_median_fwhm\t100\t25\t25.000"
+    );
+    // Without quantification the three LFQ columns are empty, and the width is
+    // named as the repeat-PSM spread it is.
+    assert_eq!(
+        rows[1],
+        "plain.mzML\t2\t0.000\t50.000\t0.000\t0.000\t50.000\t0.5000\trepeat_psm_spread\t\t\t"
+    );
+    // The total pools the charges and leaves the width out.
+    assert!(rows[2].starts_with("total\t6\t"));
+    assert!(rows[2].ends_with("\t\t\t\t\t"), "{}", rows[2]);
+}
+
+#[test]
+fn chromatography_run_stats_keep_the_kind_in_json() {
+    let mut stats = chromatography(&[2]);
+    stats.peak_width = Some(0.3);
+    stats.peak_width_kind = Some(PeakWidth::RepeatPsmSpreadFallback);
+    let json = serde_json::to_string(&ChromatographyRunStats {
+        q_value: 0.01,
+        files: vec![ChromatographyFileStats {
+            file: "one.mzML".into(),
+            stats,
+        }],
+        total: chromatography(&[2]),
+    })
+    .unwrap();
+    assert!(
+        json.contains("\"peak_width_kind\":\"repeat_psm_spread_fallback\""),
+        "{json}"
+    );
+    assert!(json.contains("\"quantified_precursors\":null"), "{json}");
+}
+
+fn occupancy(
+    site_rule: &str,
+    modified_sites: usize,
+    eligible_sites: usize,
+) -> ModificationOccupancy {
+    ModificationOccupancy {
+        site_rule: site_rule.into(),
+        mass: 15.9949,
+        name: None,
+        search_mode: "database".into(),
+        peptidoforms: 3,
+        modified_peptidoforms: 1,
+        eligible_sites,
+        modified_sites,
+        occupancy_pct: 100.0 * modified_sites as f64 / eligible_sites as f64,
+    }
+}
+
+#[test]
+fn modification_occupancy_tsv_has_a_row_per_file_and_rule_then_the_total() {
+    let stats = ModificationOccupancyRunStats {
+        q_value: 0.01,
+        modifications: vec![occupancy("M", 3, 8)],
+        files: vec![
+            ModificationOccupancyFileStats {
+                file: "a.mzML".into(),
+                modifications: vec![occupancy("M", 1, 4)],
+            },
+            ModificationOccupancyFileStats {
+                file: "b.mzML".into(),
+                modifications: vec![occupancy("M", 2, 4)],
+            },
+        ],
+    };
+    let tsv = String::from_utf8(serialize_modification_occupancy(&stats).unwrap()).unwrap();
+    let rows = tsv.lines().collect::<Vec<_>>();
+    assert_eq!(
+        rows[0],
+        "file\tsite_rule\tmass\tname\tsearch_mode\tpeptidoforms\tmodified_peptidoforms\teligible_sites\tmodified_sites\toccupancy_pct"
+    );
+    assert_eq!(
+        rows[1],
+        "a.mzML\tM\t15.994900\t\tdatabase\t3\t1\t4\t1\t25.000"
+    );
+    assert_eq!(
+        rows[2],
+        "b.mzML\tM\t15.994900\t\tdatabase\t3\t1\t4\t2\t50.000"
+    );
+    assert_eq!(
+        rows[3],
+        "total\tM\t15.994900\t\tdatabase\t3\t1\t8\t3\t37.500"
+    );
+    assert_eq!(rows.len(), 4);
+}
+
 fn at(ms_level: u8, scan_start_time: f32, total_ion_current: f32) -> RawSpectrum {
     RawSpectrum {
         ms_level,
@@ -302,16 +433,37 @@ fn identification_rates_are_shares_of_acquired_spectra() {
     assert_eq!(quiet.bins[0].identified_pct(), 0.0);
 }
 
+/// `QcSources` with only the passes a test cares about filled in. Every other
+/// pass is its own empty stats object, which is what a run without that
+/// feature gives `qc.tsv`.
+fn qc_sources<'a>(
+    identification: &'a [IdentificationFileStats],
+    digestion: &'a DigestionRunStats,
+    composition: &'a CompositionProfiles,
+    chromatography: &'a ChromatographyRunStats,
+) -> QcSources<'a> {
+    QcSources {
+        identification,
+        digestion,
+        polymers: &[],
+        composition,
+        chromatography,
+        modifications: None,
+        contaminants: None,
+        in_source: None,
+    }
+}
+
 #[test]
 fn qc_tables_have_the_published_columns_and_one_row_per_file() {
     let stats = vec![identification_fixture()];
     let qc = String::from_utf8(
-        serialize_qc(
+        serialize_qc(&qc_sources(
             &stats,
             &DigestionRunStats::default(),
-            &[],
             &CompositionProfiles::default(),
-        )
+            &ChromatographyRunStats::default(),
+        ))
         .unwrap(),
     )
     .unwrap();
@@ -356,12 +508,12 @@ fn qc_table_columns_match_the_published_schema() {
         (
             "../../schemas/qc.v1.tsv.schema.json",
             String::from_utf8(
-                serialize_qc(
+                serialize_qc(&qc_sources(
                     &[],
                     &DigestionRunStats::default(),
-                    &[],
                     &CompositionProfiles::default(),
-                )
+                    &ChromatographyRunStats::default(),
+                ))
                 .unwrap(),
             )
             .unwrap(),
@@ -406,7 +558,13 @@ fn qc_table_carries_the_composition_headline_of_each_file() {
         })
         .collect::<Vec<_>>();
     let qc = String::from_utf8(
-        serialize_qc(&stats, &DigestionRunStats::default(), &[], &composition).unwrap(),
+        serialize_qc(&qc_sources(
+            &stats,
+            &DigestionRunStats::default(),
+            &composition,
+            &ChromatographyRunStats::default(),
+        ))
+        .unwrap(),
     )
     .unwrap();
     let lines = qc.lines().collect::<Vec<_>>();
@@ -424,4 +582,127 @@ fn qc_table_carries_the_composition_headline_of_each_file() {
     assert_eq!(cell(2, "file"), "control.mzML");
     assert_eq!(cell(2, "largest_shift_log2_ratio"), "0.0000");
     assert_eq!(cell(2, "jensen_shannon_distance"), "0.0000");
+}
+
+#[test]
+fn qc_table_repeats_the_headline_of_every_other_pass() {
+    // Each column below is the number the pass that owns it already computed;
+    // nothing in qc.tsv recomputes anything.
+    let identification = vec![IdentificationFileStats {
+        file: "a.mzML".into(),
+        ..identification_fixture()
+    }];
+    let mut stats = chromatography(&[2, 2, 3, 4, 5]);
+    stats.charge_unknown = 1;
+    stats.confident_precursors += 1;
+    stats.peak_width = Some(0.3125);
+    stats.peak_width_kind = Some(PeakWidth::LfqMedianFwhm);
+    stats.quantified_precursors = Some(40);
+    stats.transferred_precursors = Some(10);
+    let chromatography = ChromatographyRunStats {
+        q_value: 0.01,
+        files: vec![ChromatographyFileStats {
+            file: "a.mzML".into(),
+            stats,
+        }],
+        total: ChromatographyStats::default(),
+    };
+    let occupancy = |site_rule: &str, name: Option<&str>, pct: f64| ModificationOccupancy {
+        site_rule: site_rule.into(),
+        mass: 15.9949,
+        name: name.map(str::to_string),
+        search_mode: "database".into(),
+        peptidoforms: 10,
+        modified_peptidoforms: 4,
+        eligible_sites: 20,
+        modified_sites: (pct / 5.0) as usize,
+        occupancy_pct: pct,
+    };
+    let modifications = ModificationOccupancyRunStats {
+        q_value: 0.01,
+        modifications: Vec::new(),
+        files: vec![ModificationOccupancyFileStats {
+            file: "a.mzML".into(),
+            modifications: vec![
+                occupancy("M", Some("Oxidation"), 42.5),
+                occupancy("K", None, 7.0),
+            ],
+        }],
+    };
+    let contaminants = ContaminantRunStats {
+        path: "contaminants.fasta".into(),
+        proteins: 381,
+        peptides: 5000,
+        confident_psms: 100,
+        contaminant_psms: 7,
+        contaminant_psm_share: 0.07,
+        files: vec![ContaminantFileStats {
+            file_id: 0,
+            filename: "a.mzML".into(),
+            confident_psms: 100,
+            contaminant_psms: 7,
+            contaminant_psm_share: 0.07,
+        }],
+    };
+    let qc = String::from_utf8(
+        serialize_qc(&QcSources {
+            identification: &identification,
+            digestion: &DigestionRunStats::default(),
+            polymers: &[],
+            composition: &CompositionProfiles::default(),
+            chromatography: &chromatography,
+            modifications: Some(&modifications),
+            contaminants: Some(&contaminants),
+            in_source: None,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let lines = qc.lines().collect::<Vec<_>>();
+    let header = lines[0].split('\t').collect::<Vec<_>>();
+    let row = lines[1].split('\t').collect::<Vec<_>>();
+    let column = |name: &str| row[header.iter().position(|&h| h == name).expect(name)];
+    // Six precursors: two at 2+, one each at 3+ and 4+, one at 5+ counted as
+    // 4 or above, and one whose charge the file did not state.
+    assert_eq!(column("charge_1_pct"), "0.000");
+    assert_eq!(column("charge_2_pct"), "33.333");
+    assert_eq!(column("charge_3_pct"), "16.667");
+    assert_eq!(column("charge_4_plus_pct"), "33.333");
+    assert_eq!(column("charge_unknown_pct"), "16.667");
+    assert_eq!(column("peak_width"), "0.3125");
+    assert_eq!(column("peak_width_kind"), PeakWidth::LfqMedianFwhm.label());
+    assert_eq!(column("quantified_precursors"), "40");
+    assert_eq!(column("transferred_pct"), "25.000");
+    // The most occupied definition, named as qc.modifications.tsv names it.
+    assert_eq!(column("modifications_searched"), "2");
+    assert_eq!(column("top_modification"), "Oxidation");
+    assert_eq!(column("top_modification_occupancy_pct"), "42.500");
+    // The contaminant share keeps the run summary's unit: a fraction.
+    assert_eq!(column("contaminant_psms"), "7");
+    assert_eq!(column("contaminant_psm_share"), "0.070000");
+    // in_source is off here, so the column is empty rather than zero.
+    assert_eq!(column("in_source_flagged_psms"), "");
+}
+
+#[test]
+fn a_definition_without_a_name_is_labelled_by_its_site_rule_and_mass() {
+    let bare = ModificationOccupancy {
+        site_rule: "K".into(),
+        mass: 42.010565,
+        name: None,
+        search_mode: "mass_offset".into(),
+        peptidoforms: 1,
+        modified_peptidoforms: 1,
+        eligible_sites: 1,
+        modified_sites: 1,
+        occupancy_pct: 100.0,
+    };
+    assert_eq!(modification_label(&bare), "K +42.0106");
+    assert_eq!(
+        modification_label(&ModificationOccupancy {
+            name: Some("Acetyl".into()),
+            ..bare
+        }),
+        "Acetyl"
+    );
 }

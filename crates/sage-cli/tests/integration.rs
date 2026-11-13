@@ -884,6 +884,8 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
         {"name": "anything", "mz": 1000.0, "tolerance": {"da": [-1000.0, 1000.0]}},
         {"name": "HexNAc", "mz": 204.0867}
     ]);
+    // One variable modification, so the occupancy table is written.
+    config["database"]["variable_mods"] = serde_json::json!({"^": [42.010565]});
     std::fs::write(root.join("config.json"), serde_json::to_vec(&config)?)?;
     let result = Command::new(env!("CARGO_BIN_EXE_sage"))
         .current_dir(&workspace)
@@ -909,6 +911,24 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     assert!(lines[0].starts_with("file\ttarget_peptides\tdecoy_peptides\tpeptides\t"));
     assert!(lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\t"));
     assert!(lines[2].starts_with("total\t"));
+
+    let occupancy = std::fs::read_to_string(root.join("output/qc.modifications.tsv"))?;
+    let lines = occupancy.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 3, "{occupancy}");
+    assert_eq!(
+        lines[0],
+        "file\tsite_rule\tmass\tname\tsearch_mode\tpeptidoforms\tmodified_peptidoforms\teligible_sites\tmodified_sites\toccupancy_pct"
+    );
+    // The fixture has one spectrum, so no PSM is confident and the counts
+    // are zero, as in digestion.tsv; the rows and their order are the point.
+    assert!(
+        lines[1].starts_with("LQSRPAAPPAPGPGQLTLR.mzML\tpeptide_n_term\t42.0105"),
+        "{occupancy}"
+    );
+    assert!(
+        lines[2].starts_with("total\tpeptide_n_term\t"),
+        "{occupancy}"
+    );
 
     // qc.tsv is one row per file with no total row; qc.gradient.tsv splits
     // each file into ten retention-time bins. This fixture is one MS2
@@ -946,6 +966,25 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     assert_eq!(column("proteins"), "0");
     assert_eq!(column("q_value"), "0.01");
     assert_eq!(column("rt_start_min"), column("rt_end_min"));
+    // The chromatography pass counted no confident precursor in this file, and
+    // the fixture has no contaminant FASTA and no in-source annotation, so
+    // those columns are empty rather than zero.
+    // The chromatography pass reports a row of zeros for a file with no
+    // confident precursor, so the charge shares are a measured zero, while
+    // the peak width and the quantification counts it could not measure stay
+    // empty.
+    assert_eq!(column("charge_2_pct"), "0.000");
+    assert_eq!(column("charge_unknown_pct"), "0.000");
+    assert_eq!(column("peak_width"), "");
+    assert_eq!(column("peak_width_kind"), "");
+    assert_eq!(column("quantified_precursors"), "");
+    assert_eq!(column("transferred_pct"), "");
+    assert_eq!(column("contaminant_psms"), "");
+    assert_eq!(column("in_source_flagged_psms"), "");
+    // The fixture searches one variable modification, so the occupancy pass
+    // reports it and qc.tsv names it as qc.modifications.tsv does.
+    assert_eq!(column("modifications_searched"), "1");
+    assert_eq!(column("top_modification"), "peptide_n_term +42.0106");
     assert_eq!(column("gradient_bins"), "10");
     // One bin acquired the spectrum and identified nothing.
     assert_eq!(column("empty_gradient_bins"), "1");
@@ -1004,6 +1043,22 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     }
     // The test file has no MS1 spectra, so no polymer rows are reported.
     assert_eq!(summary["qc"]["polymers"], serde_json::json!([]));
+
+    let occupancy = &summary["qc"]["modifications"];
+    assert_eq!(occupancy["q_value"], 0.01);
+    assert_eq!(occupancy["modifications"][0]["site_rule"], "peptide_n_term");
+    assert_eq!(occupancy["modifications"][0]["search_mode"], "database");
+    assert_eq!(occupancy["modifications"][0]["eligible_sites"], 0);
+    assert_eq!(occupancy["files"][0]["file"], "LQSRPAAPPAPGPGQLTLR.mzML");
+    assert!(
+        stderr.contains("modification occupancy: peptide_n_term"),
+        "{stderr}"
+    );
+    assert!(summary["output_paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|path| path.as_str().unwrap().ends_with("qc.modifications.tsv")));
 
     assert!(
         stderr.contains("diagnostic ions in 1 MS2 spectra: anything 100.00%, HexNAc 0.00%"),
@@ -1313,6 +1368,11 @@ fn assert_matches_published_schemas(
         (
             "diagnostic_ions.tsv",
             "diagnostic_ions.v1.tsv.schema.json",
+            false,
+        ),
+        (
+            "qc.modifications.tsv",
+            "qc.modifications.v1.tsv.schema.json",
             false,
         ),
     ] {

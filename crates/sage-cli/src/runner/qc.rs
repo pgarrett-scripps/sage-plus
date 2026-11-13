@@ -1,10 +1,16 @@
 //! Run-level quality-control summaries written next to the search results.
 
 use super::*;
+use fnv::FnvHashMap;
+use sage_core::chromatography::{
+    quantification_by_file, repeat_psm_spread, ChromatographyStats, PeakWidth, RepeatRts,
+};
 use sage_core::composition::{CompositionProfile, CompositionSummary};
 use sage_core::diagnostic::{find_ions, DiagnosticIon};
 use sage_core::digestion::DigestionSummary;
 use sage_core::enzyme::EnzymeParameters;
+use sage_core::lfq::{PrecursorId, QuantifiedPeak};
+use sage_core::occupancy::{OccupancyCounts, OccupancyRule};
 use sage_core::polymer::{PolymerFileStats, PolymerScanner};
 use sage_core::spectrum::{RawSpectrum, Representation};
 use std::collections::HashSet;
@@ -21,12 +27,20 @@ const DIGESTION_Q_VALUE: f32 = QC_Q_VALUE;
 /// `qc.gradient.tsv`.
 const GRADIENT_BINS: usize = 10;
 
+/// Spectrum- and peptide-level q-value a PSM must pass to count towards the
+/// modification occupancy table. The same threshold as
+/// [`DIGESTION_Q_VALUE`], so both tables describe the same identifications.
+const OCCUPANCY_Q_VALUE: f32 = 0.01;
+
 /// Percent of MS1 TIC on one polymer above which a run warning is raised.
 const POLYMER_WARNING_TIC_PCT: f64 = 5.0;
 
 /// Spectrum- and peptide-level q-value a PSM must pass to count towards the
 /// amino acid composition profile, matching the digestion summary.
 const COMPOSITION_Q_VALUE: f32 = 0.01;
+
+/// The same for the charge and chromatography summary.
+const CHROMATOGRAPHY_Q_VALUE: f32 = 0.01;
 
 /// Quality-control scans of one file's raw spectra.
 #[derive(Debug, Clone, Default)]
@@ -152,10 +166,35 @@ pub struct QcRunStats {
     /// Present when `diagnostic_ions` is enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic_ions: Option<DiagnosticIonRunStats>,
+    /// Present when the search has at least one variable modification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifications: Option<ModificationOccupancyRunStats>,
     /// Headline numbers of the amino acid composition profile. The per-residue
     /// table is `qc.composition.tsv`.
     #[serde(default)]
     pub composition: CompositionRunStats,
+    /// Charge states and peak width per file; the same rows are
+    /// `qc.chromatography.tsv`.
+    #[serde(default)]
+    pub chromatography: ChromatographyRunStats,
+}
+
+/// Charge-state shares, peak width and quantification counts per file.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ChromatographyRunStats {
+    pub q_value: f32,
+    pub files: Vec<ChromatographyFileStats>,
+    /// Every file together. The charge shares and the quantification counts
+    /// pool; the peak width does not, because a width in one file's
+    /// retention-time unit is not comparable with another's.
+    pub total: ChromatographyStats,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChromatographyFileStats {
+    pub file: String,
+    #[serde(flatten)]
+    pub stats: ChromatographyStats,
 }
 
 /// Headline numbers of the amino acid composition comparison, per file and for
@@ -404,6 +443,64 @@ pub struct DigestionFileStats {
     pub file: String,
     #[serde(flatten)]
     pub summary: DigestionSummary,
+}
+
+/// Occupancy of every searched variable modification, counted over distinct
+/// confident target peptidoforms. Same rows as `qc.modifications.tsv`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancyRunStats {
+    pub q_value: f32,
+    /// Every file's peptidoforms together, each counted once.
+    pub modifications: Vec<ModificationOccupancy>,
+    pub files: Vec<ModificationOccupancyFileStats>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancyFileStats {
+    pub file: String,
+    pub modifications: Vec<ModificationOccupancy>,
+}
+
+/// One searched definition and site rule in one file, or in the whole run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancy {
+    /// The site rule as a configuration key writes it, e.g. `M`,
+    /// `peptide_n_term` or `internal_residue:K`.
+    pub site_rule: String,
+    pub mass: f32,
+    /// The configured name; absent for a definition given as a bare mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `database` or `mass_offset`.
+    pub search_mode: String,
+    /// Peptidoforms with at least one eligible site.
+    pub peptidoforms: usize,
+    pub modified_peptidoforms: usize,
+    pub eligible_sites: usize,
+    pub modified_sites: usize,
+    /// `modified_sites` as a percent of `eligible_sites`.
+    pub occupancy_pct: f64,
+}
+
+fn occupancy_rows(
+    rules: &[OccupancyRule],
+    counts: &[OccupancyCounts],
+) -> Vec<ModificationOccupancy> {
+    rules
+        .iter()
+        .zip(counts)
+        .map(|(rule, counts)| ModificationOccupancy {
+            site_rule: rule.site_rule_name(),
+            mass: rule.mass(),
+            name: rule.name().map(str::to_string),
+            search_mode: rule.search_mode_name().to_string(),
+            peptidoforms: counts.peptidoforms,
+            modified_peptidoforms: counts.modified_peptidoforms,
+            eligible_sites: counts.eligible_sites,
+            modified_sites: counts.modified_sites,
+            occupancy_pct: counts.occupancy_pct(),
+        })
+        .collect()
 }
 
 impl Runner {
@@ -663,6 +760,181 @@ impl Runner {
         }
     }
 
+    /// Charge states of each file's confident precursors, a labelled peak
+    /// width, and what quantification did in that file.
+    ///
+    /// `areas` is the LFQ feature map when quantification ran. With it the peak
+    /// width is the median full width at half maximum of the file's integrated
+    /// peaks; without it, or for a file whose peaks never fell to half height,
+    /// the width is the spread of that file's repeat PSMs instead, and the kind
+    /// column says which of the two a row carries.
+    pub(super) fn chromatography_stats(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+        areas: Option<&FnvHashMap<(PrecursorId, bool), QuantifiedPeak>>,
+    ) -> ChromatographyRunStats {
+        let start = Instant::now();
+        let mut files = vec![ChromatographyStats::default(); filenames.len()];
+        let mut total = ChromatographyStats::default();
+        let mut rts = vec![RepeatRts::default(); filenames.len()];
+        for feature in features {
+            if feature.rank != 1
+                || feature.label != 1
+                || feature.spectrum_q > CHROMATOGRAPHY_Q_VALUE
+                || feature.peptide_q > CHROMATOGRAPHY_Q_VALUE
+            {
+                continue;
+            }
+            let Some(file) = files.get_mut(feature.file_id) else {
+                continue;
+            };
+            file.add_charge(feature.charge);
+            total.add_charge(feature.charge);
+            rts[feature.file_id]
+                .entry(feature.peptide_idx)
+                .or_default()
+                .push(feature.rt);
+        }
+
+        let quantification = areas.map(|areas| quantification_by_file(areas, filenames.len()));
+        for (file_id, stats) in files.iter_mut().enumerate() {
+            let fwhm = quantification.as_ref().and_then(|by_file| {
+                let (quantified, transferred, fwhm) = by_file[file_id];
+                stats.quantified_precursors = Some(quantified);
+                stats.transferred_precursors = Some(transferred);
+                fwhm
+            });
+            match fwhm {
+                Some(fwhm) => {
+                    stats.peak_width = Some(fwhm);
+                    stats.peak_width_kind = Some(PeakWidth::LfqMedianFwhm);
+                }
+                // No peaks to measure: the repeat-PSM spread stands in, and the
+                // kind column keeps the two apart.
+                None => {
+                    if let Some((spread, kind)) = repeat_psm_spread(&rts[file_id]) {
+                        stats.peak_width = Some(spread);
+                        stats.peak_width_kind = Some(kind);
+                    }
+                }
+            }
+        }
+        if let Some(by_file) = quantification.as_ref() {
+            total.quantified_precursors =
+                Some(by_file.iter().map(|&(quantified, _, _)| quantified).sum());
+            total.transferred_precursors =
+                Some(by_file.iter().map(|&(_, transferred, _)| transferred).sum());
+        }
+        info!(
+            "chromatography: charges 1+ {:.1}%, 2+ {:.1}%, 3+ {:.1}%, 4+ and above {:.1}% of {} confident precursors{} ({} ms)",
+            total.charge_pct(1),
+            total.charge_pct(2),
+            total.charge_pct(3),
+            total.charge_pct(4),
+            total.confident_precursors,
+            match (total.quantified_precursors, total.transferred_pct()) {
+                (Some(quantified), Some(transferred)) => format!(
+                    "; {quantified} quantified precursor/file pairs, {transferred:.1}% without direct MS2 evidence in their file"
+                ),
+                (Some(quantified), None) => format!("; {quantified} quantified precursor/file pairs"),
+                _ => String::new(),
+            },
+            start.elapsed().as_millis(),
+        );
+        for (file, stats) in filenames.iter().zip(&files) {
+            if let (Some(width), Some(kind)) = (stats.peak_width, stats.peak_width_kind) {
+                info!("- {file}: {} {width:.4}", kind.label());
+            }
+        }
+        ChromatographyRunStats {
+            q_value: CHROMATOGRAPHY_Q_VALUE,
+            files: filenames
+                .iter()
+                .cloned()
+                .zip(files)
+                .map(|(file, stats)| ChromatographyFileStats { file, stats })
+                .collect(),
+            total,
+        }
+    }
+    /// Occupancy of every searched variable modification per file; `None`
+    /// when the search has no variable modification.
+    ///
+    /// Each distinct peptidoform of a file counts once, however many PSMs
+    /// support it, and the run total counts each peptidoform once across
+    /// files, so it is not the sum of the file rows. Decoys are excluded:
+    /// a decoy peptidoform's sites say nothing about the sample.
+    pub(super) fn modification_occupancy_stats(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> Option<ModificationOccupancyRunStats> {
+        let rules = sage_core::occupancy::rules(&self.database_parameters);
+        if rules.is_empty() {
+            return None;
+        }
+        let mut per_file = vec![Vec::new(); filenames.len()];
+        let mut run = Vec::new();
+        let mut seen = HashSet::new();
+        let mut seen_in_run = HashSet::new();
+        for feature in features {
+            if feature.rank != 1
+                || feature.spectrum_q > OCCUPANCY_Q_VALUE
+                || feature.peptide_q > OCCUPANCY_Q_VALUE
+            {
+                continue;
+            }
+            let peptide = &self.database[feature.peptide_idx];
+            if peptide.decoy {
+                continue;
+            }
+            if let Some(peptidoforms) = per_file.get_mut(feature.file_id) {
+                if seen.insert((feature.file_id, feature.peptide_idx)) {
+                    peptidoforms.push(peptide);
+                }
+            }
+            if seen_in_run.insert(feature.peptide_idx) {
+                run.push(peptide);
+            }
+        }
+        let files = filenames
+            .iter()
+            .zip(&per_file)
+            .map(|(file, peptidoforms)| ModificationOccupancyFileStats {
+                file: file.clone(),
+                modifications: occupancy_rows(
+                    &rules,
+                    &sage_core::occupancy::count(
+                        &self.database_parameters,
+                        &rules,
+                        peptidoforms.iter().copied(),
+                    ),
+                ),
+            })
+            .collect();
+        let modifications = occupancy_rows(
+            &rules,
+            &sage_core::occupancy::count(&self.database_parameters, &rules, run),
+        );
+        info!(
+            "modification occupancy: {}",
+            modifications
+                .iter()
+                .map(|row| format!(
+                    "{} {:+.4} {:.2}% of {} sites",
+                    row.site_rule, row.mass, row.occupancy_pct, row.eligible_sites
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Some(ModificationOccupancyRunStats {
+            q_value: OCCUPANCY_Q_VALUE,
+            modifications,
+            files,
+        })
+    }
+
     /// Log and summarize the share of MS2 spectra containing each
     /// diagnostic ion; `None` when diagnostic ions are off.
     pub(super) fn diagnostic_ion_stats(
@@ -742,10 +1014,33 @@ impl Runner {
         Ok(Some(path))
     }
 
+    pub(super) fn write_chromatography(
+        &self,
+        stats: &ChromatographyRunStats,
+    ) -> anyhow::Result<Url> {
+        let path = self.make_path("qc.chromatography.tsv");
+        sage_cloudpath::write_bytes_sync(&path, serialize_chromatography(stats)?)?;
+        Ok(path)
+    }
+
     pub(super) fn write_composition(&self, profiles: &CompositionProfiles) -> anyhow::Result<Url> {
         let path = self.make_path("qc.composition.tsv");
         sage_cloudpath::write_bytes_sync(&path, serialize_composition(profiles)?)?;
         Ok(path)
+    }
+
+    /// Write `qc.modifications.tsv`, or nothing when the search has no
+    /// variable modification.
+    pub(super) fn write_modification_occupancy(
+        &self,
+        stats: Option<&ModificationOccupancyRunStats>,
+    ) -> anyhow::Result<Option<Url>> {
+        let Some(stats) = stats else {
+            return Ok(None);
+        };
+        let path = self.make_path("qc.modifications.tsv");
+        sage_cloudpath::write_bytes_sync(&path, serialize_modification_occupancy(stats)?)?;
+        Ok(Some(path))
     }
 
     pub(super) fn write_digestion(&self, stats: &DigestionRunStats) -> anyhow::Result<Url> {
@@ -753,6 +1048,49 @@ impl Runner {
         sage_cloudpath::write_bytes_sync(&path, serialize_digestion(stats)?)?;
         Ok(path)
     }
+}
+
+pub(super) fn serialize_modification_occupancy(
+    stats: &ModificationOccupancyRunStats,
+) -> anyhow::Result<Vec<u8>> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    writer.write_record([
+        "file",
+        "site_rule",
+        "mass",
+        "name",
+        "search_mode",
+        "peptidoforms",
+        "modified_peptidoforms",
+        "eligible_sites",
+        "modified_sites",
+        "occupancy_pct",
+    ])?;
+    let rows = stats
+        .files
+        .iter()
+        .map(|file| (file.file.as_str(), &file.modifications))
+        .chain(std::iter::once(("total", &stats.modifications)));
+    for (file, modifications) in rows {
+        for row in modifications {
+            writer.write_record([
+                file.to_string(),
+                row.site_rule.clone(),
+                format!("{:.6}", row.mass),
+                row.name.clone().unwrap_or_default(),
+                row.search_mode.clone(),
+                row.peptidoforms.to_string(),
+                row.modified_peptidoforms.to_string(),
+                row.eligible_sites.to_string(),
+                row.modified_sites.to_string(),
+                format!("{:.3}", row.occupancy_pct),
+            ])?;
+        }
+    }
+    writer.flush()?;
+    Ok(writer.into_inner()?)
 }
 
 /// Identification rate of one file and of each of its gradient bins. Counts
@@ -949,20 +1287,14 @@ impl Runner {
     }
 
     /// Write `qc.tsv` and `qc.gradient.tsv`.
-    pub(super) fn write_qc_tables(
-        &self,
-        identification: &[IdentificationFileStats],
-        digestion: &DigestionRunStats,
-        polymers: &[PolymerRunFileStats],
-        composition: &CompositionProfiles,
-    ) -> anyhow::Result<Vec<Url>> {
+    pub(super) fn write_qc_tables(&self, sources: &QcSources<'_>) -> anyhow::Result<Vec<Url>> {
         let table = self.make_path("qc.tsv");
-        sage_cloudpath::write_bytes_sync(
-            &table,
-            serialize_qc(identification, digestion, polymers, composition)?,
-        )?;
+        sage_cloudpath::write_bytes_sync(&table, serialize_qc(sources)?)?;
         let gradient = self.make_path("qc.gradient.tsv");
-        sage_cloudpath::write_bytes_sync(&gradient, serialize_qc_gradient(identification)?)?;
+        sage_cloudpath::write_bytes_sync(
+            &gradient,
+            serialize_qc_gradient(sources.identification)?,
+        )?;
         Ok(vec![table, gradient])
     }
 }
@@ -970,12 +1302,34 @@ impl Runner {
 /// `qc.tsv`: one row per input file, repeating the headline number of every
 /// QC output so one table shows a whole run. Schema:
 /// `schemas/qc.v1.tsv.schema.json`.
-pub(super) fn serialize_qc(
-    identification: &[IdentificationFileStats],
-    digestion: &DigestionRunStats,
-    polymers: &[PolymerRunFileStats],
-    composition: &CompositionProfiles,
-) -> anyhow::Result<Vec<u8>> {
+/// Every QC pass `qc.tsv` repeats a headline number from, borrowed. Nothing
+/// here is recomputed: each field is the stats object that pass already built,
+/// so a number in `qc.tsv` is the same number as in its own output.
+pub(super) struct QcSources<'a> {
+    pub identification: &'a [IdentificationFileStats],
+    pub digestion: &'a DigestionRunStats,
+    pub polymers: &'a [PolymerRunFileStats],
+    pub composition: &'a CompositionProfiles,
+    pub chromatography: &'a ChromatographyRunStats,
+    /// `None` when no modification was searched.
+    pub modifications: Option<&'a ModificationOccupancyRunStats>,
+    /// `None` without a `contaminant_fasta`.
+    pub contaminants: Option<&'a ContaminantRunStats>,
+    /// `None` when the in-source annotation is off.
+    pub in_source: Option<&'a sage_core::in_source::InSourceAnnotations>,
+}
+
+pub(super) fn serialize_qc(sources: &QcSources<'_>) -> anyhow::Result<Vec<u8>> {
+    let QcSources {
+        identification,
+        digestion,
+        polymers,
+        composition,
+        chromatography,
+        modifications,
+        contaminants,
+        in_source,
+    } = *sources;
     let mut writer = csv::WriterBuilder::new()
         .delimiter(b'\t')
         .from_writer(Vec::new());
@@ -1003,12 +1357,27 @@ pub(super) fn serialize_qc(
         "largest_shift_residue",
         "largest_shift_log2_ratio",
         "jensen_shannon_distance",
+        "charge_1_pct",
+        "charge_2_pct",
+        "charge_3_pct",
+        "charge_4_plus_pct",
+        "charge_unknown_pct",
+        "peak_width",
+        "peak_width_kind",
+        "quantified_precursors",
+        "transferred_pct",
+        "modifications_searched",
+        "top_modification",
+        "top_modification_occupancy_pct",
+        "contaminant_psms",
+        "contaminant_psm_share",
+        "in_source_flagged_psms",
         "gradient_bins",
         "empty_gradient_bins",
         "min_bin_identified_pct",
         "max_bin_identified_pct",
     ])?;
-    for file in identification {
+    for (file_id, file) in identification.iter().enumerate() {
         let digested = digestion
             .files
             .iter()
@@ -1029,6 +1398,31 @@ pub(super) fn serialize_qc(
             .find(|profile| profile.file == file.file)
             .map(|profile| &profile.summary);
         let largest_shift = shift.and_then(|summary| summary.largest_shift);
+        let chromatography = chromatography
+            .files
+            .iter()
+            .find(|row| row.file == file.file)
+            .map(|row| &row.stats);
+        // The definition with the highest occupancy in this file, named as
+        // qc.modifications.tsv names it: the configured name, or the site rule
+        // and mass for a definition given as a bare mass.
+        let top_modification = modifications
+            .and_then(|stats| stats.files.iter().find(|row| row.file == file.file))
+            .map(|row| row.modifications.as_slice());
+        let top = top_modification.and_then(|rows| {
+            rows.iter()
+                .max_by(|left, right| left.occupancy_pct.total_cmp(&right.occupancy_pct))
+        });
+        let contaminant =
+            contaminants.and_then(|stats| stats.files.iter().find(|row| row.filename == file.file));
+        let flagged = in_source.map(|annotations| {
+            annotations
+                .files()
+                .iter()
+                .filter(|row| row.file_id == file_id)
+                .map(|row| row.flagged_psms)
+                .sum::<usize>()
+        });
         let (min_pct, max_pct) = file.bin_pct_range().unwrap_or((0.0, 0.0));
         writer.write_record([
             file.file.clone(),
@@ -1059,6 +1453,40 @@ pub(super) fn serialize_qc(
             shift
                 .and_then(|summary| summary.jensen_shannon_distance)
                 .map_or(String::new(), |distance| format!("{distance:.4}")),
+            // Chromatography: the charge shares of this file's confident
+            // precursors, its peak width with the quantity that width is, and
+            // what quantification found. Empty where that pass measured
+            // nothing, which is not a zero.
+            chromatography.map_or(String::new(), |stats| format!("{:.3}", stats.charge_pct(1))),
+            chromatography.map_or(String::new(), |stats| format!("{:.3}", stats.charge_pct(2))),
+            chromatography.map_or(String::new(), |stats| format!("{:.3}", stats.charge_pct(3))),
+            chromatography.map_or(String::new(), |stats| format!("{:.3}", stats.charge_pct(4))),
+            chromatography.map_or(String::new(), |stats| {
+                format!("{:.3}", stats.charge_unknown_pct())
+            }),
+            chromatography
+                .and_then(|stats| stats.peak_width)
+                .map_or(String::new(), |width| format!("{width:.4}")),
+            chromatography
+                .and_then(|stats| stats.peak_width_kind)
+                .map_or(String::new(), |kind| kind.label().to_string()),
+            chromatography
+                .and_then(|stats| stats.quantified_precursors)
+                .map_or(String::new(), |count| count.to_string()),
+            chromatography
+                .and_then(|stats| stats.transferred_pct())
+                .map_or(String::new(), |pct| format!("{pct:.3}")),
+            // Modification occupancy: how many definitions were searched and
+            // which one is most occupied in this file.
+            top_modification.map_or(String::new(), |rows| rows.len().to_string()),
+            top.map_or(String::new(), modification_label),
+            top.map_or(String::new(), |row| format!("{:.3}", row.occupancy_pct)),
+            // Contaminants and in-source products, empty when those are off.
+            contaminant.map_or(String::new(), |row| row.contaminant_psms.to_string()),
+            contaminant.map_or(String::new(), |row| {
+                format!("{:.6}", row.contaminant_psm_share)
+            }),
+            flagged.map_or(String::new(), |count| count.to_string()),
             file.bins.len().to_string(),
             file.empty_bins().to_string(),
             format!("{min_pct:.3}"),
@@ -1067,6 +1495,16 @@ pub(super) fn serialize_qc(
     }
     writer.flush()?;
     Ok(writer.into_inner()?)
+}
+
+/// A searched modification named as `qc.modifications.tsv` names it: the
+/// configured name, or the site rule and mass for a definition given as a bare
+/// mass, so one modification reads the same in both tables.
+fn modification_label(occupancy: &ModificationOccupancy) -> String {
+    match &occupancy.name {
+        Some(name) => name.clone(),
+        None => format!("{} {:+.4}", occupancy.site_rule, occupancy.mass),
+    }
 }
 
 /// `qc.gradient.tsv`: one row per file and retention-time bin. Schema:
@@ -1189,6 +1627,60 @@ pub(super) fn serialize_composition(profiles: &CompositionProfiles) -> anyhow::R
                     .unwrap_or_default(),
             ])?;
         }
+    }
+    writer.flush()?;
+    Ok(writer.into_inner()?)
+}
+
+pub(super) fn serialize_chromatography(stats: &ChromatographyRunStats) -> anyhow::Result<Vec<u8>> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    writer.write_record([
+        "file",
+        "confident_precursors",
+        "charge_1_pct",
+        "charge_2_pct",
+        "charge_3_pct",
+        "charge_4_plus_pct",
+        "charge_unknown_pct",
+        "peak_width",
+        "peak_width_kind",
+        "quantified_precursors",
+        "transferred_precursors",
+        "transferred_pct",
+    ])?;
+    let rows = stats
+        .files
+        .iter()
+        .map(|file| (file.file.as_str(), &file.stats))
+        .chain(std::iter::once(("total", &stats.total)));
+    let optional = |value: Option<u64>| value.map(|v| v.to_string()).unwrap_or_default();
+    for (file, stats) in rows {
+        writer.write_record([
+            file.to_string(),
+            stats.confident_precursors.to_string(),
+            format!("{:.3}", stats.charge_pct(1)),
+            format!("{:.3}", stats.charge_pct(2)),
+            format!("{:.3}", stats.charge_pct(3)),
+            format!("{:.3}", stats.charge_pct(4)),
+            format!("{:.3}", stats.charge_unknown_pct()),
+            // Empty when the file had neither peaks nor repeat PSMs to measure.
+            stats
+                .peak_width
+                .map(|width| format!("{width:.4}"))
+                .unwrap_or_default(),
+            stats
+                .peak_width_kind
+                .map(|kind| kind.label().to_string())
+                .unwrap_or_default(),
+            optional(stats.quantified_precursors),
+            optional(stats.transferred_precursors),
+            stats
+                .transferred_pct()
+                .map(|pct| format!("{pct:.3}"))
+                .unwrap_or_default(),
+        ])?;
     }
     writer.flush()?;
     Ok(writer.into_inner()?)

@@ -529,6 +529,70 @@
             "files",
             "total"
           ]
+        },
+        "chromatography": {
+          "type": "object",
+          "description": "Charge states, peak width and quantification counts per file; the same rows as qc.chromatography.tsv.",
+          "properties": {
+            "q_value": {
+              "type": "number"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChromatographyFileStats"
+              }
+            },
+            "total": {
+              "$ref": "#/$defs/ChromatographyStats"
+            }
+          },
+          "required": [
+            "q_value",
+            "files",
+            "total"
+          ]
+        },
+        "modifications": {
+          "type": "object",
+          "description": "Present when the search has at least one variable modification. Same rows as qc.modifications.tsv.",
+          "properties": {
+            "q_value": {
+              "type": "number"
+            },
+            "modifications": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ModificationOccupancy"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  },
+                  "modifications": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/ModificationOccupancy"
+                    }
+                  }
+                },
+                "required": [
+                  "file",
+                  "modifications"
+                ]
+              }
+            }
+          },
+          "required": [
+            "q_value",
+            "modifications",
+            "files"
+          ]
         }
       },
       "required": []
@@ -1165,6 +1229,132 @@
         "expected_peptides",
         "expected_residues",
         "matched_observed_residues"
+      ]
+    },
+    "ChromatographyStats": {
+      "type": "object",
+      "properties": {
+        "confident_precursors": {
+          "type": "integer",
+          "description": "Rank-1 target PSMs at 1% spectrum and peptide q-value."
+        },
+        "charges": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Counts at charge 1, 2, 3, and 4 or above, in that order."
+        },
+        "charge_unknown": {
+          "type": "integer",
+          "description": "Precursors whose charge the file did not state."
+        },
+        "peak_width": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Width in the file's retention-time unit; null when nothing could be measured."
+        },
+        "peak_width_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "lfq_median_fwhm",
+            "repeat_psm_spread",
+            "repeat_psm_spread_fallback",
+            null
+          ],
+          "description": "Which quantity peak_width is. Null for the total row, where widths in different files' units would not be comparable."
+        },
+        "quantified_precursors": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Precursors with an integrated MS1 intensity in this file; null without quantification."
+        },
+        "transferred_precursors": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Of those, the ones with no direct MS2 evidence in this file: match-between-runs transfers. Null without quantification."
+        }
+      },
+      "required": [
+        "confident_precursors",
+        "charges",
+        "charge_unknown"
+      ]
+    },
+    "ChromatographyFileStats": {
+      "type": "object",
+      "description": "A ChromatographyStats with the file it belongs to.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ChromatographyStats"
+        }
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file"
+      ]
+    },
+    "ModificationOccupancy": {
+      "type": "object",
+      "properties": {
+        "site_rule": {
+          "type": "string"
+        },
+        "mass": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "search_mode": {
+          "type": "string",
+          "enum": [
+            "database",
+            "mass_offset"
+          ]
+        },
+        "peptidoforms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_peptidoforms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eligible_sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "occupancy_pct": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "site_rule",
+        "mass",
+        "search_mode",
+        "peptidoforms",
+        "modified_peptidoforms",
+        "eligible_sites",
+        "modified_sites",
+        "occupancy_pct"
       ]
     }
   }

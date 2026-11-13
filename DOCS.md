@@ -174,7 +174,7 @@ Running Sage will produce several output files (located in either the current di
 - A record of search parameters (`results.json`) and a portable basic-statistics artifact (`run-summary.json`) are created for every successful search
 - MS2 search results are stored in `results.sage.parquet`. TMT reporter-ion values, when enabled, are a nested array on each PSM row; a channel that was not observed is null. With TMT on, `run-summary.json` adds `quantification.tmt_channels`: per channel, the number of quantified spectra where it was observed or missing and the median observed intensity (missing channels are skipped, not counted as 0).
 - Label-free quantification is stored separately in long-form `lfq.parquet`, with one precursor/file row.
-- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, the per-file QC table to `qc.tsv`, the identification rate across each gradient to `qc.gradient.tsv`, the amino acid composition of the identifications against the database's expectation to `qc.composition.tsv`, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs). Per-PSM immonium-ion evidence fills seven `immonium_*` columns of `results.sage.parquet` when `immonium` is enabled; see [Immonium ions](#immonium-ions).
+- A digestion summary (missed cleavages and ragged termini per file) is written to `digestion.tsv`, the per-file QC table to `qc.tsv`, the identification rate across each gradient to `qc.gradient.tsv`, the amino acid composition of the identifications against the database's expectation to `qc.composition.tsv`, the charge states and chromatographic width of the confident precursors to `qc.chromatography.tsv`, the occupancy of each searched variable modification to `qc.modifications.tsv` when the search has one, and diagnostic-ion hits to `diagnostic_ions.tsv` when `diagnostic_ions` is enabled; see [Quality-control outputs](#quality-control-outputs). Per-PSM immonium-ion evidence fills seven `immonium_*` columns of `results.sage.parquet` when `immonium` is enabled; see [Immonium ions](#immonium-ions).
 - `results.json` records the effective configuration and `run-summary.json` records portable run statistics and output paths.
 
 Local output directories must be fresh unless `--overwrite` or `"overwrite": true` is explicit.
@@ -206,7 +206,7 @@ The versioned physical schemas and score definitions are published in [`schemas/
 The non-Parquet reports have published schemas in the same directory:
 
 - [`run-summary.v9.schema.json`](schemas/run-summary.v9.schema.json): JSON Schema (draft 2020-12) for `run-summary.json` with `schema_version` 9. Objects allow additional properties, since optional fields are added without a version bump; readers should ignore unknown keys.
-- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json), [`qc.v1.tsv.schema.json`](schemas/qc.v1.tsv.schema.json), [`qc_gradient.v1.tsv.schema.json`](schemas/qc_gradient.v1.tsv.schema.json), [`qc_composition.v1.tsv.schema.json`](schemas/qc_composition.v1.tsv.schema.json) and [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv`, `qc.tsv`, `qc.gradient.tsv`, `qc.composition.tsv` and `diagnostic_ions.tsv`.
+- [`digestion.v1.tsv.schema.json`](schemas/digestion.v1.tsv.schema.json), [`qc.v1.tsv.schema.json`](schemas/qc.v1.tsv.schema.json), [`qc_gradient.v1.tsv.schema.json`](schemas/qc_gradient.v1.tsv.schema.json), [`qc_composition.v1.tsv.schema.json`](schemas/qc_composition.v1.tsv.schema.json), [`qc_chromatography.v1.tsv.schema.json`](schemas/qc_chromatography.v1.tsv.schema.json), [`qc.modifications.v1.tsv.schema.json`](schemas/qc.modifications.v1.tsv.schema.json) and [`diagnostic_ions.v1.tsv.schema.json`](schemas/diagnostic_ions.v1.tsv.schema.json): [Table Schema](https://specs.frictionlessdata.io/table-schema/) descriptions of the column order, types and meaning of `digestion.tsv`, `qc.tsv`, `qc.gradient.tsv`, `qc.composition.tsv`, `qc.chromatography.tsv`, `qc.modifications.tsv` and `diagnostic_ions.tsv`.
 
 The integration tests validate a real run's outputs against these files. `results.json` echoes the effective configuration (see [`config.schema.json`](schemas/config.schema.json)) and is not a versioned contract.
 
@@ -1203,7 +1203,9 @@ alongside the library, because the location table does not embed chemical masses
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
   belongs to a contaminant, in the `is_contaminant` column, and `run-summary.json` reports the
   contaminant share of the confident PSMs for the run and per file. Unset leaves every output
-  column as it was. See [Contaminant proteins](#contaminant-proteins).
+  column as it was. One is bundled, `assets/contaminants/universal-contaminants.fasta`, and
+  searched only when this key names it. See [Contaminant proteins](#contaminant-proteins) and
+  [The bundled contaminant FASTA](#the-bundled-contaminant-fasta).
 - **clip_n_term_met**: Boolean. Also digest each protein without its initiator methionine
   when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
   and are protein N-terminal. Enzymatic digests only (default: true). See
@@ -1696,7 +1698,7 @@ Notes:
 ## Output directory:
 
 - **output_directory**: Local directory, or S3 location where output files will be written. If the local directory does not already exist, it will be created. Write permissions are required for the directory or S3 path.
-  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control tables `digestion.tsv`, `qc.tsv`, `qc.gradient.tsv` and `qc.composition.tsv` are always written, `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)), and, with `immonium` enabled, the `immonium_*` columns of `results.sage.parquet` are filled. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
+  - Possible analytical output files are `results.sage.parquet`, `lfq.parquet`, `matched_fragments.sage.parquet`, `results.sage.ptm-sites.parquet`, `results.sage.protein-sites.parquet`, and `spectral_library.sage.parquet`. Optional purpose-specific artifacts include `spectral_library.mzspeclib.txt`, `results.sage.pin`, the HTML report, and PTM-library Parquet/TSV files. The quality-control tables `digestion.tsv`, `qc.tsv`, `qc.gradient.tsv`, `qc.composition.tsv` and `qc.chromatography.tsv` are always written, `qc.modifications.tsv` when the search has a variable modification, `diagnostic_ions.tsv` when `diagnostic_ions` is enabled (see [Quality-control outputs](#quality-control-outputs)), and, with `immonium` enabled, the `immonium_*` columns of `results.sage.parquet` are filled. `results.json` and `run-summary.json` are always written after a successful run; the summary contains runtime, database size, 1% FDR counts, localized-PTM counts and thresholds, spectral-library entries and transitions, model/alignment outcomes, quantification counts, memory and batching controls, input-format counts, modification-expansion limits, recommended tolerances, and output paths.
   - `recommended_tolerances` suggests precursor and fragment tolerances from the rank-1 target PSMs at 1% spectrum q-value, pooled over all files. For each, `bias_ppm` is the median signed error (observed − theoretical), `sigma_ppm` is 1.4826 × the median absolute deviation around it, `required_ppm` is `|bias_ppm| + 4 × sigma_ppm`, and `recommended_ppm` is the smallest of ±5, 10, 20, 50 and 100 ppm that covers `required_ppm` (`null` when even 100 ppm does not). Precursor errors are `precursor_ppm`. Fragment errors start from each PSM's signed, intensity-weighted mean fragment error; the spread of those means understates how far single ions stray, so the median within-PSM standard deviation of the ion errors is added in quadrature to `sigma_ppm`. All errors are raw, before any `mass_recalibration`. Fewer than 100 such PSMs leave both estimates `null` and set `skipped`. The log prints the same result, for example `recommended tolerances: precursor ±10 ppm, fragment ±20 ppm (from 5321 PSMs)`. Only PSMs inside the configured windows are measured, so a recommendation at or above a configured half-width means the window may be clipping real errors: widen it and search again.
   - The HTML report's per-file table shows the median signed precursor error (`Median MS1 Mass Bias (ppm)`), the median signed fragment error (`Median MS2 Mass Bias (ppm)`) and the median absolute fragment error (`Median MS2 Absolute Error (ppm)`, a spread that is never negative) of target PSMs passing the report's q-value filter.
   - Example:
@@ -1959,6 +1961,25 @@ What it writes:
 Nothing else changes: no PSM is removed, rescored or requantified, and no other column moves.
 Filtering is yours — the column is there to be filtered or grouped on.
 
+### The bundled contaminant FASTA
+
+Sage Plus ships one, `assets/contaminants/universal-contaminants.fasta`: 381 entries covering the laboratory background that appears whatever the experiment was. It is **opt-in and off by default**. Point `database.contaminant_fasta` at it, and a configuration that does not name it searches exactly what it searched before:
+
+```json
+{
+  "database": {
+    "fasta": "my-proteome.fasta",
+    "contaminant_fasta": "assets/contaminants/universal-contaminants.fasta"
+  }
+}
+```
+
+The same file is in the release archives under `assets/contaminants/` and in the container at `/app/assets/contaminants/universal-contaminants.fasta`, so a path relative to the archive root or that absolute path works without downloading anything.
+
+The list of proteins is the universal contaminant library of Frankenfield et al. (*J. Proteome Res.* 2022, 21(9), 2104-2113, doi:10.1021/acs.jproteome.2c00145), built from 3,667 experiments. The sequences are not copied from it: that library states no license, so only its accession list was used and every sequence was downloaded again from UniProtKB release 2026_04, which publishes under CC BY 4.0. 367 of the 379 UniProt sequences are identical to the 2022 library and 12 have been revised by UniProt since; the remaining two entries are the FLAG and HA epitope tags, which have no UniProt record. `assets/contaminants/README.md` beside the file records the source, release, license, citation, checksum and how to rebuild it, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) carries the attribution.
+
+No accession is tagged and no keyword is involved: as above, a protein is a contaminant because it came from the contaminant file.
+
 **Splitting a combined FASTA.** Many distributions ship one file with the contaminants tagged in
 the accession, such as MaxQuant's `CON__` entries or `Cont_` in a UniProt-style header. One line
 of `awk` writes the two files this option expects (here for `CON__`; use the tag your file
@@ -2027,7 +2048,7 @@ The median rather than a high percentile, because the window sets how much of th
 
 ## Quality-control outputs
 
-Every search summarizes how the sample was digested, measures how much of each file was identified, compares the amino acid composition of what was identified with what the database predicts, and checks MS1 spectra for polymer contamination. The per-file headline numbers of all of it are in `qc.tsv`; the identification rate across each gradient is in `qc.gradient.tsv`; the digestion detail is in `digestion.tsv` and in `run-summary.json` under `qc.digestion`; the composition comparison is in `qc.composition.tsv`, with its headline numbers under `qc.composition`; polymer shares are logged and written to `run-summary.json` under `qc.polymers`. These outputs report numbers, never a pass or a fail: there are no thresholds, and an outlier file is one you see by sorting the table.
+Every search summarizes how the sample was digested, measures how much of each file was identified, compares the amino acid composition of what was identified with what the database predicts, reports the charge states and chromatographic width of its confident precursors, and checks MS1 spectra for polymer contamination. The per-file headline numbers of all of it are in `qc.tsv`; the identification rate across each gradient is in `qc.gradient.tsv`. The digestion summary is written to `digestion.tsv` and to `run-summary.json` under `qc.digestion`; the composition comparison to `qc.composition.tsv`, with its headline numbers under `qc.composition`; the charge and chromatography table to `qc.chromatography.tsv`, with the same rows under `qc.chromatography`; polymer shares are logged and written to `run-summary.json` under `qc.polymers`. A search with at least one variable modification also writes the occupancy of each searched definition to `qc.modifications.tsv` and `qc.modifications`. These outputs report numbers, never a pass or a fail: there are no thresholds, and an outlier file is one you see by sorting the table.
 
 ### Per-file QC table (`qc.tsv`)
 
@@ -2044,6 +2065,12 @@ One row per input file, one column per metric, repeating the headline number of 
 - `digestion_peptides`, `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: This file's row of `digestion.tsv`, repeated.
 - `top_polymer`, `top_polymer_tic_pct`: The polymer carrying the largest share of this file's MS1 TIC, and that share, from `qc.polymers`; `-` and 0 when the file's MS1 spectra were not read.
 - `largest_shift_residue`, `largest_shift_log2_ratio`, `jensen_shannon_distance`: This file's headline numbers from `qc.composition.tsv`: the residue whose observed share moved furthest from the database's expectation, that shift as a log2 ratio, and the Jensen-Shannon distance over the whole profile. All three are empty, as in `qc.composition.tsv`, when no residue has a finite ratio or neither profile counted residues, because an absent shift is not a shift of zero.
+- `charge_1_pct`, `charge_2_pct`, `charge_3_pct`, `charge_4_plus_pct`, `charge_unknown_pct`: Charge-state shares of this file's confident precursors, from `qc.chromatography.tsv`. Charge 4 stands for 4 and above, and the unknown column is there so the five sum to 100.
+- `peak_width`, `peak_width_kind`: The file's chromatographic width in its own retention-time unit, and which quantity that width is (`lfq_median_fwhm` with quantification, otherwise the repeat-PSM spread or its fallback). A width in one file's unit is not comparable with another's unless the kind matches.
+- `quantified_precursors`, `transferred_pct`: Precursors with an integrated intensity in this file, and the percent of them carried in by match-between-runs with no direct MS2 evidence here. Empty without quantification.
+- `modifications_searched`, `top_modification`, `top_modification_occupancy_pct`: How many searched variable-modification definitions `qc.modifications.tsv` reports for this file, the one with the highest occupancy, named as that table names it, and its percent of eligible sites. Empty when no modification was searched.
+- `contaminant_psms`, `contaminant_psm_share`: This file's confident PSMs from the contaminant FASTA and their share of its confident PSMs, in the same unit as `run-summary.json` (a fraction, not a percent). Empty without `database.contaminant_fasta`.
+- `in_source_flagged_psms`: PSMs of this file flagged as in-source fragmentation or in-source neutral-loss products. Empty when `in_source` is off.
 - `gradient_bins`, `empty_gradient_bins`, `min_bin_identified_pct`, `max_bin_identified_pct`: Summary of this file's rows in `qc.gradient.tsv`: how many bins it was split into (10, or 0 for a file with no spectra), how many of them acquired MS2 spectra and identified none, and the lowest and highest identification rate among the bins that acquired MS2 spectra.
 
 ### Identification rate across the gradient (`qc.gradient.tsv`)
@@ -2098,6 +2125,42 @@ In `qc.composition.tsv` the `expected` column stays the raw residue count of the
 Two further caveats. The expectation is the database as built: with `prefilter` enabled, or any peptide limit that drops peptides, the expected profile describes the database that was searched and not the whole in-silico digest. And a protein identified by one peptide contributes all of its database peptides to the expectation, which is the point (it removes the bias from which proteins are abundant) but makes the expectation noisier for a file with few identifications.
 
 The comparison reads data the run already holds: no spectrum is re-read, and the work is one pass over the retained PSMs and one over the database peptides, taking under a second for a 2.8 million peptide database.
+
+### Charge and chromatography (`qc.chromatography.tsv`)
+
+One row per file, then a `total` row, from the rank-1 target PSMs at 1% spectrum and peptide q-value. Charge states are counted as PSMs rather than peptides, because a charge state belongs to a PSM: `charge_1_pct` through `charge_4_plus_pct` and `charge_unknown_pct` are percentages of `confident_precursors` and sum to 100. Charge 4 and above share one bucket, and a file that states no charge for a spectrum is counted in `charge_unknown_pct` rather than being dropped, so the denominator is every confident PSM.
+
+`peak_width` is a chromatographic width in the file's own retention-time unit, and `peak_width_kind` says which of two quantities it is. They are not interchangeable:
+
+- `lfq_median_fwhm`, when `quant.lfq` is on: the median full width at half maximum of that file's integrated precursor peaks, taken from the same per-file peak geometry `lfq.parquet` reports. A peak whose trace never falls to half height inside the traced window contributes no width.
+- `repeat_psm_spread`, when quantification did not run, or for a file where no peak gave a width: the median of half the distance between every pair of PSMs of one peptide in that file, over every peptide identified more than once. Different charge states of one peptide count as repeats, so the estimate needs neither MS1 data nor quantification. This is the same quantity, computed by the same code, that the in-source check derives its co-elution tolerance from (see [In-source fragmentation](#in-source-fragmentation-and-neutral-losses)), and it is a spread between identifications, not a peak width: for the same file it is typically a fraction of the LFQ width, and the two should never be compared across rows of different kinds.
+- `repeat_psm_spread_fallback`: the same, for a file with fewer than 20 such pairs or whose repeats all sit at one retention time, where a fixed fraction of the file's retention-time span stands in. A row with this kind says the file had too few repeats to measure, not that it eluted that sharply.
+
+With quantification on, `quantified_precursors` counts the precursors with an integrated MS1 intensity in that file and `transferred_precursors` counts the ones among them with no direct MS2 evidence in that file, which is how match-between-runs carries a quantity into a file that did not identify the precursor; `transferred_pct` is their share. With `quant.lfq_settings.mbr` off the transferred count is zero, and without quantification all three columns are empty. The `total` row pools the charge counts and the quantification counts but leaves `peak_width` empty: a width in one file's retention-time unit does not average with another's.
+
+The whole table comes from data the run already holds, in one pass over the retained PSMs and one over the quantification map; no spectrum is re-read.
+
+### Variable modification occupancy (`qc.modifications.tsv`)
+
+How often the sites a searched variable modification could occupy actually carry it. One row per input file and searched definition, then the same rows for the whole run under `total`; written only when the search has at least one variable modification, and also recorded in `run-summary.json` under `qc.modifications`. The table is PTM-neutral: every rule and mass comes from the configuration, so a modification Sage knows nothing about is reported like any other.
+
+Rows are counted over **distinct peptidoforms**, not PSMs, so an abundant peptide does not weigh more than a scarce one. A peptidoform counts when a rank-1 target PSM identifies it with spectrum and peptide q-values of at most 0.01, however many PSMs support it; decoys are excluded. The `total` rows count each peptidoform once across files, so they are not the sum of the file rows.
+
+- `file`: Input file name, or `total`.
+- `site_rule`: The definition's site rule as a configuration key writes it, for example `M`, `peptide_n_term` or `internal_residue:K`. A definition configured at several site rules has one row per rule, so `M` and `W` oxidation are reported separately.
+- `mass`, `name`: The definition's monoisotopic mass, and its configured name (empty for a definition written as a bare mass).
+- `search_mode`: `database` for a definition expanded into the fragment index, `mass_offset` for one tested at search time.
+- `peptidoforms`: Peptidoforms with at least one site this rule selects.
+- `modified_peptidoforms`: Those carrying this definition on at least one of those sites.
+- `eligible_sites`: Sites the rule selects, summed over `peptidoforms`.
+- `modified_sites`: Eligible sites carrying this definition.
+- `occupancy_pct`: `modified_sites` as a percent of `eligible_sites`, zero when no site is eligible.
+
+Eligible sites come from the same resolver the search and the PTM localizer use, so a site is eligible exactly when the search could have modified it: the rule's own site rules, protein context for a `motif:` rule, and, for a definition with `site_mode: library`, only the sites the PTM library supports. A site counts as modified when the modification applied there is this definition - the same mass, name, neutral losses and channel offsets - so a different modification at an eligible site, or the same mass applied by a different definition, does not count.
+
+Read it as a site-level share of the identified peptidoforms, not as stoichiometry: it says how much of what was identified carries the modification, not how much of the protein in the sample does, which needs the intensities of the modified and unmodified forms. Two consequences are worth knowing. A `mass_offset` definition is placed at most once per peptide, so its occupancy cannot exceed one site per peptidoform however many sites are eligible. And a modification that makes a peptide easier to identify is over-represented among identified peptidoforms, which is why the denominator is the eligible sites of the peptidoforms that were identified, not of the database.
+
+Low occupancy of a modification you searched says the search space was wider than the sample needed; high occupancy of one you expected to be rare (artefactual oxidation, carbamylation, a label that should be complete) says the sample preparation, not the search, is what to look at. The complement is the amino acid composition check, which names a residue that goes missing because of a modification that was *not* searched.
 
 ### Polymer contamination (`qc.polymers`)
 

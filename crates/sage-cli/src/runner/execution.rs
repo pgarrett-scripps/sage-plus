@@ -504,6 +504,8 @@ impl Runner {
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
         let composition = self.composition_stats(&outputs.features, &filenames);
+        let chromatography =
+            self.chromatography_stats(&outputs.features, &filenames, areas.as_ref());
         let polymers = self.polymer_stats(&filenames);
         let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
@@ -513,8 +515,24 @@ impl Runner {
         self.parameters.output_paths.push(path);
         let path = self.write_composition(&composition)?;
         self.parameters.output_paths.push(path);
+        let path = self.write_chromatography(&chromatography)?;
+        self.parameters.output_paths.push(path);
+        let modifications = self.modification_occupancy_stats(&outputs.features, &filenames);
+        if let Some(path) = self.write_modification_occupancy(modifications.as_ref())? {
+            self.parameters.output_paths.push(path);
+        }
+        // Last, so it can repeat the headline number of every QC pass above.
         let identification = self.identification_stats(&outputs.features, &filenames);
-        for path in self.write_qc_tables(&identification, &digestion, &polymers, &composition)? {
+        for path in self.write_qc_tables(&qc::QcSources {
+            identification: &identification,
+            digestion: &digestion,
+            polymers: &polymers,
+            composition: &composition,
+            chromatography: &chromatography,
+            modifications: modifications.as_ref(),
+            contaminants: contaminants.as_ref(),
+            in_source: in_source.as_ref(),
+        })? {
             self.parameters.output_paths.push(path);
         }
 
@@ -826,6 +844,8 @@ impl Runner {
                 polymers,
                 diagnostic_ions,
                 composition: composition.run_stats(),
+                chromatography,
+                modifications,
             },
             output_paths,
             peak_rss_bytes,

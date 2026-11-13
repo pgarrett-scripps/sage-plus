@@ -1,5 +1,6 @@
 pub mod ambiguity;
 pub mod ambiguous_residues;
+pub mod chromatography;
 pub mod cleavage;
 pub mod composition;
 pub mod database;
@@ -22,6 +23,7 @@ pub mod mass_recalibration;
 pub mod ml;
 pub mod modification;
 pub mod motif;
+pub mod occupancy;
 pub mod peff;
 pub mod peptide;
 pub mod polymer;

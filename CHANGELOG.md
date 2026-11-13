@@ -10,6 +10,48 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- A contaminant FASTA ships with Sage Plus: `assets/contaminants/universal-contaminants.fasta`,
+  381 entries of laboratory background, in the release archives under `assets/contaminants/` and
+  in the container at `/app/assets/contaminants/`. It is opt-in and off by default, searched only
+  when `database.contaminant_fasta` names it, with no keyword and no tagged accession, so a
+  configuration that does not name it searches what it searched before. Which proteins to
+  include comes from the universal contaminant library of Frankenfield et al. (J. Proteome Res.
+  2022, 21(9), 2104-2113), built from 3,667 experiments. The sequences are not copied from it:
+  that library states no license, so only its accession list was used and every sequence was
+  downloaded again from UniProtKB release 2026_04, which publishes under CC BY 4.0. 367 of the
+  379 UniProt sequences are identical to the 2022 library and 12 have been revised by UniProt
+  since; the other two entries are the FLAG and HA epitope tags, which have no UniProt record.
+  `assets/contaminants/README.md` records the source, release, download date, license, citation,
+  checksum and rebuild procedure, and `THIRD_PARTY_NOTICES.md` carries the attribution.
+- `qc.chromatography.tsv` reports, per searched file and for the run, the charge-state shares of
+  the confident precursors (1+, 2+, 3+, 4+ and above, plus the share whose charge the file did
+  not state, so the five sum to 100), a chromatographic peak width, and what quantification did
+  in that file. The width carries the name of the quantity it is, because two different ones are
+  available and they are not interchangeable: with `quant.lfq` on it is `lfq_median_fwhm`, the
+  median full width at half maximum of that file's integrated peaks; without quantification, or
+  for a file whose peaks never fell to half height, it is `repeat_psm_spread`, the median of half
+  the distance between every pair of PSMs of one peptide, which is the quantity the in-source
+  check already derives its co-elution tolerance from and is now computed for both by the same
+  code, or `repeat_psm_spread_fallback` for a file with too few repeats to measure. With
+  quantification on, `quantified_precursors` counts the precursors with an integrated intensity
+  in the file and `transferred_precursors` those among them with no direct MS2 evidence there,
+  which is what match-between-runs transferred. The same rows appear in `run-summary.json` under
+  `qc.chromatography`. Everything comes from data the run already holds, in one pass over the
+  retained PSMs and one over the quantification map. Schema in
+  `schemas/qc_chromatography.v1.tsv.schema.json`; details in
+  [DOCS.md](DOCS.md#charge-and-chromatography-qcchromatographytsv).
+- Occupancy of every searched variable modification, per file, in a new `qc.modifications.tsv`
+  (schema `qc.modifications.v1.tsv.schema.json`) and in `run-summary.json` under
+  `qc.modifications`. One row per input file and searched definition, then the same rows for the
+  whole run: the sites the definition's own site rules select in the confident target
+  peptidoforms of that file, how many of them carry it, and the share. Counted over distinct
+  peptidoforms, not PSMs, so an abundant peptide does not weigh more than a scarce one, and
+  eligible sites come from the resolver the search and the PTM localizer already use, so a site
+  is eligible exactly when the search could have modified it (protein context for a `motif:`
+  rule, PTM-library support for a `site_mode: library` definition). Mass-offset definitions are
+  reported like indexed ones and named by their `search_mode`. The table is written only when the
+  search has at least one variable modification; no existing output changes, and the numbers are
+  a site-level share of what was identified, not stoichiometry.
 - `database.entrapment_fasta` searches a proteome that cannot be in the sample alongside
   `database.fasta`, which is how a reported q-value is tested: every discovery of an entrapment
   protein is false by construction, so the discoveries of each class estimate the false discovery
@@ -57,13 +99,16 @@ entries are retained below for provenance.
   it, and `matched_observed_residues` reports how much of the observed profile carried a
   weight. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
   [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
-||||||| 587f8ff
 - Every search writes `qc.tsv`, one row per input file and one column per metric: spectra read,
   retention-time span, summed MS1 total ion current, PSMs, peptides, proteins, the share of
   acquired MS2 spectra that were identified, this file's `digestion.tsv` headline numbers, its
   largest polymer share, the residue whose composition moved furthest from the database's
-  expectation with that shift and the Jensen-Shannon distance from `qc.composition.tsv`, and a
-  summary of its gradient bins. It repeats the per-file headline
+  expectation with that shift and the Jensen-Shannon distance from `qc.composition.tsv`, the
+  charge-state shares, labelled peak width and match-between-runs share from
+  `qc.chromatography.tsv`, the most occupied modification from `qc.modifications.tsv`, the
+  contaminant share and the in-source flagged count where those features are on, and a summary
+  of its gradient bins. Every one of those is the number its own output reports, read from the
+  stats that pass already computed, and a column whose pass measured nothing is empty, not zero. It repeats the per-file headline
   number of every other QC output so one table shows a whole run, and it has no `total` row
   because a retention-time span and an identification rate do not pool across files.
 - Every search also writes `qc.gradient.tsv`: each file split into ten equal-width

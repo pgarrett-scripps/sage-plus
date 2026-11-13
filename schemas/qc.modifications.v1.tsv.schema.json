@@ -1,0 +1,72 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc_modifications",
+  "title": "qc.modifications.tsv",
+  "description": "Occupancy of every searched variable modification: one row per input file and searched definition, then the same rows for the whole run under `total`. Written only when the search has at least one variable modification. Also written to run-summary.json under qc.modifications.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, or `total` for the rows covering all files."
+    },
+    {
+      "name": "site_rule",
+      "type": "string",
+      "description": "The definition's site rule as a configuration key writes it, for example `M`, `peptide_n_term` or `internal_residue:K`. A definition configured at several site rules has one row per rule."
+    },
+    {
+      "name": "mass",
+      "type": "number",
+      "description": "Monoisotopic mass of the definition, six decimals."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "The definition's configured name; empty for a definition written as a bare mass.",
+      "constraints": {
+        "required": false
+      }
+    },
+    {
+      "name": "search_mode",
+      "type": "string",
+      "description": "`database` for a definition expanded into the fragment index, `mass_offset` for one tested at search time.",
+      "constraints": {
+        "enum": [
+          "database",
+          "mass_offset"
+        ]
+      }
+    },
+    {
+      "name": "peptidoforms",
+      "type": "integer",
+      "description": "Distinct confident target peptidoforms with at least one site this rule selects."
+    },
+    {
+      "name": "modified_peptidoforms",
+      "type": "integer",
+      "description": "Those peptidoforms carrying this definition on at least one of those sites."
+    },
+    {
+      "name": "eligible_sites",
+      "type": "integer",
+      "description": "Sites this rule selects, summed over `peptidoforms`."
+    },
+    {
+      "name": "modified_sites",
+      "type": "integer",
+      "description": "Eligible sites carrying this definition."
+    },
+    {
+      "name": "occupancy_pct",
+      "type": "number",
+      "description": "`modified_sites` as a percent of `eligible_sites`, three decimals; zero when no site is eligible."
+    }
+  ],
+  "missingValues": []
+}

@@ -803,6 +803,23 @@ fn classify(
     })
 }
 
+/// Append half the distance between every pair of `values`, each pair once: how
+/// far each of two PSMs of one peptide sits from the centre of the pair.
+///
+/// This is the observation [`derive_rt_tolerance`] takes a percentile of, and
+/// the quantity the co-elution window applies to a PSM and its parent's median.
+/// Distances from the group's own median would be biased low instead: the
+/// median observation is zero from itself by construction.
+pub fn pairwise_half_distances(values: &[f32], out: &mut Vec<f32>) {
+    for (index, left) in values.iter().enumerate() {
+        out.extend(
+            values[index + 1..]
+                .iter()
+                .map(|right| (left - right).abs() / 2.0),
+        );
+    }
+}
+
 /// Co-elution tolerance of one file: the [`RT_PERCENTILE`]th percentile (the
 /// median) of how far each of two PSMs of one peptide sits from the centre of
 /// the pair, over every pair of PSMs of every peptide seen more than once in
@@ -1033,13 +1050,7 @@ fn annotate_file(
         // biased low instead: the median PSM is zero from itself by
         // construction, and a peptide seen twice contributes the same half
         // distance twice.
-        for (index, left) in values.iter().enumerate() {
-            spreads.extend(
-                values[index + 1..]
-                    .iter()
-                    .map(|right| (left - right).abs() / 2.0),
-            );
-        }
+        pairwise_half_distances(values, &mut spreads);
     }
     let (rt_tolerance, rt_tolerance_source) = match settings.rt_tolerance {
         Some(configured) => (configured, "configured"),

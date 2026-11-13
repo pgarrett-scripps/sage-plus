@@ -2,7 +2,7 @@
   "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
   "name": "qc",
   "title": "qc.tsv",
-  "description": "One row per searched file: the headline quality-control number of every QC output, so one table shows a whole run. There is no total row, because a retention-time span and an identification rate do not pool across files. The per-bin detail is in qc.gradient.tsv, the digestion detail in digestion.tsv, the per-residue composition in qc.composition.tsv, and the polymer detail in run-summary.json under qc.polymers.",
+  "description": "One row per searched file: the headline quality-control number of every QC output, so one table shows a whole run. Nothing here is computed twice: each column is the number its own output reports for that file. There is no total row, because a retention-time span and an identification rate do not pool across files. The per-bin detail is in qc.gradient.tsv, the digestion detail in digestion.tsv, the per-residue composition in qc.composition.tsv, the charge and chromatography rows in qc.chromatography.tsv, the per-modification occupancy in qc.modifications.tsv, and the polymer detail in run-summary.json under qc.polymers. A column whose pass measured nothing is empty, not zero.",
   "dialect": {
     "delimiter": "\t",
     "header": true
@@ -132,6 +132,126 @@
         "required": false
       },
       "description": "Jensen-Shannon distance between this file's observed and expected composition profiles, four decimals: 0 for identical profiles, 1 for profiles with no residue in common. Empty when either profile counted no residues."
+    },
+    {
+      "name": "charge_1_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent of this file's confident precursors at charge 1, from qc.chromatography.tsv. Empty when that pass counted no precursor in this file."
+    },
+    {
+      "name": "charge_2_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent at charge 2."
+    },
+    {
+      "name": "charge_3_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent at charge 3."
+    },
+    {
+      "name": "charge_4_plus_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent at charge 4 or above."
+    },
+    {
+      "name": "charge_unknown_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent whose charge the file did not state, so the five charge columns sum to 100."
+    },
+    {
+      "name": "peak_width",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Chromatographic peak width in this file's retention-time unit, from qc.chromatography.tsv. Empty when neither source had anything to measure."
+    },
+    {
+      "name": "peak_width_kind",
+      "type": "string",
+      "constraints": {
+        "required": false
+      },
+      "description": "Which quantity peak_width is: `lfq_median_fwhm` with quantification, otherwise the repeat-PSM spread (`repeat_psm_spread`, or `repeat_psm_spread_fallback` where the file had too few repeats). Empty with peak_width."
+    },
+    {
+      "name": "quantified_precursors",
+      "type": "integer",
+      "constraints": {
+        "required": false
+      },
+      "description": "Precursors with an integrated intensity in this file. Empty without quantification."
+    },
+    {
+      "name": "transferred_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Percent of those that came from match-between-runs, with no direct MS2 evidence in this file. Empty without quantification or with nothing quantified."
+    },
+    {
+      "name": "modifications_searched",
+      "type": "integer",
+      "constraints": {
+        "required": false
+      },
+      "description": "Searched variable-modification definitions reported for this file in qc.modifications.tsv. Empty when no modification was searched."
+    },
+    {
+      "name": "top_modification",
+      "type": "string",
+      "constraints": {
+        "required": false
+      },
+      "description": "The definition with the highest occupancy in this file, named as qc.modifications.tsv names it: the configured name, or the site rule and mass for a definition given as a bare mass. Empty when no modification was searched."
+    },
+    {
+      "name": "top_modification_occupancy_pct",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "That definition's modified sites as a percent of its eligible sites in this file."
+    },
+    {
+      "name": "contaminant_psms",
+      "type": "integer",
+      "constraints": {
+        "required": false
+      },
+      "description": "Confident PSMs of this file whose peptide belongs to a contaminant protein, from run-summary.json under contaminants.files. Empty without a `database.contaminant_fasta`."
+    },
+    {
+      "name": "contaminant_psm_share",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Those PSMs over this file's confident PSMs, as the run summary reports it: a fraction, not a percent. Empty without a contaminant FASTA."
+    },
+    {
+      "name": "in_source_flagged_psms",
+      "type": "integer",
+      "constraints": {
+        "required": false
+      },
+      "description": "PSMs of this file flagged as in-source fragmentation or in-source neutral-loss products. Empty when `in_source` is off."
     },
     {
       "name": "gradient_bins",
