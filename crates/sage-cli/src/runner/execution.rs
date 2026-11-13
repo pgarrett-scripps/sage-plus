@@ -504,6 +504,8 @@ impl Runner {
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
         let composition = self.composition_stats(&outputs.features, &filenames);
+        let chromatography =
+            self.chromatography_stats(&outputs.features, &filenames, areas.as_ref());
         let polymers = self.polymer_stats(&filenames);
         let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
@@ -512,6 +514,8 @@ impl Runner {
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
         let path = self.write_composition(&composition)?;
+        self.parameters.output_paths.push(path);
+        let path = self.write_chromatography(&chromatography)?;
         self.parameters.output_paths.push(path);
 
         if self.parameters.annotate_matches {
@@ -822,6 +826,7 @@ impl Runner {
                 polymers,
                 diagnostic_ions,
                 composition: composition.run_stats(),
+                chromatography,
             },
             output_paths,
             peak_rss_bytes,

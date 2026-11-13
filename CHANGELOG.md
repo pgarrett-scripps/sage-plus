@@ -10,6 +10,23 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `qc.chromatography.tsv` reports, per searched file and for the run, the charge-state shares of
+  the confident precursors (1+, 2+, 3+, 4+ and above, plus the share whose charge the file did
+  not state, so the five sum to 100), a chromatographic peak width, and what quantification did
+  in that file. The width carries the name of the quantity it is, because two different ones are
+  available and they are not interchangeable: with `quant.lfq` on it is `lfq_median_fwhm`, the
+  median full width at half maximum of that file's integrated peaks; without quantification, or
+  for a file whose peaks never fell to half height, it is `repeat_psm_spread`, the median of half
+  the distance between every pair of PSMs of one peptide, which is the quantity the in-source
+  check already derives its co-elution tolerance from and is now computed for both by the same
+  code, or `repeat_psm_spread_fallback` for a file with too few repeats to measure. With
+  quantification on, `quantified_precursors` counts the precursors with an integrated intensity
+  in the file and `transferred_precursors` those among them with no direct MS2 evidence there,
+  which is what match-between-runs transferred. The same rows appear in `run-summary.json` under
+  `qc.chromatography`. Everything comes from data the run already holds, in one pass over the
+  retained PSMs and one over the quantification map. Schema in
+  `schemas/qc_chromatography.v1.tsv.schema.json`; details in
+  [DOCS.md](DOCS.md#charge-and-chromatography-qcchromatographytsv).
 - `database.entrapment_fasta` searches a proteome that cannot be in the sample alongside
   `database.fasta`, which is how a reported q-value is tested: every discovery of an entrapment
   protein is false by construction, so the discoveries of each class estimate the false discovery
