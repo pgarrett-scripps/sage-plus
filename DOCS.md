@@ -1203,7 +1203,9 @@ alongside the library, because the location table does not embed chemical masses
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
   belongs to a contaminant, in the `is_contaminant` column, and `run-summary.json` reports the
   contaminant share of the confident PSMs for the run and per file. Unset leaves every output
-  column as it was. See [Contaminant proteins](#contaminant-proteins).
+  column as it was. One is bundled, `assets/contaminants/universal-contaminants.fasta`, and
+  searched only when this key names it. See [Contaminant proteins](#contaminant-proteins) and
+  [The bundled contaminant FASTA](#the-bundled-contaminant-fasta).
 - **clip_n_term_met**: Boolean. Also digest each protein without its initiator methionine
   when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
   and are protein N-terminal. Enzymatic digests only (default: true). See
@@ -1958,6 +1960,25 @@ What it writes:
 
 Nothing else changes: no PSM is removed, rescored or requantified, and no other column moves.
 Filtering is yours — the column is there to be filtered or grouped on.
+
+### The bundled contaminant FASTA
+
+Sage Plus ships one, `assets/contaminants/universal-contaminants.fasta`: 381 entries covering the laboratory background that appears whatever the experiment was. It is **opt-in and off by default**. Point `database.contaminant_fasta` at it, and a configuration that does not name it searches exactly what it searched before:
+
+```json
+{
+  "database": {
+    "fasta": "my-proteome.fasta",
+    "contaminant_fasta": "assets/contaminants/universal-contaminants.fasta"
+  }
+}
+```
+
+The same file is in the release archives under `assets/contaminants/` and in the container at `/app/assets/contaminants/universal-contaminants.fasta`, so a path relative to the archive root or that absolute path works without downloading anything.
+
+The list of proteins is the universal contaminant library of Frankenfield et al. (*J. Proteome Res.* 2022, 21(9), 2104-2113, doi:10.1021/acs.jproteome.2c00145), built from 3,667 experiments. The sequences are not copied from it: that library states no license, so only its accession list was used and every sequence was downloaded again from UniProtKB release 2026_04, which publishes under CC BY 4.0. 367 of the 379 UniProt sequences are identical to the 2022 library and 12 have been revised by UniProt since; the remaining two entries are the FLAG and HA epitope tags, which have no UniProt record. `assets/contaminants/README.md` beside the file records the source, release, license, citation, checksum and how to rebuild it, and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) carries the attribution.
+
+No accession is tagged and no keyword is involved: as above, a protein is a contaminant because it came from the contaminant file.
 
 **Splitting a combined FASTA.** Many distributions ship one file with the contaminants tagged in
 the accession, such as MaxQuant's `CON__` entries or `Cont_` in a UniProt-style header. One line
