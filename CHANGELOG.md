@@ -9,16 +9,174 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.19] - 2026-11-12
+
+### Added
+- `sage_core::spectral_library::write_mzspeclib` writes an mzSpecLib 1.0 library entry by entry
+  to any `io::Write` and reports a sink's error, instead of building the whole library text in
+  memory. `serialize_mzspeclib` keeps its signature and its bytes, and now calls the streaming
+  writer into a `Vec<u8>`; a test pins the two outputs byte for byte, including the header-only
+  case. No behaviour changes: the CLI still serializes and writes as before.
+
 ### Changed
+- Required `sage-plus-raw` 0.2.0 (was 0.1.2) in `sage-cloudpath`. Opening a Thermo `.raw` file
+  no longer keeps every scan's trailer and instrument-log record, only the compact trailer
+  table that decoding reads: 0.2.0 makes that the default for `SpectrumReader::open_path`, and
+  one open of a 136k-scan Orbitrap file goes from 10,027,700 allocations and 756 MiB resident
+  to 543,991 and 79 MiB. Over the five PXD028735 files at 20 threads, peak resident memory of
+  the whole search falls from 11.710 GiB to 7.750 GiB, sampled ten times a second (the
+  program's own figure, 11.708 to 7.801 GiB, agrees), and over one 3.5 GB file from 2.939 to
+  2.246 GiB. Search time is unchanged within the run-to-run spread: 61 s for the reference
+  against 63 s pinned, both binaries measured alone on the machine in one job whose busy cores
+  averaged 2,536 MHz against their usual 2,826. Output is unchanged: all 405,032 PSM rows of
+  the five-file run hash the same, as do the single-file `.raw`, mzML and `.d` runs. No source
+  line changed, because 0.2.0's two breaking changes are in the per-scan record accessors that
+  Sage Plus never calls (`OpenOptions::default` is now `spectra_only`, and `scan_parameters`,
+  `scan_params`, `inst_log_record` and `status_log_entry` return `Result` instead of `Option`).
+- Required `sage-plus-tdf` 0.2.4 (was 0.2.3) in `sage-cloudpath` and `sage-dia`, which adds
+  `DecodeBuffers` and the `*_into_buffers` readers, keeping the buffer the Zstandard decoder
+  writes into as well as the output vectors; the crate reads every frame of a 2.0 GB
+  acquisition in 9.03 s against 9.39 s. Sage Plus calls none of the new methods, so it takes
+  the existing ones unchanged, and a `.d` search returns identical rows.
+- Reading a Thermo RAW file is faster and holds less memory, with identical output. The file is
+  opened once instead of twice, each scan is decoded into an m/z buffer and a record-block buffer
+  kept for the whole file instead of three allocations per scan, and each scan becomes its Sage
+  spectrum as it is read, so the f64 m/z array of every scan in the file is no longer alive at
+  once. On a 3.5 GB Q Exactive file the read stage falls from 1,392 ms to 1,161 ms and peak
+  memory from 2.44 GiB to 2.10 GiB, with a byte-identical `results.sage.parquet`.
+
+## [v0.1.0-beta.18] - 2026-11-11
+
+### Security
+- Updated `rustix` 1.1.4 to 1.1.6 in the lockfile for RUSTSEC-2026-0486, an unsoundness in its
+  xattr functions, which mark unwritten bytes of a zero-length buffer as initialized. Sage Plus
+  calls none of them; `rustix` is reached through `tempfile` and `is-terminal`, and the advisory
+  was published after Beta 18's dependencies were last audited, so the release workflow's
+  `cargo audit --deny unsound` is what found it. Lockfile only, no manifest change. Cargo also
+  moved the crates whose `windows-sys` requirement spans several minor versions from 0.61.2 onto
+  the 0.60.2 and 0.52.0 entries already in the lockfile, because `rustix` 1.1.6 itself requires
+  0.52: Windows-only edges, no crate version added or removed.
+- Updated nine transitive dependencies flagged by `cargo audit`, lockfile only, no manifest
+  change: rustls 0.23.45 → 0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), rustls-webpki
+  0.103.15 → 0.103.16 (RUSTSEC-2026-0382), webpki-root-certs 1.0.9 → 1.0.11
+  (RUSTSEC-2026-0383), quinn-proto 0.11.15 → 0.11.19 (RUSTSEC-2026-0338 through 0342), zstd
+  0.14.2 → 0.14.3 (RUSTSEC-2026-0391), zstd-safe 8.1.0 → 8.2.0 (RUSTSEC-2026-0398/0403 plus
+  the ten unsound advisories RUSTSEC-2026-0395 through 0406), zstd-sys 2.1.1 → 2.1.2
+  (RUSTSEC-2026-0410), libz-sys 1.1.29 → 1.1.33 (RUSTSEC-2026-0418) and tokio 1.53.2 → 1.54.1
+  (RUSTSEC-2026-0386). None is a direct dependency of a Sage Plus crate; all are reached
+  through reqwest/object_store, parquet or mzdata.
+- Required `sage-plus-tdf` 0.2.2 (was 0.2.1) in `sage-cloudpath` and `sage-dia`. 0.2.1 pinned
+  `ruzstd` exactly at 0.9.0, which made RUSTSEC-2026-0344 unreachable from this repository;
+  0.2.2 relaxes the pin and the lockfile now takes ruzstd 0.9.1, clearing that advisory.
+- Required `rusqlite` 0.41 (was 0.35) in `sage-cloudpath`, which takes libsqlite3-sys from
+  0.33.0 to 0.39.1 and clears RUSTSEC-2026-0459 (the C SQLite CVE-2026-119375; the advisory is
+  first patched in libsqlite3-sys 0.39.0, and rusqlite 0.41 is the first release that accepts
+  it). `rusqlite` reads the Bruker TDF/TSF SQLite databases in `denoise.rs`; the read-only
+  connection, prepared statements and row accessors Sage Plus uses are unchanged across the six
+  minor versions, so no call site moved and no search behaviour changes. The lockfile also takes
+  hashlink 0.10.0 to 0.12.2 and adds foldhash, rsqlite-vfs and sqlite-wasm-rs, the last two
+  reached only on wasm targets.
+
+### Changed
+- Required `sage-plus-tdf` 0.2.3 (was 0.2.2) and `sage-plus-raw` 0.1.2 (was 0.1.1), which make
+  reading instrument files faster with the same decoded values. Thermo RAW: each scan's peak,
+  label, noise and profile record blocks are read in one read into a reused buffer instead of
+  roughly 2,364 four-byte reads per scan, and the seeks per scan fall from six to two, which the
+  reader measures as centroid decoding of 20,000 scans in 0.147 s instead of 0.190 s and profile
+  decoding of 8,000 scans in 0.92 s instead of 1.78 s. Bruker TDF: the Zstandard frame layout is
+  split into its byte planes once instead of reading each word through a bounds-checking closure,
+  the acquisition type is decided in one pass over the frames, and the schema object list is
+  cached so opening an acquisition issues one `sqlite_master` query per database rather than one
+  per typed table; the reader measures every frame of a 1.0 GB acquisition in 9.95 s instead of
+  10.24 s. Searches of mzML, Thermo RAW and Bruker `.d` inputs produce byte-identical
+  `results.sage.parquet` and `lfq.parquet` across the bump.
+- Searching is faster, with identical output. A spectrum's fragment tolerance windows and
+  the index buckets they touch are planned once per mass offset instead of once per isotope
+  error, and every isotope error's per-bucket precursor range is then resolved in one pass
+  over those buckets, so a bucket's search path is read from memory once rather than once
+  per isotope error. On five PXD028735 files at 20 threads the search stage falls from 23.8 s
+  to 17.0 s and the run from 59.7 s to 52.3 s; with variable modifications (M oxidation,
+  N-terminal acetyl) the run falls from 98.5 s to 77.7 s. `results.sage.parquet` and
+  `lfq.parquet` are byte-identical in every case, and peak memory is unchanged.
+- A search uses less memory, with identical output. The MS1 spectra retained for label-free
+  quantification no longer carry the two per-peak charge columns that quantification never
+  reads, and which are constants for an MS1 scan without ion mobility. They were 2 of the 10
+  bytes of every retained MS1 peak, held from the first file to the end of quantification. On
+  five PXD028735 files at 20 threads peak memory falls from 5.27 GiB to 4.92 GiB, and with
+  variable modifications (M oxidation, N-terminal acetyl) from 7.74 GiB to 7.42 GiB; wall time
+  is unchanged (52.28 s to 52.57 s and 77.66 s to 77.76 s, both inside run-to-run noise) and
+  `results.sage.parquet` and `lfq.parquet` are byte-identical.
+- A search uses less memory again, with identical output, by shrinking the two structs a
+  search holds millions of. `Peptide` falls from 144 to 120 bytes and `Feature` from 528 to
+  344 bytes: the labeling channel and library group identity move into one boxed
+  `PeptideLabel`, and the matched-fragment detail is boxed. Both are absent in an ordinary
+  label-free search that writes no fragment table, so an inline `None` was the common case.
+  On five PXD028735 files at 20 threads peak memory falls from 4.91 GiB to 4.78 GiB, and with
+  variable modifications (M oxidation, N-terminal acetyl) from 7.39 GiB to 7.09 GiB. Wall time
+  is unchanged (54.5 s to 54.3 s and 80.1 s to 79.3 s, from runs of the two binaries
+  alternated inside one exclusive job), and `results.sage.parquet` and `lfq.parquet` are
+  byte-identical.
+- The MS1 spectra retained for label-free quantification are freed as soon as quantification
+  is done, instead of at the end of the run, so output serialization and upload no longer run
+  with them resident. On five PXD028735 files resident memory at the start of the write phase
+  falls from 4.76 GiB to 4.22 GiB; the run's peak is unchanged, because it is inside
+  quantification, and `results.sage.parquet` and `lfq.parquet` are byte-identical.
+- `sage-core` API, for users of the library crate: `Peptide::label_channel` and
+  `Peptide::label_group_override` are no longer fields. They are the `channel` and
+  `group_override` fields of `PeptideLabel`, held as `Peptide::label`
+  (`Option<Box<PeptideLabel>>`), which is `None` when both are. Read them with the new
+  `label_channel()`, `label_channel_str()`, `label_group_override()` and
+  `label_group_override_str()`, and write them with `set_label_channel()` and
+  `set_label_group_override()`, which keep that invariant so peptide equality and ordering
+  are unchanged. `Feature::fragments` is now `Option<Box<Fragments>>`. No configuration key,
+  CLI flag, output column, parquet schema or serialized form changes:
+  `SpectralLibraryEntry::label_channel` and the `label_channel` output column keep their
+  names and types.
+- Merged upstream Sage through `4a051b2` (2026-10-22). Where upstream and Sage Plus solve the
+  same problem, the Sage Plus implementation is kept: named modifications with explicit sites
+  (not upstream's named PTMs), `z_dot` ions (not upstream's radical z ions), per-modification
+  `max_count`/`max_total_count` (not upstream's per-mod variable limits), and the Bruker and
+  Thermo readers from `sage-plus-tdf`/`sage-plus-raw` (not timsrust 0.6.7). Telemetry stays
+  removed. Upstream's LFQ and score-ordering fixes are taken; see below.
 - Dependencies: parquet 60 (was 59), mzdata 0.67.4 (was 0.65.5; reads mzMLb input), base64
   0.22, itertools 0.15, thiserror 2; num_cpus is replaced by the standard library. Results and
   the Parquet schema are unchanged. mzMLb isolation windows pick up mzdata's fixes: both offsets
   are kept when they come before the target m/z (pwiz Waters files), and a window with no
   offsets or limits gets correct bounds.
-- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.0, `sage-plus-raw`
-  0.1.0) instead of git revisions, so Sage Plus builds with one parquet version.
+- The Bruker and Thermo readers now come from crates.io (`sage-plus-tdf` 0.2.1, `sage-plus-raw`
+  0.1.1) instead of git revisions, so Sage Plus builds with one parquet version. The reader
+  updates are additive: `.raw` input decodes ETD and EThcD activation from the version 66
+  scan-event preamble for MS2 events whose reaction tag is unresolved, and TSF line spectra and
+  miniTDF spectra reject non-finite and negative intensities as corrupt data instead of handing
+  NaN intensities to the caller.
+- mzML reading is about twice as fast. The binary data arrays of one spectrum are now
+  base64-decoded and inflated in parallel on the configured thread pool, in batches of 32 MB
+  of base64, instead of one array at a time on the thread walking the document; the decoder
+  and its buffers are reused for a whole file instead of being rebuilt for each of the
+  roughly 300,000 arrays in a 1.2 GB file. On five 1.2 GB Thermo mzML files the read stage
+  falls from 37.7 s to 18.9 s and the whole search from 80.0 s to 60.5 s, with
+  byte-identical `results.sage.parquet` and `lfq.parquet` and no more memory. Whole-file
+  gzip and mzMLb input are unchanged.
 
 ### Fixed
+- mzML binary arrays in a numpress encoding are rejected with the accession and encoding
+  named, instead of being read as IEEE floats. `MS:1002312`, `MS:1002313`, `MS:1002314` and the
+  numpress-plus-zlib terms `MS:1002746` through `MS:1002748` matched no branch of the cvParam
+  dispatch, so a numpress array was decoded as raw floats: wrong m/z and intensity values with
+  no error at all. Sage has no numpress decoder, so the array is now an error
+  (`unsupported cvParam MS:1002312 (MS-Numpress linear prediction compression): ...`). Files
+  without numpress arrays are unaffected.
+- LFQ integration windows contain only bins that pass both the score and spectral-angle
+  thresholds, on both sides (upstream `75a5300`, `63f10e7`). The window previously always included
+  one bin either side of the apex whether or not it passed, and then dropped the last passing bin
+  on the right; a window may now be a single bin. The apex-recentering path had the matching
+  off-by-one, because `peak_bounds` returned an exclusive right bound while the integration sliced
+  it inclusively. Peak areas, `peak_start_rt` and `peak_end_rt` change for affected precursors.
+  Alignment also prefers the smallest displacement when two retention-time shifts correlate
+  equally well, and the spectral-angle distance is accumulated in f64 instead of f32.
+- PSM ordering is total (upstream `df16dec`, lazear/sage#236). `Score` compared hyperscores with
+  a partial comparison, so a NaN hyperscore could make the ranking of a whole spectrum's
+  candidates depend on heap order.
 - `localized_peptide` gives each copy of a multi-copy ambiguous modification its own ProForma group
   (`#g1`, `#g2`, ...), with every other candidate tagged in each group:
   `PES[Phospho#g1(0.95)]PT[#g1(0.20)][#g2(0.20)]IS[Phospho#g2(0.85)]K`. Beta 17 put every copy in one
@@ -27,6 +185,17 @@ entries are retained below for provenance.
 - Localization output is the same from run to run. Modifications were numbered in hash-map order,
   so `#g1`/`#g2` in `localized_peptide` and the row order of `results.sage.ptm-sites.parquet` could
   change between two runs of the same search.
+
+### Notes
+- 2026-11-11: the Beta 9 entry below reports 24,038 LFQ precursors at 1% q-value for linear
+  alignment on five PXD028735 files. That was measured before the LFQ warp tie rule of upstream
+  `75a5300` (listed under Fixed above), which keeps a trace whose reference carries no signal at
+  zero shift instead of pushing it out of its window. The traces that rule used to discard are
+  almost all shifted decoys, so the surviving decoy population grows and the 1% precursor cut
+  rises. On the current code the same configuration gives 20,714 for linear and 31,376 for
+  nonlinear; target precursors and their peak scores are unchanged, as are PSMs, peptides and
+  proteins. The Beta 9 entry is left as measured; `docs/design/NONLINEAR_RT_ALIGNMENT.md` carries
+  both sets of numbers and the configuration they were measured with.
 
 ## [v0.1.0-beta.17] - 2026-10-09
 
@@ -988,6 +1157,9 @@ The entries below predate independent Sage Plus versioning and are retained from
 - `protein_grouping_peptide_fdr` parameter to control the peptide FDR threshold used for confident peptides during protein grouping (default: 0.01)
 - Initial support for LFQ on data with ion mobility.
 - Speedup on the generation of databases when large number of peptides are redundant.
+- Database splitting and prefiltering to reduce memory usage (`database.prefilter`, `database.prefilter_chunk_size`, and `database.prefilter_low_memory` settings)
+- Per-modification occurrence limits using `{"mass": <mass>, "max_count": <limit>}` entries in `database.variable_mods`; existing bare-mass entries remain supported.
+- `database.max_combinations` to cap the number of peptide variants (including the unmodified form) generated from variable modifications, preferring variants with fewer modifications.
 - Initial support for searching diaPASEF data
 - `override_precursor_charge` setting that forces multiple charge states to be searched
 - Cross-cloud storage support: Replaced AWS SDK with the `object_store` crate. Sage now natively supports reading/writing from Amazon S3, Google Cloud Storage, and Azure Blob Storage using `s3://`, `gs://`, and `az://` URL schemes.
@@ -998,6 +1170,7 @@ The entries below predate independent Sage Plus versioning and are retained from
 - CITATION.cff file
 
 ### Fixed
+- Use neutral NH3 mass in c, x, and non-radical z fragment calculations.
 - Handle negative mass errors for .pin files
 - Extract precursor m/z from 'isolation window target m/z' if missing
 - Selected ion m/z of 0.0 was overwriting precursor.mz
@@ -1005,8 +1178,12 @@ The entries below predate independent Sage Plus versioning and are retained from
 - Bruker `.tdf` filename handling (use parent directory name)
 - Performance optimizations on prefiltering
 - Picked protein FDR now correctly uses only proteotypic peptides for competition
+- Fixed bug in MS1 picked-precursor FDR where target and decoy q-values were not distinguished when assigning them to peaks
+- Fixed bug in candidate score ordering that could retain lower-scoring peptide matches during prefiltering
+- Track charges on deisotoped ions to correctly report fragment charges and m/z in matched fragment annotations
 
 ### Breaking Changes
+- Variable modifications must be specified as lists (e.g. `[15.9949]`), rather than single values (e.g. `15.9949`)
 - `precursor_ppm` field reports the non-absoluted average mass error, rather than the absoluted average mass error.
 - Don't deisotope reporter ion regions if MS2-based TMT/iTRAQ is used
 - Removed `fragment_min_mz` and `fragment_max_mz` parameters. These were decreasing the accuracy of preliminary scoring estimation when attempting to annotate multiply-charged, high-m/z ions.

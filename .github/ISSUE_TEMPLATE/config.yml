@@ -1,0 +1,10 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Upstream Sage issue tracker
+    url: https://github.com/lazear/sage/issues
+    about: >
+      For problems that reproduce in unmodified upstream Sage. Sage Plus is a downstream
+      distribution and is not an official Sage release.
+  - name: Security vulnerability
+    url: https://github.com/pgarrett-scripps/sage-plus/security/advisories/new
+    about: Report privately through a GitHub security advisory, not a public issue. See SECURITY.md.

@@ -133,3 +133,17 @@ fn local_writes_replace_existing_files() {
         1
     );
 }
+
+#[test]
+fn cargo_config_sets_the_cmake_policy_floor() {
+    // `.cargo/config.toml` sets `CMAKE_POLICY_VERSION_MINIMUM` for everything
+    // cargo runs, which is what lets blosc-src (mzdata, the `mzmlb` feature)
+    // build under CMake >= 4. Cargo exports `[env]` into this test binary too,
+    // so if the setting is lost this test fails instead of the next clean
+    // build on a modern CMake.
+    assert_eq!(
+        std::env::var("CMAKE_POLICY_VERSION_MINIMUM").as_deref(),
+        Ok("3.5"),
+        "`.cargo/config.toml` must set CMAKE_POLICY_VERSION_MINIMUM"
+    );
+}

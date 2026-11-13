@@ -1,10 +1,17 @@
 use super::*;
+
 use crate::database::Builder;
+use crate::database::{IndexedDatabase, PeptideIx};
 use crate::enzyme::Digest;
+use crate::heap::bounded_min_heapify;
 use crate::ion_series::IonSeries;
+use crate::ion_series::{IonGroupSeries, Kind};
+use crate::mass::{Tolerance, NEUTRON, PROTON};
 use crate::modification::{ModificationDefinition, ModificationSpecificity, NeutralLossMode};
 use crate::peptide::Peptide;
-use std::{collections::HashMap, sync::Arc};
+use crate::spectrum::{Precursor, ProcessedSpectrum};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[test]
 fn score_ordering_uses_hyperscore() {
@@ -309,7 +316,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap()
         .clone();
     let fragment_masses = [Kind::B, Kind::Y]
@@ -359,7 +366,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
     assert_eq!(features.len(), 1);
     assert_eq!(features[0].isotope_error, NEUTRON);
     assert_eq!(
-        database[features[0].peptide_idx].label_channel.as_deref(),
+        database[features[0].peptide_idx].label_channel_str(),
         Some("heavy")
     );
 }
@@ -1278,4 +1285,110 @@ mod mass_offsets {
         let json = serde_json::to_value(fragments).unwrap();
         assert!(json.get("peak_indices").is_none());
     }
+}
+
+/// Ported from upstream Sage (df16dec, #236): `Score::cmp` must be a total
+/// order, or `bounded_min_heapify` can drop the best candidates.
+#[test]
+fn score_ordering_issue_236() {
+    let mut scores = [(1, 100.0), (2, 50.0), (3, 1.0)]
+        .into_iter()
+        .map(|(index, hyperscore)| Score {
+            peptide: PeptideIx(index),
+            hyperscore,
+            ..Default::default()
+        })
+        .collect::<Vec<_>>();
+    bounded_min_heapify(&mut scores, 2);
+    let mut retained = scores[..2]
+        .iter()
+        .map(|score| score.hyperscore)
+        .collect::<Vec<_>>();
+    retained.sort_by(f64::total_cmp);
+    assert_eq!(retained, vec![50.0, 100.0]);
+}
+
+#[test]
+fn ms2_without_a_precursor_reports_no_match() {
+    let builder = Builder {
+        generate_decoys: Some(false),
+        ..Builder::default()
+    };
+    let parameters = builder.make_parameters();
+    let peptides = parameters.peptides_from_tsv("sequence\nLEKPI\nPEILK\n");
+    let expected = peptides
+        .iter()
+        .find(|peptide| peptide.sequence.as_ref() == b"PEILK")
+        .unwrap()
+        .clone();
+    let mut masses = [Kind::B, Kind::Y]
+        .into_iter()
+        .flat_map(|kind| IonSeries::new(&expected, kind))
+        .map(|ion| ion.monoisotopic_mass)
+        .collect::<Vec<_>>();
+    masses.sort_by(f32::total_cmp);
+
+    // A readable MS2 scan whose selected-ion list is empty. Readers keep these
+    // deliberately, and `is_searchable` filters them in-tree, so only a library
+    // caller reaches the scorer with one.
+    let query = ProcessedSpectrum {
+        level: 2,
+        id: "no-precursor".into(),
+        precursors: Vec::new(),
+        intensities: vec![1.0; masses.len()],
+        charges: vec![1; masses.len()],
+        total_ion_current: masses.len() as f32,
+        masses,
+        ..ProcessedSpectrum::default()
+    };
+
+    let database = parameters.build_from_peptides(peptides);
+    let make_scorer = |chimera| Scorer {
+        db: &database,
+        precursor_tol: Tolerance::Da(-0.01, 0.01),
+        fragment_tol: Tolerance::Da(-0.01, 0.01),
+        min_matched_peaks: 1,
+        min_isotope_err: 0,
+        max_isotope_err: 0,
+        min_precursor_charge: 2,
+        max_precursor_charge: 2,
+        override_precursor_charge: false,
+        max_fragment_charge: Some(1),
+        chimera,
+        report_psms: 2,
+        wide_window: false,
+        annotate_matches: false,
+        mass_shift_ppm: crate::ambiguity::DEFAULT_MASS_SHIFT_PPM,
+        score_type: ScoreType::SageHyperScore,
+        mass_recalibration: None,
+    };
+
+    assert!(make_scorer(false).score(&query).is_empty());
+    assert!(make_scorer(true).score(&query).is_empty());
+
+    let keep = AtomicBitSet::new(database.peptides.len());
+    make_scorer(false).exact_prefilter(&query, &keep);
+    assert!(
+        (0..database.peptides.len()).all(|index| !keep.contains(index)),
+        "a scan with no precursor must mark no candidate"
+    );
+}
+
+#[test]
+fn feature_keeps_fragment_detail_boxed() {
+    // One Feature exists per reported PSM and a five-file search reports
+    // hundreds of thousands of them, while `fragments` is filled only when a
+    // fragment output or a spectral library is requested.
+    #[cfg(target_pointer_width = "64")]
+    {
+        assert_eq!(std::mem::size_of::<Fragments>(), 192);
+        // Inline, as it used to be, an absent `fragments` still cost all of
+        // it: 184 bytes of every Feature, and Feature was 528 bytes.
+        assert_eq!(std::mem::size_of::<Option<Fragments>>(), 192);
+        assert_eq!(std::mem::size_of::<Option<Box<Fragments>>>(), 8);
+        assert_eq!(std::mem::size_of::<Feature>(), 344);
+    }
+
+    let feature = Feature::default();
+    assert!(feature.fragments.is_none());
 }

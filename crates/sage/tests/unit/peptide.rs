@@ -10,13 +10,44 @@ fn protein_accessions_are_inline_without_growing_peptides() {
         std::mem::size_of::<Vec<Arc<str>>>()
     );
     #[cfg(target_pointer_width = "64")]
-    assert_eq!(std::mem::size_of::<Peptide>(), 144);
+    assert_eq!(std::mem::size_of::<Peptide>(), 120);
 
     let mut proteins = ProteinAccessions::new();
     proteins.push(Arc::from("P1"));
     assert!(!proteins.spilled());
     proteins.push(Arc::from("P2"));
     assert!(proteins.spilled());
+}
+
+#[test]
+fn labeling_provenance_costs_one_pointer() {
+    // Every peptidoform of a label-free FASTA search carries this, and a
+    // large database holds millions of them, so the two Option<Arc<str>>
+    // fields this replaced cost 32 bytes each peptide to say "no label".
+    #[cfg(target_pointer_width = "64")]
+    {
+        assert_eq!(std::mem::size_of::<PeptideLabel>(), 32);
+        assert_eq!(std::mem::size_of::<Option<Box<PeptideLabel>>>(), 8);
+    }
+
+    let mut peptide = Peptide::default();
+    assert!(peptide.label.is_none());
+    assert_eq!(peptide.label_channel(), None);
+    assert_eq!(peptide.label_group_override_str(), None);
+
+    peptide.set_label_channel(Some(Arc::from("heavy")));
+    assert_eq!(peptide.label_channel_str(), Some("heavy"));
+    peptide.set_label_group_override(Some(Arc::from("PEPTIDE")));
+    assert_eq!(peptide.label_group_override_str(), Some("PEPTIDE"));
+
+    // Clearing both fields drops the box again, so `None` and an all-`None`
+    // label never both occur and the derived PartialEq stays faithful to the
+    // two fields this replaced.
+    peptide.set_label_channel(None);
+    assert!(peptide.label.is_some());
+    peptide.set_label_group_override(None);
+    assert!(peptide.label.is_none());
+    assert_eq!(peptide, Peptide::default());
 }
 
 #[test]
@@ -49,7 +80,7 @@ fn unmodified_peptides_use_compact_modification_storage() {
 fn compact_modification_layout_and_inline_capacity() {
     assert_eq!(std::mem::size_of::<EncodedModification>(), 2);
     assert_eq!(std::mem::size_of::<CompactModifications>(), 32);
-    assert_eq!(std::mem::size_of::<Peptide>(), 144);
+    assert_eq!(std::mem::size_of::<Peptide>(), 120);
 
     let inline = CompactModifications::from_sparse((0..4).map(|index| (index, index as f32 + 1.0)));
     assert_eq!(inline.len(), 4);

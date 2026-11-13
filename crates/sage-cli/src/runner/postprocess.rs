@@ -228,7 +228,7 @@ impl Runner {
                 features[idx].file_id
             );
             annotated_fragments += fragments.fragment_ordinals.len();
-            features[idx].fragments = Some(fragments);
+            features[idx].fragments = Some(Box::new(fragments));
         }
 
         if annotated_indices.len() != expected_annotations {

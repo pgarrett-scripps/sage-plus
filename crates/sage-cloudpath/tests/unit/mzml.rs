@@ -1034,3 +1034,155 @@ async fn zero_tic_spectra_are_dropped_without_a_placeholder() -> Result<(), MzML
     assert_eq!(spectra[0].mz, [400.0, 500.0, 600.0]);
     Ok(())
 }
+
+/// A spectrum whose single m/z array carries `params` and `blob`, so a test
+/// can declare an encoding the reader does not support or hand it a payload
+/// that does not decode.
+fn spectrum_with_mz_array(id: &str, params: &str, blob: &str) -> String {
+    format!(
+        r#"<spectrum id="{id}">
+          <cvParam accession="MS:1000511" value="2"/>
+          <cvParam accession="MS:1000128"/>
+          <cvParam accession="MS:1000285" value="300"/>
+          <scanList count="1"><scan>
+            <cvParam accession="MS:1000016" value="90" unitAccession="UO:0000010"/>
+          </scan></scanList>
+          <binaryDataArrayList count="1">
+            <binaryDataArray>
+              <cvParam accession="MS:1000514"/>
+              <cvParam accession="MS:1000523"/>
+              {params}
+              <binary>{blob}</binary>
+            </binaryDataArray>
+          </binaryDataArrayList>
+        </spectrum>"#
+    )
+}
+
+fn base64_of(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn zlib_bytes_of(blob: &str) -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD
+        .decode(blob)
+        .expect("fixture is valid base64")
+}
+
+#[tokio::test]
+async fn numpress_arrays_are_rejected_by_accession() {
+    // Numpress bytes are not IEEE floats; before this they were read as
+    // floats, which gave wrong m/z values with no error at all.
+    for (accession, name) in [
+        ("MS:1002312", "linear prediction"),
+        ("MS:1002313", "positive integer"),
+        ("MS:1002314", "short logged float"),
+        ("MS:1002746", "linear prediction followed by zlib"),
+        ("MS:1002747", "positive integer followed by zlib"),
+        ("MS:1002748", "short logged float followed by zlib"),
+    ] {
+        let input = wrap(&[spectrum_with_mz_array(
+            "scan=1",
+            &format!(r#"<cvParam accession="{accession}"/>"#),
+            MZ_400_500_600_ZLIB,
+        )]);
+        let result = MzMLReader::with_file_id(0).parse(input.as_bytes()).await;
+        match result {
+            Err(MzMLError::UnsupportedCV(message)) => {
+                assert!(
+                    message.contains(accession),
+                    "{accession} ({name}) missing from {message:?}"
+                );
+            }
+            other => panic!("{accession} ({name}) was accepted: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn spectra_keep_file_order_across_decode_batches() -> Result<(), MzMLError> {
+    let input = wrap(
+        &(1..=6)
+            .map(|n| {
+                simple_spectrum(
+                    &format!("scan={n}"),
+                    2,
+                    "300",
+                    r#"<cvParam accession="MS:1000016" value="90" unitAccession="UO:0000010"/>"#,
+                    "",
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    // One byte of base64 per batch: every spectrum takes the mid-parse flush,
+    // so this covers batch boundaries and the `pending_bytes` reset.
+    let mut reader = MzMLReader::with_file_id(0);
+    reader.set_decode_batch_bytes(1);
+    let spectra = reader.parse(input.as_bytes()).await?;
+    assert_eq!(
+        spectra.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+        ["scan=1", "scan=2", "scan=3", "scan=4", "scan=5", "scan=6"]
+    );
+    for spectrum in &spectra {
+        assert_eq!(spectrum.mz, [400.0, 500.0, 600.0]);
+        assert_eq!(spectrum.intensity, [100.0, 100.0, 100.0]);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_truncated_zlib_array_is_invalid_data() {
+    let complete = zlib_bytes_of(MZ_400_500_600_ZLIB);
+    let input = wrap(&[spectrum_with_mz_array(
+        "scan=1",
+        r#"<cvParam accession="MS:1000574"/>"#,
+        &base64_of(&complete[..complete.len() - 4]),
+    )]);
+    let result = MzMLReader::with_file_id(0).parse(input.as_bytes()).await;
+    assert!(
+        matches!(&result, Err(MzMLError::IOError(error))
+            if error.kind() == std::io::ErrorKind::InvalidData),
+        "truncated zlib gave {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_payload_that_is_not_zlib_is_invalid_data() {
+    let input = wrap(&[spectrum_with_mz_array(
+        "scan=1",
+        r#"<cvParam accession="MS:1000574"/>"#,
+        &base64_of(b"these bytes are not a zlib stream"),
+    )]);
+    let result = MzMLReader::with_file_id(0).parse(input.as_bytes()).await;
+    assert!(
+        matches!(&result, Err(MzMLError::IOError(error))
+            if error.kind() == std::io::ErrorKind::InvalidData),
+        "non-zlib payload gave {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_first_corrupt_array_in_file_order_is_reported() {
+    // Two bad arrays in one batch, failing in different ways: the reported
+    // error must be the earlier spectrum's, not whichever worker finished
+    // first.
+    let input = wrap(&[
+        spectrum_with_mz_array(
+            "scan=1",
+            r#"<cvParam accession="MS:1000576"/>"#,
+            "@@@@not base64",
+        ),
+        spectrum_with_mz_array(
+            "scan=2",
+            r#"<cvParam accession="MS:1000574"/>"#,
+            &base64_of(b"these bytes are not a zlib stream"),
+        ),
+    ]);
+    let result = MzMLReader::with_file_id(0).parse(input.as_bytes()).await;
+    assert!(
+        matches!(&result, Err(MzMLError::Base64Error(_))),
+        "expected the first spectrum's base64 error, got {result:?}"
+    );
+}
