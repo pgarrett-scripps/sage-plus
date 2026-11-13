@@ -17,7 +17,7 @@ fn parameters(generate_decoys: bool) -> Parameters {
     }))
     .unwrap();
     builder.update_fasta(FASTA.into());
-    builder.make_parameters()
+    builder.make_parameters().expect("valid test configuration")
 }
 
 #[test]

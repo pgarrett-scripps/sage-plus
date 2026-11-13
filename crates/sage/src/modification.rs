@@ -904,27 +904,37 @@ fn named_modifications<'a>(
     serde_json::to_value(named).unwrap()
 }
 
+/// Parse the keys of `static_mods`, naming the first key that is not a site
+/// specificity. The message is the one
+/// [`crate::database::Builder::validate_modification_keys`] gives, so a
+/// configuration with a bad key reports the same thing wherever it is caught.
 pub fn validate_mods(
     input: Option<HashMap<String, StaticModEntry>>,
-) -> HashMap<ModificationSpecificity, StaticModEntry> {
+) -> Result<HashMap<ModificationSpecificity, StaticModEntry>, String> {
     parse_mod_map(input)
 }
 
+/// Parse the keys of `variable_mods`; see [`validate_mods`].
 pub fn validate_var_mods(
     input: Option<HashMap<String, Vec<VarModEntry>>>,
-) -> HashMap<ModificationSpecificity, Vec<VarModEntry>> {
+) -> Result<HashMap<ModificationSpecificity, Vec<VarModEntry>>, String> {
     parse_mod_map(input)
 }
 
-fn parse_mod_map<T>(input: Option<HashMap<String, T>>) -> HashMap<ModificationSpecificity, T> {
+/// Keys come from the configuration a user wrote, so a key that is not a site
+/// specificity is a configuration error to report, not an invariant to
+/// assert: the error carries the key as written.
+fn parse_mod_map<T>(
+    input: Option<HashMap<String, T>>,
+) -> Result<HashMap<ModificationSpecificity, T>, String> {
     input
         .unwrap_or_default()
         .into_iter()
         .map(|(key, value)| {
             let specificity = key
                 .parse()
-                .unwrap_or_else(|_| panic!("invalid modification key `{key}`"));
-            (specificity, value)
+                .map_err(|_| format!("invalid modification key `{key}`"))?;
+            Ok((specificity, value))
         })
         .collect()
 }

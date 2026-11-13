@@ -212,7 +212,7 @@ fn validate_var_mods_mixed() {
             immonium_ions: Default::default(),
         })],
     );
-    let result = validate_var_mods(Some(raw));
+    let result = validate_var_mods(Some(raw)).expect("valid keys");
 
     let m_entries = result.get(&Residue(b'M')).unwrap();
     assert_eq!(m_entries.len(), 2);
@@ -228,12 +228,45 @@ fn validate_var_mods_mixed() {
 }
 
 #[test]
-#[should_panic(expected = "invalid modification key `Z`")]
-fn validate_var_mods_invalid_residue_rejected() {
+fn a_modification_key_that_is_not_a_site_is_reported_not_panicked() {
+    // The keys come from a user's configuration, so a bad one is an error to
+    // report with the key as written, and the valid keys beside it do not
+    // make it any less of one.
     let mut raw = HashMap::new();
     raw.insert("Z".to_string(), vec![VarModEntry::Mass(15.9949)]);
     raw.insert("M".to_string(), vec![VarModEntry::Mass(15.9949)]);
-    validate_var_mods(Some(raw));
+    let error = validate_var_mods(Some(raw)).expect_err("`Z` is not a site");
+    assert_eq!(error, "invalid modification key `Z`");
+
+    // Static modifications take the same keys and give the same message.
+    let mut raw = HashMap::new();
+    raw.insert("not_a_site".to_string(), StaticModEntry::Mass(57.0215));
+    let error = validate_mods(Some(raw)).expect_err("`not_a_site` is not a site");
+    assert_eq!(error, "invalid modification key `not_a_site`");
+
+    // The same error reaches a caller that builds the search parameters.
+    // Deserializing a configuration rejects such a key first, with its own
+    // message, so this is the path a caller takes that assembles a `Builder`
+    // itself — and it is an error there too, not a panic.
+    let mut keys = HashMap::new();
+    keys.insert("Zz".to_string(), vec![VarModEntry::Mass(15.9949)]);
+    let builder = crate::database::Builder {
+        variable_mods: Some(keys),
+        ..Default::default()
+    };
+    assert_eq!(
+        builder.validate_modification_keys().expect_err("bad key"),
+        "invalid modification key `Zz`"
+    );
+    assert_eq!(
+        builder.make_parameters().expect_err("bad key"),
+        "invalid modification key `Zz`"
+    );
+
+    // A valid configuration is unaffected.
+    let mut raw = HashMap::new();
+    raw.insert("^".to_string(), vec![VarModEntry::Mass(42.010565)]);
+    assert!(validate_var_mods(Some(raw)).is_ok());
 }
 
 #[test]
@@ -565,7 +598,8 @@ fn named_definitions_share_sites_and_ignore_repeated_sites() {
         }
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     assert_eq!(params.static_mods.len(), 1);
     let lysine = &params.variable_mods[&ModificationSpecificity::Residue(b'K')];
     let mut names = lysine
@@ -588,7 +622,7 @@ fn symbol_keyed_maps_accept_upstream_sage_syntax() {
         "variable_mods": {"M": [15.9949], "^Q": [-17.026549], "S": [79.9663, 80.0]}
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     assert_eq!(params.static_mods.len(), 5);
     assert_eq!(params.variable_mods.values().flatten().count(), 4);
 }

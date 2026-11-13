@@ -49,7 +49,8 @@ fn main() {
         generate_decoys: Some(false),
         ..Builder::default()
     }
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
 
     let digest_started = Instant::now();
     let peptides = parameters.digest(&fasta);

@@ -99,6 +99,7 @@ fn main() {
         .collect::<Vec<_>>();
     let database = Builder::default()
         .make_parameters()
+        .expect("valid test configuration")
         .build_from_peptides(peptides);
     let mut settings = DeisotopeSettings::default();
     if let Ok(value) = std::env::var("SAGE_MIN_ISOTOPE_SCORE") {

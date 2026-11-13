@@ -24,7 +24,10 @@ fn mk_database(bucket_size: usize) -> IndexedDatabase {
     };
     let fasta = Fasta::parse(FASTA.into(), "rev_", false).unwrap();
 
-    builder.make_parameters().build(fasta)
+    builder
+        .make_parameters()
+        .expect("valid test configuration")
+        .build(fasta)
 }
 
 #[quickcheck]

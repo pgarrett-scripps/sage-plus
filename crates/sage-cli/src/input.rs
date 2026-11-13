@@ -554,7 +554,10 @@ impl Input {
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );
             validate_required_settings(database)?;
-            let parameters = database.clone().make_parameters();
+            let parameters = database
+                .clone()
+                .make_parameters()
+                .map_err(anyhow::Error::msg)?;
             parameters.validate_channels().map_err(anyhow::Error::msg)?;
             parameters
                 .validate_compact_modifications()
@@ -728,8 +731,10 @@ impl Input {
         }
         if let (Some(config), Some(database)) = (&self.immonium, &self.database) {
             let modified = sage_core::immonium::modified_ions(
-                &sage_core::modification::validate_mods(database.static_mods.clone()),
-                &sage_core::modification::validate_var_mods(database.variable_mods.clone()),
+                &sage_core::modification::validate_mods(database.static_mods.clone())
+                    .map_err(anyhow::Error::msg)?,
+                &sage_core::modification::validate_var_mods(database.variable_mods.clone())
+                    .map_err(anyhow::Error::msg)?,
             );
             if let Some(settings) = config.clone().resolve(self.fragment_tol, modified) {
                 settings.validate().map_err(anyhow::Error::msg)?;
@@ -747,7 +752,7 @@ impl Input {
         let batch_size = resolve_batch_size(self.batch_size)?;
         let builder = self.database.expect("validated database configuration");
         let unset_database = UnsetSearchSpace::from(&builder);
-        let database = builder.make_parameters();
+        let database = builder.make_parameters().map_err(anyhow::Error::msg)?;
         database.validate_channels().map_err(anyhow::Error::msg)?;
         database
             .validate_compact_modifications()

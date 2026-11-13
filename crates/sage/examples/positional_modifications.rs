@@ -82,7 +82,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "variable_mods":mods, "generate_decoys":false, "max_variable_mods":1,
                 "peptide_min_mass":0
             }))?
-            .make_parameters();
+            .make_parameters()
+            .expect("valid test configuration");
             let peptides = parameters.modify_digests(group_digests(vec![digest.clone()]));
             let database = parameters.build_from_peptides(peptides);
             let scorer = Scorer {
