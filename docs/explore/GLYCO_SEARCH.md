@@ -1088,7 +1088,7 @@ adducts, or fit them as their own FDR subgroup.
   `n_glycan_core_y_ions`, `y_ion_evidence`, and `n_glycan_composition_space`. Tests
   check the residue and oxonium masses, both notations, the isomeric and near-isobaric
   pairs, the gate, and the Y ladder. Run the ambiguity numbers with
-  `cargo test -p sage-glyco --lib composition::tests::ambiguity_report -- --ignored --nocapture`.
+  `cargo test -p sage-glyco --lib composition::test::ambiguity_report -- --ignored --nocapture`.
 - `crates/sage-glyco/examples/glyco_summary.rs`: counts, non-high-mannose share and top
   compositions of a `glyco.sage.parquet`, optionally dumping every row as TSV.
   `cargo run --release -p sage-glyco --example glyco_summary -- glyco.sage.parquet [rows.tsv]`.

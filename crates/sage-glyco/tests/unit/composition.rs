@@ -96,7 +96,7 @@ fn oxonium_gate_and_y_ladder() {
 }
 
 /// Sizes the composition ambiguity problem for the design doc:
-/// `cargo test -p sage-glyco composition::tests::ambiguity_report -- --ignored --nocapture`
+/// `cargo test -p sage-glyco composition::test::ambiguity_report -- --ignored --nocapture`
 #[test]
 #[ignore]
 fn ambiguity_report() {
