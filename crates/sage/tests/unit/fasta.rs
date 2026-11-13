@@ -326,3 +326,34 @@ fn a_peptide_is_a_contaminant_if_any_of_its_proteins_is() {
     merged.union(ProteinClassSet::of(ProteinClass::Contaminant));
     assert!(merged.is_contaminant());
 }
+
+#[test]
+fn a_peptide_is_entrapment_only_when_every_protein_is() {
+    let mut fasta = Fasta::parse(">SAMPLE\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let entrapment = Fasta::parse(
+        ">AT1G01010\nENTRAPPEDK\n>AT1G01020\nSHAREDPEPK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    fasta.extend_with_class(entrapment, ProteinClass::Entrapment);
+    let classes = ProteinClasses::of_fasta(&fasta).expect("two entrapment proteins");
+
+    assert_eq!(classes.entrapment_proteins(), 2);
+    assert_eq!(classes.sample_proteins(), 1);
+    let accession = |name: &str| Arc::<str>::from(name);
+    // Every protein entrapment: a discovery of it is false.
+    assert!(classes.is_entrapment([accession("AT1G01010")].iter()));
+    assert!(classes.is_entrapment([accession("AT1G01010"), accession("AT1G01020")].iter()));
+    // A sample protein explains it too, so it is no evidence of a false
+    // discovery and counts with the original targets.
+    assert!(!classes.is_entrapment([accession("AT1G01010"), accession("SAMPLE")].iter()));
+    assert!(!classes.is_entrapment([accession("SAMPLE")].iter()));
+    // A peptide without proteins is not entrapment.
+    assert!(!classes.is_entrapment(std::iter::empty()));
+    // Per protein, which is what the protein-level estimate splits on.
+    assert!(classes.is_entrapment_protein(&accession("AT1G01020")));
+    assert!(!classes.is_entrapment_protein(&accession("SAMPLE")));
+    // Contaminants and entrapment are separate axes.
+    assert!(!classes.is_contaminant([accession("AT1G01010")].iter()));
+}

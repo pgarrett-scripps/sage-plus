@@ -4,6 +4,7 @@ pub mod cleavage;
 pub mod database;
 pub mod diagnostic;
 pub mod digestion;
+pub mod entrapment;
 pub mod enzyme;
 pub mod fasta;
 pub mod fdr;

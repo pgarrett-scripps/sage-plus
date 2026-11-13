@@ -428,23 +428,35 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             database_parameters.fasta
         )
     })?;
-    // Contaminants are ordinary targets of the same search, digested and
-    // decoyed by the same rules; the class travels with each protein so a
-    // peptide can be reported as a contaminant later.
-    if let Some(path) = database_parameters.contaminant_fasta.as_deref() {
+    // Contaminants and entrapment proteins are ordinary targets of the same
+    // search, digested and decoyed by the same rules; the class travels with
+    // each protein so a peptide can be reported by class later.
+    for (path, class, label) in [
+        (
+            database_parameters.contaminant_fasta.as_deref(),
+            ProteinClass::Contaminant,
+            "contaminant",
+        ),
+        (
+            database_parameters.entrapment_fasta.as_deref(),
+            ProteinClass::Entrapment,
+            "entrapment",
+        ),
+    ] {
+        let Some(path) = path else { continue };
         let url = sage_cloudpath::to_url(path)?;
-        let contaminants = sage_cloudpath::util::read_fasta(
+        let proteins = sage_cloudpath::util::read_fasta(
             &url,
             &database_parameters.decoy_tag,
             database_parameters.generate_decoys,
         )
-        .with_context(|| format!("Failed to read contaminant FASTA `{path}`"))?;
+        .with_context(|| format!("Failed to read {label} FASTA `{path}`"))?;
         info!(
-            "contaminant FASTA: {} proteins from {}",
-            contaminants.targets.len(),
+            "{label} FASTA: {} proteins from {}",
+            proteins.targets.len(),
             path
         );
-        fasta.extend_with_class(contaminants, ProteinClass::Contaminant);
+        fasta.extend_with_class(proteins, class);
     }
     database_parameters.log_ambiguous_proteins(&fasta);
     Ok(fasta)

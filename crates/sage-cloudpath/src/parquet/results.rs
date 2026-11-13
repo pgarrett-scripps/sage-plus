@@ -521,17 +521,29 @@ pub fn serialize_features(
             )?;
         }
 
-        // Whether the peptide belongs to a protein of the contaminant FASTA:
-        // null on every row when no contaminant FASTA was searched, and on
-        // decoy rows, which are never split by class.
+        // Whether the peptide belongs to a protein of the contaminant FASTA,
+        // and whether every protein of it is an entrapment protein: null on
+        // every row when that file was not searched, and on decoy rows, which
+        // are never split by class.
         if let Some(column) = rg.next_column()? {
             write_optional_column::<BoolType>(
                 column,
                 features.iter().map(|f| {
                     let peptide = &database[f.peptide_idx];
                     protein_classes
-                        .filter(|_| !peptide.decoy)
+                        .filter(|classes| !peptide.decoy && classes.contaminant_proteins() > 0)
                         .map(|classes| classes.is_contaminant(peptide.proteins.iter()))
+                }),
+            )?;
+        }
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<BoolType>(
+                column,
+                features.iter().map(|f| {
+                    let peptide = &database[f.peptide_idx];
+                    protein_classes
+                        .filter(|classes| !peptide.decoy && classes.entrapment_proteins() > 0)
+                        .map(|classes| classes.is_entrapment(peptide.proteins.iter()))
                 }),
             )?;
         }
