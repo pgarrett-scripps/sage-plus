@@ -15,7 +15,10 @@ fn integration() -> anyhow::Result<()> {
         "rev_",
         true,
     )?;
-    let database = builder.make_parameters().build(fasta);
+    let database = builder
+        .make_parameters()
+        .expect("valid test configuration")
+        .build(fasta);
     let spectra = sage_cloudpath::util::read_mzml(
         &sage_cloudpath::to_url("../../tests/LQSRPAAPPAPGPGQLTLR.mzML").expect("valid url"),
         0,
@@ -758,8 +761,9 @@ fn motif_site_search_localizes_and_exports_edge_sites() -> anyhow::Result<()> {
     });
 
     // Equal target and decoy search spaces for the motif.
-    let parameters =
-        serde_json::from_value::<sage_core::database::Builder>(database.clone())?.make_parameters();
+    let parameters = serde_json::from_value::<sage_core::database::Builder>(database.clone())?
+        .make_parameters()
+        .expect("valid test configuration");
     let parsed = sage_core::fasta::Fasta::parse(fasta.into(), "rev_", true)?;
     let peptides = parameters.modify_digests(parameters.digest_unmodified(&parsed));
     let placements = |decoy: bool| {
@@ -1330,6 +1334,18 @@ fn assert_matches_published_schemas(
             let values = row.split('\t').collect::<Vec<_>>();
             assert_eq!(values.len(), columns.len(), "{file}: {row}");
             for (value, field) in values.iter().zip(table["fields"].as_array().unwrap()) {
+                // A field the schema marks as not required may be empty: that
+                // is how an absent number is written, and an absent number is
+                // not a zero.
+                let required = field["constraints"]["required"].as_bool() != Some(false);
+                if value.is_empty() {
+                    assert!(
+                        !required,
+                        "{file}: `{}` is required but empty",
+                        field["name"]
+                    );
+                    continue;
+                }
                 let parses = match field["type"].as_str().unwrap() {
                     "integer" => value.parse::<u64>().is_ok(),
                     "number" => value.parse::<f64>().is_ok(),
@@ -1375,7 +1391,10 @@ fn fragment_losses_add_evidence_without_changing_search_scores() -> anyhow::Resu
         builder
             .validate_fragment_losses()
             .map_err(anyhow::Error::msg)?;
-        let database = builder.make_parameters().build(fasta.clone());
+        let database = builder
+            .make_parameters()
+            .expect("valid test configuration")
+            .build(fasta.clone());
         let scorer = Scorer {
             db: &database,
             precursor_tol: Tolerance::Ppm(-50.0, 50.0),

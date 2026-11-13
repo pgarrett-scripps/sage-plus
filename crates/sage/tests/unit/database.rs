@@ -23,6 +23,7 @@ fn compact_modification_validation_rejects_long_peptides() {
     .unwrap();
     let error = builder
         .make_parameters()
+        .expect("valid test configuration")
         .validate_compact_modifications()
         .unwrap_err();
     assert!(error.contains("must not exceed 255 residues"));
@@ -39,6 +40,7 @@ fn compact_modification_validation_rejects_too_many_definitions() {
     .unwrap();
     let error = builder
         .make_parameters()
+        .expect("valid test configuration")
         .validate_compact_modifications()
         .unwrap_err();
     assert!(error.contains("at most 255 distinct definition and site variants"));
@@ -86,7 +88,8 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
         generate_decoys: Some(false),
         ..Builder::default()
     }
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let mut peptides = parameters
         .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
     Parameters::reorder_peptides(&mut peptides);
@@ -130,7 +133,9 @@ fn fragment_index_preserves_exact_ids_masses_and_ranges() {
 
 #[test]
 fn filtered_targets_receive_paired_decoys_after_selection() {
-    let parameters = Builder::default().make_parameters();
+    let parameters = Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     let targets = parameters
         .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nSEQUENCEK\tprotein-b\n");
     let targets = targets
@@ -150,7 +155,7 @@ fn filtered_decoy_generation_drops_reversals_that_collide_with_targets() {
         generate_decoys: Some(false),
         ..Builder::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let targets = parameters
         .peptides_from_tsv("sequence\tprotein\nPEPTIDER\tprotein-a\nPEDITPER\tprotein-b\n");
 
@@ -180,7 +185,9 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
 
 #[test]
 fn chunk_decoys_are_checked_against_targets_in_other_chunks() {
-    let parameters = Builder::default().make_parameters();
+    let parameters = Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     let target_sequences = ["PEPTIDER".into(), "PEDITPER".into()]
         .into_iter()
         .collect::<HashSet<_>>();
@@ -267,7 +274,7 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
         let fasta = Fasta::parse(fasta.to_string(), "rev_", generate_decoys).unwrap();
         let mut builder: Builder = serde_json::from_value(config).unwrap();
         builder.generate_decoys = Some(generate_decoys);
-        let parameters = builder.make_parameters();
+        let parameters = builder.make_parameters().expect("valid test configuration");
         let whole = peptide_keys(parameters.digest(&fasta));
         assert!(whole.iter().any(|key| key.1), "no decoys generated");
 
@@ -357,7 +364,7 @@ fn chunked_modification_matches_a_single_pass() {
         "max_variable_mods": 2
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let digests = parameters.digest_unmodified(&fasta);
     assert!(digests.len() > 8, "too few digest groups to chunk");
     let targets = digests
@@ -428,7 +435,7 @@ fn chunked_modification_matches_a_single_pass_with_libraries() {
         ])),
         ..Default::default()
     };
-    let mut parameters = builder.make_parameters();
+    let mut parameters = builder.make_parameters().expect("valid test configuration");
     let site = |protein: &str, position, residue| PtmLibrarySite {
         attachment: Default::default(),
         protein: Arc::from(protein),
@@ -477,7 +484,7 @@ fn modification_variants_share_target_and_decoy_sequence_storage() {
         "variable_mods": {"M": [15.9949]}
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.modify_digests(vec![digest_group("AMPEPTIDER", Position::Full)]);
     let targets = peptides
         .iter()
@@ -521,7 +528,7 @@ fn structured_variable_mod_config_round_trips() {
     }))
     .unwrap();
 
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     assert_eq!(params.max_variable_mods, 2);
     assert_eq!(params.max_combinations, Some(1));
 
@@ -578,7 +585,7 @@ fn channel_offsets_generate_complete_static_channels() {
         }
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_channels().unwrap();
 
     let peptides = params.peptides_from_tsv("sequence\nPEPKR\n");
@@ -618,7 +625,7 @@ fn channels_deduplicate_peptides_without_channel_sites() {
         }
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_channels().unwrap();
 
     let peptides = params.peptides_from_tsv("sequence\nPEPTIDE\n");
@@ -638,7 +645,7 @@ fn variable_channel_offsets_preserve_site_variants_and_shared_light() {
         }}
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_channels().unwrap();
     let peptides = params.peptides_from_tsv("sequence\nPEPTIDEKK\n");
     assert_eq!(peptides.len(), 4);
@@ -667,7 +674,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
         }
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_channels().unwrap();
     let digest = Digest {
         sequence: "PEPTIDEK".into(),
@@ -711,7 +718,7 @@ fn channel_resolved_modification_definitions_are_interned() {
         }
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_channels().unwrap();
 
     let peptides = params.peptides_from_tsv("sequence\nPEPTIDEK\nAAAAAAK\n");
@@ -775,7 +782,7 @@ fn ptm_library_configuration_round_trips() {
         "ptm_library": {"path": "sites.parquet", "strict": true}
     }))
     .unwrap();
-    let params = builder.make_parameters();
+    let params = builder.make_parameters().expect("valid test configuration");
     params.validate_ptm_library(&PtmLibrary::default()).unwrap();
     assert_eq!(params.max_variable_mods, 1);
     assert_eq!(params.max_total_variable_mods, 3);
@@ -899,7 +906,7 @@ fn custom_cleavages_flow_through_modification_and_memory_paths() {
         generate_decoys: Some(false),
         ..Default::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
 
     let ordinary = parameters.digest(&fasta);
     let custom = parameters.digest_with_custom_cleavages(&fasta, Some(&library));
@@ -938,7 +945,7 @@ fn peptides_with_massless_residues_are_skipped_at_digestion() {
         }),
         ..Default::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
 
     let custom = parameters.digest_with_custom_cleavages(&fasta, Some(&library));
     assert!(custom
@@ -1001,7 +1008,7 @@ fn estimates_variable_modification_expansion_before_allocation() {
         generate_decoys: Some(false),
         ..Default::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let fasta = Fasta::parse(">protein\nSSSSSSSSSS\n".into(), "rev_", false).unwrap();
 
     let estimate = parameters.estimate_memory(&fasta);
@@ -1042,7 +1049,7 @@ fn memory_estimate_totals_are_additive_over_protein_chunks() {
         max_variable_mods: Some(2),
         ..Default::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let fasta = (0..64)
         .map(|idx| {
             let residues = "MSKPEPTIDESRAGMSLKWVTFISLLFLFSSAYSR";
@@ -1106,7 +1113,7 @@ fn protein_site_library_adds_targeted_combinations() {
         )])),
         ..Default::default()
     };
-    let mut parameters = builder.make_parameters();
+    let mut parameters = builder.make_parameters().expect("valid test configuration");
     parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
         PtmLibrarySite {
             attachment: Default::default(),
@@ -1163,7 +1170,7 @@ fn library_sites_from_different_proteins_are_not_combined() {
         )])),
         ..Default::default()
     };
-    let mut parameters = builder.make_parameters();
+    let mut parameters = builder.make_parameters().expect("valid test configuration");
     parameters.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
         PtmLibrarySite {
             attachment: Default::default(),
@@ -1220,6 +1227,7 @@ fn mass_offset_validation_rejects_ambiguous_definitions() {
             ..Default::default()
         }
         .make_parameters()
+        .expect("valid test configuration")
         .validate_ptm_library(library)
     };
     let empty = PtmLibrary::default();
@@ -1297,6 +1305,7 @@ fn positional_parameters(keys: &[&str], mode: &str, static_mod: bool) -> Paramet
     }))
     .unwrap()
     .make_parameters()
+    .expect("valid test configuration")
 }
 
 fn positional_digest(sequence: &str, position: Position) -> Digest {
@@ -1459,7 +1468,7 @@ fn internal_label_channels_keep_terminal_residues_unmodified() {
     let parameters = serde_json::from_value::<Builder>(serde_json::json!({
         "static_mods":{"Label":{"mass":0.0,"channel_offsets":{"light":0.0,"heavy":8.0},"sites":["internal_residue:K"]}},
         "generate_decoys":false,"peptide_min_mass":0
-    })).unwrap().make_parameters();
+    })).unwrap().make_parameters().expect("valid test configuration");
     let variants = parameters.modify_digests(group_digests(vec![positional_digest(
         "KAKAK",
         Position::Full,
@@ -1479,7 +1488,8 @@ fn named_modifications_share_limits_and_preserve_terminal_identity() {
     });
     let params = serde_json::from_value::<Builder>(config)
         .unwrap()
-        .make_parameters();
+        .make_parameters()
+        .expect("valid test configuration");
     params.validate_ptm_library(&PtmLibrary::default()).unwrap();
     let output = serde_json::to_value(&params).unwrap();
     assert_eq!(
@@ -1491,7 +1501,8 @@ fn named_modifications_share_limits_and_preserve_terminal_identity() {
     );
     let round_trip = serde_json::from_value::<Builder>(output)
         .unwrap()
-        .make_parameters();
+        .make_parameters()
+        .expect("valid test configuration");
     let digest = Digest {
         sequence: "KAKAK".into(),
         position: Position::Internal,
@@ -1521,7 +1532,7 @@ fn typed_library_separates_terminal_from_boundary_residue_in_both_modes() {
             let mut params = serde_json::from_value::<Builder>(serde_json::json!({
                 "variable_mods":{"Acetyl":{"mass":42.010565,"sites":["first_residue:K","peptide_n_term:K"],"site_mode":"library","max_count":1,"search_mode":mode}},
                 "ptm_library":{"path":"unused.tsv"},"generate_decoys":false,"peptide_min_mass":0
-            })).unwrap().make_parameters();
+            })).unwrap().make_parameters().expect("valid test configuration");
             params.loaded_ptm_library = Some(Arc::new(PtmLibrary::new(vec![
                 crate::ptm_library::PtmLibrarySite {
                     attachment,
@@ -1573,7 +1584,8 @@ fn named_static_modifications_apply_terminal_and_residue_sites_separately() {
         "generate_decoys":false,"peptide_min_mass":0
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let digest = Digest {
         sequence: "KAK".into(),
         position: Position::Internal,
@@ -1609,7 +1621,7 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
             }
         }))
         .unwrap();
-        let parameters = builder.make_parameters();
+        let parameters = builder.make_parameters().expect("valid test configuration");
         parameters.validate_channels().unwrap();
         let peptides = parameters.peptides_from_tsv(&format!("sequence\n{sequence}\n"));
         let db = parameters.build_from_peptides(peptides);
@@ -1638,7 +1650,7 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     parameters.validate_channels().unwrap();
     let peptides = parameters.peptides_from_tsv("sequence\nPEPMR\n");
     let db = parameters.build_from_peptides(peptides);
@@ -1675,7 +1687,8 @@ fn required_neutral_loss_fragment_shift_matches_preliminary_index() {
             generate_decoys: Some(false),
             ..Default::default()
         }
-        .make_parameters();
+        .make_parameters()
+        .expect("valid test configuration");
         let peptide = parameters
             .peptides_from_tsv("sequence\nPEPSTIDEK\n")
             .pop()
@@ -1721,7 +1734,8 @@ fn histone_parameters(
         "enzyme": {"min_len": 1, "max_len": 50, "missed_cleavages": 0, "cleave_at": "$"}
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let site = |position: u32, modification: &str| PtmLibrarySite {
         attachment: Default::default(),
         protein: Arc::from("H4"),
@@ -1820,11 +1834,14 @@ fn json_parameters(value: serde_json::Value) -> Parameters {
     serde_json::from_value::<Builder>(value)
         .unwrap()
         .make_parameters()
+        .expect("valid test configuration")
 }
 
 #[test]
 fn make_parameters_normalizes_modification_limits() {
-    let parameters = Builder::default().make_parameters();
+    let parameters = Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     assert_eq!(parameters.max_variable_mods, 2);
     assert_eq!(parameters.max_total_variable_mods, 2);
     assert_eq!(parameters.max_combinations, None);
@@ -1839,7 +1856,8 @@ fn make_parameters_normalizes_modification_limits() {
         bucket_size: Some(1000),
         ..Default::default()
     }
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     assert_eq!(parameters.max_variable_mods, 1);
     assert_eq!(parameters.max_total_variable_mods, 1);
     assert_eq!(parameters.max_combinations, Some(1));
@@ -1851,14 +1869,16 @@ fn make_parameters_normalizes_modification_limits() {
         max_total_variable_mods: Some(1),
         ..Default::default()
     }
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     assert_eq!(parameters.max_total_variable_mods, 3);
     let parameters = Builder {
         max_variable_mods: Some(1),
         max_total_variable_mods: Some(4),
         ..Default::default()
     }
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     assert_eq!(
         (
             parameters.max_variable_mods,
@@ -1910,7 +1930,9 @@ fn ptm_validation_rejects_conflicting_static_and_variable_definitions() {
         "{error}"
     );
 
-    let mut parameters = Builder::default().make_parameters();
+    let mut parameters = Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     parameters.max_variable_mods = 3;
     parameters.max_total_variable_mods = 2;
     assert_eq!(
@@ -2012,6 +2034,7 @@ fn ptm_validation_rejects_inconsistent_named_database_modifications() {
             ..Default::default()
         }
         .make_parameters()
+        .expect("valid test configuration")
         .validate_ptm_library(&PtmLibrary::default())
     };
     assert!(validate(entry(42.0, Some(1)), entry(42.0, Some(1))).is_ok());
@@ -2339,6 +2362,7 @@ fn clipped_initiator_methionine_peptides_take_protein_n_terminal_mods() {
         serde_json::from_value::<Builder>(config)
             .unwrap()
             .make_parameters()
+            .expect("valid test configuration")
     };
 
     let defaults = parameters(None);
@@ -2385,7 +2409,8 @@ fn clipped_initiator_methionine_peptides_match_protein_n_terminal_motifs() {
         "generate_decoys": false,
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let names = parameters
         .digest(&fasta)
         .iter()
@@ -2405,7 +2430,8 @@ fn fasta_copy_of_a_peptide_keeps_its_position_over_a_tsv_copy() {
         "generate_decoys": false,
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let mut peptides = parameters.digest(&fasta);
     // The TSV copy is a whole-protein, fully enzymatic placeholder.
     peptides.extend(parameters.peptides_from_tsv("sequence\tprotein\nPEPTIDER\tT1\n"));
@@ -2441,7 +2467,8 @@ fn generated_decoys_of_n_terminal_peptides_stay_balanced_and_n_terminal() {
         "generate_decoys": true,
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters()
+    .expect("valid test configuration");
     let peptides = parameters.digest(&fasta);
     let n_terminal = |decoy: bool| {
         peptides
@@ -2486,6 +2513,7 @@ fn ambiguous_parameters(expand: bool) -> Parameters {
         ..Default::default()
     }
     .make_parameters()
+    .expect("valid test configuration")
 }
 
 #[test]
@@ -2608,6 +2636,7 @@ fn substitutions_follow_the_first_expanded_occurrence() {
         }))
         .unwrap()
         .make_parameters()
+        .expect("valid test configuration")
     };
     let peptide = |fasta: &str, merge: bool| {
         let fasta = Fasta::parse(fasta.into(), "rev_", false).unwrap();
@@ -2808,7 +2837,8 @@ fn batched_page_search_matches_per_peak_page_search() {
             bucket_size: Some(bucket_size),
             ..Builder::default()
         }
-        .make_parameters();
+        .make_parameters()
+        .expect("valid test configuration");
         let database = parameters.clone().build(fasta.clone());
         assert!(!database.peptides.is_empty());
 
@@ -2864,6 +2894,7 @@ fn isoleucine_leucine_parameters(merge: bool, extra: serde_json::Value) -> Param
     serde_json::from_value::<Builder>(config)
         .unwrap()
         .make_parameters()
+        .expect("valid test configuration")
 }
 
 /// Unmodified peptides equal to APEPLDEK once I, L and J are one residue.
@@ -3104,7 +3135,10 @@ mod site_losses {
     }
 
     fn peptides(neutral_losses: serde_json::Value, mode: &str) -> Vec<Peptide> {
-        let parameters = builder(neutral_losses, mode).unwrap().make_parameters();
+        let parameters = builder(neutral_losses, mode)
+            .unwrap()
+            .make_parameters()
+            .expect("valid test configuration");
         let fasta = Fasta::parse(">P1\nASAYAK\n".into(), "rev_", false).unwrap();
         parameters.digest(&fasta)
     }
@@ -3148,8 +3182,8 @@ mod site_losses {
     fn both_forms_parse() {
         let list = builder(serde_json::json!([H3PO4]), "optional").unwrap();
         let map = builder(serde_json::json!({"S": [H3PO4], "T": [H3PO4]}), "optional").unwrap();
-        let list = list.make_parameters();
-        let map = map.make_parameters();
+        let list = list.make_parameters().expect("valid test configuration");
+        let map = map.make_parameters().expect("valid test configuration");
         for rule in list.variable_modifications() {
             assert_eq!(&*rule.modification.neutral_losses, &[H3PO4]);
             assert!(rule.modification.site_losses.is_none());
@@ -3203,7 +3237,7 @@ mod site_losses {
             }
         }))
         .unwrap();
-        let parameters = builder.make_parameters();
+        let parameters = builder.make_parameters().expect("valid test configuration");
         let rules = parameters.variable_modifications();
         let losses = rules[0].modification.site_losses.as_ref().unwrap();
         assert_eq!(losses[0].0, ModificationSpecificity::PeptideN(Some(b'K')));
@@ -3395,6 +3429,7 @@ fn unlimited_length_warns_only_without_another_length_bound() {
             ..Default::default()
         }
         .make_parameters()
+        .expect("valid test configuration")
     };
     for enzyme in [
         serde_json::json!({"cleave_at": "KR", "missed_cleavages": "unlimited", "max_len": "unlimited"}),
@@ -3420,7 +3455,7 @@ fn localization_rules_come_in_a_fixed_order() {
         "generate_decoys":false,"peptide_min_mass":0
     }))
     .unwrap()
-    .make_parameters();
+    .make_parameters().expect("valid test configuration");
     let peptide = Peptide::try_from(Digest {
         sequence: "KMSTYK".into(),
         protein: "P1".into(),
@@ -3461,7 +3496,10 @@ fn contaminant_proteins_mark_their_peptides_by_accession() {
         "enzyme": {"missed_cleavages": 0, "min_len": 6}
     }))
     .unwrap();
-    let peptides = builder.make_parameters().digest(&fasta);
+    let peptides = builder
+        .make_parameters()
+        .expect("valid test configuration")
+        .digest(&fasta);
     let peptide_of = |sequence: &str| {
         peptides
             .iter()

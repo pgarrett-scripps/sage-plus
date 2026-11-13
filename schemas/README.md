@@ -35,9 +35,9 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
   matched fragment ion of a retained PSM.
 - `run-summary.v9.schema.json` is the JSON Schema for `run-summary.json` (`schema_version` 9).
   Objects allow additional properties; optional fields may be added without a version bump.
-- `digestion.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are Frictionless
-  Table Schemas giving the column order, types and meaning of `digestion.tsv` and
-  `diagnostic_ions.tsv`.
+- `digestion.v1.tsv.schema.json`, `qc_composition.v1.tsv.schema.json` and
+  `diagnostic_ions.v1.tsv.schema.json` are Frictionless Table Schemas giving the column order,
+  types and meaning of `digestion.tsv`, `qc.composition.tsv` and `diagnostic_ions.tsv`.
 - `qc.v1.tsv.schema.json` describes `qc.tsv`, one row per searched file carrying the headline
   number of every quality-control output.
 - `qc_gradient.v1.tsv.schema.json` describes `qc.gradient.tsv`, one row per file and

@@ -43,7 +43,7 @@ fn exact_prefilter_preserves_tied_isobaric_scoring() {
         generate_decoys: Some(false),
         ..Builder::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nLEKPI\nPEILK\nPELIK\n");
     let expected = peptides
         .iter()
@@ -250,7 +250,9 @@ fn equal_nonzero_isotope_bounds_are_honored() {
         .map(|ion| ion.monoisotopic_mass)
         .collect::<Vec<_>>();
 
-    let parameters = Builder::default().make_parameters();
+    let parameters = Builder::default()
+        .make_parameters()
+        .expect("valid test configuration");
     let database = parameters.build_from_peptides(vec![peptide.clone()]);
     let precursor_charge = 2;
     let precursor = Precursor {
@@ -311,7 +313,7 @@ fn isotope_offsets_are_honored_for_labeled_precursors() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     parameters.validate_channels().unwrap();
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let heavy = peptides
@@ -577,6 +579,7 @@ fn exact_score_ties_prefer_isotope_zero() {
     peptides.sort_by(|a, b| a.monoisotopic.total_cmp(&b.monoisotopic));
     let database = Builder::default()
         .make_parameters()
+        .expect("valid test configuration")
         .build_from_peptides(peptides);
     let precursor_charge = 2;
     let query = ProcessedSpectrum {
@@ -671,6 +674,7 @@ mod mass_offsets {
             ..Builder::default()
         }
         .make_parameters()
+        .expect("valid test configuration")
     }
 
     fn database(search_mode: SearchMode) -> IndexedDatabase {
@@ -1314,7 +1318,7 @@ fn ms2_without_a_precursor_reports_no_match() {
         generate_decoys: Some(false),
         ..Builder::default()
     };
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nLEKPI\nPEILK\n");
     let expected = peptides
         .iter()

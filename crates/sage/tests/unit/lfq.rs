@@ -26,7 +26,9 @@ fn disabling_mbr_keeps_one_anchor_per_identified_file() {
         "generate_decoys": false
     }))
     .unwrap();
-    let parameters = parameters.make_parameters();
+    let parameters = parameters
+        .make_parameters()
+        .expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
     let db = parameters.build_from_peptides(peptides);
     let features = [0, 1].map(|file_id| Feature {
@@ -74,7 +76,7 @@ fn one_identified_label_channel_seeds_all_channel_precursors() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     parameters.validate_channels().unwrap();
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDER\n");
     let db = parameters.build_from_peptides(peptides);
@@ -118,7 +120,7 @@ fn shared_light_variable_channel_seeds_every_heavy_site_pattern() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     parameters.validate_channels().unwrap();
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEKK\n");
     let db = parameters.build_from_peptides(peptides);
@@ -450,7 +452,7 @@ fn file_evidence_does_not_invent_a_score_for_a_missing_trace() {
 fn strict_ms2_evidence_requires_both_psm_and_peptide_acceptance() {
     let builder: Builder =
         serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
     let db = parameters.build_from_peptides(peptides);
     let features = [0.001, 0.5, f32::NAN]
@@ -540,7 +542,7 @@ fn eluting_ms1_spectra(
 fn disabling_mbr_quantifies_each_file_against_its_own_anchor() {
     let builder: Builder =
         serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
     let db = parameters.build_from_peptides(peptides);
     let features = [(0, 0.2), (1, 0.6)].map(|(file_id, aligned_rt)| Feature {
@@ -597,7 +599,7 @@ fn disabling_mbr_quantifies_each_file_against_its_own_anchor() {
 fn mbr_traces_one_anchor_across_files_deterministically() {
     let builder: Builder =
         serde_json::from_value(serde_json::json!({"generate_decoys": false})).unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDE\n");
     let db = parameters.build_from_peptides(peptides);
     let feature = Feature {

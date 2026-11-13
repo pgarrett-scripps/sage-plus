@@ -27,10 +27,43 @@ entries are retained below for provenance.
   foreign proteome does not give, and the two methods the paper shows cannot support a claim of
   FDR control — the lower bound and the sample estimate — are not reported. The results schema
   stays at version 7 (8 with precursor labels), with the new column null.
+- `qc.composition.tsv` reports the amino acid composition of what was identified against the
+  composition the search database predicts for the same proteins, one row per file and residue,
+  then a `total` row set for the run. The observed profile counts the residues of each file's
+  distinct confident target peptide sequences (rank 1, spectrum and peptide q-value at most
+  0.01, one count per sequence, modifications ignored); the expected profile counts the residues
+  of the distinct in-silico peptides in the database that belong to the proteins identified in
+  that file, so the expectation carries the same enzyme, length limits and protein composition
+  as the observations and no species reference table is involved. Both count interior residues
+  only: a terminus the enzyme produced is dictated by the enzyme, so with trypsin counting it
+  would mostly report K and R, while a ragged terminus keeps its residue and a non-specific
+  digest keeps every residue. Each row gives the observed and expected counts and fractions and
+  their `log2_ratio`, which is empty when one side has none of the residue. `run-summary.json`
+  gains a `qc.composition` block with the peptide and residue counts, the residue whose share
+  moved most and by how much, and the Jensen-Shannon distance between the whole profiles. The
+  point is to name the residue that goes missing: cysteine low means the alkylation or its
+  static modification is wrong, methionine low means oxidation was not searched, lysine low
+  means the lysines are blocked, every residue shifted means the FASTA is wrong or a second
+  species is present. No p-value and no threshold: a profile holds hundreds of thousands of
+  residues, so every test is significant and significance would say nothing about size. The
+  comparison re-reads nothing, costing one pass over the retained PSMs and one over the
+  database peptides. The two profiles are matched on missed cleavages, because the database
+  holds every missed cleavage the digest allows while the identified peptides are mostly fully
+  cleaved, and each missed cleavage keeps a cleavage residue inside the peptide: compared
+  directly, the enzyme's own residues (K and R for trypsin) read near a log2 ratio of -3 in
+  every run and are always the largest shift, which is the digest and not the sample. The
+  expected profile is therefore the database profile of each missed-cleavage class, weighted by
+  the share of the file's observed residues in that class; no enzyme or residue is named to do
+  it, and `matched_observed_residues` reports how much of the observed profile carried a
+  weight. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
+  [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
+||||||| 587f8ff
 - Every search writes `qc.tsv`, one row per input file and one column per metric: spectra read,
   retention-time span, summed MS1 total ion current, PSMs, peptides, proteins, the share of
   acquired MS2 spectra that were identified, this file's `digestion.tsv` headline numbers, its
-  largest polymer share, and a summary of its gradient bins. It repeats the per-file headline
+  largest polymer share, the residue whose composition moved furthest from the database's
+  expectation with that shift and the Jensen-Shannon distance from `qc.composition.tsv`, and a
+  summary of its gradient bins. It repeats the per-file headline
   number of every other QC output so one table shows a whole run, and it has no `total` row
   because a retention-time span and an identification rate do not pool across files.
 - Every search also writes `qc.gradient.tsv`: each file split into ten equal-width
@@ -42,6 +75,7 @@ entries are retained below for provenance.
   already holds: one pass over each file's spectra where the polymer scan already runs, and one
   pass over the PSMs after FDR. Nothing existing changes; `run-summary.json` gains only the two
   new paths in `output_paths`.
+
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
   decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per
@@ -118,6 +152,15 @@ entries are retained below for provenance.
   difference in peak widths is not a difference in minutes. In-source products pile up at a
   difference of zero while unrelated pairs spread out, so the density of pairs 1 to 5 units from
   zero says how much of a flagged set could be coincidence.
+
+### Fixed
+- A modification key that is not a site specificity is reported instead of panicking.
+  `validate_mods`, `validate_var_mods` and `Database::make_parameters` now return
+  `Result`, carrying `invalid modification key \`<key>\`` — the message
+  `validate_modification_keys` already gave — so the key as written reaches the error a
+  user sees wherever the configuration is assembled, including by a caller that builds the
+  settings in Rust rather than from JSON. A configuration whose keys are all valid produces
+  exactly what it did before.
 
 ## [v0.1.0-beta.19] - 2026-11-12
 

@@ -503,6 +503,7 @@ impl Runner {
         self.parameters.output_paths.push(path);
 
         let digestion = self.digestion_stats(&outputs.features, &filenames);
+        let composition = self.composition_stats(&outputs.features, &filenames);
         let polymers = self.polymer_stats(&filenames);
         let diagnostic_ions = self.diagnostic_ion_stats(&filenames);
         if let Some(path) = self.write_diagnostic_ions(&filenames)? {
@@ -510,8 +511,10 @@ impl Runner {
         }
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
+        let path = self.write_composition(&composition)?;
+        self.parameters.output_paths.push(path);
         let identification = self.identification_stats(&outputs.features, &filenames);
-        for path in self.write_qc_tables(&identification, &digestion, &polymers)? {
+        for path in self.write_qc_tables(&identification, &digestion, &polymers, &composition)? {
             self.parameters.output_paths.push(path);
         }
 
@@ -822,6 +825,7 @@ impl Runner {
                 digestion,
                 polymers,
                 diagnostic_ions,
+                composition: composition.run_stats(),
             },
             output_paths,
             peak_rss_bytes,

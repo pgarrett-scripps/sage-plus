@@ -2,7 +2,7 @@
   "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
   "name": "qc",
   "title": "qc.tsv",
-  "description": "One row per searched file: the headline quality-control number of every QC output, so one table shows a whole run. There is no total row, because a retention-time span and an identification rate do not pool across files. The per-bin detail is in qc.gradient.tsv, the digestion detail in digestion.tsv, and the polymer detail in run-summary.json under qc.polymers.",
+  "description": "One row per searched file: the headline quality-control number of every QC output, so one table shows a whole run. There is no total row, because a retention-time span and an identification rate do not pool across files. The per-bin detail is in qc.gradient.tsv, the digestion detail in digestion.tsv, the per-residue composition in qc.composition.tsv, and the polymer detail in run-summary.json under qc.polymers.",
   "dialect": {
     "delimiter": "\t",
     "header": true
@@ -107,6 +107,31 @@
       "name": "top_polymer_tic_pct",
       "type": "number",
       "description": "That polymer's percent of the scanned centroided MS1 total ion current, as reported in run-summary.json under qc.polymers; zero when top_polymer is `-`."
+    },
+    {
+      "name": "largest_shift_residue",
+      "type": "string",
+      "constraints": {
+        "required": false,
+        "pattern": "^[A-Z]?$"
+      },
+      "description": "Residue whose observed share in this file differs most from the share the search database predicts for the same proteins, from qc.composition.tsv. Empty when no residue has a finite log2 ratio, for example when nothing was identified."
+    },
+    {
+      "name": "largest_shift_log2_ratio",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "That residue's `log2(observed_fraction / expected_fraction)`, four decimals. Empty with largest_shift_residue: an absent shift is not a shift of zero."
+    },
+    {
+      "name": "jensen_shannon_distance",
+      "type": "number",
+      "constraints": {
+        "required": false
+      },
+      "description": "Jensen-Shannon distance between this file's observed and expected composition profiles, four decimals: 0 for identical profiles, 1 for profiles with no residue in common. Empty when either profile counted no residues."
     },
     {
       "name": "gradient_bins",

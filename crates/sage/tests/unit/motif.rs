@@ -133,6 +133,7 @@ mod database {
         serde_json::from_value::<Builder>(config)
             .unwrap()
             .make_parameters()
+            .expect("valid test configuration")
     }
 
     fn expand(parameters: &Parameters, fasta: &str, decoys: bool) -> Vec<Peptide> {

@@ -26,6 +26,7 @@ fn isoleucine_leucine_twins_share_a_prefilter_key() {
     .unwrap();
     let enzyme = sage_core::database::Builder::default()
         .make_parameters()
+        .expect("valid test configuration")
         .enzyme_parameters();
     for merge in [false, true] {
         let shared = SharedSequences::scan(&fasta, &enzyme, None, true, merge);

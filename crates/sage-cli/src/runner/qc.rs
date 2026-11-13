@@ -1,6 +1,7 @@
 //! Run-level quality-control summaries written next to the search results.
 
 use super::*;
+use sage_core::composition::{CompositionProfile, CompositionSummary};
 use sage_core::diagnostic::{find_ions, DiagnosticIon};
 use sage_core::digestion::DigestionSummary;
 use sage_core::enzyme::EnzymeParameters;
@@ -22,6 +23,10 @@ const GRADIENT_BINS: usize = 10;
 
 /// Percent of MS1 TIC on one polymer above which a run warning is raised.
 const POLYMER_WARNING_TIC_PCT: f64 = 5.0;
+
+/// Spectrum- and peptide-level q-value a PSM must pass to count towards the
+/// amino acid composition profile, matching the digestion summary.
+const COMPOSITION_Q_VALUE: f32 = 0.01;
 
 /// Quality-control scans of one file's raw spectra.
 #[derive(Debug, Clone, Default)]
@@ -147,6 +152,93 @@ pub struct QcRunStats {
     /// Present when `diagnostic_ions` is enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic_ions: Option<DiagnosticIonRunStats>,
+    /// Headline numbers of the amino acid composition profile. The per-residue
+    /// table is `qc.composition.tsv`.
+    #[serde(default)]
+    pub composition: CompositionRunStats,
+}
+
+/// Headline numbers of the amino acid composition comparison, per file and for
+/// the whole run. The per-residue rows go to `qc.composition.tsv`, which would
+/// make this block twenty times longer for no reader's benefit.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct CompositionRunStats {
+    pub q_value: f32,
+    pub files: Vec<CompositionHeadline>,
+    pub total: CompositionHeadline,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct CompositionHeadline {
+    pub file: String,
+    /// Distinct confident target peptide sequences observed.
+    pub observed_peptides: u64,
+    pub observed_residues: u64,
+    /// Observed residues whose missed-cleavage class the database could match,
+    /// which are the ones weighting the expected profile.
+    pub matched_observed_residues: u64,
+    /// Distinct database peptide sequences of the proteins identified here.
+    pub expected_peptides: u64,
+    pub expected_residues: u64,
+    /// Residue whose observed share differs most from the expected one, and
+    /// that difference as a log2 ratio. Absent when no residue has a finite
+    /// ratio, for example when nothing was identified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largest_shift_residue: Option<char>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub largest_shift_log2_ratio: Option<f64>,
+    /// Jensen-Shannon distance over the whole profile; absent when either
+    /// profile counted no residues.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jensen_shannon_distance: Option<f64>,
+}
+
+impl CompositionHeadline {
+    fn new(file: &str, summary: &CompositionSummary) -> Self {
+        Self {
+            file: file.to_string(),
+            observed_peptides: summary.observed_peptides,
+            observed_residues: summary.observed_residues,
+            matched_observed_residues: summary.matched_observed_residues,
+            expected_peptides: summary.expected_peptides,
+            expected_residues: summary.expected_residues,
+            largest_shift_residue: summary.largest_shift.map(|(residue, _)| residue),
+            largest_shift_log2_ratio: summary.largest_shift.map(|(_, ratio)| ratio),
+            jensen_shannon_distance: summary.jensen_shannon_distance,
+        }
+    }
+}
+
+/// The full per-file composition profiles, including the per-residue rows.
+#[derive(Debug, Clone, Default)]
+pub struct CompositionProfiles {
+    pub q_value: f32,
+    /// One entry per searched file, in input order.
+    pub files: Vec<CompositionFileProfile>,
+    /// Every file together: distinct sequences over the run, against the
+    /// database peptides of every protein identified anywhere in it.
+    pub total: CompositionSummary,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompositionFileProfile {
+    pub file: String,
+    pub summary: CompositionSummary,
+}
+
+impl CompositionProfiles {
+    /// The small block written to `run-summary.json`.
+    pub fn run_stats(&self) -> CompositionRunStats {
+        CompositionRunStats {
+            q_value: self.q_value,
+            files: self
+                .files
+                .iter()
+                .map(|file| CompositionHeadline::new(&file.file, &file.summary))
+                .collect(),
+            total: CompositionHeadline::new("total", &self.total),
+        }
+    }
 }
 
 /// Diagnostic ions found in one file's MS2 spectra.
@@ -454,6 +546,123 @@ impl Runner {
         }
     }
 
+    /// Interior amino acid composition of each file's confident target
+    /// peptides, against the composition of the database peptides of the
+    /// proteins identified in that file.
+    ///
+    /// The expected profile is taken from the database as built, so a
+    /// prefiltered or limited database makes a prefiltered expectation.
+    pub(super) fn composition_stats(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> CompositionProfiles {
+        use std::collections::{HashMap, HashSet};
+
+        let start = Instant::now();
+        let enzyme = EnzymeParameters::from(self.database_parameters.enzyme.clone()).enzyme;
+        let clip = self.database_parameters.clip_n_term_met;
+        // One slot per file, and one more for the run as a whole.
+        let run = filenames.len();
+        let mut observed = vec![CompositionProfile::default(); run + 1];
+        let mut observed_seen = vec![HashSet::new(); run + 1];
+        let mut proteins = vec![HashSet::new(); run + 1];
+        for feature in features {
+            if feature.rank != 1
+                || feature.spectrum_q > COMPOSITION_Q_VALUE
+                || feature.peptide_q > COMPOSITION_Q_VALUE
+            {
+                continue;
+            }
+            let peptide = &self.database[feature.peptide_idx];
+            if peptide.decoy {
+                continue;
+            }
+            let sequence = peptide.sequence.as_str();
+            for slot in [feature.file_id, run] {
+                // Distinct sequences, so an abundant peptide counts once.
+                if observed_seen[slot].insert(sequence) {
+                    observed[slot].add_peptide(enzyme.as_ref(), clip, peptide);
+                }
+                for protein in &peptide.proteins {
+                    proteins[slot].insert(&**protein);
+                }
+            }
+        }
+
+        // A protein identified in several files credits its peptides to each.
+        let mut protein_files: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (slot, identified) in proteins.iter().enumerate() {
+            for protein in identified {
+                protein_files.entry(protein).or_default().push(slot);
+            }
+        }
+        let mut expected = vec![CompositionProfile::default(); run + 1];
+        let mut expected_seen: HashSet<&str> = HashSet::new();
+        let mut credited: Vec<usize> = Vec::new();
+        for peptide in &self.database.peptides {
+            if peptide.decoy {
+                continue;
+            }
+            credited.clear();
+            for protein in &peptide.proteins {
+                let slots = protein_files
+                    .get(&**protein)
+                    .map_or(&[][..], |slots| slots.as_slice());
+                for &slot in slots {
+                    if !credited.contains(&slot) {
+                        credited.push(slot);
+                    }
+                }
+            }
+            if credited.is_empty() {
+                continue;
+            }
+            // Every modification variant of a sequence shares its proteins, so
+            // the first occurrence settles which files it is counted in.
+            if !expected_seen.insert(peptide.sequence.as_str()) {
+                continue;
+            }
+            let mut counts = CompositionProfile::default();
+            counts.add_peptide(enzyme.as_ref(), clip, peptide);
+            for &slot in &credited {
+                expected[slot].merge(&counts);
+            }
+        }
+
+        let files = filenames
+            .iter()
+            .enumerate()
+            .map(|(slot, file)| CompositionFileProfile {
+                file: file.clone(),
+                summary: CompositionSummary::new(&observed[slot], &expected[slot]),
+            })
+            .collect();
+        let total = CompositionSummary::new(&observed[run], &expected[run]);
+        info!(
+            "composition: {} peptides, {} interior residues ({} matched on missed cleavages) against {} database peptides of {} proteins; largest shift {}, Jensen-Shannon distance {} ({} ms)",
+            total.observed_peptides,
+            total.observed_residues,
+            total.matched_observed_residues,
+            total.expected_peptides,
+            proteins[run].len(),
+            match total.largest_shift {
+                Some((residue, ratio)) => format!("{residue} {ratio:+.2} log2"),
+                None => "none".to_string(),
+            },
+            match total.jensen_shannon_distance {
+                Some(distance) => format!("{distance:.4}"),
+                None => "none".to_string(),
+            },
+            start.elapsed().as_millis(),
+        );
+        CompositionProfiles {
+            q_value: COMPOSITION_Q_VALUE,
+            files,
+            total,
+        }
+    }
+
     /// Log and summarize the share of MS2 spectra containing each
     /// diagnostic ion; `None` when diagnostic ions are off.
     pub(super) fn diagnostic_ion_stats(
@@ -531,6 +740,12 @@ impl Runner {
         let path = self.make_path("diagnostic_ions.tsv");
         sage_cloudpath::write_bytes_sync(&path, writer.into_inner()?)?;
         Ok(Some(path))
+    }
+
+    pub(super) fn write_composition(&self, profiles: &CompositionProfiles) -> anyhow::Result<Url> {
+        let path = self.make_path("qc.composition.tsv");
+        sage_cloudpath::write_bytes_sync(&path, serialize_composition(profiles)?)?;
+        Ok(path)
     }
 
     pub(super) fn write_digestion(&self, stats: &DigestionRunStats) -> anyhow::Result<Url> {
@@ -739,11 +954,12 @@ impl Runner {
         identification: &[IdentificationFileStats],
         digestion: &DigestionRunStats,
         polymers: &[PolymerRunFileStats],
+        composition: &CompositionProfiles,
     ) -> anyhow::Result<Vec<Url>> {
         let table = self.make_path("qc.tsv");
         sage_cloudpath::write_bytes_sync(
             &table,
-            serialize_qc(identification, digestion, polymers)?,
+            serialize_qc(identification, digestion, polymers, composition)?,
         )?;
         let gradient = self.make_path("qc.gradient.tsv");
         sage_cloudpath::write_bytes_sync(&gradient, serialize_qc_gradient(identification)?)?;
@@ -758,6 +974,7 @@ pub(super) fn serialize_qc(
     identification: &[IdentificationFileStats],
     digestion: &DigestionRunStats,
     polymers: &[PolymerRunFileStats],
+    composition: &CompositionProfiles,
 ) -> anyhow::Result<Vec<u8>> {
     let mut writer = csv::WriterBuilder::new()
         .delimiter(b'\t')
@@ -783,6 +1000,9 @@ pub(super) fn serialize_qc(
         "non_enzymatic_pct",
         "top_polymer",
         "top_polymer_tic_pct",
+        "largest_shift_residue",
+        "largest_shift_log2_ratio",
+        "jensen_shannon_distance",
         "gradient_bins",
         "empty_gradient_bins",
         "min_bin_identified_pct",
@@ -803,6 +1023,12 @@ pub(super) fn serialize_qc(
                     .iter()
                     .max_by(|left, right| left.tic_pct.total_cmp(&right.tic_pct))
             });
+        let shift = composition
+            .files
+            .iter()
+            .find(|profile| profile.file == file.file)
+            .map(|profile| &profile.summary);
+        let largest_shift = shift.and_then(|summary| summary.largest_shift);
         let (min_pct, max_pct) = file.bin_pct_range().unwrap_or((0.0, 0.0));
         writer.write_record([
             file.file.clone(),
@@ -825,6 +1051,14 @@ pub(super) fn serialize_qc(
             format!("{:.3}", digested.map_or(0.0, |s| s.non_enzymatic_pct)),
             polymer.map_or("-", |share| share.name.as_str()).to_string(),
             format!("{:.3}", polymer.map_or(0.0, |share| share.tic_pct)),
+            // Empty, as in qc.composition.tsv, where no residue has a finite
+            // ratio or neither profile counted residues: an absent shift is
+            // not a shift of zero.
+            largest_shift.map_or(String::new(), |(residue, _)| residue.to_string()),
+            largest_shift.map_or(String::new(), |(_, ratio)| format!("{ratio:.4}")),
+            shift
+                .and_then(|summary| summary.jensen_shannon_distance)
+                .map_or(String::new(), |distance| format!("{distance:.4}")),
             file.bins.len().to_string(),
             file.empty_bins().to_string(),
             format!("{min_pct:.3}"),
@@ -915,6 +1149,46 @@ pub(super) fn serialize_digestion(stats: &DigestionRunStats) -> anyhow::Result<V
             format!("{:.3}", summary.semi_c_pct),
             format!("{:.3}", summary.non_enzymatic_pct),
         ])?;
+    }
+    writer.flush()?;
+    Ok(writer.into_inner()?)
+}
+
+pub(super) fn serialize_composition(profiles: &CompositionProfiles) -> anyhow::Result<Vec<u8>> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    writer.write_record([
+        "file",
+        "residue",
+        "observed",
+        "observed_fraction",
+        "expected",
+        "expected_fraction",
+        "log2_ratio",
+    ])?;
+    let rows = profiles
+        .files
+        .iter()
+        .map(|file| (file.file.as_str(), &file.summary))
+        .chain(std::iter::once(("total", &profiles.total)));
+    for (file, summary) in rows {
+        for residue in &summary.residues {
+            writer.write_record([
+                file.to_string(),
+                residue.residue.to_string(),
+                residue.observed.to_string(),
+                format!("{:.6}", residue.observed_fraction),
+                residue.expected.to_string(),
+                format!("{:.6}", residue.expected_fraction),
+                // Empty when one side has none of the residue, where the
+                // ratio has no finite value.
+                residue
+                    .log2_ratio
+                    .map(|ratio| format!("{ratio:.4}"))
+                    .unwrap_or_default(),
+            ])?;
+        }
     }
     writer.flush()?;
     Ok(writer.into_inner()?)

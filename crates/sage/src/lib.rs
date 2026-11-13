@@ -1,6 +1,7 @@
 pub mod ambiguity;
 pub mod ambiguous_residues;
 pub mod cleavage;
+pub mod composition;
 pub mod database;
 pub mod diagnostic;
 pub mod digestion;

@@ -115,7 +115,7 @@ fn equal_mass_labels_keep_their_site_specific_names() {
         }
     }))
     .unwrap();
-    let parameters = builder.make_parameters();
+    let parameters = builder.make_parameters().expect("valid test configuration");
     let peptides = parameters.peptides_from_tsv("sequence\nPEPTIDEK\nPEPTIDER\n");
     let database = parameters.build_from_peptides(peptides);
 
