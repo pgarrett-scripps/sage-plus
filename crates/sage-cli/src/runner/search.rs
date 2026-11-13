@@ -32,6 +32,29 @@ pub(super) fn widen_for_recalibration(tolerance: Tolerance) -> Tolerance {
     }
 }
 
+/// Release the per-peak columns that nothing reads from a retained MS1
+/// spectrum.
+///
+/// Label-free quantification is the only consumer of the MS1 spectra a
+/// chunk hands back ([`sage_core::lfq::FeatureMap::quantify`]), and it
+/// reads only `file_id`, `scan_start_time`, `masses`, `intensities` and
+/// `mobilities`. The charge columns are filled for every peak of every
+/// spectrum regardless of level, and for an MS1 scan without ion mobility
+/// they are constants: charge 1, charge unknown. Holding them costs 2 of
+/// the 10 bytes per peak for as long as the run keeps its MS1 spectra,
+/// which is from the first chunk to the end of quantification. Measured on
+/// five PXD028735 files, that is 0.34 GiB of a 5.27 GiB peak.
+///
+/// Dropping the allocations here, rather than not filling them in
+/// `SpectrumProcessor::process`, keeps the content of a public field in
+/// sage-core the same for every library caller.
+pub(super) fn release_unread_ms1_columns(ms1_spectra: &mut [ProcessedSpectrum]) {
+    for spectrum in ms1_spectra {
+        spectrum.charges = Vec::new();
+        spectrum.charge_is_known = Vec::new();
+    }
+}
+
 impl Runner {
     /// Whether the search runs a discovery pass and recalibrates masses.
     pub(super) fn mass_recalibration_enabled(&self) -> bool {
@@ -490,10 +513,11 @@ impl Runner {
     pub(super) fn complete_features(
         &self,
         msn_spectra: Vec<ProcessedSpectrum>,
-        ms1_spectra: Vec<ProcessedSpectrum>,
+        mut ms1_spectra: Vec<ProcessedSpectrum>,
         features: Vec<Feature>,
         repeated_spectrum_psms: HashMap<usize, usize>,
     ) -> SageResults {
+        release_unread_ms1_columns(&mut ms1_spectra);
         let quant = self
             .parameters
             .quant
@@ -820,3 +844,7 @@ impl Runner {
         Ok((spectra.ms1, spectra.msn))
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/runner/search.rs"]
+mod test;

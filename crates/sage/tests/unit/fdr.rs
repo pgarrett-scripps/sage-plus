@@ -14,8 +14,13 @@ fn peptide(sequence: &str, decoy: bool) -> Peptide {
     peptide
 }
 
+/// Two peptidoforms of PEPTIDE carrying the same modification mass at the same
+/// residue, differing only in neutral loss. `Display` prints the mass, so both
+/// render the same string: under the old string competition key they shared one
+/// competition entry and the loser was dropped from the competition, silently
+/// taking `peptide_q = 1.0`. The structural key competes them separately.
 #[test]
-fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
+fn picked_peptide_competes_peptidoforms_that_render_the_same_string() {
     let mut twin_a = peptide("PEPTIDE", false);
     twin_a.modifications = CompactModifications::from_applied([AppliedModification {
         site: Site::Sequence(1),
@@ -45,7 +50,9 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
     }])
     .unwrap();
 
+    // The collision the string key could not see.
     assert_eq!(twin_a.to_string(), twin_b.to_string());
+    assert_ne!(twin_a.modifications, twin_b.modifications);
     let mut twins = vec![twin_a.clone(), twin_b.clone()];
     crate::database::Parameters::reorder_peptides(&mut twins);
     assert_eq!(twins.len(), 2);
@@ -91,7 +98,58 @@ fn picked_peptide_assigns_one_to_orphaned_competition_twins() {
 
     picked_peptide(&db, &mut features);
 
-    assert_eq!(features[0].peptide_q, 1.0);
+    // Winners ranked 10 (t), 9 (t), 8 (t), 7 (d), 2 (d); raw (d + 1) / t is
+    // 1/1, 1/2, 1/3, 2/3, 3/3, monotonised from the bottom to 1/3 for all
+    // three targets. Both twins hold a competition entry, so neither is left
+    // orphaned at 1.0.
+    assert_eq!(features[0].peptide_q, 1.0 / 3.0);
+    assert_eq!(features[1].peptide_q, 1.0 / 3.0);
+    assert_eq!(features[2].peptide_q, 1.0 / 3.0);
+    assert_eq!(features[3].peptide_q, 2.0 / 3.0);
+    assert_eq!(features[4].peptide_q, 1.0);
+}
+
+/// The competition key itself: string-colliding peptidoforms are distinct, and
+/// a library peptidoform whose modification provenance was lost to ProForma
+/// mass deltas still competes on its recorded group identity.
+#[test]
+fn competition_keys_separate_peptidoforms_and_group_library_identities() {
+    let loss = |loss: f32| {
+        CompactModifications::from_applied([AppliedModification {
+            site: Site::Sequence(1),
+            modification: Arc::new(ModificationDefinition {
+                mass: 10.0,
+                name: None,
+                neutral_losses: Arc::from([loss]),
+                site_losses: None,
+                neutral_loss_mode: NeutralLossMode::Optional,
+                channel_offsets: Arc::default(),
+            }),
+            kind: ModificationKind::Ordinary,
+        }])
+        .unwrap()
+    };
+
+    let mut twin_a = peptide("PEPTIDE", false);
+    twin_a.modifications = loss(5.0);
+    let mut twin_b = peptide("PEPTIDE", false);
+    twin_b.modifications = loss(6.0);
+    assert_eq!(twin_a.to_string(), twin_b.to_string());
+    assert_ne!(PeptideKey::new(&twin_a), PeptideKey::new(&twin_b));
+
+    let mut plain = peptide("PEPTIDE", false);
+    plain.modifications = loss(5.0);
+    assert_eq!(PeptideKey::new(&twin_a), PeptideKey::new(&plain));
+
+    let mut library_target = peptide("PEPTIDE", false);
+    library_target.set_label_group_override(Some(Arc::from("PEPTIDE(group)")));
+    let mut library_decoy = peptide("EDITPEP", true);
+    library_decoy.set_label_group_override(Some(Arc::from("PEPTIDE(group)")));
+    assert_eq!(
+        PeptideKey::new(&library_target),
+        PeptideKey::new(&library_decoy)
+    );
+    assert_ne!(PeptideKey::new(&library_target), PeptideKey::new(&twin_a));
 }
 
 fn target(ix: u32, score: f32) -> Competition<u32> {

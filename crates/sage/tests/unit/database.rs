@@ -1,10 +1,19 @@
 use crate::enzyme::group_digests;
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
 
 use super::*;
+
+use crate::enzyme::{Digest, DigestGroup, EnzymeParameters, Position, ProteinOccurrence};
+use crate::fasta::Fasta;
+use crate::ion_series::Kind;
+use crate::mass::Tolerance;
+use crate::modification::{
+    ModificationDefinition, ModificationSpecificity, SearchMode, SiteMode, VarModEntry,
+};
+use crate::peptide::{Peptide, Site};
+use crate::ptm_library::PtmLibrary;
+use crate::sequence::PeptideSequence;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 #[test]
 fn compact_modification_validation_rejects_long_peptides() {
@@ -621,11 +630,11 @@ fn channel_offsets_generate_complete_static_channels() {
     assert_eq!(peptides.len(), 2);
     let light = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("light"))
+        .find(|peptide| peptide.label_channel_str() == Some("light"))
         .unwrap();
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap();
     assert!((heavy.monoisotopic - light.monoisotopic - 18.022468).abs() < 1e-4);
     assert_eq!(light.label_group(), heavy.label_group());
@@ -659,7 +668,7 @@ fn channels_deduplicate_peptides_without_channel_sites() {
 
     let peptides = params.peptides_from_tsv("sequence\nPEPTIDE\n");
     assert_eq!(peptides.len(), 1);
-    assert_eq!(peptides[0].label_channel, None);
+    assert_eq!(peptides[0].label_channel(), None);
 }
 
 #[test]
@@ -681,7 +690,7 @@ fn variable_channel_offsets_preserve_site_variants_and_shared_light() {
     assert_eq!(
         peptides
             .iter()
-            .filter(|peptide| peptide.label_channel.as_deref() == Some("light"))
+            .filter(|peptide| peptide.label_channel_str() == Some("light"))
             .count(),
         1
     );
@@ -722,7 +731,7 @@ fn channel_offsets_add_to_the_modification_base_mass() {
     }]);
     let heavy = peptides
         .iter()
-        .find(|peptide| peptide.label_channel.as_deref() == Some("heavy"))
+        .find(|peptide| peptide.label_channel_str() == Some("heavy"))
         .unwrap();
     assert!(heavy.to_string().ends_with("K[TMT-SILAC-K]"));
     assert_eq!(
@@ -758,7 +767,7 @@ fn channel_resolved_modification_definitions_are_interned() {
             .iter()
             .find(|peptide| {
                 peptide.sequence.as_ref() == sequence
-                    && peptide.label_channel.as_deref() == Some(channel)
+                    && peptide.label_channel_str() == Some(channel)
             })
             .unwrap()
             .applied_modifications()
@@ -1654,7 +1663,7 @@ fn label_group_recovers_base_definitions_with_nonzero_masses() {
             .iter()
             .map(|peptide| {
                 (
-                    peptide.label_channel.as_deref().unwrap().to_string(),
+                    peptide.label_channel_str().unwrap().to_string(),
                     peptide.label_group(),
                 )
             })
@@ -2762,8 +2771,29 @@ fn interleaved_bucket_ranges_match_bucket_search_on_random_queries() {
             let queried = (0..rng.below(50))
                 .map(|_| rng.below(bucket_count as u64) as u32)
                 .collect::<Vec<_>>();
-            index.resolve_bucket_ranges(&queried, lo, hi, &mut out);
+            // Several windows in one pass must give each window exactly what
+            // it gets alone: one window, then the same window beside two
+            // others, at n=1 and n=3.
+            let others = [
+                (lo, hi),
+                (0, u32::MAX),
+                (hi.saturating_add(1), hi.saturating_add(1)),
+            ];
+            let mut multi = Vec::new();
+            index.resolve_bucket_ranges_multi(&queried, &others, &mut multi);
+            assert_eq!(multi.len(), queried.len() * others.len());
+            index.resolve_bucket_ranges_multi(&queried, &[(lo, hi)], &mut out);
             assert_eq!(out.len(), queried.len());
+            assert_eq!(out[..], multi[..queried.len()]);
+            for (window, &(window_lo, window_hi)) in others.iter().enumerate().skip(1) {
+                let mut alone = Vec::new();
+                index.resolve_bucket_ranges_multi(&queried, &[(window_lo, window_hi)], &mut alone);
+                assert_eq!(
+                    alone[..],
+                    multi[window * queried.len()..(window + 1) * queried.len()],
+                    "window {window} differs when resolved beside others"
+                );
+            }
             for (&bucket, &(first, last)) in queried.iter().zip(&out) {
                 let expected = index
                     .bucket_search(bucket as usize, lo, hi)
@@ -2800,7 +2830,7 @@ fn bucket_ranges_keep_offsets_above_32_bits() {
         fragments: Vec::new(),
     };
     let mut out = Vec::new();
-    index.resolve_bucket_ranges(&[1, 0], 0, u32::MAX, &mut out);
+    index.resolve_bucket_ranges_multi(&[1, 0], &[(0, u32::MAX)], &mut out);
     assert_eq!(out, [(base + (1 << 32), base + (1 << 32)), (base, base)]);
 }
 

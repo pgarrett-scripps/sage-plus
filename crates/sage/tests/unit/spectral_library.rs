@@ -17,7 +17,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
         calcmass: 1_000.0,
         rt: 12.0,
         aligned_rt: 11.5,
-        fragments: Some(Fragments {
+        fragments: Some(Box::new(Fragments {
             kinds: vec![Kind::B, Kind::Y, Kind::Y],
             fragment_ordinals: vec![2, 3, 4],
             charges: vec![1, 1, 2],
@@ -26,7 +26,7 @@ fn feature(peptide_idx: u32, psm_id: usize, spectrum_q: f32, score: f32) -> Feat
             mz_experimental: vec![200.01, 300.01, 400.01],
             intensities: vec![25.0, 100.0, 0.5],
             peak_indices: vec![0, 1, 2],
-        }),
+        })),
         ..Feature::default()
     }
 }
@@ -326,4 +326,70 @@ fn median_ignores_non_finite_values() {
     assert_eq!(median(vec![f32::NAN, 5.0, f32::INFINITY]), Some(5.0));
     assert_eq!(median(vec![f32::NAN]), None);
     assert_eq!(median(Vec::new()), None);
+}
+
+/// A sink that refuses every write, to prove the streaming writer reports a
+/// real sink's failure instead of swallowing it.
+struct FailingSink;
+
+impl std::io::Write for FailingSink {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::StorageFull,
+            "no space",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn streamed_mzspeclib_is_byte_identical_to_the_in_memory_writer() {
+    let database = database();
+    let settings = SpectralLibrarySettings {
+        enabled: true,
+        max_fragments: 2,
+        ..Default::default()
+    };
+    let features = vec![feature(0, 1, 0.001, 8.0)];
+    let selected = select_best_psms(&features, &database, &settings);
+    let mut entries = build_entries(
+        &features,
+        &database,
+        &["sample.mzML".into()],
+        &selected,
+        &settings,
+    )
+    .unwrap();
+    entries[0].label_channel = Some("heavy".into());
+    entries[0].label_group = Some("PEPTIDE".into());
+    entries[0].label_reference = Some("light".into());
+
+    for strategy in [
+        SpectralLibraryStrategy::BestPsm,
+        SpectralLibraryStrategy::Consensus,
+    ] {
+        for library in [entries.as_slice(), &[]] {
+            let in_memory = serialize_mzspeclib(library, "0.1.0-beta.1", strategy);
+            let mut streamed = Vec::new();
+            write_mzspeclib(library, "0.1.0-beta.1", strategy, &mut streamed).unwrap();
+            assert_eq!(
+                String::from_utf8(streamed).unwrap(),
+                String::from_utf8(in_memory).unwrap(),
+                "streamed and in-memory text differ for {} entries",
+                library.len()
+            );
+        }
+    }
+
+    let failed = write_mzspeclib(
+        &entries,
+        "0.1.0-beta.1",
+        SpectralLibraryStrategy::BestPsm,
+        &mut FailingSink,
+    )
+    .expect_err("a sink that cannot be written to must fail the library");
+    assert_eq!(failed.kind(), std::io::ErrorKind::StorageFull);
 }

@@ -32,6 +32,13 @@ calibration. Neither change affects these non-Bruker searches.
 | PXD000138 HCD_1, phosphorylation mass offset | `prefilter-offset-hcd1.json` | 203,040 |
 | PXD000138 HCD_2, phosphorylation mass offset | `prefilter-offset-hcd2.json` | 203,040 |
 
+"Database peptides without prefilter" is the whole modified target-and-decoy database, the
+search with `prefilter` off; the retained column below is the survivors, and both are the same
+`peptides_in_database` field of `run-summary.json`. These retained counts were measured when
+the prefilter kept a peptide on a single preliminary fragment match, which is
+`prefilter_min_matched_peaks: 1` since that setting was added in v0.1.0-beta.11; its default is
+4, so the current default retains far fewer peptides than the numbers below.
+
 ## Results
 
 Median of three runs.

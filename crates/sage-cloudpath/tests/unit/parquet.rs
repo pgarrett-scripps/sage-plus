@@ -161,7 +161,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
     let database = parameters.build_from_peptides(peptides);
     let mut areas = HashMap::new();
     for (index, peptide) in database.peptides.iter().enumerate() {
-        let intensity = match peptide.label_channel.as_deref() {
+        let intensity = match peptide.label_channel_str() {
             Some("light") => 10.0,
             Some("heavy") => 30.0,
             _ => continue,
@@ -493,7 +493,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
     let light = database
         .peptides
         .iter()
-        .position(|peptide| peptide.label_channel.as_deref() == Some("light"))
+        .position(|peptide| peptide.label_channel_str() == Some("light"))
         .unwrap();
     let feature = Feature {
         peptide_idx: PeptideIx(light as u32),

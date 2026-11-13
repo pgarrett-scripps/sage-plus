@@ -1,9 +1,7 @@
+//! Peptides: the sequence, its modifications, and how a digest becomes one.
+
 use std::cmp::Ordering;
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteMode};
 use crate::{
@@ -11,10 +9,8 @@ use crate::{
     mass::{monoisotopic, H2O},
     sequence::PeptideSequence,
 };
-use fnv::{FnvHashMap, FnvHashSet};
 use itertools::Itertools;
 use smallvec::SmallVec;
-use std::sync::OnceLock;
 
 pub const INLINE_PROTEINS: usize = 1;
 
@@ -22,425 +18,18 @@ pub const INLINE_PROTEINS: usize = 1;
 /// Shared peptides transparently spill to heap storage.
 pub type ProteinAccessions = SmallVec<[Arc<str>; INLINE_PROTEINS]>;
 
-const MAX_COMPACT_DEFINITIONS: usize = u8::MAX as usize;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum SiteClass {
-    Nterm,
-    Cterm,
-    Residue,
-}
-
-impl SiteClass {
-    fn from_specificity(specificity: ModificationSpecificity) -> Self {
-        match specificity {
-            ModificationSpecificity::PeptideN(None)
-            | ModificationSpecificity::ProteinN(None)
-            | ModificationSpecificity::PeptideNTerm(_)
-            | ModificationSpecificity::ProteinNTerm(_) => Self::Nterm,
-            ModificationSpecificity::PeptideC(None)
-            | ModificationSpecificity::ProteinC(None)
-            | ModificationSpecificity::PeptideCTerm(_)
-            | ModificationSpecificity::ProteinCTerm(_) => Self::Cterm,
-            _ => Self::Residue,
-        }
-    }
-
-    fn from_site(site: Site) -> Self {
-        match site {
-            Site::Nterm => Self::Nterm,
-            Site::Cterm => Self::Cterm,
-            Site::Sequence(_) => Self::Residue,
-        }
-    }
-
-    fn site(self, position: u8) -> Site {
-        match self {
-            Self::Nterm => Site::Nterm,
-            Self::Cterm => Site::Cterm,
-            Self::Residue => Site::Sequence(position as u32),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct LookupKey {
-    site: SiteClass,
-    kind: ModificationKind,
-    definition: ModificationDefinition,
-}
-
-#[derive(Clone, Debug)]
-struct LookupRecord {
-    site: SiteClass,
-    kind: ModificationKind,
-    definition: Arc<ModificationDefinition>,
-    /// Channel-base definition that a `Label` record was resolved from. Kept by
-    /// identity because `(mass + offset) - offset` is not exact in f32.
-    base: Option<Arc<ModificationDefinition>>,
-}
-
-/// Shared metadata addressed by the compact one-byte modification IDs stored
-/// in each peptide.
-#[derive(Clone, Debug, Default)]
-pub struct ModificationLookup {
-    records: Vec<LookupRecord>,
-    ids: BTreeMap<LookupKey, u8>,
-    pointer_ids: FnvHashMap<(usize, SiteClass, ModificationKind), u8>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModificationLookupError {
-    pub definitions: usize,
-}
-
-impl std::fmt::Display for ModificationLookupError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "compact modification encoding supports at most {MAX_COMPACT_DEFINITIONS} distinct definition and site variants, but {} are required",
-            self.definitions
-        )
-    }
-}
-
-impl std::error::Error for ModificationLookupError {}
-
-impl ModificationLookup {
-    fn from_records(
-        records: impl IntoIterator<Item = LookupRecord>,
-    ) -> Result<Arc<Self>, ModificationLookupError> {
-        let mut unique = BTreeMap::<LookupKey, LookupRecord>::new();
-        let mut pointers = Vec::new();
-        for record in records {
-            let key = LookupKey {
-                site: record.site,
-                kind: record.kind,
-                definition: record.definition.as_ref().clone(),
-            };
-            pointers.push((Arc::as_ptr(&record.definition) as usize, key.clone()));
-            unique.entry(key).or_insert(record);
-        }
-        if unique.len() > MAX_COMPACT_DEFINITIONS {
-            return Err(ModificationLookupError {
-                definitions: unique.len(),
-            });
-        }
-
-        let mut lookup = Self::default();
-        for (key, record) in unique {
-            let id = lookup.records.len() as u8;
-            lookup.records.push(record);
-            lookup.ids.insert(key, id);
-        }
-        for (pointer, key) in pointers {
-            lookup.pointer_ids.insert(
-                (pointer, key.site, key.kind),
-                *lookup.ids.get(&key).expect("compact lookup key is missing"),
-            );
-        }
-        Ok(Arc::new(lookup))
-    }
-
-    pub fn from_definitions(
-        definitions: impl IntoIterator<Item = (Site, Arc<ModificationDefinition>, ModificationKind)>,
-    ) -> Result<Arc<Self>, ModificationLookupError> {
-        Self::from_records(
-            definitions
-                .into_iter()
-                .map(|(site, definition, kind)| LookupRecord {
-                    site: SiteClass::from_site(site),
-                    kind,
-                    definition,
-                    base: None,
-                }),
-        )
-    }
-
-    fn id(
-        &self,
-        site: SiteClass,
-        definition: &Arc<ModificationDefinition>,
-        kind: ModificationKind,
-    ) -> Option<u8> {
-        self.pointer_ids
-            .get(&(Arc::as_ptr(definition) as usize, site, kind))
-            .copied()
-            .or_else(|| self.id_value(site, definition, kind))
-    }
-
-    fn id_value(
-        &self,
-        site: SiteClass,
-        definition: &ModificationDefinition,
-        kind: ModificationKind,
-    ) -> Option<u8> {
-        self.ids
-            .get(&LookupKey {
-                site,
-                kind,
-                definition: definition.clone(),
-            })
-            .copied()
-    }
-
-    fn record(&self, id: u8) -> &LookupRecord {
-        &self.records[id as usize]
-    }
-}
-
-fn empty_modification_lookup() -> Arc<ModificationLookup> {
-    static EMPTY: OnceLock<Arc<ModificationLookup>> = OnceLock::new();
-    EMPTY
-        .get_or_init(|| Arc::new(ModificationLookup::default()))
-        .clone()
-}
-
-/// A residue position and shared modification-definition ID.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct EncodedModification {
-    pub position: u8,
-    pub modification_id: u8,
-}
-
-/// Compact peptide-local modification sites plus shared full metadata.
-///
-/// Four entries are stored inline. Larger collections spill to one allocation.
-#[derive(Clone, Debug)]
-pub struct CompactModifications {
-    entries: SmallVec<[EncodedModification; 4]>,
-    lookup: Arc<ModificationLookup>,
-}
-
-impl Default for CompactModifications {
-    fn default() -> Self {
-        Self {
-            entries: SmallVec::new(),
-            lookup: empty_modification_lookup(),
-        }
-    }
-}
-
-impl PartialEq for CompactModifications {
-    fn eq(&self, other: &Self) -> bool {
-        self.semantic_cmp(other) == Ordering::Equal
-    }
-}
-
-impl CompactModifications {
-    pub fn from_dense(masses: impl IntoIterator<Item = f32>) -> Self {
-        Self::from_sparse(
-            masses
-                .into_iter()
-                .enumerate()
-                .filter(|(_, mass)| *mass != 0.0),
-        )
-    }
-
-    pub fn from_sparse(masses: impl IntoIterator<Item = (usize, f32)>) -> Self {
-        let masses = masses.into_iter().collect::<Vec<_>>();
-        let records = masses
-            .iter()
-            .map(|(position, mass)| {
-                (
-                    Site::Sequence(*position as u32),
-                    Arc::new(ModificationDefinition::bare(*mass)),
-                    ModificationKind::Ordinary,
-                )
-            })
-            .collect::<Vec<_>>();
-        let lookup = ModificationLookup::from_definitions(records.clone())
-            .expect("dense modification array exceeds compact definition limit");
-        let mut compact = Self {
-            entries: SmallVec::new(),
-            lookup,
-        };
-        for (site, definition, kind) in records {
-            compact.push(site, &definition, kind);
-        }
-        compact.sort();
-        compact
-    }
-
-    pub fn from_applied(
-        modifications: impl IntoIterator<Item = AppliedModification>,
-    ) -> Result<Self, ModificationLookupError> {
-        let modifications = modifications.into_iter().collect::<Vec<_>>();
-        let lookup = ModificationLookup::from_definitions(
-            modifications
-                .iter()
-                .map(|applied| (applied.site, applied.modification.clone(), applied.kind)),
-        )?;
-        let mut compact = Self {
-            entries: SmallVec::new(),
-            lookup,
-        };
-        for applied in modifications {
-            compact.push(applied.site, &applied.modification, applied.kind);
-        }
-        compact.sort();
-        Ok(compact)
-    }
-
-    fn install_lookup(&mut self, lookup: Arc<ModificationLookup>) {
-        if self.entries.is_empty() {
-            self.lookup = lookup;
-            return;
-        }
-        if Arc::ptr_eq(&self.lookup, &lookup) {
-            return;
-        }
-
-        let old_lookup = self.lookup.clone();
-        let records = old_lookup
-            .records
-            .iter()
-            .chain(lookup.records.iter())
-            .cloned()
-            .collect::<Vec<_>>();
-        let merged =
-            ModificationLookup::from_records(records).unwrap_or_else(|error| panic!("{error}"));
-        for encoded in &mut self.entries {
-            let record = old_lookup.record(encoded.modification_id);
-            encoded.modification_id = merged
-                .id(record.site, &record.definition, record.kind)
-                .expect("existing modification is missing from merged compact lookup");
-        }
-        self.lookup = merged;
-    }
-
-    fn push(
-        &mut self,
-        site: Site,
-        definition: &Arc<ModificationDefinition>,
-        kind: ModificationKind,
-    ) {
-        let class = SiteClass::from_site(site);
-        let id = self.lookup.id(class, definition, kind).unwrap_or_else(|| {
-            panic!("modification definition was not registered in the shared compact lookup")
-        });
-        let position = match site {
-            Site::Sequence(position) => u8::try_from(position)
-                .expect("peptide residue position exceeds compact modification encoding"),
-            Site::Nterm | Site::Cterm => 0,
-        };
-        self.entries.push(EncodedModification {
-            position,
-            modification_id: id,
-        });
-    }
-
-    fn applied(&self) -> impl ExactSizeIterator<Item = AppliedModificationRef<'_>> {
-        self.entries.iter().map(|encoded| {
-            let record = self.lookup.record(encoded.modification_id);
-            AppliedModificationRef {
-                site: record.site.site(encoded.position),
-                modification: record.definition.as_ref(),
-                kind: record.kind,
-            }
-        })
-    }
-
-    fn mass_at(&self, position: usize) -> f32 {
-        self.entries
-            .iter()
-            .filter_map(|encoded| {
-                let record = self.lookup.record(encoded.modification_id);
-                (record.site == SiteClass::Residue && encoded.position as usize == position)
-                    .then_some(record.definition.mass)
-            })
-            .sum()
-    }
-
-    /// Read all modifications at the next residue in a forward sequence scan.
-    ///
-    /// Compact entries are sorted by site, so callers such as ion generation
-    /// can visit every entry once instead of searching the collection for each
-    /// residue.
-    pub(crate) fn mass_at_with_cursor(&self, position: usize, cursor: &mut usize) -> f32 {
-        let mut mass = 0.0;
-        while let Some(encoded) = self.entries.get(*cursor) {
-            let record = self.lookup.record(encoded.modification_id);
-            if record.site != SiteClass::Residue {
-                *cursor += 1;
-                continue;
-            }
-
-            match (encoded.position as usize).cmp(&position) {
-                Ordering::Less => *cursor += 1,
-                Ordering::Equal => {
-                    mass += record.definition.mass;
-                    *cursor += 1;
-                }
-                Ordering::Greater => break,
-            }
-        }
-        mass
-    }
-
-    fn total_mass(&self) -> f32 {
-        self.entries
-            .iter()
-            .map(|encoded| self.lookup.record(encoded.modification_id).definition.mass)
-            .sum()
-    }
-
-    fn sort(&mut self) {
-        let lookup = self.lookup.clone();
-        self.entries.sort_unstable_by(|left, right| {
-            let left_record = lookup.record(left.modification_id);
-            let right_record = lookup.record(right.modification_id);
-            left_record
-                .site
-                .site(left.position)
-                .cmp(&right_record.site.site(right.position))
-                .then_with(|| left_record.definition.cmp(&right_record.definition))
-                .then_with(|| left_record.kind.cmp(&right_record.kind))
-        });
-    }
-
-    fn semantic_cmp(&self, other: &Self) -> Ordering {
-        self.applied()
-            .map(|applied| (applied.site, applied.modification, applied.kind))
-            .cmp(
-                other
-                    .applied()
-                    .map(|applied| (applied.site, applied.modification, applied.kind)),
-            )
-    }
-
-    fn reverse_internal(&mut self, last: usize) {
-        let lookup = self.lookup.clone();
-        for encoded in &mut self.entries {
-            if lookup.record(encoded.modification_id).site != SiteClass::Residue {
-                continue;
-            }
-            let position = encoded.position as usize;
-            if (1..last).contains(&position) {
-                encoded.position = (last - position) as u8;
-            }
-        }
-        self.sort();
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn spilled(&self) -> bool {
-        self.entries.spilled()
-    }
-
-    pub(crate) fn heap_bytes(&self) -> usize {
-        usize::from(self.entries.spilled())
-            * self.entries.capacity()
-            * std::mem::size_of::<EncodedModification>()
-    }
+/// Labeling provenance for a peptidoform: which precursor channel it was
+/// resolved to, and the base identity a spectral library supplied for it.
+/// Both are `None` for every peptide of a label-free FASTA search, so
+/// [`Peptide`] stores this behind a box instead of inline.
+#[derive(Clone, PartialEq, Default, Debug)]
+pub struct PeptideLabel {
+    /// Precursor-resolved labeling channel, when this peptide was generated
+    /// from a coherent database label definition.
+    pub channel: Option<Arc<str>>,
+    /// Library-provided base peptidoform identity when applied modification
+    /// provenance is unavailable after parsing ProForma mass deltas.
+    pub group_override: Option<Arc<str>>,
 }
 
 #[derive(Clone, PartialEq, Default)]
@@ -449,12 +38,13 @@ pub struct Peptide {
     pub sequence: PeptideSequence,
     /// Compact modification sites with shared definition metadata.
     pub modifications: CompactModifications,
-    /// Precursor-resolved labeling channel, when this peptide was generated
-    /// from a coherent database label definition.
-    pub label_channel: Option<Arc<str>>,
-    /// Library-provided base peptidoform identity when applied modification
-    /// provenance is unavailable after parsing ProForma mass deltas.
-    pub label_group_override: Option<Arc<str>>,
+    /// Labeling provenance, absent in a label-free search. Boxed because an
+    /// ordinary FASTA search leaves both of its fields `None` on every
+    /// peptide, and the box is `None` exactly then: the accessors
+    /// [`Peptide::label_channel`] and [`Peptide::label_group_override`] read
+    /// it, and the setters keep that invariant, so `PartialEq` and `Ord`
+    /// behave as they did with the two separate fields.
+    pub label: Option<Box<PeptideLabel>>,
     /// Modification on peptide C-terminus
     pub nterm: Option<f32>,
     /// Modification on peptide C-terminus
@@ -473,181 +63,53 @@ pub struct Peptide {
     pub protein_sites: Arc<[ProteinOccurrence]>,
 }
 
-pub trait ModificationSource {
-    fn definition(&self) -> Arc<ModificationDefinition>;
-}
-
-#[derive(Clone)]
-pub(crate) struct VariableRule {
-    pub specificity: ModificationSpecificity,
-    pub modification: Arc<ModificationDefinition>,
-    /// Per-peptide limit on new (non-library) placements of this modification.
-    pub max_count: Option<usize>,
-    /// Per-peptide limit on all placements, library-supported included.
-    /// Defaults to `max_count`.
-    pub max_total_count: Option<usize>,
-    pub site_mode: SiteMode,
-    /// Rules with the same named modification share one occurrence counter.
-    pub count_group: usize,
-}
-
-impl VariableRule {
-    pub(crate) fn total_limit(&self) -> Option<usize> {
-        self.max_total_count.or(self.max_count)
-    }
-}
-
-/// Channel-resolved modification definitions shared by every peptide produced
-/// during one database expansion.
-pub(crate) struct LabelModificationCache {
-    by_source: FnvHashMap<usize, BTreeMap<Arc<str>, Arc<ModificationDefinition>>>,
-}
-
-impl LabelModificationCache {
-    pub(crate) fn new<'a>(
-        definitions: impl IntoIterator<Item = &'a Arc<ModificationDefinition>>,
-        channels: &[Arc<str>],
-    ) -> Self {
-        let mut by_source: FnvHashMap<usize, BTreeMap<Arc<str>, Arc<ModificationDefinition>>> =
-            FnvHashMap::default();
-        let mut interned: BTreeMap<ModificationDefinition, Arc<ModificationDefinition>> =
-            BTreeMap::new();
-
-        for definition in definitions {
-            if definition.channel_offsets.is_empty() {
-                continue;
-            }
-            let source = Arc::as_ptr(definition) as usize;
-            let resolved_by_channel = by_source.entry(source).or_default();
-            for channel in channels {
-                let offset = definition.channel_offsets[channel];
-                let resolved = definition.with_mass(definition.mass + offset);
-                let shared = interned
-                    .entry(resolved.clone())
-                    .or_insert_with(|| Arc::new(resolved))
-                    .clone();
-                resolved_by_channel.insert(channel.clone(), shared);
-            }
-        }
-
-        Self { by_source }
-    }
-
-    #[inline]
-    fn resolve(
-        &self,
-        definition: &Arc<ModificationDefinition>,
-        channel: &str,
-    ) -> Option<Arc<ModificationDefinition>> {
-        self.by_source
-            .get(&(Arc::as_ptr(definition) as usize))?
-            .get(channel)
-            .cloned()
-    }
-}
-
-impl ModificationLookup {
-    pub(crate) fn for_rules(
-        variable_mods: &[VariableRule],
-        static_mods: &HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-        channels: &[Arc<str>],
-        labels: &LabelModificationCache,
-    ) -> Result<Arc<Self>, ModificationLookupError> {
-        let mut records = Vec::new();
-        for (specificity, definition) in variable_mods
-            .iter()
-            .map(|rule| (rule.specificity, &rule.modification))
-            .chain(
-                static_mods
-                    .iter()
-                    .map(|(specificity, definition)| (*specificity, definition)),
-            )
-        {
-            let site = SiteClass::from_specificity(specificity);
-            let kind = if definition.channel_offsets.is_empty() {
-                ModificationKind::Ordinary
-            } else {
-                ModificationKind::ChannelBase
-            };
-            records.push(LookupRecord {
-                site,
-                kind,
-                definition: definition.clone(),
-                base: None,
-            });
-            if kind == ModificationKind::ChannelBase {
-                for channel in channels {
-                    if let Some(resolved) = labels.resolve(definition, channel) {
-                        records.push(LookupRecord {
-                            site,
-                            kind: ModificationKind::Label,
-                            definition: resolved,
-                            base: Some(definition.clone()),
-                        });
-                    }
-                }
-            }
-        }
-        Self::from_records(records)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct LibrarySite {
-    pub attachment: crate::ptm_library::Attachment,
-    pub position: u32,
-    pub modification: Arc<str>,
-}
-
-#[derive(Copy, Clone)]
-struct ModificationCandidate {
-    site: Site,
-    rule: usize,
-    library_supported: bool,
-}
-
-pub(crate) struct ModificationPlan<'a> {
-    variable_mods: &'a [VariableRule],
-    static_mods: &'a HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-    lookup: Arc<ModificationLookup>,
-    max_exhaustive_mods: usize,
-    max_total_mods: usize,
-    max_combinations: Option<usize>,
-}
-
-impl<'a> ModificationPlan<'a> {
-    pub(crate) fn new(
-        variable_mods: &'a [VariableRule],
-        static_mods: &'a HashMap<ModificationSpecificity, Arc<ModificationDefinition>>,
-        lookup: Arc<ModificationLookup>,
-        max_exhaustive_mods: usize,
-        max_total_mods: usize,
-        max_combinations: Option<usize>,
-    ) -> Self {
-        Self {
-            variable_mods,
-            static_mods,
-            lookup,
-            max_exhaustive_mods,
-            max_total_mods,
-            max_combinations,
-        }
-    }
-}
-
-impl ModificationSource for f32 {
-    fn definition(&self) -> Arc<ModificationDefinition> {
-        Arc::new(ModificationDefinition::bare(*self))
-    }
-}
-
-impl ModificationSource for Arc<ModificationDefinition> {
-    fn definition(&self) -> Arc<ModificationDefinition> {
-        self.clone()
-    }
-}
-
 impl Peptide {
+    /// The precursor label channel this peptidoform was resolved to.
+    #[inline]
+    pub fn label_channel(&self) -> Option<&Arc<str>> {
+        self.label.as_ref().and_then(|label| label.channel.as_ref())
+    }
+
+    /// [`Peptide::label_channel`] as a string slice, for comparisons.
+    #[inline]
+    pub fn label_channel_str(&self) -> Option<&str> {
+        self.label_channel().map(Arc::as_ref)
+    }
+
+    /// The library-provided base peptidoform identity, when one was parsed.
+    #[inline]
+    pub fn label_group_override(&self) -> Option<&Arc<str>> {
+        self.label
+            .as_ref()
+            .and_then(|label| label.group_override.as_ref())
+    }
+
+    /// [`Peptide::label_group_override`] as a string slice.
+    #[inline]
+    pub fn label_group_override_str(&self) -> Option<&str> {
+        self.label_group_override().map(Arc::as_ref)
+    }
+
+    /// Set or clear the precursor label channel.
+    pub fn set_label_channel(&mut self, channel: Option<Arc<str>>) {
+        self.update_label(|label| label.channel = channel);
+    }
+
+    /// Set or clear the library-provided base peptidoform identity.
+    pub fn set_label_group_override(&mut self, group: Option<Arc<str>>) {
+        self.update_label(|label| label.group_override = group);
+    }
+
+    /// Edit [`Peptide::label`], dropping the box again when nothing is left in
+    /// it. Keeping `None` and an all-`None` [`PeptideLabel`] from both
+    /// occurring is what makes the derived `PartialEq` agree with the two
+    /// fields this replaced.
+    fn update_label(&mut self, edit: impl FnOnce(&mut PeptideLabel)) {
+        let mut label = self.label.take().unwrap_or_default();
+        edit(&mut label);
+        self.label = (label.channel.is_some() || label.group_override.is_some()).then_some(label);
+    }
+
     #[inline]
     pub fn modification_at(&self, index: usize) -> f32 {
         self.modifications.mass_at(index)
@@ -801,7 +263,7 @@ impl Peptide {
                     .unwrap_or(Ordering::Equal)
             })
             .then_with(|| self.modifications.semantic_cmp(&other.modifications))
-            .then_with(|| self.label_channel.cmp(&other.label_channel))
+            .then_with(|| self.label_channel().cmp(&other.label_channel()))
     }
 }
 
@@ -1040,7 +502,7 @@ impl Peptide {
                 .expect("resolved label definition missing from compact lookup");
         }
         self.monoisotopic += self.modification_mass() - before;
-        self.label_channel = Some(channel);
+        self.set_label_channel(Some(channel));
         self.modifications.sort();
         self
     }
@@ -1049,14 +511,27 @@ impl Peptide {
     /// This is used for channel grouping, peptide-level FDR, and protein
     /// inference without collapsing ordinary biological modifications.
     pub fn label_group(&self) -> String {
-        if let Some(group) = &self.label_group_override {
+        if let Some(group) = self.label_group_override() {
             return group.to_string();
         }
-        if self.label_channel.is_none() {
-            return self.to_string();
+        match self.label_group_peptide() {
+            Some(base) => base.to_string(),
+            None => self.to_string(),
         }
+    }
+
+    /// The channel-collapsed peptidoform behind [`Peptide::label_group`]:
+    /// every precursor-label modification resolved back to its channel base,
+    /// with the channel offset removed from the terminal masses. `None` when
+    /// this peptide carries no precursor label channel, in which case the
+    /// peptide is already its own label group.
+    ///
+    /// Callers that need a structural identity rather than a rendered string
+    /// (peptide-level FDR competition) use this instead of parsing
+    /// `label_group`.
+    pub fn label_group_peptide(&self) -> Option<Peptide> {
+        let channel = self.label_channel().cloned()?;
         let mut base = self.clone();
-        let channel = base.label_channel.clone().unwrap();
         let lookup = base.modifications.lookup.clone();
         for encoded in &mut base.modifications.entries {
             let record = lookup.record(encoded.modification_id);
@@ -1078,10 +553,9 @@ impl Peptide {
                 .id(record.site, unresolved, ModificationKind::ChannelBase)
                 .expect("base label definition missing from compact lookup");
         }
-        base.label_channel = None;
-        base.label_group_override = None;
+        base.label = None;
         base.modifications.sort();
-        base.to_string()
+        Some(base)
     }
 
     /// Physical sites selected by one rule. Motif rules are evaluated against
@@ -1332,102 +806,11 @@ impl Peptide {
     }
 }
 
-fn nonzero_mass(mass: f32) -> Option<f32> {
-    (mass.abs() >= 1e-5).then_some(mass)
-}
+mod enumerate;
+mod lookup;
 
-struct ModificationEnumeration<'a, 'p> {
-    peptide: &'p Peptide,
-    modifications: &'p [ModificationCandidate],
-    plan: &'p ModificationPlan<'a>,
-    occupied: FnvHashSet<Site>,
-    selected: Vec<ModificationCandidate>,
-    new_counts: Vec<usize>,
-    total_counts: Vec<usize>,
-    output: Vec<Peptide>,
-}
-
-impl<'a, 'p> ModificationEnumeration<'a, 'p> {
-    fn new(
-        peptide: &'p Peptide,
-        modifications: &'p [ModificationCandidate],
-        plan: &'p ModificationPlan<'a>,
-        group_count: usize,
-    ) -> Self {
-        Self {
-            peptide,
-            modifications,
-            plan,
-            occupied: FnvHashSet::default(),
-            selected: Vec::new(),
-            new_counts: vec![0; group_count],
-            total_counts: vec![0; group_count],
-            output: vec![peptide.clone()],
-        }
-    }
-
-    fn enumerate(&mut self, start: usize, remaining: usize, exhaustive_count: usize) -> bool {
-        for idx in start..self.modifications.len() {
-            let modification = self.modifications[idx];
-            if !self.occupied.insert(modification.site) {
-                continue;
-            }
-
-            let rule = &self.plan.variable_mods[modification.rule];
-            let group = rule.count_group;
-            let is_new = !modification.library_supported;
-            let next_exhaustive = exhaustive_count + usize::from(is_new);
-            let exceeds_limit = next_exhaustive > self.plan.max_exhaustive_mods
-                || (is_new
-                    && rule
-                        .max_count
-                        .is_some_and(|limit| self.new_counts[group] >= limit))
-                || rule
-                    .total_limit()
-                    .is_some_and(|limit| self.total_counts[group] >= limit);
-            if exceeds_limit {
-                self.occupied.remove(&modification.site);
-                continue;
-            }
-
-            self.new_counts[group] += usize::from(is_new);
-            self.total_counts[group] += 1;
-            self.selected.push(modification);
-            let should_continue = if remaining == 1 {
-                self.push_variant()
-            } else {
-                self.enumerate(idx + 1, remaining - 1, next_exhaustive)
-            };
-            self.selected.pop();
-            self.new_counts[group] -= usize::from(is_new);
-            self.total_counts[group] -= 1;
-            self.occupied.remove(&modification.site);
-            if !should_continue {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn push_variant(&mut self) -> bool {
-        if self
-            .plan
-            .max_combinations
-            .is_some_and(|cap| self.output.len() >= cap)
-        {
-            return false;
-        }
-        let mut modified = self.peptide.clone();
-        for selected in self.selected.iter().copied() {
-            modified.apply_site(
-                selected.site,
-                self.plan.variable_mods[selected.rule].modification.clone(),
-            );
-        }
-        self.output.push(modified);
-        true
-    }
-}
+pub use enumerate::*;
+pub use lookup::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Site {
@@ -1535,8 +918,7 @@ impl TryFrom<Digest> for Peptide {
             decoy: value.decoy,
             position: value.position,
             modifications: CompactModifications::default(),
-            label_channel: None,
-            label_group_override: None,
+            label: None,
             sequence: value.sequence,
             monoisotopic: mass,
             nterm: None,

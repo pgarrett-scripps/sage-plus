@@ -4,10 +4,17 @@ Thank you for your interest in contributing to Sage Plus!
 
 Table of Contents:
 
-1. [Feature Requests](#feature-requests)
-2. [Bug Reports](#bug-reports)
-3. [Pull Requests](#pull-requests)
-4. [Contact](#contact)
+1. [Where to Start](#where-to-start)
+2. [Feature Requests](#feature-requests)
+3. [Bug Reports](#bug-reports)
+4. [Pull Requests](#pull-requests)
+5. [Contact](#contact)
+
+## Where to Start
+
+`ARCHITECTURE.md` maps the four crates, the order the pipeline runs in and the module that owns
+each stage. `CLAUDE.md` covers building, testing and the conventions a change must follow, and
+`DOCS.md` documents every configuration key.
 
 ## Feature Requests
 

@@ -222,7 +222,7 @@ keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage
 | Key | Value |
 | --- | --- |
 | `sage.provenance.version` | Version of this key set, currently `1`. |
-| `sage.version` | Sage Plus version, such as `0.1.0-beta.17`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.18`. |
 | `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
 | `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
 | `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
@@ -505,7 +505,7 @@ For additional information about configuration options and output file formats, 
 // but need to be removed in a real config.json file
 {
   "database": {
-    "bucket_size": 32768,           // Maximum fragments in each internal search bucket
+    "bucket_size": 32768,           // Optional[int] {default=8192}, Maximum fragments in each internal search bucket (rounded up to a power of two)
     "enzyme": {               // Required when a FASTA is digested
       "missed_cleavages": 2,  // Required[int | "unlimited"], Number of missed cleavages
       "min_len": 5,           // Optional[int] {default=5}, Minimum AA length of peptides to search
@@ -533,7 +533,7 @@ For additional information about configuration options and output file formats, 
     "max_total_variable_mods": 2, // Exhaustive + PTM-library placements
     "max_combinations": 8,  // Optional[int] {default=null} Limit total variants per peptide
     "decoy_tag": "rev_",    // Optional[str] {default="rev_"}: See notes above
-    "generate_decoys": false, // Optional[bool] {default="true"}: Ignore decoys in FASTA database matching `decoy_tag`
+    "generate_decoys": false, // Optional[bool] {default=true}: Ignore decoys in FASTA database matching `decoy_tag`
     "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
@@ -547,7 +547,7 @@ For additional information about configuration options and output file formats, 
       "level": 3,           // Optional[int] {default=3}, MS-level to perform TMT quantification on
       "sn": false           // Optional[bool] {default=false}, use Signal/Noise instead of intensity for TMT quant. Requires noise values in mzML
     },
-    "lfq": true,            // Optional[bool] {default=null}, perform MS1 feature quantification
+    "lfq": true,            // Optional[bool] {default=false}, perform MS1 feature quantification
     "lfq_settings": {
       "peak_scoring": "Hybrid", // See DOCS.md for details - recommend that you do not change this setting
       "integration": "Sum",   // Optional["Sum" | "Apex"], use sum of MS1 traces in peak, or MS1 intensity at peak apex
@@ -615,8 +615,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.17
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.17 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.18
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.18 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -1144,7 +1144,9 @@ remain in the named definitions. `site_mode` selects:
 - `library` requires a matching typed library attachment as well as a configured site.
 - `both` allows exhaustive placement and recognizes matching library-supported sites.
 
-Set `database.ptm_library` to `{"path": "sites.tsv", "strict": true}`.
+Set `database.ptm_library` to `{"path": "sites.tsv", "strict": true}`; `path` is required and
+`strict` defaults to true, which turns a library record that matches no searched site into an
+error instead of a warning.
 TSV, TSV.gz, and Parquet are supported. When a library is configured, indexed
 variable modifications require `max_count`. Names are supplied by dictionary keys.
 Library-supported indexed placements bypass `max_variable_mods` but still consume
@@ -1199,7 +1201,7 @@ alongside the library, because the location table does not embed chemical masses
   one peptide listing all their proteins (default: true). See
   [Ambiguous residues](#ambiguous-residues).
 - **prefilter**: Boolean. Retain only peptides that match the spectra well enough to be worth
-  searching before building the search index. The spectra are indexed once, and proteins are
+  searching before building the search index (default: false). The spectra are indexed once, and proteins are
   streamed through the spectrum index in parallel: each protein is digested, modified, and
   checked on its own, and only its survivors are kept, so neither the whole digest nor a
   fragment index for discarded peptides is ever held. A peptide is kept when one precursor hypothesis (charge, isotope error, mass
@@ -1237,19 +1239,26 @@ chemistry remains on modification definitions through `channel_offsets`. LFQ aut
 channel-aware when these offsets are configured.
 
 
-- **tmt**: String. One of "Tmt6", "Tmt10", "Tmt11", "Tmt16", or "Tmt18" (default: null).
+- **tmt**: String or object. One of "Tmt6", "Tmt10", "Tmt11", "Tmt16", or "Tmt18" (default: null). `{"User": [126.1277, 127.1248, ...]}` quantifies a
+  custom set of reporter ions instead, given as their monoisotopic masses. A custom set carries no reagent mass, so its label is not added to the
+  search as a modification, and its quantification columns are named `user_1`, `user_2`, ... instead of `tmt_1`, `tmt_2`, ...
 - **tmt_settings**: Object containing TMT-specific settings.
   - **level**: Integer. The MS-level to perform TMT quantification on (default: 3).
   - **sn**: Boolean. Use Signal/Noise instead of intensity for TMT quantification. Requires noise values in mzML (default: false).
 - **lfq**: Boolean. Perform MS1 feature quantification. This is label-free without channel-aware
-  modifications and channel-aware when `channel_offsets` are configured (default: null).
+  modifications and channel-aware when `channel_offsets` are configured (default: false).
 - **lfq_settings**: Object containing LFQ-specific settings.
-  - **peak_scoring**: String. The method used for scoring peaks in LFQ, one of: "Hybrid", "RetentionTime", "SpectralAngle" (default: "Hybrid").
-  - **integration**: String. The method used for integrating peak intensities, either "Sum" or "Max" (default: "Sum").
+  - **peak_scoring**: String. The method used for scoring peaks in LFQ, one of: "Hybrid", "RetentionTime", "SpectralAngle", "Intensity" (default: "Hybrid").
+  - **integration**: String. The method used for integrating peak intensities, either "Sum" or "Apex" (default: "Sum").
   - **spectral_angle**: Float. Threshold for the spectral angle similarity measure, ranging from 0 to 1 (default: 0.7).
   - **ppm_tolerance**: Float. Tolerance for matching MS1 ions in parts per million (default: 5.0).
   - **rt_pct_tolerance**: Float. Symmetric retention-time tolerance for match-between-runs, as a percentage of total gradient length (default: 0.5). For example, `0.5` searches +/-0.5% around the aligned retention time.
   - **mbr**: Boolean. Trace identified precursors into runs without direct MS2 evidence. Set this to `false` to quantify a precursor only in runs where it was identified (default: true).
+  - **peptide_q_value**: Float from 0 to 1. Peptide q-value a PSM must reach before its precursor is quantified and traced (default: 0.01).
+  - **mobility_pct_tolerance**: Float. Symmetric ion-mobility tolerance for matching MS1 ions, as a percentage of the precursor 1/K0 (default: 1.0).
+    It applies only to inputs that carry ion mobility; for others it is ignored.
+  - **combine_charge_states**: Boolean. Quantify all charge states of a peptide together (default: true). With `false`, each peptide-charge precursor
+    in the `precursor_charge` range is quantified separately.
   - **recenter_on_apex**: Boolean. Experimental. Center each LFQ peak on its MS1 elution apex rather than on the MS2 identification RT (default: false). With MBR, the traced window is centered on the median aligned identification RT across files instead of the single most confident PSM. In each identified file, Sage climbs from the identification bin to the apex of the isotope-consistent trace; the cross-run apex is the median of those apexes, each identified file is aligned on its own apex, and files without an identification get the usual warp search towards the aligned identified traces. Integration bounds follow the summed trace down to a valley or half the apex height, with no fixed bin caps. Shifted decoys are picked from the same identification bins. On the PXD028735 HYE benchmark it picked a point more than half a peak width from the true apex for 6% of MS2-confirmed rows (12% by default), gave 2% more precursors at 1% and similar ratio accuracy, but slightly more foreign-species rows in the human-only control at `extraction_q_value` <= 0.01 (3.2% vs 2.6%), so it stays off by default. On 15 min timsTOF E. coli replicates it raised the median replicate CV from 0.171 to 0.269 on the same precursors, so leave it off for timsTOF data.
 
 Example: 
@@ -1285,7 +1294,8 @@ Example:
 
 ## Precursor Tolerance
 
-- **precursor_tol**: Dictionary with either "ppm" or "da" as keys, and lists of two integers as values (default: {}).
+- **precursor_tol**: Required. Dictionary with "ppm", "da" or "pct" as the key, and a list of two numbers as the value. `pct` is a percentage of the
+  precursor mass, so `{"pct": [-0.001, 0.001]}` is the same window as `{"ppm": [-10, 10]}`.
   - Example: Tolerance of [-500, 100] in daltons.
     ```json
     "precursor_tol": {
@@ -1295,7 +1305,9 @@ Example:
 
 ## Fragment Tolerance
 
-- **fragment_tol**: Dictionary with either "ppm" or "da" as keys, and lists of two integers as values (default: {}).
+- **fragment_tol**: Required. Dictionary with "ppm", "da" or "pct" as the key, and a list of two numbers as the value. `pct` is a percentage of the
+  fragment mass, so `{"pct": [-0.001, 0.001]}` is the same window as `{"ppm": [-10, 10]}`. `immonium.tolerance` and a `diagnostic_ions` entry's
+  `tolerance` take the same three forms.
   - Example: Tolerance of [-10, 10] in parts per million.
     ```json
     "fragment_tol": {
@@ -1335,6 +1347,13 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
 
   `ppm_tolerance` controls isotope-spacing matches. `max_charge` optionally caps the precursor-derived charge search. Envelope sizes are bounded between two and four peaks. `min_score` is the minimum Bhattacharyya isotope-pattern score required to merge an envelope and treat its charge as known. `max_isotope_log2_ratio` limits the difference between observed and averagine-predicted adjacent isotope ratios. Boolean `true` uses the object defaults shown above. When mzML or mzMLb provides the fragment charge binary array `MS:1000516`, positive values constrain isotope-envelope assignment and are used directly for charge-aware fragment matching. Zero values remain unknown and use scored inference.
 - **chimera**: Boolean. Search for chimeric/co-fragmenting PSMs (default: false).
+- **score_type**: `"SageHyperScore"` (default) or `"OpenMSHyperScore"`. Which hyperscore formula ranks candidates. The Sage form multiplies the
+  summed b and y intensities; the OpenMS form adds them. Both add the log factorials of the matched b and y counts. Changing it changes every score,
+  so q-values and identifications are not comparable between the two.
+- **override_precursor_charge**: Boolean. Ignore the precursor charge annotated in the file and search every scan at each charge in
+  `precursor_charge` instead (default: false). Without it, an annotated charge is used and `precursor_charge` applies only to scans that have none.
+- **write_report**: Boolean. Write the interactive HTML report `results.sage.report.html` next to the other outputs (default: false). The report
+  summarizes identifications, score distributions and the fitted models at 1% q-value.
 - **wide_window**: Boolean. Ignore `precursor_tol` and search spectra in wide-window/dynamic precursor tolerance mode (default: false).
 - **dia**: Object. Opt-in DIA pseudo-spectrum search (default: off). See [DIA pseudo-spectrum search](#dia-pseudo-spectrum-search).
 - **predict_rt**: Boolean. Use retention time prediction model as a feature for LDA (default: true).
@@ -1363,6 +1382,13 @@ Retention-time alignment and prediction are separate features. Alignment runs wh
       "enabled": false
     }
     ```
+- **retention_time_model**: Object. Tunes the retention-time prediction model fitted when `predict_rt` is true. `features` selects the sequence feature
+  set: `"basic"` (default), `"physicochemical"` or `"additive_ptm"`; `folds` is the number of peptide-grouped cross-validation folds (default: 3, from 2 through 10); `seed`
+  seeds the deterministic peptide-level fold assignment (default: 42); `ptm_regularization` is the ridge penalty on additive variable-PTM retention-time
+  offsets (default: 25.0). Alignment is a separate setting, `retention_time_alignment`.
+- **ion_mobility_model**: Object. The same four fields with the same defaults for the ion-mobility model, plus `enabled` (default: true) and
+  `min_training_psms`, the fewest high-confidence mobility observations required before a model is fitted (default: 200). Below that, observed
+  mobility is reported and no prediction is made.
 - **retention_time_alignment**: Method used to align observed retention times across experiments (default: `"nonlinear"`). `"nonlinear"` rejects outlier landmarks with a robust affine fit, then fits a monotone piecewise-linear warp; runs with fewer than 16 shared landmarks, or landmarks spanning less than a quarter of the gradient, use the robust affine fit alone, and single-file searches are left unwarped. `"linear"` restores the ordinary least-squares alignment that was the default before Beta 9. Setting this field enables alignment even when `predict_rt` is false. `run-summary.json` records the method used under `models.retention_time_alignment`.
 - **mass_recalibration**: `"off"` (default), `"static"`, `"linear"`, or `"auto"`. Correct precursor and fragment m/z during the search. Each file is first searched on a sample of up to 25,000 MS2 spectra with a precursor, stratified by acquisition group: each group keeps its share of the sample (at least one spectrum), taken at even positions across its own spectra, so interleaved scan cycles cannot be sampled unevenly; rank-1 target PSMs at 1% Poisson spectrum q-value supply signed precursor errors (isotope error 0, no mass offset) and per-PSM median signed fragment errors. Q-values are computed within each acquisition group, so a low-accuracy group searched with a wide fragment window cannot swamp an accurate group with decoys; the precursor model is fitted on the union of every group's confident PSMs and each fragment model on its own group's. Every PSM is assigned to a fit or validation set (30%) by a stable hash of its spectrum ID. Each file gets one precursor model and one fragment model per acquisition group, where a group is the MS2 mass analyzer (Orbitrap, Astral, TOF, ion trap) and activation (HCD, CID, ETD, EThcD, ETciD) of the spectrum. Groups are read from the Thermo filter string (mzML `MS:1000512`, mzMLb, Thermo RAW), otherwise from mzML or mzMLb instrument configurations (scan `instrumentConfigurationRef` or the run default; the Astral analyzer is `MS:1003379`) and precursor activation terms; Bruker TDF is TOF/CID. An unknown analyzer is not treated as low accuracy, so the `unknown/unknown` group is fitted and validated like any other. Resolution and AGC target are not part of the key: they are rarely recorded per scan and would split files too thinly. Each group's fragment model is selected independently with the same gates below, so an ion-trap CID group and an Orbitrap HCD group in the same file never share a pooled correction. Ion-trap groups are never corrected (`skipped: "low_accuracy_analyzer"`), groups with too few PSMs keep no correction (`"too_few_psms"`), and spectra whose group has no model are left uncorrected. The precursor model stays per file because precursor m/z comes from the survey scan. The mode sets the most flexible model allowed:
   - `static`: one ppm offset.
@@ -1620,13 +1646,23 @@ Notes:
   - Bruker TDF ion mobility (1/K0) uses each frame's `TimsCalibration` model from `analysis.tdf`, matching the Bruker SDK. Every scan is converted before MS1 centroiding, and DDA precursors convert their fractional average scan. DIA window centers use the calibration row shared by most frames. Inputs that point at a file inside the `.d` directory, such as `analysis.tdf_bin`, read the same `analysis.tdf`. Only ModelType 2 is supported; other models stop the search. Set `"bruker_config": {"ion_mobility_scale": "linear"}` to reproduce the uncalibrated scale of Beta 6 and earlier, which interpolates between the acquisition limits. `run-summary.json` records the scale applied as `models.ion_mobility_scale`, or `mixed` when only some inputs fell back to the linear scale. Mobility tolerances are relative and apply unchanged.
   - Bruker TSF acquisitions (a `.d` directory with `analysis.tsf` and `analysis.tsf_bin`, from timsTOF fleX and TIMS-off methods) are read from their line (centroid) spectra; profile-only TSF is not read. m/z comes from each frame's `MzCalibration` model, which matches the Bruker SDK to under 0.001 ppm, rather than the linear scale TimsRust used (up to about 30 ppm off). MS/MS frames take their precursor m/z, isolation width and charge (when recorded) from `FrameMsMsInfo`; spectrum ids are frame Ids. TSF has no ion mobility. TimsRust gave TSF MS/MS spectra no precursor, so Beta 16 searched none of them.
   - ProteoScape miniTDF MS2 spectra are read from a directory (or either file) holding one `<name>.ms2spectrum.bin` and `<name>.ms2spectrum.parquet` pair, as ProteoScape writes them. Spectra, precursors and ids match TimsRust 0.6.6 exactly, including its assumed isolation width (2 Th up to m/z 700, 3 Th from m/z 800, linear between). Precursor 1/K0 is the recorded `ooK0`, whatever `ion_mobility_scale` says. miniTDF MS1 frames are not read, so `quant.lfq` stops with an error for miniTDF inputs. TimsRust parquet spectrum files are not read.
+  - **bruker_config.ms1**: MS1 frame centroiding for Bruker TDF inputs, which are read only when `quant.lfq` is true. `mz_ppm` is the m/z window
+    within which neighbouring points are merged (default: 5.0 ppm) and `ims_pct` the ion-mobility window, as a percentage of 1/K0 (default: 3.0).
+  - **bruker_config.ms2.spectrum_processing_params**: how each diaPASEF or PASEF frame is turned into peaks. `smoothing_window` (default: 1) and
+    `centroiding_window` (default: 1) are TOF-index widths, where 1 means no smoothing and no merging; `calibrate` runs the reader's m/z
+    recalibration (default: false) and `calibration_tolerance` is its tolerance (default: 0.1).
+  - **bruker_config.ms2.frame_splitting_params**: `{"Quadrupole": <strategy>}` (the default) splits each frame by its quadrupole isolation windows,
+    `{"Window": <strategy>}` by the acquisition's recorded windows. The strategy is `"None"`, `{"Even": n}` (the default, n = 1), equal scan ranges;
+    `{"UniformMobility": [[width, step], null]}`, overlapping 1/K0 slices; or `{"UniformScan": [span, step]}`, the same in scan numbers. See
+    [diaPASEF spectra](#diapasef-spectra).
+  - **bruker_config.ion_mobility_scale**: `"calibrated"` (default) or `"linear"`, described above.
   - **bruker_config.denoise**: optional timsTOF MS1 denoising with [dnoise](https://github.com/pgarrett-scripps/dnoise) v0.5.0. It is off by default. When `enabled` is true, every MS1 frame of a Bruker TDF input is filtered before MS1 centroiding. The filter keeps runs of points that persist across adjacent mobility scans, removes halos around intense peaks, and keeps points inside the MS/MS isolation region: the PASEF selection polygon for DDA, or the DIA window boxes for DIA. MS2 spectra are not changed, and neither is the dnoise CLI's default output. Sage reads MS1 frames only for LFQ, so the setting has no effect unless `quant.lfq` is true. Non-TDF inputs ignore it, and Sage logs a warning in both cases. The log reports how many MS1 points were kept. Keys and defaults, which match the dnoise CLI:
     - `enabled` (false).
     - Streak filter: `mz_half_width` (3 TOF indices), `min_feature_length` (5 scans), `max_internal_gap` (2 scans), `min_window_intensity` (0), `min_feature_intensity` (0), and `iterations` (2).
     - Halo removal: `halo` (true), `halo_peak_fraction` (0.10), `halo_mz_idx_half_width` (80), and `halo_scan_half_width` (2).
     - DDA selection-polygon gate: `ms1_polygon` (true), `ms1_polygon_overlap` (true: keep a whole streak feature if any part of it touches the gate, rather than gating point by point), `ms1_polygon_mz_pad` (3.0 Th), and `ms1_polygon_im_pad` (0.015 1/K0).
     - DIA window gate: `dia_ms1_window` (true), `dia_ms1_overlap` (true), `dia_ms1_mz_pad` (3.0 Th), and `dia_ms1_im_pad` (0.015 1/K0).
-    - `mobility_scale` (`"calibrated"` or `"linear"`): the 1/K0 scale used to place the gates.
+    - `mobility_scale` (`"calibrated"`, the default, or `"linear"`): the 1/K0 scale used to place the gates.
     - Invalid values, such as `halo_peak_fraction` outside 0 to 1 or a negative pad, stop the search before any file is read. A gate is built only when the file has the tables it needs.
   - Example:
     ```json
