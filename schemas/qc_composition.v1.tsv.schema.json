@@ -1,0 +1,54 @@
+{
+  "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
+  "name": "qc_composition",
+  "title": "qc.composition.tsv",
+  "description": "Amino acid composition of identified peptides against the composition the search database predicts for the same proteins: one row per file and residue, then the same residues for a `total` row covering the run. Interior residues only. Headline numbers are in run-summary.json under qc.composition.",
+  "dialect": {
+    "delimiter": "\t",
+    "header": true
+  },
+  "fields": [
+    {
+      "name": "file",
+      "type": "string",
+      "description": "Spectrum file name, or `total` for the rows covering all files."
+    },
+    {
+      "name": "residue",
+      "type": "string",
+      "description": "One-letter amino acid code, uppercase. A row is present when the residue was counted in either profile, so the residues present vary with the data.",
+      "constraints": {
+        "pattern": "^[A-Z]$"
+      }
+    },
+    {
+      "name": "observed",
+      "type": "integer",
+      "description": "Interior residues of this kind in the distinct confident target peptide sequences of this file."
+    },
+    {
+      "name": "observed_fraction",
+      "type": "number",
+      "description": "`observed` divided by all interior residues observed in this file, six decimals."
+    },
+    {
+      "name": "expected",
+      "type": "integer",
+      "description": "Interior residues of this kind in the distinct database peptide sequences of the proteins identified in this file."
+    },
+    {
+      "name": "expected_fraction",
+      "type": "number",
+      "description": "`expected` divided by all interior residues expected for this file, six decimals."
+    },
+    {
+      "name": "log2_ratio",
+      "type": "number",
+      "description": "`log2(observed_fraction / expected_fraction)`, four decimals. Empty when either fraction is zero, where the ratio has no finite value. Negative means the residue is seen less often than the database predicts.",
+      "constraints": {
+        "required": false
+      }
+    }
+  ],
+  "missingValues": [""]
+}

@@ -10,6 +10,32 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `qc.composition.tsv` reports the amino acid composition of what was identified against the
+  composition the search database predicts for the same proteins, one row per file and residue,
+  then a `total` row set for the run. The observed profile counts the residues of each file's
+  distinct confident target peptide sequences (rank 1, spectrum and peptide q-value at most
+  0.01, one count per sequence, modifications ignored); the expected profile counts the residues
+  of the distinct in-silico peptides in the database that belong to the proteins identified in
+  that file, so the expectation carries the same enzyme, length limits and protein composition
+  as the observations and no species reference table is involved. Both count interior residues
+  only: a terminus the enzyme produced is dictated by the enzyme, so with trypsin counting it
+  would mostly report K and R, while a ragged terminus keeps its residue and a non-specific
+  digest keeps every residue. Each row gives the observed and expected counts and fractions and
+  their `log2_ratio`, which is empty when one side has none of the residue. `run-summary.json`
+  gains a `qc.composition` block with the peptide and residue counts, the residue whose share
+  moved most and by how much, and the Jensen-Shannon distance between the whole profiles. The
+  point is to name the residue that goes missing: cysteine low means the alkylation or its
+  static modification is wrong, methionine low means oxidation was not searched, lysine low
+  means the lysines are blocked, every residue shifted means the FASTA is wrong or a second
+  species is present. No p-value and no threshold: a profile holds hundreds of thousands of
+  residues, so every test is significant and significance would say nothing about size. The
+  comparison re-reads nothing, costing one pass over the retained PSMs and one over the
+  database peptides. One property to know before reading the table: with missed cleavages
+  enabled the database holds peptides that keep a cleavage residue inside them while the
+  identified peptides are mostly fully cleaved, so the enzyme's own residues (K and R for
+  trypsin) read near a log2 ratio of -3 in every run and are always the largest shift. That is
+  the digest, not the sample. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
+  [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
   decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per
