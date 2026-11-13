@@ -36,11 +36,14 @@
 //! protein, which is what in-source fragmentation means.
 
 use crate::database::{IndexedDatabase, PeptideIx};
+use crate::lfq::{PrecursorId, QuantifiedPeak};
 use crate::mass::{H2O, NH3};
 use crate::peptide::{ModificationKind, Peptide, Site};
 use crate::scoring::Feature;
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 /// Maximum spectrum q-value for a PSM to be a product or a parent.
 pub const PSM_Q_VALUE: f32 = 0.01;
@@ -65,6 +68,16 @@ pub const MIN_SPREAD_OBSERVATIONS: usize = 20;
 pub const FALLBACK_RT_FRACTION: f32 = 0.002;
 /// Fallback co-elution tolerance when a file's retention-time span is unusable.
 pub const FALLBACK_RT_TOLERANCE: f32 = 0.1;
+/// Fraction of a peak width within which two apexes are the same peak. An
+/// apex is a property of the peak, so the window is a fraction of the peak's
+/// own full width at half maximum rather than a fixed time: see
+/// [`apex_tolerance`]. At the 0.26 min median peak width of a PXD028735 file
+/// it is 0.039 min, about one to two MS1 sampling intervals, which is how far
+/// apart two apexes of one elution can legitimately be measured. On that file
+/// it admits 140 of 4,094 candidate pairs with 7.8 expected by chance (5.6%),
+/// where the same pairs judged on PSM retention times give 158 with 16.7
+/// expected (10.6%).
+pub const APEX_FWHM_FRACTION: f32 = 0.15;
 /// Width of a retention-time difference histogram bin, in the file's
 /// retention-time units. The grid is fixed rather than a function of the
 /// tolerance, so the distribution can be read, and a tolerance chosen, after
@@ -113,17 +126,36 @@ pub struct InSourceSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("exclusiveMinimum" = 0.0))]
     pub rt_tolerance: Option<f32>,
+    /// Fraction of a peak's full width at half maximum within which the
+    /// product's and the parent's quantified apexes are the same peak
+    /// (default 0.15, [`APEX_FWHM_FRACTION`]). Used only where quantification
+    /// gives both of them a peak in the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(extend("exclusiveMinimum" = 0.0))]
+    pub apex_fwhm_fraction: Option<f32>,
 }
 
 impl InSourceSettings {
     /// Why these settings cannot be used, if so.
     pub fn validate(&self) -> Result<(), String> {
-        match self.rt_tolerance {
-            Some(tolerance) if !(tolerance.is_finite() && tolerance > 0.0) => {
-                Err("`in_source.rt_tolerance` must be a finite value greater than zero".into())
+        for (name, value) in [
+            ("rt_tolerance", self.rt_tolerance),
+            ("apex_fwhm_fraction", self.apex_fwhm_fraction),
+        ] {
+            if let Some(value) = value {
+                if !(value.is_finite() && value > 0.0) {
+                    return Err(format!(
+                        "`in_source.{name}` must be a finite value greater than zero"
+                    ));
+                }
             }
-            _ => Ok(()),
         }
+        Ok(())
+    }
+
+    /// The fraction of a peak width within which two apexes are one peak.
+    pub fn apex_tolerance(&self) -> f32 {
+        self.apex_fwhm_fraction.unwrap_or(APEX_FWHM_FRACTION)
     }
 }
 
@@ -214,14 +246,90 @@ pub struct InSourceCandidate {
     pub parent_len: usize,
 }
 
+/// A quantified peak of one precursor in one file, as far as co-elution is
+/// concerned: where it apexes and how wide it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeakShape {
+    pub apex_rt: f32,
+    /// Full width at half maximum, where the trace fell to half height.
+    pub fwhm: Option<f32>,
+}
+
+/// The quantified peaks of a run, by peptide and file. An apex is a property
+/// of the peak; a PSM's retention time is where MS2 happened to fire inside
+/// that peak, which is why apexes make the better co-elution test when
+/// quantification has provided them.
+#[derive(Clone, Debug, Default)]
+pub struct PeakApexes {
+    peaks: FnvHashMap<(PeptideIx, usize), Vec<PeakShape>>,
+    median_fwhm: FnvHashMap<usize, f32>,
+}
+
+impl PeakApexes {
+    /// Collect the target precursors' peaks from an LFQ result. Decoy rows are
+    /// left out: they are never annotated.
+    pub fn from_areas<H: BuildHasher>(
+        areas: &HashMap<(PrecursorId, bool), QuantifiedPeak, H>,
+    ) -> Self {
+        let mut peaks: FnvHashMap<(PeptideIx, usize), Vec<PeakShape>> = FnvHashMap::default();
+        let mut widths: FnvHashMap<usize, Vec<f32>> = FnvHashMap::default();
+        for ((id, decoy), peak) in areas.iter() {
+            if *decoy {
+                continue;
+            }
+            let peptide_idx = match id {
+                PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
+            };
+            for (file_id, evidence) in peak.file_evidence.iter().enumerate() {
+                let Some(evidence) = evidence.as_ref() else {
+                    continue;
+                };
+                if !evidence.apex_rt.is_finite() {
+                    continue;
+                }
+                let fwhm = evidence.fwhm.filter(|fwhm| fwhm.is_finite() && *fwhm > 0.0);
+                if let Some(fwhm) = fwhm {
+                    widths.entry(file_id).or_default().push(fwhm);
+                }
+                peaks
+                    .entry((peptide_idx, file_id))
+                    .or_default()
+                    .push(PeakShape {
+                        apex_rt: evidence.apex_rt,
+                        fwhm,
+                    });
+            }
+        }
+        let median_fwhm = widths
+            .into_iter()
+            .map(|(file_id, mut values)| (file_id, median(&mut values)))
+            .collect();
+        Self { peaks, median_fwhm }
+    }
+
+    /// The peaks of a precursor in one file, in no particular order.
+    pub fn peaks(&self, peptide: PeptideIx, file_id: usize) -> &[PeakShape] {
+        self.peaks
+            .get(&(peptide, file_id))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Median full width at half maximum of the file's quantified peaks, used
+    /// where a peak's own width is unknown.
+    pub fn median_fwhm(&self, file_id: usize) -> Option<f32> {
+        self.median_fwhm.get(&file_id).copied()
+    }
+}
+
 /// One retention-time difference bin, [`HISTOGRAM_BIN`] wide.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HistogramBin {
-    /// Bin index; bin 0 spans `(-HISTOGRAM_BIN, HISTOGRAM_BIN)` and bin 1
-    /// `[HISTOGRAM_BIN, 2 * HISTOGRAM_BIN)`, so the bins are symmetric about
-    /// zero.
+    /// Bin index: the bin is centred on `bin * HISTOGRAM_BIN` and is one
+    /// [`HISTOGRAM_BIN`] wide, so bin 0 is centred on zero and bin `-k`
+    /// mirrors bin `k`.
     pub bin: i32,
-    /// Lower edge of the bin, in the file's retention-time units.
+    /// Lower edge of the bin, in the mode's own unit.
     pub start: f32,
     /// Upper edge of the bin.
     pub end: f32,
@@ -279,8 +387,8 @@ impl InSourcePlacementStats {
             .into_iter()
             .map(|(bin, pairs)| HistogramBin {
                 bin,
-                start: bin as f32 * HISTOGRAM_BIN,
-                end: (bin + 1) as f32 * HISTOGRAM_BIN,
+                start: (bin as f32 - 0.5) * HISTOGRAM_BIN,
+                end: (bin as f32 + 0.5) * HISTOGRAM_BIN,
                 pairs,
             })
             .collect();
@@ -291,22 +399,43 @@ impl InSourcePlacementStats {
     }
 }
 
+/// The built-in check for one way of deciding co-elution.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InSourceModeStats {
+    /// `apex` where quantification gave both the product and the parent a
+    /// peak in the file, `rt` where the product's PSM retention time was
+    /// compared with the parent's.
+    pub mode: String,
+    /// `peak_fwhm` for `apex`, where a difference is measured in widths of
+    /// the narrower peak, or `retention_time` for `rt`.
+    pub unit: String,
+    /// Tolerance in that unit; absent at the run level when the files used
+    /// different ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tolerance: Option<f32>,
+    /// `configured`, `derived`, `fallback` or `peak_width`; absent at the run
+    /// level when the files differ.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tolerance_source: Option<String>,
+    /// The check for this mode as a whole, then per placement.
+    pub totals: InSourcePlacementStats,
+    pub placements: Vec<InSourcePlacementStats>,
+}
+
 /// The built-in check, per file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InSourceFileStats {
     pub file_id: usize,
-    /// Co-elution tolerance used for this file.
-    pub rt_tolerance: f32,
-    /// `configured`, `derived` or `fallback`.
-    pub rt_tolerance_source: String,
     /// Confident target PSMs that could be a product or a parent.
     pub confident_psms: usize,
     /// PSMs flagged in this file.
     pub flagged_psms: usize,
-    /// The check for the file as a whole, then for each placement that has a
-    /// candidate pair.
-    pub totals: InSourcePlacementStats,
-    pub placements: Vec<InSourcePlacementStats>,
+    /// Median full width at half maximum of the file's quantified peaks, the
+    /// fallback width when a peak's own is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub median_fwhm: Option<f32>,
+    /// One record per way of deciding co-elution that was used.
+    pub modes: Vec<InSourceModeStats>,
 }
 
 /// Per-PSM in-source annotations of a whole run.
@@ -314,7 +443,8 @@ pub struct InSourceFileStats {
 pub struct InSourceAnnotations {
     by_psm: FnvHashMap<usize, InSourceAnnotation>,
     candidates: FnvHashMap<PeptideIx, Vec<InSourceCandidate>>,
-    rt_tolerance: FnvHashMap<usize, f32>,
+    apex_fraction: f32,
+    apexes: Option<PeakApexes>,
     files: Vec<InSourceFileStats>,
 }
 
@@ -336,36 +466,6 @@ impl InSourceAnnotations {
             .unwrap_or_default()
     }
 
-    /// The co-elution tolerance of a file, if the file took part.
-    pub fn rt_tolerance(&self, file_id: usize) -> Option<f32> {
-        self.rt_tolerance.get(&file_id).copied()
-    }
-
-    /// Of `candidates`, the annotation to report for a product observed at
-    /// `rt`, given each parent's retention time in the same file from
-    /// `parent_rt`. The longest co-eluting parent wins, so a product of a
-    /// product names the intact peptide. `None` when the file did not take
-    /// part, or nothing co-elutes.
-    pub fn coeluting(
-        &self,
-        file_id: usize,
-        rt: f32,
-        candidates: &[InSourceCandidate],
-        mut parent_rt: impl FnMut(PeptideIx) -> Option<f32>,
-    ) -> Option<InSourceAnnotation> {
-        let tolerance = self.rt_tolerance(file_id)?;
-        candidates
-            .iter()
-            .filter(|candidate| {
-                parent_rt(candidate.parent).is_some_and(|parent| (rt - parent).abs() < tolerance)
-            })
-            .reduce(preferred_parent)
-            .map(|candidate| InSourceAnnotation {
-                parent: candidate.parent,
-                kind: candidate.kind,
-            })
-    }
-
     /// The per-file record of the built-in check.
     pub fn files(&self) -> &[InSourceFileStats] {
         &self.files
@@ -381,34 +481,145 @@ impl InSourceAnnotations {
         self.by_psm.is_empty()
     }
 
-    /// The built-in check for the whole run.
-    pub fn run_totals(&self) -> InSourcePlacementStats {
-        InSourcePlacementStats::merge("all", self.files.iter().map(|file| &file.totals))
-    }
-
-    /// The built-in check for the whole run, per placement, in the order
-    /// [`Placement`] declares.
-    pub fn run_placements(&self) -> Vec<InSourcePlacementStats> {
-        let mut labels = self
+    /// The built-in check for the whole run, one record per mode, with each
+    /// mode's placements. A mode's tolerance is reported only where every
+    /// file that used it agreed.
+    pub fn run_modes(&self) -> Vec<InSourceModeStats> {
+        let mut modes: Vec<&str> = self
             .files
             .iter()
-            .flat_map(|file| file.placements.iter().map(|stats| stats.placement.as_str()))
-            .collect::<Vec<_>>();
-        labels.sort_unstable_by_key(|label| placement_order(label));
-        labels.dedup();
-        labels
+            .flat_map(|file| file.modes.iter().map(|mode| mode.mode.as_str()))
+            .collect();
+        modes.sort_unstable();
+        modes.dedup();
+        modes
             .into_iter()
-            .map(|label| {
-                InSourcePlacementStats::merge(
-                    label,
-                    self.files
-                        .iter()
-                        .flat_map(|file| file.placements.iter())
-                        .filter(|stats| stats.placement == label),
-                )
+            .map(|mode| {
+                let parts = self
+                    .files
+                    .iter()
+                    .flat_map(|file| file.modes.iter())
+                    .filter(|stats| stats.mode == mode)
+                    .collect::<Vec<_>>();
+                let tolerances = parts
+                    .iter()
+                    .filter_map(|stats| stats.tolerance)
+                    .collect::<Vec<_>>();
+                let agreed = tolerances
+                    .first()
+                    .copied()
+                    .filter(|first| tolerances.iter().all(|value| value == first));
+                let mut placements: Vec<&str> = parts
+                    .iter()
+                    .flat_map(|stats| {
+                        stats
+                            .placements
+                            .iter()
+                            .map(|placement| placement.placement.as_str())
+                    })
+                    .collect();
+                placements.sort_unstable_by_key(|label| placement_order(label));
+                placements.dedup();
+                InSourceModeStats {
+                    mode: mode.into(),
+                    unit: parts
+                        .first()
+                        .map(|stats| stats.unit.clone())
+                        .unwrap_or_default(),
+                    tolerance: agreed,
+                    tolerance_source: agreed.and_then(|_| {
+                        parts
+                            .first()
+                            .and_then(|stats| stats.tolerance_source.clone())
+                    }),
+                    totals: InSourcePlacementStats::merge(
+                        "all",
+                        parts.iter().map(|stats| &stats.totals),
+                    ),
+                    placements: placements
+                        .into_iter()
+                        .map(|label| {
+                            InSourcePlacementStats::merge(
+                                label,
+                                parts
+                                    .iter()
+                                    .flat_map(|stats| stats.placements.iter())
+                                    .filter(|placement| placement.placement == label),
+                            )
+                        })
+                        .collect(),
+                }
             })
             .collect()
     }
+
+    /// The built-in check for the whole run, both modes together.
+    pub fn run_totals(&self) -> InSourcePlacementStats {
+        InSourcePlacementStats::merge(
+            "all",
+            self.files
+                .iter()
+                .flat_map(|file| file.modes.iter().map(|mode| &mode.totals)),
+        )
+    }
+
+    /// The annotation of a quantified precursor's row in one file, judged on
+    /// the peaks quantification found: the product's apex against the
+    /// parent's, both in that file. `None` without quantification, where
+    /// either has no peak there, or where nothing co-elutes. Decoy rows are
+    /// not in the peak table, so they are never annotated.
+    pub fn precursor_row(&self, peptide: PeptideIx, file_id: usize) -> Option<InSourceAnnotation> {
+        let apexes = self.apexes.as_ref()?;
+        let file_fwhm = apexes.median_fwhm(file_id);
+        let product_peaks = apexes.peaks(peptide, file_id);
+        if product_peaks.is_empty() {
+            return None;
+        }
+        self.candidates(peptide)
+            .iter()
+            .filter(|candidate| {
+                closest_apex_ratio(
+                    product_peaks,
+                    apexes.peaks(candidate.parent, file_id),
+                    file_fwhm,
+                )
+                .is_some_and(|ratio| ratio.abs() < self.apex_fraction)
+            })
+            .reduce(preferred_parent)
+            .map(|candidate| InSourceAnnotation {
+                parent: candidate.parent,
+                kind: candidate.kind,
+            })
+    }
+}
+
+/// Of every pairing of a product's and a parent's peaks in one file, the
+/// signed apex difference in peak widths whose size is smallest: the two peaks
+/// that agree best. `None` when either side has no peak, or no width is known.
+fn closest_apex_ratio(
+    product: &[PeakShape],
+    parent: &[PeakShape],
+    file_fwhm: Option<f32>,
+) -> Option<f32> {
+    product
+        .iter()
+        .flat_map(|product| {
+            parent.iter().filter_map(move |parent| {
+                let width = match (product.fwhm, parent.fwhm) {
+                    (Some(left), Some(right)) => left.min(right),
+                    (Some(width), None) | (None, Some(width)) => width,
+                    (None, None) => file_fwhm?,
+                };
+                (width > 0.0).then(|| (product.apex_rt - parent.apex_rt) / width)
+            })
+        })
+        .reduce(|best, ratio| {
+            if ratio.abs() < best.abs() {
+                ratio
+            } else {
+                best
+            }
+        })
 }
 
 /// Sort key putting placement records in the order [`Placement`] declares.
@@ -632,7 +843,7 @@ fn histogram_bin(difference: f32) -> Option<i32> {
     if !difference.is_finite() || difference.abs() >= HISTOGRAM_HALF_WIDTH {
         return None;
     }
-    Some((difference / HISTOGRAM_BIN).trunc() as i32)
+    Some((difference / HISTOGRAM_BIN).round() as i32)
 }
 
 /// Candidate pairs per retention-time unit in [`BACKGROUND_BAND`], either side
@@ -684,8 +895,8 @@ impl PlacementCounts {
             .iter()
             .map(|(bin, pairs)| HistogramBin {
                 bin: *bin,
-                start: *bin as f32 * HISTOGRAM_BIN,
-                end: (*bin + 1) as f32 * HISTOGRAM_BIN,
+                start: (*bin as f32 - 0.5) * HISTOGRAM_BIN,
+                end: (*bin as f32 + 0.5) * HISTOGRAM_BIN,
                 pairs: *pairs,
             })
             .collect::<Vec<_>>();
@@ -712,8 +923,13 @@ pub fn annotate(
     features: &[Feature],
     database: &IndexedDatabase,
     settings: &InSourceSettings,
+    apexes: Option<PeakApexes>,
 ) -> InSourceAnnotations {
-    let mut annotations = InSourceAnnotations::default();
+    let mut annotations = InSourceAnnotations {
+        apex_fraction: settings.apex_tolerance(),
+        apexes,
+        ..InSourceAnnotations::default()
+    };
     let mut by_file: FnvHashMap<usize, Vec<ConfidentPsm>> = FnvHashMap::default();
     for feature in features {
         if is_confident(feature, database) {
@@ -802,11 +1018,17 @@ fn annotate_file(
         Some(configured) => (configured, "configured"),
         None => derive_rt_tolerance(&mut spreads, (rt_max - rt_min).max(0.0)),
     };
-    annotations.rt_tolerance.insert(file_id, rt_tolerance);
 
-    let mut counts: FnvHashMap<Placement, PlacementCounts> = FnvHashMap::default();
-    let mut totals = PlacementCounts::default();
+    // One set of counts per mode: a difference in peak widths is not a
+    // difference in minutes, so the two are never pooled.
+    let mut counts: FnvHashMap<(Mode, Placement), PlacementCounts> = FnvHashMap::default();
+    let mut totals: FnvHashMap<Mode, PlacementCounts> = FnvHashMap::default();
     let mut flagged_psms = 0usize;
+    let apex_fraction = settings.apex_tolerance();
+    let file_fwhm = annotations
+        .apexes
+        .as_ref()
+        .and_then(|apexes| apexes.median_fwhm(file_id));
 
     for psm in psms {
         // A peptide's candidates depend only on the peptide, so the first PSM
@@ -819,48 +1041,136 @@ fn annotate_file(
         if candidates.is_empty() {
             continue;
         }
+        let product_peaks = annotations
+            .apexes
+            .as_ref()
+            .map(|apexes| apexes.peaks(psm.peptide_idx, file_id))
+            .unwrap_or_default();
+        let mut best: Option<(&InSourceCandidate, Mode)> = None;
         for candidate in &candidates {
-            // A candidate's parent may be confident in another file and not in
-            // this one; it is then no parent here.
-            let Some(parent_rt) = medians.get(&candidate.parent) else {
-                continue;
-            };
-            let difference = psm.rt - parent_rt;
+            // Apexes decide wherever quantification found both peaks in this
+            // file: an apex is a property of the peak, while a PSM's
+            // retention time is only where MS2 fired inside it. Without both
+            // peaks, the PSM's retention time and the file's derived
+            // tolerance decide, as they do in a search without
+            // quantification.
+            let parent_peaks = annotations
+                .apexes
+                .as_ref()
+                .map(|apexes| apexes.peaks(candidate.parent, file_id))
+                .unwrap_or_default();
+            let (mode, difference, tolerance) =
+                match closest_apex_ratio(product_peaks, parent_peaks, file_fwhm) {
+                    Some(ratio) => (Mode::Apex, ratio, apex_fraction),
+                    None => match medians.get(&candidate.parent) {
+                        Some(parent_rt) => (Mode::Rt, psm.rt - parent_rt, rt_tolerance),
+                        // The parent is confident in another file and has no
+                        // peak in this one: it is no parent here.
+                        None => continue,
+                    },
+                };
             counts
-                .entry(candidate.kind.placement)
+                .entry((mode, candidate.kind.placement))
                 .or_default()
-                .record(difference, rt_tolerance);
-            totals.record(difference, rt_tolerance);
+                .record(difference, tolerance);
+            totals
+                .entry(mode)
+                .or_default()
+                .record(difference, tolerance);
+            if difference.abs() < tolerance {
+                best = match best {
+                    Some((incumbent, incumbent_mode)) => {
+                        let winner = preferred_parent(incumbent, candidate);
+                        if std::ptr::eq(winner, candidate) {
+                            Some((candidate, mode))
+                        } else {
+                            Some((incumbent, incumbent_mode))
+                        }
+                    }
+                    None => Some((candidate, mode)),
+                };
+            }
         }
-        if let Some(annotation) = annotations.coeluting(file_id, psm.rt, &candidates, |parent| {
-            medians.get(&parent).copied()
-        }) {
-            annotations.by_psm.insert(psm.psm_id, annotation);
+        if let Some((candidate, mode)) = best {
+            annotations.by_psm.insert(
+                psm.psm_id,
+                InSourceAnnotation {
+                    parent: candidate.parent,
+                    kind: candidate.kind,
+                },
+            );
             flagged_psms += 1;
-            totals.flagged_psms += 1;
+            totals.entry(mode).or_default().flagged_psms += 1;
             counts
-                .entry(annotation.kind.placement)
+                .entry((mode, candidate.kind.placement))
                 .or_default()
                 .flagged_psms += 1;
         }
     }
 
-    let mut ordered = counts.keys().copied().collect::<Vec<_>>();
-    ordered.sort_unstable();
-    let placements = ordered
+    let mut modes = totals.keys().copied().collect::<Vec<_>>();
+    modes.sort_unstable();
+    let modes = modes
         .into_iter()
-        .map(|placement| counts[&placement].finish(placement.label(), rt_tolerance))
+        .map(|mode| {
+            let mut placements = counts
+                .keys()
+                .filter(|(counted, _)| *counted == mode)
+                .map(|(_, placement)| *placement)
+                .collect::<Vec<_>>();
+            placements.sort_unstable();
+            let (tolerance, source) = match mode {
+                Mode::Apex => (apex_fraction, "peak_width"),
+                Mode::Rt => (rt_tolerance, rt_tolerance_source),
+            };
+            InSourceModeStats {
+                mode: mode.label().into(),
+                unit: mode.unit().into(),
+                tolerance: Some(tolerance),
+                tolerance_source: Some(source.into()),
+                totals: totals[&mode].finish("all", tolerance),
+                placements: placements
+                    .into_iter()
+                    .map(|placement| {
+                        counts[&(mode, placement)].finish(placement.label(), tolerance)
+                    })
+                    .collect(),
+            }
+        })
         .collect::<Vec<_>>();
 
     annotations.files.push(InSourceFileStats {
         file_id,
-        rt_tolerance,
-        rt_tolerance_source: rt_tolerance_source.into(),
         confident_psms: psms.len(),
         flagged_psms,
-        totals: totals.finish("all", rt_tolerance),
-        placements,
+        median_fwhm: file_fwhm,
+        modes,
     });
+}
+
+/// How a product and a parent were compared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Mode {
+    /// Quantified apexes, in widths of the narrower peak.
+    Apex,
+    /// PSM retention times, in the file's retention-time units.
+    Rt,
+}
+
+impl Mode {
+    fn label(self) -> &'static str {
+        match self {
+            Mode::Apex => "apex",
+            Mode::Rt => "rt",
+        }
+    }
+
+    fn unit(self) -> &'static str {
+        match self {
+            Mode::Apex => "peak_fwhm",
+            Mode::Rt => "retention_time",
+        }
+    }
 }
 
 /// Every parent of `peptide` that passes the sequence and mass test.

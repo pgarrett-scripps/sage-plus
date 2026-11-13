@@ -747,6 +747,15 @@
       "additionalProperties": false,
       "description": "In-source annotation settings.",
       "properties": {
+        "apex_fwhm_fraction": {
+          "description": "Fraction of a peak's full width at half maximum within which the\nproduct's and the parent's quantified apexes are the same peak\n(default 0.15, [`APEX_FWHM_FRACTION`]). Used only where quantification\ngives both of them a peak in the file.",
+          "exclusiveMinimum": 0.0,
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "rt_tolerance": {
           "description": "Co-elution tolerance in the file's retention-time units. When unset,\neach file's tolerance is derived from the spread of its own repeated\npeptides; see [`derive_rt_tolerance`].",
           "exclusiveMinimum": 0.0,

@@ -627,7 +627,7 @@
         "rt_tolerance": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "Configured co-elution tolerance; absent when each file derived its own."
+          "description": "Configured co-elution tolerance for the retention-time mode; absent when each file derived its own."
         },
         "flagged_psms": {
           "type": "integer",
@@ -637,16 +637,16 @@
         "totals": {
           "$ref": "#/$defs/InSourcePlacementStats"
         },
-        "placements": {
+        "modes": {
           "type": "array",
-          "description": "The same check per placement of a product in its parent.",
+          "description": "The check per way of deciding co-elution: `apex` where quantification gave both the product and the parent a peak in the file, `rt` where PSM retention times were compared.",
           "items": {
-            "$ref": "#/$defs/InSourcePlacementStats"
+            "$ref": "#/$defs/InSourceModeStats"
           }
         },
         "files": {
           "type": "array",
-          "description": "Per-file record, including the retention-time difference histogram.",
+          "description": "Per-file record, including the difference histogram of each mode.",
           "items": {
             "$ref": "#/$defs/InSourceFileStats"
           }
@@ -827,19 +827,6 @@
           "type": "integer",
           "minimum": 0
         },
-        "rt_tolerance": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "description": "Co-elution tolerance used for this file, in its own retention-time units."
-        },
-        "rt_tolerance_source": {
-          "type": "string",
-          "enum": [
-            "configured",
-            "derived",
-            "fallback"
-          ]
-        },
         "confident_psms": {
           "type": "integer",
           "minimum": 0
@@ -848,13 +835,15 @@
           "type": "integer",
           "minimum": 0
         },
-        "totals": {
-          "$ref": "#/$defs/InSourcePlacementStats"
+        "median_fwhm": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Median full width at half maximum of the file's quantified peaks, the width used where a peak's own is unknown; absent without quantification."
         },
-        "placements": {
+        "modes": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/InSourcePlacementStats"
+            "$ref": "#/$defs/InSourceModeStats"
           }
         }
       }
@@ -864,7 +853,7 @@
       "properties": {
         "bin": {
           "type": "integer",
-          "description": "Bin index on the fixed grid; bin 0 is symmetric about zero."
+          "description": "Bin index: the bin is centred on `bin` times 0.05 of the mode's unit and is one bin wide, so bin 0 is centred on zero and bin -k mirrors bin k."
         },
         "start": {
           "type": "number"
@@ -905,7 +894,7 @@
         "expected_by_chance": {
           "type": "number",
           "minimum": 0,
-          "description": "Co-eluting pairs expected from the density of candidate pairs 1 to 5 retention-time units from zero, scaled to the window's width."
+          "description": "Co-eluting pairs expected from the density of candidate pairs 1 to 5 units from zero, scaled to the window's width."
         },
         "flagged_psms": {
           "type": "integer",
@@ -918,9 +907,55 @@
         },
         "rt_difference_histogram": {
           "type": "array",
-          "description": "Retention-time differences of the candidate pairs on a fixed 0.05-unit grid.",
+          "description": "Differences of the candidate pairs on a fixed 0.05-unit grid, in the mode's unit.",
           "items": {
             "$ref": "#/$defs/InSourceHistogramBin"
+          }
+        }
+      }
+    },
+    "InSourceModeStats": {
+      "type": "object",
+      "description": "The in-source check for one way of deciding co-elution.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "apex",
+            "rt"
+          ],
+          "description": "`apex` compares the two quantified peaks' apexes, `rt` the product's PSM retention time with the parent's median."
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "peak_fwhm",
+            "retention_time"
+          ],
+          "description": "`peak_fwhm`: a difference in widths of the narrower peak. `retention_time`: the file's own retention-time units."
+        },
+        "tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Co-elution tolerance in that unit; absent at the run level when the files used different ones."
+        },
+        "tolerance_source": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "derived",
+            "fallback",
+            "peak_width"
+          ],
+          "description": "`peak_width` for the apex mode; absent at the run level when the files differ."
+        },
+        "totals": {
+          "$ref": "#/$defs/InSourcePlacementStats"
+        },
+        "placements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InSourcePlacementStats"
           }
         }
       }

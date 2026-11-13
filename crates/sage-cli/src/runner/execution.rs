@@ -262,33 +262,6 @@ impl Runner {
         });
         self.cancellation.check()?;
 
-        // In-source fragmentation and neutral-loss annotation: a side table
-        // keyed by PSM, read by the writers. It needs the q-values, so it runs
-        // after FDR, and it changes no feature.
-        let in_source = self.parameters.in_source.as_ref().map(|settings| {
-            let annotations =
-                sage_core::in_source::annotate(&outputs.features, &self.database, settings);
-            let totals = annotations.run_totals();
-            log::info!(
-                "flagged {} PSMs as in-source products: {} co-eluting product/parent pairs of {} candidates, against {:.1} expected by chance",
-                annotations.flagged_psms(),
-                totals.coeluting_pairs,
-                totals.candidate_pairs,
-                totals.expected_by_chance
-            );
-            for placement in annotations.run_placements() {
-                log::info!(
-                    "  {}: {} of {} candidate pairs co-elute, {:.1} expected by chance, {} PSMs flagged",
-                    placement.placement,
-                    placement.coeluting_pairs,
-                    placement.candidate_pairs,
-                    placement.expected_by_chance,
-                    placement.flagged_psms
-                );
-            }
-            annotations
-        });
-
         let postprocess = self.postprocess_features(
             &scorer,
             &mut outputs.features,
@@ -363,6 +336,52 @@ impl Runner {
             } else {
                 None
             }
+        });
+
+        // In-source fragmentation and neutral-loss annotation: a side table
+        // keyed by PSM, read by the writers. It needs the q-values and, where
+        // quantification ran, the peaks: a product and its parent are judged
+        // on their apexes wherever both were quantified in the file, and on
+        // PSM retention times otherwise. It changes no feature.
+        let in_source = self.parameters.in_source.as_ref().map(|settings| {
+            let apexes = areas
+                .as_ref()
+                .map(sage_core::in_source::PeakApexes::from_areas);
+            let annotations = sage_core::in_source::annotate(
+                &outputs.features,
+                &self.database,
+                settings,
+                apexes,
+            );
+            let totals = annotations.run_totals();
+            log::info!(
+                "flagged {} PSMs as in-source products: {} co-eluting product/parent pairs of {} candidates",
+                annotations.flagged_psms(),
+                totals.coeluting_pairs,
+                totals.candidate_pairs
+            );
+            for mode in annotations.run_modes() {
+                log::info!(
+                    "  {} mode ({}): {} of {} candidate pairs co-elute, {:.1} expected by chance, {} PSMs flagged",
+                    mode.mode,
+                    mode.unit,
+                    mode.totals.coeluting_pairs,
+                    mode.totals.candidate_pairs,
+                    mode.totals.expected_by_chance,
+                    mode.totals.flagged_psms
+                );
+                for placement in &mode.placements {
+                    log::info!(
+                        "    {}: {} of {} co-elute, {:.1} expected by chance, {} PSMs flagged",
+                        placement.placement,
+                        placement.coeluting_pairs,
+                        placement.candidate_pairs,
+                        placement.expected_by_chance,
+                        placement.flagged_psms
+                    );
+                }
+            }
+            annotations
         });
 
         // Quantification is the last reader of the retained MS1 spectra, so
@@ -709,7 +728,7 @@ impl Runner {
                     .and_then(|settings| settings.rt_tolerance),
                 flagged_psms: annotations.flagged_psms(),
                 totals: Some(annotations.run_totals()),
-                placements: annotations.run_placements(),
+                modes: annotations.run_modes(),
                 files: annotations.files().to_vec(),
             }),
             modifications: ModificationRunStats {

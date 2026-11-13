@@ -92,7 +92,50 @@ fn database(peptides: Vec<Peptide>) -> IndexedDatabase {
 fn settings(rt_tolerance: f32) -> InSourceSettings {
     InSourceSettings {
         rt_tolerance: Some(rt_tolerance),
+        apex_fwhm_fraction: None,
     }
+}
+
+/// Quantified peaks of one file: a peptide, its apex, and the peak width.
+fn apexes(file_id: usize, peaks: &[(PeptideIx, f32, Option<f32>)]) -> PeakApexes {
+    let evidence = |apex_rt: f32, fwhm: Option<f32>| {
+        Some(crate::lfq::FileEvidence {
+            apex_rt,
+            fwhm,
+            ..Default::default()
+        })
+    };
+    let mut areas = std::collections::HashMap::new();
+    for (peptide, apex_rt, fwhm) in peaks {
+        let mut file_evidence = vec![None; file_id + 1];
+        file_evidence[file_id] = evidence(*apex_rt, *fwhm);
+        areas.insert(
+            (crate::lfq::PrecursorId::Charged((*peptide, 2)), false),
+            crate::lfq::QuantifiedPeak {
+                peak: crate::lfq::Peak::default(),
+                intensities: file_evidence.iter().map(|_| Some(10.0)).collect(),
+                ms2_confirmed: file_evidence.iter().map(|_| true).collect(),
+                ms2_confirmed_strict: file_evidence.iter().map(|_| true).collect(),
+                file_evidence,
+                paired_decoy_evidence: Vec::new(),
+            },
+        );
+    }
+    PeakApexes::from_areas(&areas)
+}
+
+/// The record of one way of deciding co-elution in a file.
+fn mode_of(annotations: &InSourceAnnotations, file_id: usize, mode: &str) -> InSourceModeStats {
+    annotations
+        .files()
+        .iter()
+        .find(|file| file.file_id == file_id)
+        .unwrap_or_else(|| panic!("file {file_id} took part"))
+        .modes
+        .iter()
+        .find(|record| record.mode == mode)
+        .unwrap_or_else(|| panic!("a {mode} mode record"))
+        .clone()
 }
 
 #[test]
@@ -105,7 +148,7 @@ fn flags_a_co_eluting_suffix_and_names_the_parent() {
     ]);
     let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.05)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     let flagged = annotations
         .psm(1)
@@ -130,10 +173,10 @@ fn a_prefix_at_the_intact_peptide_mass_is_not_a_product() {
     ]);
     let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.files()[0].totals.candidate_pairs, 0);
+    assert_eq!(annotations.run_totals().candidate_pairs, 0);
 }
 
 #[test]
@@ -145,7 +188,7 @@ fn flags_a_water_light_prefix_and_internal_product() {
     let db = database(vec![peptide("PEPTIDEKR", "P1", 10), prefix, internal]);
     let features = vec![psm(0, 0, 0, 44.0), psm(1, 1, 0, 44.02), psm(2, 2, 0, 44.04)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     let flagged = annotations.psm(1).expect("the prefix is water-light");
     assert_eq!(flagged.kind.placement, Placement::Prefix);
@@ -164,7 +207,7 @@ fn flags_a_water_loss_of_the_whole_peptide_by_its_mass() {
     let db = database(vec![peptide("PEPTIDE", "P1", 10), lighter]);
     let features = vec![psm(0, 0, 0, 20.0), psm(1, 1, 0, 20.02)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     let flagged = annotations.psm(1).expect("the lighter form is a product");
     assert_eq!(flagged.parent, PeptideIx(0));
@@ -183,7 +226,7 @@ fn flags_a_suffix_that_also_lost_ammonia() {
     let db = database(vec![peptide("KRTPEPTIDE", "P1", 10), product]);
     let features = vec![psm(0, 0, 0, 55.0), psm(1, 1, 0, 55.1)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     let flagged = annotations.psm(1).expect("a product may carry one loss");
     assert_eq!(flagged.kind.placement, Placement::Suffix);
@@ -210,6 +253,7 @@ fn a_whole_modification_is_a_loss_only_where_the_modification_declares_it() {
         &[psm(0, 0, 0, 12.0), psm(1, 1, 0, 12.03)],
         &db,
         &settings(0.2),
+        None,
     );
     let flagged = annotations
         .psm(1)
@@ -234,6 +278,7 @@ fn a_whole_modification_is_a_loss_only_where_the_modification_declares_it() {
         &[psm(0, 0, 0, 12.0), psm(1, 1, 0, 12.03)],
         &db,
         &settings(0.2),
+        None,
     );
     assert!(annotations.psm(1).is_none());
 }
@@ -257,6 +302,7 @@ fn a_labelling_modification_never_makes_a_product() {
         &[psm(0, 0, 0, 25.0), psm(1, 1, 0, 25.01)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
@@ -274,10 +320,11 @@ fn a_modification_on_another_residue_is_a_difference_not_an_equal_total() {
         &[psm(0, 0, 0, 18.0), psm(1, 1, 0, 18.02)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.files()[0].totals.candidate_pairs, 0);
+    assert_eq!(annotations.run_totals().candidate_pairs, 0);
 }
 
 #[test]
@@ -289,10 +336,11 @@ fn a_heavier_product_is_not_a_product() {
         &[psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
-    assert_eq!(annotations.files()[0].totals.candidate_pairs, 0);
+    assert_eq!(annotations.run_totals().candidate_pairs, 0);
 }
 
 #[test]
@@ -304,6 +352,7 @@ fn a_mass_difference_that_is_no_listed_loss_is_not_flagged() {
         &[psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
@@ -317,11 +366,11 @@ fn a_product_that_does_not_co_elute_is_not_flagged() {
     ]);
     let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 34.0)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert!(annotations.psm(1).is_none());
     // It is still a candidate pair, which is what the check counts.
-    let stats = &annotations.files()[0].totals;
+    let stats = mode_of(&annotations, 0, "rt").totals;
     assert_eq!(stats.candidate_pairs, 1);
     assert_eq!(stats.coeluting_pairs, 0);
 }
@@ -339,7 +388,7 @@ fn the_same_peptide_is_a_product_at_one_retention_time_and_not_at_another() {
         psm(3, 1, 0, 44.1),
     ];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert!(annotations.psm(1).is_some());
     assert!(annotations.psm(2).is_none());
@@ -357,7 +406,7 @@ fn the_parent_is_the_longest_co_eluting_peptide_that_contains_the_product() {
     ]);
     let features = vec![psm(0, 0, 0, 40.0), psm(1, 1, 0, 40.02), psm(2, 2, 0, 40.04)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert_eq!(annotations.psm(2).unwrap().parent, PeptideIx(0));
     assert_eq!(annotations.psm(1).unwrap().parent, PeptideIx(0));
@@ -374,7 +423,7 @@ fn only_a_parent_that_co_elutes_is_named() {
     // of the shortest product.
     let features = vec![psm(0, 0, 0, 10.0), psm(1, 1, 0, 40.02), psm(2, 2, 0, 40.04)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert_eq!(annotations.psm(2).unwrap().parent, PeptideIx(1));
     assert!(annotations.psm(1).is_none());
@@ -391,6 +440,7 @@ fn a_product_in_another_protein_is_not_a_product_of_this_one() {
         &[psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
@@ -407,6 +457,7 @@ fn a_product_and_its_parent_must_be_in_the_same_file() {
         &[psm(0, 0, 0, 30.0), psm(1, 1, 1, 30.02)],
         &db,
         &settings(0.2),
+        None,
     );
 
     assert!(annotations.psm(1).is_none());
@@ -424,13 +475,14 @@ fn a_candidate_pair_is_found_even_when_the_parent_is_confident_in_another_file()
     ]);
     let features = vec![psm(0, 1, 0, 30.0), psm(1, 0, 1, 30.0), psm(2, 1, 1, 30.02)];
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), None);
 
     assert_eq!(annotations.candidates(PeptideIx(1)).len(), 1);
     assert!(annotations.psm(0).is_none());
-    assert_eq!(annotations.files()[0].totals.candidate_pairs, 0);
+    // No pair was judged in file 0: the parent has no retention time there.
+    assert!(annotations.files()[0].modes.is_empty());
     assert!(annotations.psm(2).is_some());
-    assert_eq!(annotations.files()[1].totals.candidate_pairs, 1);
+    assert_eq!(mode_of(&annotations, 1, "rt").totals.candidate_pairs, 1);
 }
 
 #[test]
@@ -446,18 +498,117 @@ fn unconfident_and_decoy_psms_take_no_part() {
     // A parent above the q-value cutoff is no parent.
     let mut unconfident = psm(0, 0, 0, 30.0);
     unconfident.spectrum_q = 0.5;
-    let annotations = annotate(&[unconfident, psm(1, 1, 0, 30.02)], &db, &settings(0.2));
+    let annotations = annotate(
+        &[unconfident, psm(1, 1, 0, 30.02)],
+        &db,
+        &settings(0.2),
+        None,
+    );
     assert!(annotations.psm(1).is_none());
 
     // Neither is a decoy, and a decoy PSM is never flagged.
     let mut decoy_psm = psm(2, 2, 0, 30.0);
     decoy_psm.label = -1;
-    let annotations = annotate(&[decoy_psm, psm(1, 1, 0, 30.02)], &db, &settings(0.2));
+    let annotations = annotate(&[decoy_psm, psm(1, 1, 0, 30.02)], &db, &settings(0.2), None);
     assert!(annotations.psm(1).is_none());
 }
 
 #[test]
-fn a_quantified_row_is_judged_on_the_retention_times_its_caller_has() {
+fn an_apex_decides_a_psm_the_retention_times_would_miss() {
+    // The product's MS2 fired four minutes from the parent's, which no
+    // retention-time window of a sane width would accept. Quantification put
+    // both peaks' apexes 0.05 min apart with a width of 0.4 min, so the peaks
+    // are the same elution and the product is flagged.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 34.0)];
+    let peaks = apexes(
+        0,
+        &[
+            (PeptideIx(0), 30.0, Some(0.4)),
+            (PeptideIx(1), 30.05, Some(0.4)),
+        ],
+    );
+
+    assert!(annotate(&features, &db, &settings(0.2), None)
+        .psm(1)
+        .is_none());
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    let flagged = annotations.psm(1).expect("the apexes agree");
+    assert_eq!(flagged.parent, PeptideIx(0));
+    // The pair was counted in apex mode, in peak widths, and nowhere else.
+    let apex = mode_of(&annotations, 0, "apex");
+    assert_eq!(apex.unit, "peak_fwhm");
+    assert_eq!(apex.tolerance, Some(APEX_FWHM_FRACTION));
+    assert_eq!(apex.tolerance_source.as_deref(), Some("peak_width"));
+    assert_eq!(apex.totals.candidate_pairs, 1);
+    assert_eq!(apex.totals.coeluting_pairs, 1);
+    assert_eq!(apex.totals.flagged_psms, 1);
+    assert_eq!(annotations.files()[0].median_fwhm, Some(0.4));
+    assert!(annotations.files()[0]
+        .modes
+        .iter()
+        .all(|mode| mode.mode == "apex"));
+}
+
+#[test]
+fn apexes_apart_are_not_co_eluting_however_close_the_psms_are() {
+    // The two MS2 scans are 0.02 min apart, but the peaks they came from
+    // apex 0.3 min apart, which is more than a quarter of the 0.4 min width.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)];
+    let peaks = apexes(
+        0,
+        &[
+            (PeptideIx(0), 30.0, Some(0.4)),
+            (PeptideIx(1), 30.3, Some(0.4)),
+        ],
+    );
+
+    assert!(annotate(&features, &db, &settings(0.2), None)
+        .psm(1)
+        .is_some());
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    assert!(annotations.psm(1).is_none());
+    let apex = mode_of(&annotations, 0, "apex");
+    assert_eq!(apex.totals.candidate_pairs, 1);
+    assert_eq!(apex.totals.coeluting_pairs, 0);
+}
+
+#[test]
+fn a_pair_without_both_peaks_falls_back_to_the_retention_times() {
+    // Only the parent was quantified, so this pair is judged the way a search
+    // without quantification judges every pair.
+    let db = database(vec![
+        peptide("KPEPTIDE", "P1", 10),
+        peptide("PEPTIDE", "P1", 11),
+    ]);
+    let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 30.02)];
+    let peaks = apexes(0, &[(PeptideIx(0), 30.0, Some(0.4))]);
+
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
+
+    assert!(annotations.psm(1).is_some());
+    let rt = mode_of(&annotations, 0, "rt");
+    assert_eq!(rt.unit, "retention_time");
+    assert_eq!(rt.tolerance, Some(0.2));
+    assert_eq!(rt.totals.candidate_pairs, 1);
+    assert_eq!(rt.totals.coeluting_pairs, 1);
+    assert!(!annotations.files()[0]
+        .modes
+        .iter()
+        .any(|mode| mode.mode == "apex"));
+}
+
+#[test]
+fn a_quantified_row_is_judged_on_its_own_apex() {
     let db = database(vec![
         peptide("KPEPTIDE", "P1", 10),
         peptide("PEPTIDE", "P1", 11),
@@ -465,32 +616,32 @@ fn a_quantified_row_is_judged_on_the_retention_times_its_caller_has() {
     // The product has no PSM in file 1 at all, which is the shape of a row
     // transferred between runs; its peak there is still judged.
     let features = vec![psm(0, 0, 0, 30.0), psm(1, 1, 0, 34.0), psm(2, 0, 1, 31.0)];
+    let peaks = apexes(
+        1,
+        &[
+            (PeptideIx(0), 31.0, Some(0.4)),
+            (PeptideIx(1), 31.02, Some(0.4)),
+        ],
+    );
 
-    let annotations = annotate(&features, &db, &settings(0.2));
+    let annotations = annotate(&features, &db, &settings(0.2), Some(peaks));
     let candidates = annotations.candidates(PeptideIx(1));
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].parent, PeptideIx(0));
 
-    // The PSM at 34.0 in file 0 is not flagged, but a peak apexing at 30.05 is.
-    assert!(annotations.psm(1).is_none());
+    // No PSM of the product in file 1, and its row there is annotated anyway.
     let quantified = annotations
-        .coeluting(0, 30.05, candidates, |_| Some(30.0))
-        .expect("the quantified peak co-elutes with the parent's peak");
+        .precursor_row(PeptideIx(1), 1)
+        .expect("the row's apex agrees with the parent's");
     assert_eq!(quantified.parent, PeptideIx(0));
-    assert!(annotations
-        .coeluting(0, 34.0, candidates, |_| Some(30.0))
-        .is_none());
-    // In file 1 the product was never identified; the parent's apex decides.
-    assert!(annotations
-        .coeluting(1, 31.02, candidates, |_| Some(31.0))
-        .is_some());
-    // A parent without a peak in that file cannot be named.
-    assert!(annotations
-        .coeluting(1, 31.02, candidates, |_| None)
-        .is_none());
-    // A file the annotation never saw has no tolerance, so no verdict.
-    assert!(annotations
-        .coeluting(7, 30.05, candidates, |_| Some(30.0))
+    // The parent is not a product of anything, and a file without peaks of
+    // this row has no verdict for it.
+    assert!(annotations.precursor_row(PeptideIx(0), 1).is_none());
+    assert!(annotations.precursor_row(PeptideIx(1), 0).is_none());
+
+    // Without quantification there are no rows to judge.
+    assert!(annotate(&features, &db, &settings(0.2), None)
+        .precursor_row(PeptideIx(1), 1)
         .is_none());
 }
 
@@ -507,57 +658,68 @@ fn the_check_splits_by_placement_and_estimates_what_chance_would_give() {
         features.push(psm(2 + step, 1, 0, 31.0 + step as f32 * 0.25));
     }
 
-    let annotations = annotate(&features, &db, &settings(0.1));
-    let file = &annotations.files()[0];
+    let annotations = annotate(&features, &db, &settings(0.1), None);
+    let file = annotations.files()[0].clone();
+    let rt = mode_of(&annotations, 0, "rt");
 
     assert_eq!(file.file_id, 0);
-    assert_eq!(file.rt_tolerance, 0.1);
-    assert_eq!(file.rt_tolerance_source, "configured");
+    assert_eq!(rt.tolerance, Some(0.1));
+    assert_eq!(rt.tolerance_source.as_deref(), Some("configured"));
     assert_eq!(file.confident_psms, 14);
     assert_eq!(file.flagged_psms, 1);
-    assert_eq!(file.totals.placement, "all");
-    assert_eq!(file.totals.candidate_pairs, 13);
-    assert_eq!(file.totals.coeluting_pairs, 1);
+    assert_eq!(rt.totals.placement, "all");
+    assert_eq!(rt.totals.candidate_pairs, 13);
+    assert_eq!(rt.totals.coeluting_pairs, 1);
     // Every candidate here is a suffix, so the split repeats the totals.
-    assert_eq!(file.placements.len(), 1);
-    assert_eq!(file.placements[0].placement, "suffix");
-    assert_eq!(file.placements[0].candidate_pairs, 13);
-    assert_eq!(file.placements[0].flagged_psms, 1);
+    assert_eq!(rt.placements.len(), 1);
+    assert_eq!(rt.placements[0].placement, "suffix");
+    assert_eq!(rt.placements[0].candidate_pairs, 13);
+    assert_eq!(rt.placements[0].flagged_psms, 1);
 
-    // The histogram grid is fixed and symmetric about zero, and the pair at
-    // +0.02 sits in the bin that starts at zero.
-    let histogram = &file.totals.rt_difference_histogram;
+    // The histogram grid is fixed, every bin is one width wide, and bin 0 is
+    // centred on zero, so the pair 0.02 apart lands in it.
+    let histogram = &rt.totals.rt_difference_histogram;
     assert!(histogram.windows(2).all(|pair| pair[0].bin < pair[1].bin));
+    assert!(histogram
+        .iter()
+        .all(|entry| (entry.end - entry.start - HISTOGRAM_BIN).abs() < 1e-6));
     let zero = histogram.iter().find(|entry| entry.bin == 0).unwrap();
     assert_eq!(zero.pairs, 1);
-    assert_eq!(zero.start, 0.0);
-    assert!((zero.end - HISTOGRAM_BIN).abs() < 1e-6);
+    assert!((zero.start + HISTOGRAM_BIN / 2.0).abs() < 1e-6);
+    assert!((zero.end - HISTOGRAM_BIN / 2.0).abs() < 1e-6);
+    // A difference of -0.02 would land in the same bin, which is what being
+    // centred on zero means.
+    let mirrored = histogram.iter().find(|entry| entry.bin == -1);
+    assert!(mirrored.is_none() || mirrored.unwrap().start < 0.0);
 
     // The estimate is the background band's density over the window's width,
     // and the unrelated PSMs put it far below what co-eluted.
     let background: usize = histogram
         .iter()
         .filter(|entry| {
-            let distance = entry.start.abs();
+            let distance = ((entry.start + entry.end) / 2.0).abs();
             (BACKGROUND_BAND.start..BACKGROUND_BAND.end).contains(&distance)
         })
         .map(|entry| entry.pairs)
         .sum();
     assert!(background >= 8, "background band holds {background} pairs");
     let density = background as f32 / (2.0 * (BACKGROUND_BAND.end - BACKGROUND_BAND.start));
-    assert!((file.totals.expected_by_chance - density * 2.0 * 0.1).abs() < 1e-6);
-    assert!(file.totals.expected_by_chance < file.totals.coeluting_pairs as f32);
+    assert!((rt.totals.expected_by_chance - density * 2.0 * 0.1).abs() < 1e-6);
+    assert!(rt.totals.expected_by_chance < rt.totals.coeluting_pairs as f32);
 
     // The run-level record is the files' records summed on the same grid.
     let totals = annotations.run_totals();
-    assert_eq!(totals.candidate_pairs, file.totals.candidate_pairs);
+    assert_eq!(totals.candidate_pairs, rt.totals.candidate_pairs);
     assert_eq!(
         totals.rt_difference_histogram,
-        file.totals.rt_difference_histogram
+        rt.totals.rt_difference_histogram
     );
-    let placements = annotations.run_placements();
-    assert_eq!(placements.len(), 1);
-    assert_eq!(placements[0].placement, "suffix");
+    let modes = annotations.run_modes();
+    assert_eq!(modes.len(), 1);
+    assert_eq!(modes[0].mode, "rt");
+    assert_eq!(modes[0].tolerance, Some(0.1));
+    assert_eq!(modes[0].placements.len(), 1);
+    assert_eq!(modes[0].placements[0].placement, "suffix");
 }
 
 #[test]
@@ -571,8 +733,9 @@ fn a_difference_beyond_the_histogram_is_counted_apart() {
         &[psm(0, 0, 0, 10.0), psm(1, 1, 0, 16.0)],
         &db,
         &settings(0.1),
+        None,
     );
-    let stats = &annotations.files()[0].totals;
+    let stats = mode_of(&annotations, 0, "rt").totals;
 
     assert_eq!(stats.candidate_pairs, 1);
     assert_eq!(stats.outside_pairs, 1);
@@ -614,11 +777,11 @@ fn a_derived_tolerance_is_recorded_per_file() {
         features.push(psm(1 + step, 0, 0, 30.0 + step as f32 * 0.01));
     }
 
-    let annotations = annotate(&features, &db, &InSourceSettings::default());
-    let stats = &annotations.files()[0];
+    let annotations = annotate(&features, &db, &InSourceSettings::default(), None);
+    let rt = mode_of(&annotations, 0, "rt");
 
-    assert_eq!(stats.rt_tolerance_source, "derived");
-    assert!(stats.rt_tolerance > 0.0);
+    assert_eq!(rt.tolerance_source.as_deref(), Some("derived"));
+    assert!(rt.tolerance.is_some_and(|tolerance| tolerance > 0.0));
 }
 
 #[test]
@@ -638,6 +801,7 @@ fn an_unset_option_follows_the_digest_and_true_or_false_overrides_it() {
     );
     let configured = InSourceSettings {
         rt_tolerance: Some(0.5),
+        apex_fwhm_fraction: Some(0.3),
     };
     assert_eq!(
         InSourceConfig::resolve(Some(InSourceConfig::Settings(configured)), false),
@@ -649,18 +813,30 @@ fn an_unset_option_follows_the_digest_and_true_or_false_overrides_it() {
 fn a_tolerance_of_zero_or_worse_is_rejected() {
     assert!(InSourceSettings::default().validate().is_ok());
     assert!(InSourceSettings {
-        rt_tolerance: Some(0.25)
+        rt_tolerance: Some(0.25),
+        apex_fwhm_fraction: Some(0.25),
     }
     .validate()
     .is_ok());
+    // Both knobs are a positive width, in minutes and in peak widths.
     for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
         assert!(
             InSourceSettings {
-                rt_tolerance: Some(bad)
+                rt_tolerance: Some(bad),
+                apex_fwhm_fraction: None,
             }
             .validate()
             .is_err(),
-            "{bad} should be rejected"
+            "rt_tolerance {bad} should be rejected"
+        );
+        assert!(
+            InSourceSettings {
+                rt_tolerance: None,
+                apex_fwhm_fraction: Some(bad),
+            }
+            .validate()
+            .is_err(),
+            "apex_fwhm_fraction {bad} should be rejected"
         );
     }
 }

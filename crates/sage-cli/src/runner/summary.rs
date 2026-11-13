@@ -66,8 +66,11 @@ pub struct InSourceRunStats {
     pub rt_tolerance: Option<f32>,
     pub flagged_psms: usize,
     pub totals: Option<sage_core::in_source::InSourcePlacementStats>,
+    /// One record per way co-elution was decided: `apex` where quantification
+    /// gave both the product and the parent a peak in the file, `rt` where
+    /// PSM retention times were compared.
     #[serde(default)]
-    pub placements: Vec<sage_core::in_source::InSourcePlacementStats>,
+    pub modes: Vec<sage_core::in_source::InSourceModeStats>,
     pub files: Vec<sage_core::in_source::InSourceFileStats>,
 }
 

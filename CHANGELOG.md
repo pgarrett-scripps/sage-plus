@@ -16,7 +16,7 @@ entries are retained below for provenance.
   same file, its peptide occupies a span of a longer confident peptide of the same protein (or
   that peptide's own span with a lower mass), the modifications on the shared residues are equal
   except at one site, its mass is the mass a product of that span would have, and it co-elutes
-  with the parent's own PSMs. The flag names the longest such parent, so a product of a product
+  with the parent in that file. The flag names the longest such parent, so a product of a product
   points at the intact peptide. The decision is per PSM, not per peptide, so a peptide can be an
   experimental peptide at one retention time and a product at another in the same file.
 
@@ -31,15 +31,27 @@ entries are retained below for provenance.
   modification's neutral losses, and a labelling modification contributes nothing, so the light
   channel of a labelling pair is never a product of its heavy partner. Modifications are compared
   residue by residue, so a modification moved to another residue is a difference and not an equal
-  total. The co-elution tolerance is derived per file from the spread of its own repeated peptides,
-  the median distance from a peptide's median retention time, which needs no MS1 data and no
-  quantification; `in_source.rt_tolerance` replaces it. The median rather than a high percentile
-  because the window decides how much of the flagged set is coincidence: on a semi-enzymatic
-  search of one PXD028735 file the 95th percentile is 1.04 min, which admits 483 of 4,168
-  candidate pairs with 149 expected by chance (31%), while the median is 0.12 min, which admits
-  161 with 14 expected (9%). A quantified LFQ row is judged
-  on its own peak apex against the parent's apex in the same file, so a row transferred between
-  runs is judged too, and decoy rows are never annotated.
+  total.
+
+  Co-elution is decided on the peaks wherever quantification found them. An apex is a property of
+  a peak, while a PSM's retention time is only where MS2 fired inside it, so where both the
+  product and the parent were quantified in the file their apexes decide, within
+  `in_source.apex_fwhm_fraction` (default 0.15) of the narrower peak's full width at half maximum.
+  On a semi-enzymatic search of one PXD028735 file, 4,094 of 4,168 candidate pairs had both
+  peaks; judged on their apexes they give 140 co-eluting pairs with 7.8 expected by chance
+  (5.6%), where the same pairs judged on PSM retention times give 158 with 16.7 expected
+  (10.6%).
+
+  Without both peaks the product's PSM retention time is compared with the parent's median
+  retention time, against a tolerance derived per file from the spread of its own repeated
+  peptides, the median distance from a peptide's median retention time, which needs no MS1 data
+  and no quantification; `in_source.rt_tolerance` replaces that derivation. The median rather than
+  a high percentile because the window decides how much of the flagged set is coincidence: on a
+  semi-enzymatic search of one PXD028735 file the 95th percentile is 1.04 min, which admits 483 of
+  4,168 candidate pairs with 149 expected by chance (31%), while the median is 0.12 min, which
+  admits 161 with 14 expected (9%). A quantified LFQ row is judged on its own peak apex against
+  the parent's apex in the same file, so a row transferred between runs is judged too, and decoy
+  rows are never annotated.
 
   The annotation runs after FDR and changes nothing else: no score, q-value, intensity or row
   moves, and quantification is untouched. It is on by default for a semi-enzymatic or
@@ -51,9 +63,10 @@ entries are retained below for provenance.
   `run-summary.json` are omitted when it is off.
 
   `run-summary.json` gains an `in_source` block with the built-in check: candidate pairs,
-  co-eluting pairs, PSMs flagged, and the pairs expected by chance, for the run, for each
-  placement of a product in its parent, and per file with that file's retention-time difference
-  histogram on a fixed 0.05-unit grid. In-source products pile up at a difference of zero while
+  co-eluting pairs, PSMs flagged, and the pairs expected by chance, for the run, for each way
+  co-elution was decided (`apex` in peak widths, `rt` in retention-time units), for each
+  placement of a product in its parent, and per file with that file's difference histogram on a
+  fixed grid of 0.05-unit bins centred on multiples of 0.05, and its median peak width. In-source products pile up at a difference of zero while
   unrelated pairs spread out, so the density of pairs 1 to 5 units from zero says how much of a
   flagged set could be coincidence.
 

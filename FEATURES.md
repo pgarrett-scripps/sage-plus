@@ -39,6 +39,8 @@ peptide is a co-eluting fragment of a longer confident peptide of the same prote
 having lost one neutral molecule, and names the parent it came from. The mass has to match the ion
 type: a C-terminal product carries the ordinary peptide mass of its sequence, an N-terminal or
 internal one is 18.010565 Da lighter, so a peptide merely contained in a longer one is not flagged.
+Co-elution is judged on the peaks wherever quantification found them, the two apexes within a
+fraction of the peak width, and on PSM retention times otherwise.
 It is on by default for semi-enzymatic and non-specific digests, whose search space contains those
 products, and it is annotation only: two columns in `results.sage.parquet` and `lfq.parquet`, no
 score, q-value or intensity changed. Every record says how many co-eluting pairs were found against

@@ -1,5 +1,4 @@
 use super::*;
-use sage_core::database::PeptideIx;
 use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
@@ -455,33 +454,11 @@ pub fn serialize_lfq<H: BuildHasher>(
             col.close()?;
         }
     }
-    // A quantified row is judged on its own peak: its apex retention time in
-    // this file against the parent's apex in the same file, not on a PSM's
-    // retention time, so a row transferred between runs is judged too. Decoy
-    // rows are never annotated. Both columns are always written and are null
-    // when the annotation is off.
-    let parent_apexes = in_source.map(|_| {
-        let mut apexes: HashMap<(PeptideIx, usize), Vec<f32>> = HashMap::new();
-        for ((id, decoy), peak) in areas.iter() {
-            if *decoy {
-                continue;
-            }
-            let peptide_idx = match id {
-                PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
-            };
-            for (file_id, evidence) in peak.file_evidence.iter().enumerate() {
-                if let Some(apex) = evidence
-                    .as_ref()
-                    .map(|evidence| evidence.apex_rt)
-                    .filter(|apex| apex.is_finite())
-                {
-                    apexes.entry((peptide_idx, file_id)).or_default().push(apex);
-                }
-            }
-        }
-        apexes
-    });
-    let parent_apexes = parent_apexes.as_ref();
+    // A quantified row is judged on the peaks quantification found: its own
+    // apex in this file against the parent's apex in the same file, not on any
+    // PSM's retention time, so a row transferred between runs is judged too.
+    // Decoy rows are never annotated. Both columns are always written and are
+    // null when the annotation is off.
     let verdicts = rows
         .iter()
         .flat_map(|((id, decoy), peak)| {
@@ -489,61 +466,35 @@ pub fn serialize_lfq<H: BuildHasher>(
                 PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
             };
             let decoy = *decoy;
-            peak.file_evidence
-                .iter()
-                .enumerate()
-                .map(move |(file_id, evidence)| {
-                    let annotations = in_source?;
-                    let apexes = parent_apexes?;
-                    if decoy {
-                        return None;
-                    }
-                    let apex = evidence
-                        .as_ref()
-                        .map(|evidence| evidence.apex_rt)
-                        .filter(|apex| apex.is_finite())?;
-                    let candidates = annotations.candidates(peptide_idx);
-                    annotations.coeluting(file_id, apex, candidates, |parent| {
-                        apexes.get(&(parent, file_id)).and_then(|parent_apexes| {
-                            parent_apexes.iter().copied().min_by(|left, right| {
-                                (left - apex).abs().total_cmp(&(right - apex).abs())
-                            })
-                        })
-                    })
-                })
+            (0..peak.file_evidence.len()).map(move |file_id| {
+                let annotations = in_source?;
+                if decoy {
+                    return None;
+                }
+                annotations.precursor_row(peptide_idx, file_id)
+            })
         })
         .collect::<Vec<_>>();
-    if let Some(mut col) = rg.next_column()? {
-        let mut values = Vec::new();
-        let mut levels = Vec::new();
-        for verdict in &verdicts {
-            match verdict {
-                Some(annotation) => {
-                    values.push(database[annotation.parent].to_string().into_bytes().into());
-                    levels.push(1);
+    for field in 0..2 {
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut levels = Vec::new();
+            for verdict in &verdicts {
+                match verdict {
+                    Some(annotation) => {
+                        values.push(match field {
+                            0 => database[annotation.parent].to_string().into_bytes().into(),
+                            _ => annotation.kind.label().into_bytes().into(),
+                        });
+                        levels.push(1);
+                    }
+                    None => levels.push(0),
                 }
-                None => levels.push(0),
             }
+            col.typed::<ByteArrayType>()
+                .write_batch(&values, Some(&levels), None)?;
+            col.close()?;
         }
-        col.typed::<ByteArrayType>()
-            .write_batch(&values, Some(&levels), None)?;
-        col.close()?;
-    }
-    if let Some(mut col) = rg.next_column()? {
-        let mut values = Vec::new();
-        let mut levels = Vec::new();
-        for verdict in &verdicts {
-            match verdict {
-                Some(annotation) => {
-                    values.push(annotation.kind.label().into_bytes().into());
-                    levels.push(1);
-                }
-                None => levels.push(0),
-            }
-        }
-        col.typed::<ByteArrayType>()
-            .write_batch(&values, Some(&levels), None)?;
-        col.close()?;
     }
     rg.close()?;
     writer.into_inner()
