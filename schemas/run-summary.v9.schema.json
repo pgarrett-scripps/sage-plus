@@ -620,6 +620,46 @@
         "fragment"
       ]
     },
+    "contaminants": {
+      "type": "object",
+      "description": "Contaminant proteins of `database.contaminant_fasta`; absent when none was searched. Counts are confident target PSMs at the run's 1% spectrum and peptide q-values.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The searched contaminant FASTA."
+        },
+        "proteins": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Proteins read from it."
+        },
+        "peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Database target peptides belonging to at least one contaminant protein."
+        },
+        "confident_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contaminant_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contaminant_psm_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "files": {
+          "type": "array",
+          "description": "The same per acquisition file.",
+          "items": {
+            "$ref": "#/$defs/ContaminantFileStats"
+          }
+        }
+      }
+    },
     "in_source": {
       "type": "object",
       "description": "In-source fragmentation and in-source neutral loss annotation; absent when `in_source` is off.",
@@ -954,6 +994,32 @@
           "items": {
             "$ref": "#/$defs/InSourcePlacementStats"
           }
+        }
+      }
+    },
+    "ContaminantFileStats": {
+      "type": "object",
+      "description": "One acquisition file's contaminant share.",
+      "properties": {
+        "file_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filename": {
+          "type": "string"
+        },
+        "confident_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contaminant_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contaminant_psm_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
         }
       }
     }

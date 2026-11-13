@@ -5,9 +5,152 @@ use crate::sequence::ProteinSequence;
 use rayon::prelude::*;
 use std::sync::Arc;
 
+/// Which FASTA a protein was read from. The class is a second axis next to
+/// target/decoy: a decoy is a decoy whatever file it came from, and only
+/// targets are split by class.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ProteinClass {
+    /// `database.fasta`, the sample proteins.
+    #[default]
+    Sample,
+    /// `database.contaminant_fasta`.
+    Contaminant,
+    /// `database.entrapment_fasta`.
+    Entrapment,
+}
+
+/// The classes of the proteins a peptide was digested from. A peptide can
+/// belong to proteins of more than one class, so the flags are a set rather
+/// than one class, and the rules read it:
+///
+/// - contaminant: **any** of its proteins is a contaminant;
+/// - entrapment: **every** one of its proteins is entrapment.
+///
+/// One byte, so that carrying it on every [`crate::peptide::Peptide`] of a
+/// database of tens of millions costs nothing: it fits the padding the
+/// peptide's other one-byte fields already leave.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProteinClassSet(u8);
+
+impl ProteinClassSet {
+    const SAMPLE: u8 = 1;
+    const CONTAMINANT: u8 = 1 << 1;
+    const ENTRAPMENT: u8 = 1 << 2;
+
+    const fn flag(class: ProteinClass) -> u8 {
+        match class {
+            ProteinClass::Sample => Self::SAMPLE,
+            ProteinClass::Contaminant => Self::CONTAMINANT,
+            ProteinClass::Entrapment => Self::ENTRAPMENT,
+        }
+    }
+
+    /// The set holding one class.
+    pub const fn of(class: ProteinClass) -> Self {
+        Self(Self::flag(class))
+    }
+
+    /// Add a protein's class to the set.
+    pub fn insert(&mut self, class: ProteinClass) {
+        self.0 |= Self::flag(class);
+    }
+
+    /// Add every class of another set, as merging two copies of one peptide
+    /// does.
+    pub fn union(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    /// Whether any protein of this peptide is a contaminant.
+    pub const fn is_contaminant(self) -> bool {
+        self.0 & Self::CONTAMINANT != 0
+    }
+
+    /// Whether every protein of this peptide is entrapment. An empty set is
+    /// not entrapment.
+    pub const fn is_entrapment(self) -> bool {
+        self.0 == Self::ENTRAPMENT
+    }
+
+    /// Whether any class at all was recorded.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// The accessions of every protein whose class is not [`ProteinClass::Sample`],
+/// so a peptide's classes can be read from its protein accessions. Keeping
+/// them beside the database rather than on every peptide costs one set of
+/// accessions instead of a byte on each of a database's tens of millions of
+/// peptides, which would round [`crate::peptide::Peptide`] up by eight.
+#[derive(Clone, Debug, Default)]
+pub struct ProteinClasses {
+    contaminant: fnv::FnvHashSet<Arc<str>>,
+    entrapment: fnv::FnvHashSet<Arc<str>>,
+}
+
+impl ProteinClasses {
+    /// Collect the classed accessions of a FASTA. `None` when every protein
+    /// is a sample protein, which is the ordinary search.
+    pub fn of_fasta(fasta: &Fasta) -> Option<Self> {
+        let mut classes = Self::default();
+        for (index, (accession, _)) in fasta.targets.iter().enumerate() {
+            match fasta.class(index) {
+                ProteinClass::Sample => {}
+                ProteinClass::Contaminant => {
+                    classes.contaminant.insert(accession.clone());
+                }
+                ProteinClass::Entrapment => {
+                    classes.entrapment.insert(accession.clone());
+                }
+            }
+        }
+        (!classes.is_empty()).then_some(classes)
+    }
+
+    /// The classes of the proteins a peptide belongs to. Accessions that are
+    /// in neither set are sample proteins.
+    pub fn classes_of<'a>(
+        &self,
+        proteins: impl IntoIterator<Item = &'a Arc<str>>,
+    ) -> ProteinClassSet {
+        let mut set = ProteinClassSet::default();
+        for protein in proteins {
+            if self.contaminant.contains(protein) {
+                set.insert(ProteinClass::Contaminant);
+            } else if self.entrapment.contains(protein) {
+                set.insert(ProteinClass::Entrapment);
+            } else {
+                set.insert(ProteinClass::Sample);
+            }
+        }
+        set
+    }
+
+    /// Whether any protein of this peptide is a contaminant, which is what
+    /// makes the peptide one.
+    pub fn is_contaminant<'a>(&self, proteins: impl IntoIterator<Item = &'a Arc<str>>) -> bool {
+        proteins
+            .into_iter()
+            .any(|protein| self.contaminant.contains(protein))
+    }
+
+    /// Contaminant proteins the FASTA contributed.
+    pub fn contaminant_proteins(&self) -> usize {
+        self.contaminant.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.contaminant.is_empty() && self.entrapment.is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Fasta {
     pub targets: Vec<(Arc<str>, ProteinSequence)>,
+    /// The class of each protein of [`Self::targets`], at the same index.
+    /// Parallel to `targets` so that reading the proteins is unchanged.
+    classes: Vec<ProteinClass>,
     decoy_tag: String,
     // Should we ignore decoys in the fasta database
     // and generate them internally?
@@ -78,10 +221,32 @@ impl Fasta {
         }
 
         Ok(Fasta {
+            classes: vec![ProteinClass::Sample; targets.len()],
             targets,
             decoy_tag,
             generate_decoys,
         })
+    }
+
+    /// Add every protein of another FASTA under `class`. The decoy tag and
+    /// decoy strategy are the search's, so they stay this file's; proteins
+    /// that repeat an accession or a sequence of another class are kept, and
+    /// the per-peptide rules of [`ProteinClassSet`] decide what the peptide
+    /// is.
+    pub fn extend_with_class(&mut self, other: Fasta, class: ProteinClass) {
+        self.classes
+            .extend(std::iter::repeat_n(class, other.targets.len()));
+        self.targets.extend(other.targets);
+    }
+
+    /// The class of protein `index` of [`Self::targets`].
+    pub fn class(&self, index: usize) -> ProteinClass {
+        self.classes.get(index).copied().unwrap_or_default()
+    }
+
+    /// How many proteins of `class` the database holds.
+    pub fn class_count(&self, class: ProteinClass) -> usize {
+        self.classes.iter().filter(|&&other| other == class).count()
     }
 
     pub fn digest(&self, enzyme: &EnzymeParameters) -> Vec<Digest> {
@@ -193,10 +358,15 @@ impl Fasta {
     pub fn iter_chunks(&self, chunk_size: usize) -> impl Iterator<Item = Self> + '_ {
         self.targets
             .chunks(chunk_size)
-            .map(move |target_chunk| Self {
-                targets: target_chunk.to_vec(),
-                decoy_tag: self.decoy_tag.clone(),
-                generate_decoys: self.generate_decoys,
+            .enumerate()
+            .map(move |(index, target_chunk)| {
+                let start = index * chunk_size;
+                Self {
+                    targets: target_chunk.to_vec(),
+                    classes: self.classes[start..start + target_chunk.len()].to_vec(),
+                    decoy_tag: self.decoy_tag.clone(),
+                    generate_decoys: self.generate_decoys,
+                }
             })
     }
 }

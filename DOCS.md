@@ -536,6 +536,7 @@ For additional information about configuration options and output file formats, 
     "generate_decoys": false, // Optional[bool] {default=true}: Ignore decoys in FASTA database matching `decoy_tag`
     "clip_n_term_met": true, // Optional[bool] {default=true}: Also search proteins without the initiator Met (MetAP rule)
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
+    "contaminant_fasta": "contaminants.fasta", // Optional[str] {default=null}: searched alongside `fasta`, flagged in `is_contaminant`
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
     "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
     "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
@@ -1189,6 +1190,12 @@ alongside the library, because the location table does not embed chemical masses
 ### FASTA
 
 - **fasta**: String. The path to the FASTA file, either a local path or s3 object URI.
+- **contaminant_fasta**: String. Path to a FASTA of common contaminant proteins, searched
+  alongside `fasta` (default: unset). Its proteins are ordinary targets with the same enzyme,
+  modifications and decoy rules; what it adds is that every PSM says whether its peptide
+  belongs to a contaminant, in the `is_contaminant` column, and `run-summary.json` reports the
+  contaminant share of the confident PSMs for the run and per file. Unset leaves every output
+  column as it was. See [Contaminant proteins](#contaminant-proteins).
 - **clip_n_term_met**: Boolean. Also digest each protein without its initiator methionine
   when the second residue is G, A, S, T, C, P, or V. The added peptides start at residue 2
   and are protein N-terminal. Enzymatic digests only (default: true). See
@@ -1750,6 +1757,9 @@ seven `immonium_*` columns, `localized_peptide`, then `in_source_parent_peptide`
 - `num_protein_groups`: Number of protein groups assigned to the peptide. Only peptides with exactly one group take part in `protein_group_q`.
 - `rank`: Rank of the PSM. If `report_psms > 1`, then the best match will have rank = 1, the second best match will have rank = 2, etc.
 - `is_decoy`: True for decoy PSMs.
+- `is_contaminant`: Whether the peptide belongs to at least one protein of
+  `database.contaminant_fasta`. Null on every row when no contaminant FASTA was searched, and on
+  decoy rows, which are never split by class; see [Contaminant proteins](#contaminant-proteins).
 - `expmass`: Experimental mass of the peptide.
 - `calcmass`: Calculated mass of the peptide.
 - `charge`: Reported precursor charge.
@@ -1847,6 +1857,51 @@ grouping off) and the grouping peptide q-value.
 - `in_source_parent_peptide`, `in_source_type`: The longer co-eluting peptide this quantified precursor's signal came from, and what kind of product it is; see [In-source fragmentation](#in-source-fragmentation). A row is judged on the peak quantification gave that row — that precursor, that charge where charge states are not combined — against the parent's peaks in the same file, within `in_source.apex_fwhm_fraction` of the peak width and never on a PSM's retention time, so a row transferred between runs is judged too. A row flag asks less of the parent than a PSM flag: the parent must be confident somewhere in the run and quantified in this file, but need not have a PSM in it. A row without a peak in the file is never flagged and a precursor can be flagged in one file and not in another. Decoy rows are never annotated, and both columns are null when `in_source` is off.
 
 Sage does not report a `missing_reason`: it cannot reliably distinguish biological absence from detection-limit, alignment, extraction, or scoring causes for a null intensity.
+
+## Contaminant proteins
+
+Keratins, trypsin, serum albumin and the rest of the laboratory background are identified by
+every search whether you list them or not: left out of the FASTA their spectra go to the best
+wrong peptide, and left in they are indistinguishable from the sample. `database.contaminant_fasta`
+keeps them in the search and tells them apart in the output.
+
+The contaminant proteins are ordinary targets. They are digested by the same enzyme, carry the
+same modifications, and get decoys by the same rule, so target-decoy competition and FDR are
+what they were. The class is a second axis next to target/decoy: a decoy is a decoy whatever
+file its protein came from, and only targets are split by class.
+
+A PSM is a contaminant when **any** protein its peptide belongs to is a contaminant. A peptide
+shared between a sample protein and a contaminant is therefore reported as a contaminant: the
+spectrum cannot say which protein it came from, and a share that leaves such peptides out would
+understate the background. The same accession or sequence may appear in both files; both are
+kept, and that rule decides.
+
+What it writes:
+
+- `is_contaminant` in `results.sage.parquet`, null on every row when no contaminant FASTA was
+  searched, and null on decoy rows.
+- `contaminants` in `run-summary.json`: the file, its protein count, how many database peptides
+  belong to a contaminant, and the confident PSMs with the contaminant share, for the run and
+  per acquisition file. Only confident target PSMs count, at the 1% spectrum and peptide
+  q-value the run reports at.
+- The file's path and SHA-256 in the provenance, under `database_inputs`, with role
+  `contaminant_fasta`.
+
+Nothing else changes: no PSM is removed, rescored or requantified, and no other column moves.
+Filtering is yours — the column is there to be filtered or grouped on.
+
+**Splitting a combined FASTA.** Many distributions ship one file with the contaminants tagged in
+the accession, such as MaxQuant's `CON__` entries or `Cont_` in a UniProt-style header. One line
+of `awk` writes the two files this option expects (here for `CON__`; use the tag your file
+carries):
+
+```
+awk '/^>/{keep = /CON__/} keep' combined.fasta > contaminants.fasta
+awk '/^>/{keep = !/CON__/} keep' combined.fasta > sample.fasta
+```
+
+The tag itself is not needed afterwards: the class comes from which file a protein was read
+from, and Sage Plus adds no class tag to any accession.
 
 ## In-source fragmentation
 

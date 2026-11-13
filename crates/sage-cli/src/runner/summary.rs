@@ -42,6 +42,10 @@ pub struct RunSummary {
     /// Precursor and fragment tolerances suggested by the confident PSMs.
     #[serde(default)]
     pub recommended_tolerances: ToleranceRecommendation,
+    /// Contaminant proteins; absent when no `contaminant_fasta` was searched,
+    /// so a search without one writes the summary it wrote before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contaminants: Option<ContaminantRunStats>,
     /// In-source fragmentation and neutral-loss annotation; absent when the
     /// annotation is off, so a search without it writes the summary it wrote
     /// before.
@@ -226,6 +230,37 @@ pub struct MassRecalibrationRunStats {
     /// Configured mode: `static`, `linear`, or `auto`.
     pub mode: String,
     pub files: Vec<MassRecalibrationFileStats>,
+}
+
+/// Contaminant proteins of one run. The counts are confident target PSMs,
+/// the ones the run reports at its PSM and peptide q-value cutoffs; decoys
+/// are never split by class.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ContaminantRunStats {
+    /// The searched `contaminant_fasta`.
+    pub path: String,
+    /// Proteins read from it.
+    pub proteins: usize,
+    /// Database peptides belonging to at least one contaminant protein.
+    pub peptides: usize,
+    /// Confident target PSMs of the run, and how many of them are
+    /// contaminants.
+    pub confident_psms: usize,
+    pub contaminant_psms: usize,
+    /// `contaminant_psms` over `confident_psms`, or 0 where there are none.
+    pub contaminant_psm_share: f32,
+    /// The same per acquisition file.
+    pub files: Vec<ContaminantFileStats>,
+}
+
+/// One acquisition file's contaminant share.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ContaminantFileStats {
+    pub file_id: usize,
+    pub filename: String,
+    pub confident_psms: usize,
+    pub contaminant_psms: usize,
+    pub contaminant_psm_share: f32,
 }
 
 const fn run_summary_schema_version() -> u32 {

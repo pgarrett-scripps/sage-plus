@@ -260,3 +260,69 @@ fn supplied_decoys_are_expanded_like_targets() {
         ]
     );
 }
+
+#[test]
+fn a_contaminant_file_marks_its_proteins_and_leaves_the_sample_alone() {
+    let mut fasta = Fasta::parse(">P1\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let contaminants = Fasta::parse(">K1A1\nTRYPSINK\n>K2C1\nKERATINK\n".into(), "rev_", true)
+        .expect("a contaminant file");
+
+    fasta.extend_with_class(contaminants, ProteinClass::Contaminant);
+
+    assert_eq!(fasta.targets.len(), 3);
+    assert_eq!(fasta.class(0), ProteinClass::Sample);
+    assert_eq!(fasta.class(1), ProteinClass::Contaminant);
+    assert_eq!(fasta.class(2), ProteinClass::Contaminant);
+    assert_eq!(fasta.class_count(ProteinClass::Sample), 1);
+    assert_eq!(fasta.class_count(ProteinClass::Contaminant), 2);
+    // Chunking keeps each protein's class with it.
+    let chunked = fasta
+        .iter_chunks(2)
+        .flat_map(|chunk| {
+            (0..chunk.targets.len())
+                .map(|index| chunk.class(index))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        chunked,
+        vec![
+            ProteinClass::Sample,
+            ProteinClass::Contaminant,
+            ProteinClass::Contaminant
+        ]
+    );
+    // The classed accessions are what a peptide's class is read from.
+    let classes = ProteinClasses::of_fasta(&fasta).expect("two contaminant proteins");
+    assert_eq!(classes.contaminant_proteins(), 2);
+    assert!(classes.is_contaminant([Arc::from("K1A1")].iter()));
+    assert!(!classes.is_contaminant([Arc::from("P1")].iter()));
+    // A sample-only FASTA has no classes at all, which is the ordinary search.
+    let plain = Fasta::parse(">P1\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    assert!(ProteinClasses::of_fasta(&plain).is_none());
+}
+
+#[test]
+fn a_peptide_is_a_contaminant_if_any_of_its_proteins_is() {
+    let mut set = ProteinClassSet::default();
+    assert!(set.is_empty());
+    assert!(!set.is_contaminant());
+    assert!(!set.is_entrapment());
+
+    set.insert(ProteinClass::Sample);
+    set.insert(ProteinClass::Contaminant);
+    assert!(set.is_contaminant(), "any contaminant protein is enough");
+    assert!(!set.is_entrapment());
+
+    // Entrapment only when every protein is entrapment, which is what the
+    // estimate needs; a peptide shared with the sample is not.
+    let mut entrapment = ProteinClassSet::of(ProteinClass::Entrapment);
+    assert!(entrapment.is_entrapment());
+    entrapment.union(ProteinClassSet::of(ProteinClass::Sample));
+    assert!(!entrapment.is_entrapment());
+
+    // Merging two copies of one peptide keeps both classes.
+    let mut merged = ProteinClassSet::of(ProteinClass::Sample);
+    merged.union(ProteinClassSet::of(ProteinClass::Contaminant));
+    assert!(merged.is_contaminant());
+}

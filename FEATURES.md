@@ -34,6 +34,15 @@ the linear baseline fell for a reason unrelated to alignment, so the Beta 9 figu
 as the conservative one. See [quantification](DOCS.md#quantification) and the
 [evaluation](docs/design/NONLINEAR_RT_ALIGNMENT.md#evaluation).
 
+**Keep contaminants in the search and out of the conclusions.** `database.contaminant_fasta`
+searches a second FASTA of keratins, proteases and the rest of the laboratory background as
+ordinary targets — same enzyme, same modifications, same decoys — and reports in
+`is_contaminant` whether each PSM's peptide belongs to one of those proteins, with the
+contaminant share of the run and of each file in `run-summary.json`. A peptide shared with a
+sample protein counts as a contaminant, since the spectrum cannot say which protein it came
+from. No accession is tagged and no PSM is removed. See
+[contaminant proteins](DOCS.md#contaminant-proteins).
+
 **Tell in-source products from experimental peptides.** `in_source` flags a confident PSM whose
 peptide is a co-eluting fragment of a longer confident peptide of the same protein, or that peptide
 having lost one neutral molecule, and names the parent it came from. The mass has to match the ion

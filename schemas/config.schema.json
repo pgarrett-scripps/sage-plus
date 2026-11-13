@@ -1784,6 +1784,13 @@
             "null"
           ]
         },
+        "contaminant_fasta": {
+          "description": "Path to a FASTA of common contaminant proteins, searched alongside\n`fasta`. Its proteins are ordinary targets, digested and decoyed the\nsame way; what changes is that a PSM whose peptide belongs to any\ncontaminant protein is reported as one, in `is_contaminant`. Unset\n(the default) leaves every output column as it was.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "custom_cleavage_sites": {
           "description": "Path to a protein-specific custom cleavage-site TSV or Parquet file.\nRequired columns: `protein`, `position`; optional column: `context`.",
           "type": [

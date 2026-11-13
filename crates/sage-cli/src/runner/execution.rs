@@ -1,5 +1,9 @@
 use super::*;
 
+/// Spectrum and peptide q-value a PSM must pass to count in the contaminant
+/// share, the cutoff the run reports at.
+const CONTAMINANT_Q_VALUE: f32 = 0.01;
+
 impl Runner {
     pub fn batch_files(&self, scorer: &Scorer, batch_size: usize) -> anyhow::Result<SageResults> {
         let results = self
@@ -338,6 +342,20 @@ impl Runner {
             }
         });
 
+        // Contaminants: how much of the confident output came from the
+        // contaminant FASTA, for the run and per acquisition file. Counts
+        // only confident target PSMs, so decoys are never split by class.
+        let contaminants = self.contaminant_stats(&outputs.features, &filenames);
+        if let Some(stats) = &contaminants {
+            log::info!(
+                "contaminants: {} of {} confident PSMs ({:.2}%) from {} proteins",
+                stats.contaminant_psms,
+                stats.confident_psms,
+                100.0 * stats.contaminant_psm_share,
+                stats.proteins
+            );
+        }
+
         // In-source fragmentation and neutral-loss annotation: a side table
         // keyed by PSM, read by the writers. It needs the q-values and, where
         // quantification ran, the peaks: a product and its parent are judged
@@ -459,6 +477,7 @@ impl Runner {
                 .enabled
                 .then_some(self.parameters.ptm_localization.localization_q_value),
             in_source.as_ref(),
+            self.protein_classes.as_ref(),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -717,6 +736,7 @@ impl Runner {
                 max_memory_gb: self.parameters.max_memory_gb,
             },
             inputs: input_stats,
+            contaminants,
             in_source: in_source.as_ref().map(|annotations| InSourceRunStats {
                 rt_tolerance: self
                     .parameters
@@ -801,5 +821,66 @@ impl Runner {
         self.events.check()?;
 
         Ok(summary)
+    }
+
+    /// How much of the confident output came from the contaminant FASTA.
+    /// `None` when none was searched. A PSM counts where it passes the same
+    /// cutoffs the run reports at, and only targets are counted: a decoy is a
+    /// decoy whatever file its protein came from.
+    fn contaminant_stats(
+        &self,
+        features: &[sage_core::scoring::Feature],
+        filenames: &[String],
+    ) -> Option<super::summary::ContaminantRunStats> {
+        let path = self.database_parameters.contaminant_fasta.clone()?;
+        let classes = self.protein_classes.as_ref()?;
+        let share = |contaminants: usize, confident: usize| match confident {
+            0 => 0.0,
+            total => contaminants as f32 / total as f32,
+        };
+        let mut per_file = filenames
+            .iter()
+            .enumerate()
+            .map(|(file_id, filename)| super::summary::ContaminantFileStats {
+                file_id,
+                filename: filename.clone(),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let mut confident_psms = 0usize;
+        let mut contaminant_psms = 0usize;
+        for feature in features {
+            if feature.label != 1
+                || feature.spectrum_q > CONTAMINANT_Q_VALUE
+                || feature.peptide_q > CONTAMINANT_Q_VALUE
+            {
+                continue;
+            }
+            let peptide = &self.database[feature.peptide_idx];
+            let contaminant = classes.is_contaminant(peptide.proteins.iter());
+            confident_psms += 1;
+            contaminant_psms += usize::from(contaminant);
+            if let Some(file) = per_file.get_mut(feature.file_id) {
+                file.confident_psms += 1;
+                file.contaminant_psms += usize::from(contaminant);
+            }
+        }
+        for file in &mut per_file {
+            file.contaminant_psm_share = share(file.contaminant_psms, file.confident_psms);
+        }
+        Some(super::summary::ContaminantRunStats {
+            path,
+            proteins: classes.contaminant_proteins(),
+            peptides: self
+                .database
+                .peptides
+                .iter()
+                .filter(|peptide| !peptide.decoy && classes.is_contaminant(peptide.proteins.iter()))
+                .count(),
+            confident_psms,
+            contaminant_psms,
+            contaminant_psm_share: share(contaminant_psms, confident_psms),
+            files: per_file,
+        })
     }
 }

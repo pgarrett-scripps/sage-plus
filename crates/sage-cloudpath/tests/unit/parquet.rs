@@ -277,6 +277,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         None,
         None,
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -333,6 +334,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
         None,
@@ -410,6 +412,7 @@ fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::e
             1.0,
             &[],
             settings,
+            None,
             None,
             None,
         )?;
@@ -496,6 +499,7 @@ fn in_source_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::
             None,
             None,
             annotations,
+            None,
         )?;
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
         let metadata = reader
@@ -698,6 +702,7 @@ fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::error
             None,
             None,
             None,
+            None,
         )?;
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
         let rows = reader
@@ -761,6 +766,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
         None,
@@ -1137,6 +1143,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         None,
         None,
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader
@@ -1184,6 +1191,7 @@ fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
         None,
@@ -1248,4 +1256,81 @@ fn provenance_follows_the_schema_keys_in_the_footer() {
     let clash = vec![("sage.schema.name".to_string(), "other".to_string())];
     let error = serialize_ptm_library(&[], &clash).unwrap_err().to_string();
     assert!(error.contains("sage.schema.name"), "{error}");
+}
+
+#[test]
+fn is_contaminant_is_null_without_a_contaminant_fasta_and_set_with_one(
+) -> parquet::errors::Result<()> {
+    use sage_core::fasta::{Fasta, ProteinClass, ProteinClasses};
+    // A sample protein and a contaminant protein, each with one peptide; the
+    // classes come from the accessions, as the search builds them.
+    let mut fasta = Fasta::parse(">SAMPLE\nSAMPLEPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let contaminants = Fasta::parse(">K1A1\nCONTAMPEPTIDEK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(contaminants, ProteinClass::Contaminant);
+    let classes = ProteinClasses::of_fasta(&fasta).expect("one contaminant protein");
+
+    let peptide = |sequence: &[u8], protein: &str, decoy: bool| Peptide {
+        sequence: sequence.into(),
+        proteins: vec![Arc::from(protein)].into(),
+        decoy,
+        ..Peptide::default()
+    };
+    let mut database = IndexedDatabase::default();
+    database
+        .peptides
+        .push(peptide(b"SAMPLEPEPTIDEK", "SAMPLE", false));
+    database
+        .peptides
+        .push(peptide(b"CONTAMPEPTIDEK", "K1A1", false));
+    // A decoy of the contaminant peptide: decoys are never split by class.
+    database
+        .peptides
+        .push(peptide(b"KEDITPEPMASC", "K1A1", true));
+    let feature = |psm_id: usize, peptide: u32, label: i32| Feature {
+        psm_id,
+        peptide_idx: PeptideIx(peptide),
+        label,
+        ..Feature::default()
+    };
+    let features = [feature(0, 0, 1), feature(1, 1, 1), feature(2, 2, -1)];
+
+    let read = |classes: Option<&ProteinClasses>| -> parquet::errors::Result<Vec<String>> {
+        let rows = features.iter().collect::<Vec<_>>();
+        let bytes = serialize_features(
+            &rows,
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            None,
+            classes,
+        )?;
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        reader
+            .get_row_iter(None)?
+            .map(|row| {
+                let row = row?;
+                let value = row
+                    .get_column_iter()
+                    .find(|(name, _)| name.as_str() == "is_contaminant")
+                    .map(|(_, field)| field.to_string())
+                    .expect("the is_contaminant column is always written");
+                Ok(value)
+            })
+            .collect::<parquet::errors::Result<Vec<_>>>()
+    };
+
+    // Without a contaminant FASTA the question was never asked.
+    assert_eq!(read(None)?, vec!["null"; 3]);
+    // With one, every target row says whether its peptide is a contaminant,
+    // and the decoy row stays null.
+    assert_eq!(
+        read(Some(&classes))?,
+        vec!["false".to_string(), "true".to_string(), "null".to_string()]
+    );
+    Ok(())
 }

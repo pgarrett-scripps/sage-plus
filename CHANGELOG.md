@@ -10,6 +10,21 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
+  `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
+  decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per
+  protein, carried through digestion to every peptide, and two places it is reported: the new
+  `is_contaminant` column of `results.sage.parquet`, null on every row when no contaminant
+  FASTA was searched and on every decoy row, and a `contaminants` block in `run-summary.json` with the file, its
+  protein count, the database peptides belonging to a contaminant, and the contaminant share of
+  the confident PSMs for the run and per acquisition file. A PSM is a contaminant when any
+  protein of its peptide is one, so a peptide shared with a sample protein counts; a decoy is a
+  decoy whatever file its protein came from. The contaminant FASTA's path and SHA-256 are
+  recorded in the provenance under `database_inputs`. No accession is tagged, nothing is
+  removed or rescored, and a configuration without the key produces what it produced before:
+  `results.sage.parquet` keeps schema version 7 (8 with precursor labels), with the new column
+  null. DOCS has a one-line recipe for splitting a combined FASTA, such as MaxQuant `CON__`
+  entries, into the two files.
 - `in_source` flags the PSMs that are in-source fragmentation or in-source neutral loss products
   of a longer peptide, in two new nullable columns of `results.sage.parquet` and `lfq.parquet`,
   `in_source_parent_peptide` and `in_source_type`. A confident target PSM is flagged when, in the

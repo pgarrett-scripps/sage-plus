@@ -143,6 +143,13 @@ impl Ord for ProteinOccurrence {
     }
 }
 
+impl DigestGroup {
+    /// One group of a digest and the occurrences it was found at.
+    pub fn of(reference: Digest, origins: Vec<ProteinOccurrence>) -> Self {
+        Self { reference, origins }
+    }
+}
+
 fn normalize_origins(group: &mut DigestGroup) {
     group.origins.sort_unstable();
     group.origins.dedup();

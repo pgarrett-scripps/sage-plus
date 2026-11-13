@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use sage_cloudpath::{FileFormat, Url};
 use sage_core::cleavage::{CustomCleavageLibrary, ValidatedCustomCleavageLibrary};
 use sage_core::database::{IndexedDatabase, Parameters};
-use sage_core::fasta::Fasta;
+use sage_core::fasta::{Fasta, ProteinClass, ProteinClasses};
 use sage_core::lfq::{PrecursorId, QuantifiedPeak};
 use sage_core::mass::Tolerance;
 use sage_core::mass::PROTON;
@@ -224,6 +224,9 @@ pub struct Runner {
     /// Provenance key-value pairs for Parquet footers, set before outputs are
     /// written.
     parquet_provenance: Vec<(String, String)>,
+    /// Accessions of the proteins whose class is not sample, built from the
+    /// searched FASTA files. `None` for an ordinary search.
+    protein_classes: Option<ProteinClasses>,
 }
 
 /// Processed MS1 and MSn spectra of one file batch.
@@ -414,7 +417,7 @@ fn load_ptm_library(database_parameters: &mut Parameters) -> anyhow::Result<()> 
 
 fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
     let fasta_url = sage_cloudpath::to_url(&database_parameters.fasta)?;
-    let fasta = sage_cloudpath::util::read_fasta(
+    let mut fasta = sage_cloudpath::util::read_fasta(
         &fasta_url,
         &database_parameters.decoy_tag,
         database_parameters.generate_decoys,
@@ -425,6 +428,24 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             database_parameters.fasta
         )
     })?;
+    // Contaminants are ordinary targets of the same search, digested and
+    // decoyed by the same rules; the class travels with each protein so a
+    // peptide can be reported as a contaminant later.
+    if let Some(path) = database_parameters.contaminant_fasta.as_deref() {
+        let url = sage_cloudpath::to_url(path)?;
+        let contaminants = sage_cloudpath::util::read_fasta(
+            &url,
+            &database_parameters.decoy_tag,
+            database_parameters.generate_decoys,
+        )
+        .with_context(|| format!("Failed to read contaminant FASTA `{path}`"))?;
+        info!(
+            "contaminant FASTA: {} proteins from {}",
+            contaminants.targets.len(),
+            path
+        );
+        fasta.extend_with_class(contaminants, ProteinClass::Contaminant);
+    }
     database_parameters.log_ambiguous_proteins(&fasta);
     Ok(fasta)
 }
@@ -534,8 +555,10 @@ impl Runner {
         let mut reordered = false;
         let mut custom_cleavage_sites = None;
         // Collect peptides from FASTA (if configured).
+        let mut protein_classes = None;
         let mut all_peptides: Vec<Peptide> = if !database_parameters.fasta.is_empty() {
             let fasta = load_fasta(&database_parameters)?;
+            protein_classes = ProteinClasses::of_fasta(&fasta);
             let custom_cleavages = load_custom_cleavages(&database_parameters, &fasta)?;
             custom_cleavage_sites = custom_cleavages.clone();
 
@@ -606,6 +629,7 @@ impl Runner {
                         file_qc: file_qc.clone(),
                         custom_cleavages: None,
                         parquet_provenance: Vec::new(),
+                        protein_classes: None,
                     };
                     let (peptides, retained) =
                         mini_runner.prefilter_peptides(parallel, fasta, custom_cleavages)?;
@@ -714,6 +738,7 @@ impl Runner {
             file_qc,
             custom_cleavages: custom_cleavage_sites,
             parquet_provenance: Vec::new(),
+            protein_classes,
         })
     }
 }

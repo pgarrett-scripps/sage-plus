@@ -167,17 +167,15 @@ fn digest_group(sequence: &str, position: Position) -> DigestGroup {
         protein: Arc::from(sequence),
         ..Digest::default()
     };
-    DigestGroup {
-        origins: vec![ProteinOccurrence {
-            protein: reference.protein.clone(),
-            start: reference.protein_start,
-            prev_aa: reference.prev_aa,
-            next_aa: reference.next_aa,
-            source: None,
-            met_clipped: false,
-        }],
-        reference,
-    }
+    let origins = vec![ProteinOccurrence {
+        protein: reference.protein.clone(),
+        start: reference.protein_start,
+        prev_aa: reference.prev_aa,
+        next_aa: reference.next_aa,
+        source: None,
+        met_clipped: false,
+    }];
+    DigestGroup::of(reference, origins)
 }
 
 #[test]
@@ -310,10 +308,10 @@ fn per_protein_expansion_of_unshared_digests_matches_the_whole_database() {
                         deferred.push(digest.clone());
                         continue;
                     }
-                    let group = DigestGroup {
-                        origins: vec![ProteinOccurrence::of_protein_digest(digest)],
-                        reference: digest.clone(),
-                    };
+                    let group = DigestGroup::of(
+                        digest.clone(),
+                        vec![ProteinOccurrence::of_protein_digest(digest)],
+                    );
                     peptides.extend(expander.expand(group, None));
                 }
                 expander.reorder(&mut peptides);
@@ -675,17 +673,15 @@ fn channel_offsets_add_to_the_modification_base_mass() {
         sequence: "PEPTIDEK".into(),
         ..Digest::default()
     };
-    let peptides = params.modify_digests(vec![DigestGroup {
-        reference: digest.clone(),
-        origins: vec![crate::enzyme::ProteinOccurrence {
-            protein: digest.protein.clone(),
-            start: digest.protein_start,
-            prev_aa: None,
-            next_aa: None,
-            source: None,
-            met_clipped: false,
-        }],
-    }]);
+    let origins = vec![crate::enzyme::ProteinOccurrence {
+        protein: digest.protein.clone(),
+        start: digest.protein_start,
+        prev_aa: None,
+        next_aa: None,
+        source: None,
+        met_clipped: false,
+    }];
+    let peptides = params.modify_digests(vec![DigestGroup::of(digest.clone(), origins)]);
     let heavy = peptides
         .iter()
         .find(|peptide| peptide.label_channel_str() == Some("heavy"))
@@ -817,6 +813,7 @@ fn digestion() {
     );
 
     let params = Parameters {
+        contaminant_fasta: None,
         bucket_size: 128,
         enzyme: EnzymeBuilder {
             missed_cleavages: Some(1.into()),
@@ -3439,4 +3436,47 @@ fn localization_rules_come_in_a_fixed_order() {
     sorted.sort();
     assert_eq!(keys, sorted);
     assert_eq!(rules.len(), 6);
+}
+
+#[test]
+fn contaminant_proteins_mark_their_peptides_by_accession() {
+    // SHAEDPEPTIDEK is in both files, so rule 4 makes it a contaminant; the
+    // sample-only peptide stays clean and the contaminant-only one is
+    // flagged. The classes are read from the protein accessions, so no byte
+    // is spent on the peptides of a database.
+    let mut fasta = Fasta::parse(
+        ">sample\nSAMPLEPEPTIDEKSHAEDPEPTIDEK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let contaminants =
+        Fasta::parse(">K1A1\nSHAEDPEPTIDEKCONTAMPEPTIDEK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(contaminants, crate::fasta::ProteinClass::Contaminant);
+    let classes = crate::fasta::ProteinClasses::of_fasta(&fasta).expect("a contaminant class");
+    assert_eq!(classes.contaminant_proteins(), 1);
+
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 6}
+    }))
+    .unwrap();
+    let peptides = builder.make_parameters().digest(&fasta);
+    let peptide_of = |sequence: &str| {
+        peptides
+            .iter()
+            .find(|peptide| !peptide.decoy && peptide.sequence.as_str() == sequence)
+            .unwrap_or_else(|| panic!("{sequence} is in the database"))
+    };
+
+    assert!(!classes.is_contaminant(peptide_of("SAMPLEPEPTIDEK").proteins.iter()));
+    assert!(classes.is_contaminant(peptide_of("CONTAMPEPTIDEK").proteins.iter()));
+    let shared = peptide_of("SHAEDPEPTIDEK");
+    assert_eq!(shared.proteins.len(), 2, "one peptide, both proteins");
+    assert!(
+        classes.is_contaminant(shared.proteins.iter()),
+        "a peptide of any contaminant protein is a contaminant"
+    );
+    assert!(classes.classes_of(shared.proteins.iter()).is_contaminant());
+    // Rule 1: the class never changes what a decoy is.
+    assert!(peptides.iter().any(|peptide| peptide.decoy));
 }

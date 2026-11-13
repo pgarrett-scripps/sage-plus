@@ -388,10 +388,8 @@ impl ProteinStream<'_> {
                                 }
                                 continue;
                             }
-                            let group = DigestGroup {
-                                origins: vec![ProteinOccurrence::of_protein_digest(&digest)],
-                                reference: digest,
-                            };
+                            let origins = vec![ProteinOccurrence::of_protein_digest(&digest)];
+                            let group = DigestGroup::of(digest, origins);
                             peptides.extend(expander.expand(group, None));
                         }
                         let checked = filter_unit(

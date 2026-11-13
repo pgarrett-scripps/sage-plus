@@ -330,11 +330,22 @@ impl Runner {
             .filter_map(|entry| entry.definition().name.map(|name| name.to_string()))
             .collect::<HashSet<_>>();
         let fasta_url = sage_cloudpath::to_url(&self.database_parameters.fasta)?;
-        let fasta = sage_cloudpath::util::read_fasta(
+        let mut fasta = sage_cloudpath::util::read_fasta(
             &fasta_url,
             &self.database_parameters.decoy_tag,
             self.database_parameters.generate_decoys,
         )?;
+        // The library locates peptides in their proteins, and a contaminant
+        // peptide's protein is in the contaminant file.
+        if let Some(path) = self.database_parameters.contaminant_fasta.as_deref() {
+            let url = sage_cloudpath::to_url(path)?;
+            let contaminants = sage_cloudpath::util::read_fasta(
+                &url,
+                &self.database_parameters.decoy_tag,
+                self.database_parameters.generate_decoys,
+            )?;
+            fasta.extend_with_class(contaminants, sage_core::fasta::ProteinClass::Contaminant);
+        }
         let proteins = fasta
             .targets
             .iter()

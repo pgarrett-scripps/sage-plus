@@ -165,6 +165,9 @@ pub fn serialize_features(
     immonium: Option<&ImmoniumSettings>,
     localization_q_cutoff: Option<f32>,
     in_source: Option<&InSourceAnnotations>,
+    // The classed protein accessions, when a contaminant or entrapment FASTA
+    // was searched; without one `is_contaminant` is null on every row.
+    protein_classes: Option<&sage_core::fasta::ProteinClasses>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let has_fragment_losses = database.fragment_losses.is_some();
@@ -514,6 +517,21 @@ pub fn serialize_features(
                     in_source
                         .and_then(|annotations| annotations.psm(f.psm_id))
                         .map(|annotation| annotation.kind.label().into_bytes().into())
+                }),
+            )?;
+        }
+
+        // Whether the peptide belongs to a protein of the contaminant FASTA:
+        // null on every row when no contaminant FASTA was searched, and on
+        // decoy rows, which are never split by class.
+        if let Some(column) = rg.next_column()? {
+            write_optional_column::<BoolType>(
+                column,
+                features.iter().map(|f| {
+                    let peptide = &database[f.peptide_idx];
+                    protein_classes
+                        .filter(|_| !peptide.decoy)
+                        .map(|classes| classes.is_contaminant(peptide.proteins.iter()))
                 }),
             )?;
         }

@@ -161,6 +161,12 @@ pub struct Builder {
     pub clip_n_term_met: Option<bool>,
     /// Path to fasta database
     pub fasta: Option<String>,
+    /// Path to a FASTA of common contaminant proteins, searched alongside
+    /// `fasta`. Its proteins are ordinary targets, digested and decoyed the
+    /// same way; what changes is that a PSM whose peptide belongs to any
+    /// contaminant protein is reported as one, in `is_contaminant`. Unset
+    /// (the default) leaves every output column as it was.
+    pub contaminant_fasta: Option<String>,
     /// Expand ambiguous FASTA residues into every residue they may stand
     /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues
     /// (default false: peptides containing B, X or Z are not searched).
@@ -291,6 +297,7 @@ impl Builder {
             generate_decoys: self.generate_decoys.unwrap_or(true),
             clip_n_term_met: self.clip_n_term_met.unwrap_or(true),
             fasta: self.fasta.unwrap_or_default(),
+            contaminant_fasta: self.contaminant_fasta,
             expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
             max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
             merge_isoleucine_leucine: self.merge_isoleucine_leucine.unwrap_or(true),
@@ -332,6 +339,9 @@ pub struct Parameters {
     pub generate_decoys: bool,
     pub clip_n_term_met: bool,
     pub fasta: String,
+    /// Path to a FASTA of contaminant proteins, searched alongside `fasta`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contaminant_fasta: Option<String>,
     pub expand_ambiguous_residues: bool,
     pub max_ambiguous_variants: usize,
     pub merge_isoleucine_leucine: bool,
