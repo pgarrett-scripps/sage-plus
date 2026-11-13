@@ -2,7 +2,7 @@
   "$comment": "Frictionless Table Schema (https://specs.frictionlessdata.io/table-schema/). Tab-separated, UTF-8, one header row; columns appear in this order.",
   "name": "qc_composition",
   "title": "qc.composition.tsv",
-  "description": "Amino acid composition of identified peptides against the composition the search database predicts for the same proteins: one row per file and residue, then the same residues for a `total` row covering the run. Interior residues only. Headline numbers are in run-summary.json under qc.composition.",
+  "description": "Amino acid composition of identified peptides against the composition the search database predicts for the same proteins, matched on the observed missed-cleavage distribution: one row per file and residue, then the same residues for a `total` row covering the run. Interior residues only. Headline numbers are in run-summary.json under qc.composition.",
   "dialect": {
     "delimiter": "\t",
     "header": true
@@ -34,12 +34,12 @@
     {
       "name": "expected",
       "type": "integer",
-      "description": "Interior residues of this kind in the distinct database peptide sequences of the proteins identified in this file."
+      "description": "Interior residues of this kind in the distinct database peptide sequences of the proteins identified in this file: the raw count, not reweighted."
     },
     {
       "name": "expected_fraction",
       "type": "number",
-      "description": "`expected` divided by all interior residues expected for this file, six decimals."
+      "description": "Expected share of this residue, six decimals: the database fraction of each missed-cleavage class, weighted by the share of this file's observed interior residues in the same class. Not `expected` divided by the total of that column."
     },
     {
       "name": "log2_ratio",
@@ -50,5 +50,7 @@
       }
     }
   ],
-  "missingValues": [""]
+  "missingValues": [
+    ""
+  ]
 }

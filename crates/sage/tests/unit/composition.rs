@@ -34,6 +34,27 @@ fn counts(sequences: &[&str]) -> ResidueCounts {
     counts
 }
 
+/// A profile whose every peptide is fully cleaved, so weighting has one class
+/// and cannot change a fraction.
+fn profile(sequences: &[&str]) -> CompositionProfile {
+    classed(&[(0, sequences)])
+}
+
+/// A profile built from `(missed cleavages, sequences)` groups.
+fn classed(groups: &[(usize, &[&str])]) -> CompositionProfile {
+    let mut profile = CompositionProfile::default();
+    for (missed, sequences) in groups {
+        for sequence in *sequences {
+            profile.add_sequence(
+                sequence.as_bytes(),
+                Some(TerminusClass::NonEnzymatic),
+                *missed,
+            );
+        }
+    }
+    profile
+}
+
 #[test]
 fn interior_drops_only_the_termini_the_enzyme_made() {
     let sequence = b"ACDEK";
@@ -123,7 +144,7 @@ fn merging_adds_every_field() {
 
 #[test]
 fn identical_profiles_have_no_shift_and_no_distance() {
-    let profile = counts(&["ACDEFG", "ACDE"]);
+    let profile = profile(&["ACDEFG", "ACDE"]);
     let summary = CompositionSummary::new(&profile, &profile);
     assert_eq!(summary.observed_residues, summary.expected_residues);
     assert_eq!(summary.residues.len(), 6);
@@ -138,8 +159,8 @@ fn identical_profiles_have_no_shift_and_no_distance() {
 #[test]
 fn a_halved_residue_reads_as_minus_one() {
     // Observed: 2 of 8 are C. Expected: 4 of 8 are C.
-    let observed = counts(&["CCAAAAAA"]);
-    let expected = counts(&["CCCCAAAA"]);
+    let observed = profile(&["CCAAAAAA"]);
+    let expected = profile(&["CCCCAAAA"]);
     let summary = CompositionSummary::new(&observed, &expected);
     let carbon = summary
         .residues
@@ -158,7 +179,7 @@ fn a_halved_residue_reads_as_minus_one() {
 
 #[test]
 fn a_residue_missing_from_one_side_has_no_finite_ratio() {
-    let summary = CompositionSummary::new(&counts(&["AAAA"]), &counts(&["AACC"]));
+    let summary = CompositionSummary::new(&profile(&["AAAA"]), &profile(&["AACC"]));
     let carbon = summary
         .residues
         .iter()
@@ -173,7 +194,7 @@ fn a_residue_missing_from_one_side_has_no_finite_ratio() {
 
 #[test]
 fn profiles_with_no_residue_in_common_are_one_apart() {
-    let summary = CompositionSummary::new(&counts(&["AAAA"]), &counts(&["CCCC"]));
+    let summary = CompositionSummary::new(&profile(&["AAAA"]), &profile(&["CCCC"]));
     assert_eq!(summary.jensen_shannon_distance, Some(1.0));
     assert_eq!(summary.largest_shift, None);
     assert_eq!(summary.residues.len(), 2);
@@ -181,7 +202,7 @@ fn profiles_with_no_residue_in_common_are_one_apart() {
 
 #[test]
 fn an_empty_profile_is_reported_rather_than_dividing_by_zero() {
-    let summary = CompositionSummary::new(&ResidueCounts::default(), &counts(&["ACDE"]));
+    let summary = CompositionSummary::new(&CompositionProfile::default(), &profile(&["ACDE"]));
     assert_eq!(summary.observed_peptides, 0);
     assert_eq!(summary.observed_residues, 0);
     assert_eq!(summary.expected_residues, 4);
@@ -192,4 +213,95 @@ fn an_empty_profile_is_reported_rather_than_dividing_by_zero() {
     }
     // With nothing observed there is no distance to report.
     assert_eq!(summary.jensen_shannon_distance, None);
+}
+
+#[test]
+fn the_expected_profile_is_matched_to_the_observed_missed_cleavages() {
+    // The database holds fully cleaved peptides with no K and one-missed-cleavage
+    // peptides that keep a K inside, in equal numbers. What was identified is
+    // fully cleaved except for one peptide in eight residues' worth.
+    let database = classed(&[(0, &["AAAA", "AAAA"]), (1, &["AAAK", "AAAK"])]);
+    let observed = classed(&[(0, &["AAAA", "AAAA", "AAAA"]), (1, &["AAAK"])]);
+    let summary = CompositionSummary::new(&observed, &database);
+    let lysine = summary
+        .residues
+        .iter()
+        .find(|residue| residue.residue == 'K')
+        .unwrap();
+    // Unmatched, the database would expect 2 K in 16 residues, 0.125, against
+    // the observed 1 in 16, 0.0625: a log2 ratio of -1 that is only the digest.
+    assert_eq!(lysine.observed_fraction, 0.0625);
+    assert_eq!(lysine.expected_fraction, 0.0625);
+    assert_eq!(lysine.log2_ratio, Some(0.0));
+    // The expected count stays the raw count of the matched database peptides.
+    assert_eq!(lysine.expected, 2);
+    assert_eq!(summary.matched_observed_residues, summary.observed_residues);
+    assert_eq!(summary.jensen_shannon_distance, Some(0.0));
+}
+
+#[test]
+fn matching_still_shows_a_residue_that_is_really_missing() {
+    // Same digest on both sides, but the observed peptides lost their cysteine.
+    let database = classed(&[(0, &["ACAA"]), (1, &["ACAK"])]);
+    let observed = classed(&[(0, &["AAAA"]), (1, &["AAAK"])]);
+    let summary = CompositionSummary::new(&observed, &database);
+    let carbon = summary
+        .residues
+        .iter()
+        .find(|residue| residue.residue == 'C')
+        .unwrap();
+    assert_eq!(carbon.observed, 0);
+    assert_eq!(carbon.log2_ratio, None);
+    let lysine = summary
+        .residues
+        .iter()
+        .find(|residue| residue.residue == 'K')
+        .unwrap();
+    // K is matched class for class, so it does not move.
+    assert_eq!(lysine.log2_ratio, Some(0.0));
+}
+
+#[test]
+fn a_class_the_database_cannot_supply_is_left_out_of_the_weights() {
+    // Nothing in the database has two missed cleavages, so those observed
+    // residues carry no weight and are reported as unmatched.
+    let database = classed(&[(0, &["AAAA"])]);
+    let observed = classed(&[(0, &["AAAA"]), (2, &["AAKK"])]);
+    let summary = CompositionSummary::new(&observed, &database);
+    assert_eq!(summary.observed_residues, 8);
+    assert_eq!(summary.matched_observed_residues, 4);
+    // The expectation is class 0's profile: all A, so K has no finite ratio.
+    let lysine = summary
+        .residues
+        .iter()
+        .find(|residue| residue.residue == 'K')
+        .unwrap();
+    assert_eq!(lysine.expected_fraction, 0.0);
+    assert_eq!(lysine.log2_ratio, None);
+}
+
+#[test]
+fn with_no_class_in_common_the_plain_database_profile_is_used() {
+    let database = classed(&[(1, &["AACC"])]);
+    let observed = classed(&[(0, &["AAAA"])]);
+    let summary = CompositionSummary::new(&observed, &database);
+    assert_eq!(summary.matched_observed_residues, 0);
+    let carbon = summary
+        .residues
+        .iter()
+        .find(|residue| residue.residue == 'C')
+        .unwrap();
+    // Unweighted: half of the database's residues are C.
+    assert_eq!(carbon.expected_fraction, 0.5);
+}
+
+#[test]
+fn merging_profiles_keeps_the_classes_apart() {
+    let mut left = classed(&[(0, &["AAAA"])]);
+    left.merge(&classed(&[(2, &["KKKK"])]));
+    assert_eq!(left.total().residues(), 8);
+    assert_eq!(left.classes(), 3);
+    assert_eq!(left.class(0).unwrap().count(b'A'), 4);
+    assert_eq!(left.class(1).unwrap().residues(), 0);
+    assert_eq!(left.class(2).unwrap().count(b'K'), 4);
 }

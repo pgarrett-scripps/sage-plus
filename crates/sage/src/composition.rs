@@ -14,6 +14,15 @@
 //! every residue. Modifications are ignored; a residue is counted once per
 //! distinct sequence, however many PSMs or peptidoforms carry it.
 //!
+//! The two profiles are matched on missed cleavages. Each missed cleavage leaves
+//! a cleavage residue inside the peptide, and the database holds every missed
+//! cleavage the digest allows while the peptides actually identified are mostly
+//! fully cleaved, so an unmatched comparison reports that difference and little
+//! else: with trypsin, K and R come out near a log2 ratio of -3 in every run.
+//! The expected profile is therefore a weighted average of the database profile
+//! of each missed-cleavage class, weighted by the share of the observed residues
+//! in that class. No enzyme or residue is named to do it.
+//!
 //! A residue that goes missing from the observed profile is the point of the
 //! comparison: no threshold is applied and no test is run here, because with
 //! hundreds of thousands of residues any test is significant in every run.
@@ -125,6 +134,82 @@ impl ResidueCounts {
     }
 }
 
+/// Interior residue counts of a set of distinct peptide sequences, kept both in
+/// total and per missed-cleavage class so the two sides of a comparison can be
+/// matched on the digest.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompositionProfile {
+    total: ResidueCounts,
+    /// Counts of the peptides with this many missed cleavages, by index.
+    by_missed_cleavages: Vec<ResidueCounts>,
+}
+
+impl CompositionProfile {
+    /// Count one peptide's interior residues, in the total and in the class of
+    /// its missed cleavage count.
+    pub fn add_peptide(
+        &mut self,
+        enzyme: Option<&Enzyme>,
+        clip_n_term_met: bool,
+        peptide: &Peptide,
+    ) {
+        self.total.add_peptide(enzyme, clip_n_term_met, peptide);
+        let class = usize::from(peptide.missed_cleavages);
+        if self.by_missed_cleavages.len() <= class {
+            self.by_missed_cleavages
+                .resize_with(class + 1, ResidueCounts::default);
+        }
+        self.by_missed_cleavages[class].add_peptide(enzyme, clip_n_term_met, peptide);
+    }
+
+    /// Count one sequence in `missed_cleavages`'s class; for tests and for
+    /// callers that have no [`Peptide`].
+    pub fn add_sequence(
+        &mut self,
+        sequence: &[u8],
+        class: Option<TerminusClass>,
+        missed_cleavages: usize,
+    ) {
+        self.total.add_sequence(sequence, class);
+        if self.by_missed_cleavages.len() <= missed_cleavages {
+            self.by_missed_cleavages
+                .resize_with(missed_cleavages + 1, ResidueCounts::default);
+        }
+        self.by_missed_cleavages[missed_cleavages].add_sequence(sequence, class);
+    }
+
+    /// Add another profile, class by class.
+    pub fn merge(&mut self, other: &Self) {
+        self.total.merge(&other.total);
+        if self.by_missed_cleavages.len() < other.by_missed_cleavages.len() {
+            self.by_missed_cleavages
+                .resize_with(other.by_missed_cleavages.len(), ResidueCounts::default);
+        }
+        for (mine, theirs) in self
+            .by_missed_cleavages
+            .iter_mut()
+            .zip(&other.by_missed_cleavages)
+        {
+            mine.merge(theirs);
+        }
+    }
+
+    /// Counts over every class.
+    pub fn total(&self) -> &ResidueCounts {
+        &self.total
+    }
+
+    /// Counts of the peptides with `missed_cleavages` missed cleavages.
+    pub fn class(&self, missed_cleavages: usize) -> Option<&ResidueCounts> {
+        self.by_missed_cleavages.get(missed_cleavages)
+    }
+
+    /// One past the highest missed-cleavage class counted.
+    pub fn classes(&self) -> usize {
+        self.by_missed_cleavages.len()
+    }
+}
+
 /// One residue's observed and expected share, and the ratio between them.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ResidueComposition {
@@ -147,6 +232,12 @@ pub struct CompositionSummary {
     /// Distinct in-silico peptide sequences of the identified proteins.
     pub expected_peptides: u64,
     pub expected_residues: u64,
+    /// Observed residues whose missed-cleavage class the database could match,
+    /// and which therefore carry the weights of the expected profile. Equal to
+    /// `observed_residues` unless a class is missing from the database, and zero
+    /// when none could be matched, where the expected fractions fall back to the
+    /// plain database profile.
+    pub matched_observed_residues: u64,
     /// One row per residue present in either profile, in alphabetical order.
     pub residues: Vec<ResidueComposition>,
     /// Residue with the largest `|log2_ratio|`, and that ratio. `None` when no
@@ -161,8 +252,43 @@ pub struct CompositionSummary {
 }
 
 impl CompositionSummary {
-    /// Compare an observed profile with the expected one.
-    pub fn new(observed: &ResidueCounts, expected: &ResidueCounts) -> Self {
+    /// Compare an observed profile with the expected one, matching the expected
+    /// profile to the observed distribution of missed cleavages.
+    pub fn new(observed: &CompositionProfile, expected: &CompositionProfile) -> Self {
+        // Weight each missed-cleavage class by the observed residues in it, over
+        // the classes the database can supply a profile for.
+        let classes = observed.classes().min(expected.classes());
+        let mut weights = Vec::with_capacity(classes);
+        let mut matched_observed_residues = 0;
+        for class in 0..classes {
+            let (Some(seen), Some(database)) = (observed.class(class), expected.class(class))
+            else {
+                continue;
+            };
+            if seen.residues() == 0 || database.residues() == 0 {
+                continue;
+            }
+            matched_observed_residues += seen.residues();
+            weights.push((class, seen.residues() as f64));
+        }
+        let total_weight = weights.iter().map(|(_, weight)| weight).sum::<f64>();
+        let class_fraction = |class: usize, residue: u8| {
+            expected
+                .class(class)
+                .map_or(0.0, |database| database.fraction(residue))
+        };
+        let (observed, expected) = (observed.total(), expected.total());
+        // Nothing to match on: fall back to the plain database profile rather
+        // than inventing a distribution.
+        let expected_fraction = |residue: u8| {
+            if total_weight == 0.0 {
+                return expected.fraction(residue);
+            }
+            weights
+                .iter()
+                .map(|&(class, weight)| weight / total_weight * class_fraction(class, residue))
+                .sum()
+        };
         let mut residues = Vec::new();
         let mut largest_shift: Option<(char, f64)> = None;
         let mut divergence = 0.0;
@@ -171,7 +297,7 @@ impl CompositionSummary {
             if observed_count == 0 && expected_count == 0 {
                 continue;
             }
-            let (p, q) = (observed.fraction(letter), expected.fraction(letter));
+            let (p, q) = (observed.fraction(letter), expected_fraction(letter));
             let log2_ratio = (p > 0.0 && q > 0.0).then(|| (p / q).log2());
             if let Some(ratio) = log2_ratio {
                 if largest_shift.is_none_or(|(_, best)| ratio.abs() > best.abs()) {
@@ -203,6 +329,7 @@ impl CompositionSummary {
             observed_residues: observed.residues(),
             expected_peptides: expected.peptides(),
             expected_residues: expected.residues(),
+            matched_observed_residues,
             residues,
             largest_shift,
             // Rounding can leave the divergence a hair outside [0, 1].

@@ -1,7 +1,7 @@
 //! Run-level quality-control summaries written next to the search results.
 
 use super::*;
-use sage_core::composition::{CompositionSummary, ResidueCounts};
+use sage_core::composition::{CompositionProfile, CompositionSummary};
 use sage_core::diagnostic::{find_ions, DiagnosticIon};
 use sage_core::digestion::DigestionSummary;
 use sage_core::enzyme::EnzymeParameters;
@@ -62,6 +62,9 @@ pub struct CompositionHeadline {
     /// Distinct confident target peptide sequences observed.
     pub observed_peptides: u64,
     pub observed_residues: u64,
+    /// Observed residues whose missed-cleavage class the database could match,
+    /// which are the ones weighting the expected profile.
+    pub matched_observed_residues: u64,
     /// Distinct database peptide sequences of the proteins identified here.
     pub expected_peptides: u64,
     pub expected_residues: u64,
@@ -84,6 +87,7 @@ impl CompositionHeadline {
             file: file.to_string(),
             observed_peptides: summary.observed_peptides,
             observed_residues: summary.observed_residues,
+            matched_observed_residues: summary.matched_observed_residues,
             expected_peptides: summary.expected_peptides,
             expected_residues: summary.expected_residues,
             largest_shift_residue: summary.largest_shift.map(|(residue, _)| residue),
@@ -447,7 +451,7 @@ impl Runner {
         let clip = self.database_parameters.clip_n_term_met;
         // One slot per file, and one more for the run as a whole.
         let run = filenames.len();
-        let mut observed = vec![ResidueCounts::default(); run + 1];
+        let mut observed = vec![CompositionProfile::default(); run + 1];
         let mut observed_seen = vec![HashSet::new(); run + 1];
         let mut proteins = vec![HashSet::new(); run + 1];
         for feature in features {
@@ -480,7 +484,7 @@ impl Runner {
                 protein_files.entry(protein).or_default().push(slot);
             }
         }
-        let mut expected = vec![ResidueCounts::default(); run + 1];
+        let mut expected = vec![CompositionProfile::default(); run + 1];
         let mut expected_seen: HashSet<&str> = HashSet::new();
         let mut credited: Vec<usize> = Vec::new();
         for peptide in &self.database.peptides {
@@ -506,7 +510,7 @@ impl Runner {
             if !expected_seen.insert(peptide.sequence.as_str()) {
                 continue;
             }
-            let mut counts = ResidueCounts::default();
+            let mut counts = CompositionProfile::default();
             counts.add_peptide(enzyme.as_ref(), clip, peptide);
             for &slot in &credited {
                 expected[slot].merge(&counts);
@@ -523,9 +527,10 @@ impl Runner {
             .collect();
         let total = CompositionSummary::new(&observed[run], &expected[run]);
         info!(
-            "composition: {} peptides, {} interior residues against {} database peptides of {} proteins; largest shift {}, Jensen-Shannon distance {} ({} ms)",
+            "composition: {} peptides, {} interior residues ({} matched on missed cleavages) against {} database peptides of {} proteins; largest shift {}, Jensen-Shannon distance {} ({} ms)",
             total.observed_peptides,
             total.observed_residues,
+            total.matched_observed_residues,
             total.expected_peptides,
             proteins[run].len(),
             match total.largest_shift {

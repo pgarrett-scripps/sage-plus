@@ -47,13 +47,14 @@ fn polymer_scan_needs_ms1() {
     assert!(scan_polymers(&spectra).is_none());
 }
 
-fn residue_counts(sequences: &[&str]) -> ResidueCounts {
+fn residue_counts(sequences: &[&str]) -> CompositionProfile {
     use sage_core::digestion::TerminusClass;
-    let mut counts = ResidueCounts::default();
+    let mut profile = CompositionProfile::default();
     for sequence in sequences {
-        counts.add_sequence(sequence.as_bytes(), Some(TerminusClass::NonEnzymatic));
+        // One missed-cleavage class, so the weighting cannot move a fraction.
+        profile.add_sequence(sequence.as_bytes(), Some(TerminusClass::NonEnzymatic), 0);
     }
-    counts
+    profile
 }
 
 fn profiles() -> CompositionProfiles {
@@ -126,6 +127,7 @@ fn composition_run_stats_carry_the_headline_numbers_only() {
     assert_eq!(flagged.file, "alkylated.mzML");
     assert_eq!(flagged.observed_peptides, 1);
     assert_eq!(flagged.observed_residues, 4);
+    assert_eq!(flagged.matched_observed_residues, 4);
     assert_eq!(flagged.expected_peptides, 1);
     assert_eq!(flagged.expected_residues, 4);
     assert_eq!(flagged.largest_shift_residue, Some('C'));
@@ -143,7 +145,10 @@ fn composition_run_stats_omit_absent_numbers_from_json() {
         q_value: 0.01,
         files: vec![CompositionFileProfile {
             file: "empty.mzML".into(),
-            summary: CompositionSummary::new(&ResidueCounts::default(), &residue_counts(&["AC"])),
+            summary: CompositionSummary::new(
+                &CompositionProfile::default(),
+                &residue_counts(&["AC"]),
+            ),
         }],
         total: CompositionSummary::default(),
     };

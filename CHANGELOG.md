@@ -47,11 +47,15 @@ entries are retained below for provenance.
   species is present. No p-value and no threshold: a profile holds hundreds of thousands of
   residues, so every test is significant and significance would say nothing about size. The
   comparison re-reads nothing, costing one pass over the retained PSMs and one over the
-  database peptides. One property to know before reading the table: with missed cleavages
-  enabled the database holds peptides that keep a cleavage residue inside them while the
-  identified peptides are mostly fully cleaved, so the enzyme's own residues (K and R for
-  trypsin) read near a log2 ratio of -3 in every run and are always the largest shift. That is
-  the digest, not the sample. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
+  database peptides. The two profiles are matched on missed cleavages, because the database
+  holds every missed cleavage the digest allows while the identified peptides are mostly fully
+  cleaved, and each missed cleavage keeps a cleavage residue inside the peptide: compared
+  directly, the enzyme's own residues (K and R for trypsin) read near a log2 ratio of -3 in
+  every run and are always the largest shift, which is the digest and not the sample. The
+  expected profile is therefore the database profile of each missed-cleavage class, weighted by
+  the share of the file's observed residues in that class; no enzyme or residue is named to do
+  it, and `matched_observed_residues` reports how much of the observed profile carried a
+  weight. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
   [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
 ||||||| 587f8ff
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside

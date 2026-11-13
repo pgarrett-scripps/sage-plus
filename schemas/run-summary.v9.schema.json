@@ -1152,6 +1152,10 @@
         "jensen_shannon_distance": {
           "type": "number",
           "description": "Distance between the whole profiles, 0 identical to 1 disjoint. Absent when either profile counted no residues."
+        },
+        "matched_observed_residues": {
+          "type": "integer",
+          "description": "Observed interior residues whose missed-cleavage class the database could match, which carry the weights of the expected profile."
         }
       },
       "required": [
@@ -1159,7 +1163,8 @@
         "observed_peptides",
         "observed_residues",
         "expected_peptides",
-        "expected_residues"
+        "expected_residues",
+        "matched_observed_residues"
       ]
     }
   }
