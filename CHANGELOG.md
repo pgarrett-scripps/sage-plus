@@ -10,6 +10,18 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- Occupancy of every searched variable modification, per file, in a new `qc.modifications.tsv`
+  (schema `qc.modifications.v1.tsv.schema.json`) and in `run-summary.json` under
+  `qc.modifications`. One row per input file and searched definition, then the same rows for the
+  whole run: the sites the definition's own site rules select in the confident target
+  peptidoforms of that file, how many of them carry it, and the share. Counted over distinct
+  peptidoforms, not PSMs, so an abundant peptide does not weigh more than a scarce one, and
+  eligible sites come from the resolver the search and the PTM localizer already use, so a site
+  is eligible exactly when the search could have modified it (protein context for a `motif:`
+  rule, PTM-library support for a `site_mode: library` definition). Mass-offset definitions are
+  reported like indexed ones and named by their `search_mode`. The table is written only when the
+  search has at least one variable modification; no existing output changes, and the numbers are
+  a site-level share of what was identified, not stoichiometry.
 - `database.entrapment_fasta` searches a proteome that cannot be in the sample alongside
   `database.fasta`, which is how a reported q-value is tested: every discovery of an entrapment
   protein is false by construction, so the discoveries of each class estimate the false discovery

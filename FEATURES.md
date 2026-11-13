@@ -120,7 +120,7 @@ Typed, versioned files instead of logs you have to parse.
 - Parquet is the canonical output, with versioned schemas in [`schemas/`](schemas/) and one-based protein coordinates ([details](DOCS.md#interpreting-sage-output)).
 - Every Parquet file records its provenance (version, commit, configuration, FASTA hash) in the footer ([details](DOCS.md#output-provenance)).
 - `run-summary.json` records outputs, warnings, peak memory, fitted models, and recommended tolerances; it and the TSV outputs have published schemas.
-- QC on every search: `digestion.tsv` and a polymer contamination check, plus opt-in `diagnostic_ions.tsv` ([details](DOCS.md#quality-control-outputs)).
+- QC on every search: `digestion.tsv`, a polymer contamination check and, with any variable modification, per-modification occupancy in `qc.modifications.tsv`, plus opt-in `diagnostic_ions.tsv` ([details](DOCS.md#quality-control-outputs)).
 - Empirical spectral-library export in Parquet and PSI mzSpecLib ([details](DOCS.md#empirical-spectral-libraries)).
 
 ### Automate runs safely

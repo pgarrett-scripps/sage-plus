@@ -46,3 +46,58 @@ fn polymer_scan_needs_ms1() {
     }];
     assert!(scan_polymers(&spectra).is_none());
 }
+
+fn occupancy(
+    site_rule: &str,
+    modified_sites: usize,
+    eligible_sites: usize,
+) -> ModificationOccupancy {
+    ModificationOccupancy {
+        site_rule: site_rule.into(),
+        mass: 15.9949,
+        name: None,
+        search_mode: "database".into(),
+        peptidoforms: 3,
+        modified_peptidoforms: 1,
+        eligible_sites,
+        modified_sites,
+        occupancy_pct: 100.0 * modified_sites as f64 / eligible_sites as f64,
+    }
+}
+
+#[test]
+fn modification_occupancy_tsv_has_a_row_per_file_and_rule_then_the_total() {
+    let stats = ModificationOccupancyRunStats {
+        q_value: 0.01,
+        modifications: vec![occupancy("M", 3, 8)],
+        files: vec![
+            ModificationOccupancyFileStats {
+                file: "a.mzML".into(),
+                modifications: vec![occupancy("M", 1, 4)],
+            },
+            ModificationOccupancyFileStats {
+                file: "b.mzML".into(),
+                modifications: vec![occupancy("M", 2, 4)],
+            },
+        ],
+    };
+    let tsv = String::from_utf8(serialize_modification_occupancy(&stats).unwrap()).unwrap();
+    let rows = tsv.lines().collect::<Vec<_>>();
+    assert_eq!(
+        rows[0],
+        "file\tsite_rule\tmass\tname\tsearch_mode\tpeptidoforms\tmodified_peptidoforms\teligible_sites\tmodified_sites\toccupancy_pct"
+    );
+    assert_eq!(
+        rows[1],
+        "a.mzML\tM\t15.994900\t\tdatabase\t3\t1\t4\t1\t25.000"
+    );
+    assert_eq!(
+        rows[2],
+        "b.mzML\tM\t15.994900\t\tdatabase\t3\t1\t4\t2\t50.000"
+    );
+    assert_eq!(
+        rows[3],
+        "total\tM\t15.994900\t\tdatabase\t3\t1\t8\t3\t37.500"
+    );
+    assert_eq!(rows.len(), 4);
+}

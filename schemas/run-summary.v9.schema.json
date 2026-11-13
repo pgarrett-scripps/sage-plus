@@ -506,6 +506,47 @@
             "ions",
             "files"
           ]
+        },
+        "modifications": {
+          "type": "object",
+          "description": "Present when the search has at least one variable modification. Same rows as qc.modifications.tsv.",
+          "properties": {
+            "q_value": {
+              "type": "number"
+            },
+            "modifications": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ModificationOccupancy"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string"
+                  },
+                  "modifications": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/ModificationOccupancy"
+                    }
+                  }
+                },
+                "required": [
+                  "file",
+                  "modifications"
+                ]
+              }
+            }
+          },
+          "required": [
+            "q_value",
+            "modifications",
+            "files"
+          ]
         }
       },
       "required": []
@@ -1094,6 +1135,56 @@
           "description": "N_E * (1 + 1/r) / (N_T + N_E), an upper bound on the false discovery proportion; absent when it is undefined."
         }
       }
+    },
+    "ModificationOccupancy": {
+      "type": "object",
+      "properties": {
+        "site_rule": {
+          "type": "string"
+        },
+        "mass": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "search_mode": {
+          "type": "string",
+          "enum": [
+            "database",
+            "mass_offset"
+          ]
+        },
+        "peptidoforms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_peptidoforms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eligible_sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_sites": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "occupancy_pct": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "site_rule",
+        "mass",
+        "search_mode",
+        "peptidoforms",
+        "modified_peptidoforms",
+        "eligible_sites",
+        "modified_sites",
+        "occupancy_pct"
+      ]
     }
   }
 }

@@ -21,6 +21,7 @@ pub mod mass_recalibration;
 pub mod ml;
 pub mod modification;
 pub mod motif;
+pub mod occupancy;
 pub mod peff;
 pub mod peptide;
 pub mod polymer;

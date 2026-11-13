@@ -4,12 +4,18 @@ use super::*;
 use sage_core::diagnostic::{find_ions, DiagnosticIon};
 use sage_core::digestion::DigestionSummary;
 use sage_core::enzyme::EnzymeParameters;
+use sage_core::occupancy::{OccupancyCounts, OccupancyRule};
 use sage_core::polymer::{PolymerFileStats, PolymerScanner};
 use sage_core::spectrum::{RawSpectrum, Representation};
 
 /// Spectrum- and peptide-level q-value a PSM must pass to count towards the
 /// digestion summary, matching the run summary's 1% FDR counts.
 const DIGESTION_Q_VALUE: f32 = 0.01;
+
+/// Spectrum- and peptide-level q-value a PSM must pass to count towards the
+/// modification occupancy table. The same threshold as
+/// [`DIGESTION_Q_VALUE`], so both tables describe the same identifications.
+const OCCUPANCY_Q_VALUE: f32 = 0.01;
 
 /// Percent of MS1 TIC on one polymer above which a run warning is raised.
 const POLYMER_WARNING_TIC_PCT: f64 = 5.0;
@@ -35,6 +41,9 @@ pub struct QcRunStats {
     /// Present when `diagnostic_ions` is enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic_ions: Option<DiagnosticIonRunStats>,
+    /// Present when the search has at least one variable modification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifications: Option<ModificationOccupancyRunStats>,
 }
 
 /// Diagnostic ions found in one file's MS2 spectra.
@@ -202,6 +211,64 @@ pub struct DigestionFileStats {
     pub summary: DigestionSummary,
 }
 
+/// Occupancy of every searched variable modification, counted over distinct
+/// confident target peptidoforms. Same rows as `qc.modifications.tsv`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancyRunStats {
+    pub q_value: f32,
+    /// Every file's peptidoforms together, each counted once.
+    pub modifications: Vec<ModificationOccupancy>,
+    pub files: Vec<ModificationOccupancyFileStats>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancyFileStats {
+    pub file: String,
+    pub modifications: Vec<ModificationOccupancy>,
+}
+
+/// One searched definition and site rule in one file, or in the whole run.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModificationOccupancy {
+    /// The site rule as a configuration key writes it, e.g. `M`,
+    /// `peptide_n_term` or `internal_residue:K`.
+    pub site_rule: String,
+    pub mass: f32,
+    /// The configured name; absent for a definition given as a bare mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `database` or `mass_offset`.
+    pub search_mode: String,
+    /// Peptidoforms with at least one eligible site.
+    pub peptidoforms: usize,
+    pub modified_peptidoforms: usize,
+    pub eligible_sites: usize,
+    pub modified_sites: usize,
+    /// `modified_sites` as a percent of `eligible_sites`.
+    pub occupancy_pct: f64,
+}
+
+fn occupancy_rows(
+    rules: &[OccupancyRule],
+    counts: &[OccupancyCounts],
+) -> Vec<ModificationOccupancy> {
+    rules
+        .iter()
+        .zip(counts)
+        .map(|(rule, counts)| ModificationOccupancy {
+            site_rule: rule.site_rule_name(),
+            mass: rule.mass(),
+            name: rule.name().map(str::to_string),
+            search_mode: rule.search_mode_name().to_string(),
+            peptidoforms: counts.peptidoforms,
+            modified_peptidoforms: counts.modified_peptidoforms,
+            eligible_sites: counts.eligible_sites,
+            modified_sites: counts.modified_sites,
+            occupancy_pct: counts.occupancy_pct(),
+        })
+        .collect()
+}
+
 impl Runner {
     /// Run the quality-control scans on one file's raw spectra, once per
     /// file: rereads of a file already scanned are skipped.
@@ -341,6 +408,83 @@ impl Runner {
         }
     }
 
+    /// Occupancy of every searched variable modification per file; `None`
+    /// when the search has no variable modification.
+    ///
+    /// Each distinct peptidoform of a file counts once, however many PSMs
+    /// support it, and the run total counts each peptidoform once across
+    /// files, so it is not the sum of the file rows. Decoys are excluded:
+    /// a decoy peptidoform's sites say nothing about the sample.
+    pub(super) fn modification_occupancy_stats(
+        &self,
+        features: &[Feature],
+        filenames: &[String],
+    ) -> Option<ModificationOccupancyRunStats> {
+        let rules = sage_core::occupancy::rules(&self.database_parameters);
+        if rules.is_empty() {
+            return None;
+        }
+        let mut per_file = vec![Vec::new(); filenames.len()];
+        let mut run = Vec::new();
+        let mut seen = HashSet::new();
+        let mut seen_in_run = HashSet::new();
+        for feature in features {
+            if feature.rank != 1
+                || feature.spectrum_q > OCCUPANCY_Q_VALUE
+                || feature.peptide_q > OCCUPANCY_Q_VALUE
+            {
+                continue;
+            }
+            let peptide = &self.database[feature.peptide_idx];
+            if peptide.decoy {
+                continue;
+            }
+            if let Some(peptidoforms) = per_file.get_mut(feature.file_id) {
+                if seen.insert((feature.file_id, feature.peptide_idx)) {
+                    peptidoforms.push(peptide);
+                }
+            }
+            if seen_in_run.insert(feature.peptide_idx) {
+                run.push(peptide);
+            }
+        }
+        let files = filenames
+            .iter()
+            .zip(&per_file)
+            .map(|(file, peptidoforms)| ModificationOccupancyFileStats {
+                file: file.clone(),
+                modifications: occupancy_rows(
+                    &rules,
+                    &sage_core::occupancy::count(
+                        &self.database_parameters,
+                        &rules,
+                        peptidoforms.iter().copied(),
+                    ),
+                ),
+            })
+            .collect();
+        let modifications = occupancy_rows(
+            &rules,
+            &sage_core::occupancy::count(&self.database_parameters, &rules, run),
+        );
+        info!(
+            "modification occupancy: {}",
+            modifications
+                .iter()
+                .map(|row| format!(
+                    "{} {:+.4} {:.2}% of {} sites",
+                    row.site_rule, row.mass, row.occupancy_pct, row.eligible_sites
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Some(ModificationOccupancyRunStats {
+            q_value: OCCUPANCY_Q_VALUE,
+            modifications,
+            files,
+        })
+    }
+
     /// Log and summarize the share of MS2 spectra containing each
     /// diagnostic ion; `None` when diagnostic ions are off.
     pub(super) fn diagnostic_ion_stats(
@@ -420,11 +564,68 @@ impl Runner {
         Ok(Some(path))
     }
 
+    /// Write `qc.modifications.tsv`, or nothing when the search has no
+    /// variable modification.
+    pub(super) fn write_modification_occupancy(
+        &self,
+        stats: Option<&ModificationOccupancyRunStats>,
+    ) -> anyhow::Result<Option<Url>> {
+        let Some(stats) = stats else {
+            return Ok(None);
+        };
+        let path = self.make_path("qc.modifications.tsv");
+        sage_cloudpath::write_bytes_sync(&path, serialize_modification_occupancy(stats)?)?;
+        Ok(Some(path))
+    }
+
     pub(super) fn write_digestion(&self, stats: &DigestionRunStats) -> anyhow::Result<Url> {
         let path = self.make_path("digestion.tsv");
         sage_cloudpath::write_bytes_sync(&path, serialize_digestion(stats)?)?;
         Ok(path)
     }
+}
+
+pub(super) fn serialize_modification_occupancy(
+    stats: &ModificationOccupancyRunStats,
+) -> anyhow::Result<Vec<u8>> {
+    let mut writer = csv::WriterBuilder::new()
+        .delimiter(b'\t')
+        .from_writer(Vec::new());
+    writer.write_record([
+        "file",
+        "site_rule",
+        "mass",
+        "name",
+        "search_mode",
+        "peptidoforms",
+        "modified_peptidoforms",
+        "eligible_sites",
+        "modified_sites",
+        "occupancy_pct",
+    ])?;
+    let rows = stats
+        .files
+        .iter()
+        .map(|file| (file.file.as_str(), &file.modifications))
+        .chain(std::iter::once(("total", &stats.modifications)));
+    for (file, modifications) in rows {
+        for row in modifications {
+            writer.write_record([
+                file.to_string(),
+                row.site_rule.clone(),
+                format!("{:.6}", row.mass),
+                row.name.clone().unwrap_or_default(),
+                row.search_mode.clone(),
+                row.peptidoforms.to_string(),
+                row.modified_peptidoforms.to_string(),
+                row.eligible_sites.to_string(),
+                row.modified_sites.to_string(),
+                format!("{:.3}", row.occupancy_pct),
+            ])?;
+        }
+    }
+    writer.flush()?;
+    Ok(writer.into_inner()?)
 }
 
 pub(super) fn serialize_digestion(stats: &DigestionRunStats) -> anyhow::Result<Vec<u8>> {

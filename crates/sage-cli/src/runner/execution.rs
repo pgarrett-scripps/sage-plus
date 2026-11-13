@@ -510,6 +510,10 @@ impl Runner {
         }
         let path = self.write_digestion(&digestion)?;
         self.parameters.output_paths.push(path);
+        let modifications = self.modification_occupancy_stats(&outputs.features, &filenames);
+        if let Some(path) = self.write_modification_occupancy(modifications.as_ref())? {
+            self.parameters.output_paths.push(path);
+        }
 
         if self.parameters.annotate_matches {
             let bytes = sage_cloudpath::parquet::serialize_matched_fragments(
@@ -818,6 +822,7 @@ impl Runner {
                 digestion,
                 polymers,
                 diagnostic_ions,
+                modifications,
             },
             output_paths,
             peak_rss_bytes,
