@@ -10,6 +10,19 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- A contaminant FASTA ships with Sage Plus: `assets/contaminants/universal-contaminants.fasta`,
+  381 entries of laboratory background, in the release archives under `assets/contaminants/` and
+  in the container at `/app/assets/contaminants/`. It is opt-in and off by default, searched only
+  when `database.contaminant_fasta` names it, with no keyword and no tagged accession, so a
+  configuration that does not name it searches what it searched before. Which proteins to
+  include comes from the universal contaminant library of Frankenfield et al. (J. Proteome Res.
+  2022, 21(9), 2104-2113), built from 3,667 experiments. The sequences are not copied from it:
+  that library states no license, so only its accession list was used and every sequence was
+  downloaded again from UniProtKB release 2026_04, which publishes under CC BY 4.0. 367 of the
+  379 UniProt sequences are identical to the 2022 library and 12 have been revised by UniProt
+  since; the other two entries are the FLAG and HA epitope tags, which have no UniProt record.
+  `assets/contaminants/README.md` records the source, release, download date, license, citation,
+  checksum and rebuild procedure, and `THIRD_PARTY_NOTICES.md` carries the attribution.
 - `qc.chromatography.tsv` reports, per searched file and for the run, the charge-state shares of
   the confident precursors (1+, 2+, 3+, 4+ and above, plus the share whose charge the file did
   not state, so the five sum to 100), a chromatographic peak width, and what quantification did
@@ -74,7 +87,6 @@ entries are retained below for provenance.
   it, and `matched_observed_residues` reports how much of the observed profile carried a
   weight. Schema in `schemas/qc_composition.v1.tsv.schema.json`; details in
   [DOCS.md](DOCS.md#amino-acid-composition-qccompositiontsv).
-||||||| 587f8ff
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same
   decoy rule, so FDR and target-decoy competition are unchanged. What it adds is a class per

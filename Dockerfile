@@ -15,4 +15,8 @@ COPY THIRD_PARTY_NOTICES.md /app/licenses/THIRD_PARTY_NOTICES.md
 COPY crates/sage/data/LICENSE-unimod.txt /app/licenses/unimod.txt
 COPY licenses/ /app/licenses/
 
+# The opt-in contaminant FASTA and its provenance, searched only when
+# `database.contaminant_fasta` names it.
+COPY assets/contaminants/ /app/assets/contaminants/
+
 ENV PATH="/app:$PATH"

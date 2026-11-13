@@ -120,6 +120,7 @@ Typed, versioned files instead of logs you have to parse.
 - Parquet is the canonical output, with versioned schemas in [`schemas/`](schemas/) and one-based protein coordinates ([details](DOCS.md#interpreting-sage-output)).
 - Every Parquet file records its provenance (version, commit, configuration, FASTA hash) in the footer ([details](DOCS.md#output-provenance)).
 - `run-summary.json` records outputs, warnings, peak memory, fitted models, and recommended tolerances; it and the TSV outputs have published schemas.
+- A bundled 381-protein contaminant FASTA (`assets/contaminants/universal-contaminants.fasta`), opt-in through `database.contaminant_fasta`, rebuilt from UniProt by accession from the Frankenfield et al. 2022 universal library ([details](DOCS.md#the-bundled-contaminant-fasta)).
 - QC on every search: `digestion.tsv`, the amino acid composition of the identifications against the search database's own expectation (`qc.composition.tsv`), charge-state shares with a labelled chromatographic width and the match-between-runs share per file (`qc.chromatography.tsv`), and a polymer contamination check, plus opt-in `diagnostic_ions.tsv` ([details](DOCS.md#quality-control-outputs)).
 - Empirical spectral-library export in Parquet and PSI mzSpecLib ([details](DOCS.md#empirical-spectral-libraries)).
 
