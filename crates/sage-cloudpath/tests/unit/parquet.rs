@@ -46,6 +46,7 @@ fn lfq_preserves_missingness_and_ms2_evidence() -> parquet::errors::Result<()> {
         &database,
         &[],
         "identification_rt",
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -136,8 +137,22 @@ fn lfq_serialization_is_independent_of_hashmap_insertion_order() -> parquet::err
 
     let filenames = ["run-a".into()];
     assert_eq!(
-        serialize_lfq(&forward, &filenames, &database, &[], "identification_rt")?,
-        serialize_lfq(&reverse, &filenames, &database, &[], "identification_rt")?
+        serialize_lfq(
+            &forward,
+            &filenames,
+            &database,
+            &[],
+            "identification_rt",
+            None
+        )?,
+        serialize_lfq(
+            &reverse,
+            &filenames,
+            &database,
+            &[],
+            "identification_rt",
+            None
+        )?
     );
     Ok(())
 }
@@ -185,6 +200,7 @@ fn labeled_lfq_writes_channels_groups_and_reference_ratios() -> parquet::errors:
         &database,
         &[],
         "identification_rt",
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -260,6 +276,7 @@ fn results_preserve_typed_protein_occurrences() -> parquet::errors::Result<()> {
         &[],
         None,
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let metadata = reader
@@ -316,6 +333,7 @@ fn results_report_ambiguous_database_peptides_and_substitutions() -> parquet::er
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
     )?;
@@ -393,6 +411,7 @@ fn results_immonium_columns_are_null_when_off_and_filled_when_on() -> parquet::e
             &[],
             settings,
             None,
+            None,
         )?;
         let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
         let rows = reader
@@ -443,6 +462,7 @@ fn results_loss_columns_are_null_when_off_and_filled_when_on() -> parquet::error
             database,
             1.0,
             &[],
+            None,
             None,
             None,
         )?;
@@ -508,6 +528,7 @@ fn labeled_results_write_channel_and_group_columns() -> parquet::errors::Result<
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
     )?;
@@ -882,6 +903,7 @@ fn repeated_spectrum_ids_keep_their_own_reporter_ions() -> parquet::errors::Resu
         &[],
         None,
         None,
+        None,
     )?;
     let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
     let reporters = reader
@@ -929,6 +951,7 @@ fn missing_reporter_channels_are_written_as_null() -> parquet::errors::Result<()
         &database,
         1.0,
         &[],
+        None,
         None,
         None,
     )?;

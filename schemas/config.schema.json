@@ -732,6 +732,33 @@
       },
       "type": "object"
     },
+    "InSourceConfig": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/InSourceSettings"
+        }
+      ],
+      "description": "`in_source` configuration: `true` or `false` to override the automatic\nchoice, or an object to set the co-elution tolerance."
+    },
+    "InSourceSettings": {
+      "additionalProperties": false,
+      "description": "In-source annotation settings.",
+      "properties": {
+        "rt_tolerance": {
+          "description": "Co-elution tolerance in the file's retention-time units. When unset,\neach file's tolerance is derived from the spread of its own repeated\npeptides; see [`derive_rt_tolerance`].",
+          "format": "float",
+          "minimum": 0.0,
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "IntegrationStrategy": {
       "enum": [
         "Apex",
@@ -2027,6 +2054,17 @@
         }
       ],
       "description": "Per-PSM immonium-ion evidence, written to `results.sage.parquet` and\nthe PIN file and added to the linear discriminant. `true` looks for the\nunmodified P, V, L/I, H, F, Y and W ions and for the modified-residue\nions that modifications declare in `immonium_ions`. An object sets\n`rescore` (default true; false only reports the counts),\n`residue_ions` (the global switch for the unmodified-residue ions,\ndefault true) and `tolerance` (default `fragment_tol`). Default off."
+    },
+    "in_source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InSourceConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In-source fragmentation and in-source neutral loss annotation, written\nas the `in_source_root_peptide` and `in_source_type` columns of\n`results.sage.parquet` and `lfq.parquet`. A confident PSM is flagged\nwhen its peptide is a co-eluting piece of a longer confident peptide of\nthe same protein, or the same peptide having lost one neutral molecule.\nNothing is removed, rescored or requantified. Unset is on for a\nsemi-enzymatic or non-specific digest and off otherwise; `true` and\n`false` override that, and an object sets `rt_tolerance`, the\nco-elution tolerance that is otherwise derived per file."
     },
     "ion_mobility_model": {
       "anyOf": [

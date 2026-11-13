@@ -9,6 +9,38 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `in_source` flags the PSMs that are in-source fragmentation or in-source neutral loss products
+  of a longer peptide, in two new nullable columns of `results.sage.parquet` and `lfq.parquet`,
+  `in_source_root_peptide` and `in_source_type` (`fragment`, `loss:<name>` or
+  `fragment+loss:<name>`). A confident target PSM is flagged when, in the same file, its peptide
+  occupies a sub-span of a longer confident peptide of the same protein (or the same span with a
+  lower mass), the modifications on the shared residues are equal or short by exactly one
+  candidate loss, and it co-elutes with that peptide's own PSMs; the flag names the longest such
+  root, so a piece of a piece points at the intact peptide. The decision is per PSM, not per
+  peptide, so a peptide can be an experimental peptide at one retention time and a product at
+  another in the same file. Candidate losses are water, ammonia, the losses configured under
+  `database.fragment_losses`, the neutral losses the root's modifications declare, and the full
+  mass of each modification the root carries, matched within 0.005 Da. The co-elution tolerance
+  is derived per file from the spread of its own repeated peptides (95th percentile of the
+  distance from a peptide's median retention time), which needs no MS1 data and no
+  quantification; `in_source.rt_tolerance` replaces it. A quantified LFQ row is judged on its own
+  peak apex in its own file rather than on a PSM's retention time.
+
+  The annotation runs after FDR and changes nothing else: no score, q-value, intensity or row
+  moves, and quantification is untouched. It is on by default for a semi-enzymatic or
+  non-specific digest, whose search space contains those pieces, and off otherwise; `true` and
+  `false` override that. A search with the annotation off writes byte-identical output to a
+  search before this change, because the two columns exist only in the new schema versions
+  `results.sage.v7`/`v8` and `lfq.v9`/`v10`, which are written only when it is on, and the
+  `in_source` keys of `results.json` and `run-summary.json` are omitted then.
+
+  `run-summary.json` gains an `in_source` block with the built-in check: candidate pairs,
+  co-eluting pairs, PSMs flagged, and the pairs expected by chance, for the run and per file with
+  each file's retention-time difference histogram. In-source products pile up at a difference of
+  zero while unrelated pairs spread out, so the estimate from the bins 5 to 25 tolerances away
+  says how much of a flagged set could be coincidence.
+
 ## [v0.1.0-beta.19] - 2026-11-12
 
 ### Added

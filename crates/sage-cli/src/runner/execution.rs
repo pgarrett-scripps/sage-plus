@@ -262,6 +262,31 @@ impl Runner {
         });
         self.cancellation.check()?;
 
+        // In-source fragmentation and neutral-loss annotation: a side table
+        // keyed by PSM, read by the writers. It needs the q-values, so it runs
+        // after FDR, and it changes no feature.
+        let in_source = self.parameters.in_source.as_ref().map(|settings| {
+            let annotations =
+                sage_core::in_source::annotate(&outputs.features, &self.database, settings);
+            let coeluting = annotations
+                .files()
+                .iter()
+                .map(|file| file.coeluting_pairs)
+                .sum::<usize>();
+            let expected = annotations
+                .files()
+                .iter()
+                .map(|file| file.expected_by_chance)
+                .sum::<f32>();
+            log::info!(
+                "flagged {} PSMs as in-source products: {} co-eluting product/root pairs against {:.1} expected by chance",
+                annotations.flagged_psms(),
+                coeluting,
+                expected
+            );
+            annotations
+        });
+
         let postprocess = self.postprocess_features(
             &scorer,
             &mut outputs.features,
@@ -415,6 +440,7 @@ impl Runner {
                 .ptm_localization
                 .enabled
                 .then_some(self.parameters.ptm_localization.localization_q_value),
+            in_source.as_ref(),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -488,6 +514,7 @@ impl Runner {
                 } else {
                     "identification_rt"
                 },
+                in_source.as_ref(),
             )?;
 
             let path = self.make_path("lfq.parquet");
@@ -672,6 +699,30 @@ impl Runner {
                 max_memory_gb: self.parameters.max_memory_gb,
             },
             inputs: input_stats,
+            in_source: in_source.as_ref().map(|annotations| InSourceRunStats {
+                rt_tolerance: self
+                    .parameters
+                    .in_source
+                    .as_ref()
+                    .and_then(|settings| settings.rt_tolerance),
+                flagged_psms: annotations.flagged_psms(),
+                candidate_pairs: annotations
+                    .files()
+                    .iter()
+                    .map(|file| file.candidate_pairs)
+                    .sum(),
+                coeluting_pairs: annotations
+                    .files()
+                    .iter()
+                    .map(|file| file.coeluting_pairs)
+                    .sum(),
+                expected_by_chance: annotations
+                    .files()
+                    .iter()
+                    .map(|file| file.expected_by_chance)
+                    .sum(),
+                files: annotations.files().to_vec(),
+            }),
             modifications: ModificationRunStats {
                 static_definitions: self.database_parameters.static_mods.len(),
                 variable_definitions: self

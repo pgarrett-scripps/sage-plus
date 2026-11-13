@@ -620,6 +620,44 @@
         "fragment"
       ]
     },
+    "in_source": {
+      "type": "object",
+      "description": "In-source fragmentation and in-source neutral loss annotation; absent when `in_source` is off.",
+      "properties": {
+        "rt_tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Configured co-elution tolerance; absent when each file derived its own."
+        },
+        "flagged_psms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "PSMs annotated as in-source products."
+        },
+        "candidate_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Product/root pairs that passed the sequence and mass test, before co-elution."
+        },
+        "coeluting_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Candidate pairs inside the co-elution window."
+        },
+        "expected_by_chance": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Co-eluting pairs expected from the rate at which candidate pairs fall 5 to 25 tolerances from zero."
+        },
+        "files": {
+          "type": "array",
+          "description": "Per-file record, including the retention-time difference histogram.",
+          "items": {
+            "$ref": "#/$defs/InSourceFileStats"
+          }
+        }
+      }
+    },
     "peak_rss_bytes": {
       "type": [
         "integer",
@@ -785,6 +823,75 @@
           ]
         }
       ]
+    },
+    "InSourceFileStats": {
+      "type": "object",
+      "description": "One acquisition file's in-source record.",
+      "properties": {
+        "file_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rt_tolerance": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Co-elution tolerance used for this file, in its own retention-time units."
+        },
+        "rt_tolerance_source": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "derived",
+            "fallback"
+          ]
+        },
+        "confident_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidate_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coeluting_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_by_chance": {
+          "type": "number",
+          "minimum": 0
+        },
+        "flagged_psms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rt_difference_histogram": {
+          "type": "array",
+          "description": "Retention-time differences of every candidate pair, in bins one tolerance wide.",
+          "items": {
+            "$ref": "#/$defs/InSourceHistogramBin"
+          }
+        }
+      }
+    },
+    "InSourceHistogramBin": {
+      "type": "object",
+      "properties": {
+        "bin": {
+          "type": "integer",
+          "description": "Bin index in tolerances from zero; bin 0 spans [0, tolerance)."
+        },
+        "start": {
+          "type": "number"
+        },
+        "end": {
+          "type": "number"
+        },
+        "pairs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

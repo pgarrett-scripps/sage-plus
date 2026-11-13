@@ -8,6 +8,7 @@ use sage_core::{
     database::{Builder, Parameters},
     diagnostic::{DiagnosticIon, DiagnosticIonsConfig},
     immonium::{ImmoniumConfig, ImmoniumSettings},
+    in_source::{InSourceConfig, InSourceSettings},
     lfq::LfqSettings,
     mass::Tolerance,
     mass_recalibration::MassRecalibrationMode,
@@ -108,6 +109,10 @@ pub struct Search {
     /// Per-PSM immonium-ion evidence; omitted when off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub immonium: Option<ImmoniumSettings>,
+
+    /// In-source fragmentation and neutral-loss annotation; omitted when off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_source: Option<InSourceSettings>,
 
     #[serde(skip_serializing)]
     pub output_directory: Url,
@@ -215,6 +220,16 @@ pub struct Input {
     /// `residue_ions` (the global switch for the unmodified-residue ions,
     /// default true) and `tolerance` (default `fragment_tol`). Default off.
     pub immonium: Option<ImmoniumConfig>,
+    /// In-source fragmentation and in-source neutral loss annotation, written
+    /// as the `in_source_root_peptide` and `in_source_type` columns of
+    /// `results.sage.parquet` and `lfq.parquet`. A confident PSM is flagged
+    /// when its peptide is a co-eluting piece of a longer confident peptide of
+    /// the same protein, or the same peptide having lost one neutral molecule.
+    /// Nothing is removed, rescored or requantified. Unset is on for a
+    /// semi-enzymatic or non-specific digest and off otherwise; `true` and
+    /// `false` override that, and an object sets `rt_tolerance`, the
+    /// co-elution tolerance that is otherwise derived per file.
+    pub in_source: Option<InSourceConfig>,
 
     pub annotate_matches: Option<bool>,
     /// Record the SHA-256 of every local spectrum file in the Parquet footers
@@ -865,6 +880,20 @@ impl Input {
             );
         }
 
+        // An unset `in_source` is on exactly for the digests whose peptides
+        // are pieces of longer ones: semi-enzymatic and non-specific.
+        let semi_or_nonspecific = database.enzyme.semi_enzymatic.unwrap_or(false)
+            || database.enzyme.cleave_at.as_deref() == Some("");
+        let in_source = InSourceConfig::resolve(self.in_source, semi_or_nonspecific);
+        if let Some(settings) = in_source.as_ref() {
+            anyhow::ensure!(
+                settings
+                    .rt_tolerance
+                    .is_none_or(|tolerance| tolerance.is_finite() && tolerance > 0.0),
+                "in_source.rt_tolerance must be greater than zero"
+            );
+        }
+
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);
         // Record the alignment method that will run, so results.json states it.
@@ -918,6 +947,7 @@ impl Input {
             mass_recalibration: self.mass_recalibration.unwrap_or_default(),
             diagnostic_ions,
             immonium,
+            in_source,
             score_type,
             dia,
             prefilter_budgets: None,

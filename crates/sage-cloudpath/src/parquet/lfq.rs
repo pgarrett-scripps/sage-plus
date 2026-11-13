@@ -1,4 +1,5 @@
 use super::*;
+use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     parquet::schema::parser::parse_message_type(include_str!(
@@ -6,11 +7,27 @@ pub fn build_lfq_schema() -> parquet::errors::Result<Type> {
     ))
 }
 
-fn build_lfq_schema_version(has_labels: bool) -> parquet::errors::Result<Type> {
-    parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/lfq.v8.parquet.schema")
-    } else {
-        include_str!("../../../../schemas/lfq.v7.parquet.schema")
+/// Schema version of `lfq.parquet`: 7 without precursor labels, 8 with them;
+/// 9 and 10 are those plus the two in-source columns, written only when
+/// in-source annotation is on.
+fn lfq_schema_version(has_labels: bool, has_in_source: bool) -> &'static str {
+    match (has_in_source, has_labels) {
+        (false, false) => "7",
+        (false, true) => "8",
+        (true, false) => "9",
+        (true, true) => "10",
+    }
+}
+
+fn build_lfq_schema_version(
+    has_labels: bool,
+    has_in_source: bool,
+) -> parquet::errors::Result<Type> {
+    parquet::schema::parser::parse_message_type(match (has_in_source, has_labels) {
+        (false, false) => include_str!("../../../../schemas/lfq.v7.parquet.schema"),
+        (false, true) => include_str!("../../../../schemas/lfq.v8.parquet.schema"),
+        (true, false) => include_str!("../../../../schemas/lfq.v9.parquet.schema"),
+        (true, true) => include_str!("../../../../schemas/lfq.v10.parquet.schema"),
     })
 }
 
@@ -20,6 +37,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     database: &IndexedDatabase,
     provenance: &[(String, String)],
     peak_center: &str,
+    in_source: Option<&InSourceAnnotations>,
 ) -> parquet::errors::Result<Vec<u8>> {
     if let Some((_, quantified)) = areas.iter().find(|(_, quantified)| {
         quantified.intensities.len() != filenames.len()
@@ -39,7 +57,7 @@ pub fn serialize_lfq<H: BuildHasher>(
     let mut rows = areas.iter().collect::<Vec<_>>();
     rows.sort_unstable_by(|left, right| left.0.cmp(right.0));
     let has_labels = !database.label_channels.is_empty();
-    let schema = build_lfq_schema_version(has_labels)?;
+    let schema = build_lfq_schema_version(has_labels, in_source.is_some())?;
     let reference_intensities = database
         .label_reference
         .as_deref()
@@ -83,7 +101,7 @@ pub fn serialize_lfq<H: BuildHasher>(
             KeyValue::new("sage.lfq.peak_center".into(), Some(peak_center.into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(if has_labels { "8" } else { "7" }.into()),
+                Some(lfq_schema_version(has_labels, in_source.is_some()).into()),
             ),
         ],
         provenance,
@@ -436,6 +454,58 @@ pub fn serialize_lfq<H: BuildHasher>(
                 }
             }
             col.typed::<FloatType>()
+                .write_batch(&values, Some(&levels), None)?;
+            col.close()?;
+        }
+    }
+    // A quantified row is judged on its own peak: the apex retention time in
+    // this file against the root's, not the PSM's retention time. Both columns
+    // exist only in schema versions 9 and 10.
+    if let Some(annotations) = in_source {
+        let verdicts = rows
+            .iter()
+            .flat_map(|((id, _), peak)| {
+                let peptide_idx = match id {
+                    PrecursorId::Combined(idx) | PrecursorId::Charged((idx, _)) => *idx,
+                };
+                peak.file_evidence
+                    .iter()
+                    .enumerate()
+                    .map(move |(file_id, evidence)| {
+                        let apex = evidence.as_ref().map(|evidence| evidence.apex_rt)?;
+                        annotations.precursor(peptide_idx, file_id, apex)
+                    })
+            })
+            .collect::<Vec<_>>();
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut levels = Vec::new();
+            for verdict in &verdicts {
+                match verdict {
+                    Some(annotation) => {
+                        values.push(database[annotation.root].to_string().into_bytes().into());
+                        levels.push(1);
+                    }
+                    None => levels.push(0),
+                }
+            }
+            col.typed::<ByteArrayType>()
+                .write_batch(&values, Some(&levels), None)?;
+            col.close()?;
+        }
+        if let Some(mut col) = rg.next_column()? {
+            let mut values = Vec::new();
+            let mut levels = Vec::new();
+            for verdict in &verdicts {
+                match verdict {
+                    Some(annotation) => {
+                        values.push(annotation.kind.label().into_bytes().into());
+                        levels.push(1);
+                    }
+                    None => levels.push(0),
+                }
+            }
+            col.typed::<ByteArrayType>()
                 .write_batch(&values, Some(&levels), None)?;
             col.close()?;
         }

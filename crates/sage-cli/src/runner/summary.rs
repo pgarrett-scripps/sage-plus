@@ -42,10 +42,33 @@ pub struct RunSummary {
     /// Precursor and fragment tolerances suggested by the confident PSMs.
     #[serde(default)]
     pub recommended_tolerances: ToleranceRecommendation,
+    /// In-source fragmentation and neutral-loss annotation; absent when the
+    /// annotation is off, so a search without it writes the summary it wrote
+    /// before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_source: Option<InSourceRunStats>,
     /// Peak resident set size of the Sage process, in bytes, at the end of
     /// the run; `None` where the platform does not report it.
     #[serde(default)]
     pub peak_rss_bytes: Option<u64>,
+}
+
+/// In-source fragmentation and in-source neutral loss annotation of one run.
+/// `flagged_psms` is how many PSMs were annotated; `coeluting_pairs` against
+/// `expected_by_chance` is the built-in check, summed over the files, and
+/// `files` carries each file's own record including its retention-time
+/// difference histogram.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct InSourceRunStats {
+    /// Configured co-elution tolerance, when one was set; otherwise each
+    /// file's tolerance is in `files`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rt_tolerance: Option<f32>,
+    pub flagged_psms: usize,
+    pub candidate_pairs: usize,
+    pub coeluting_pairs: usize,
+    pub expected_by_chance: f32,
+    pub files: Vec<sage_core::in_source::InSourceFileStats>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target

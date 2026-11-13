@@ -34,6 +34,14 @@ the linear baseline fell for a reason unrelated to alignment, so the Beta 9 figu
 as the conservative one. See [quantification](DOCS.md#quantification) and the
 [evaluation](docs/design/NONLINEAR_RT_ALIGNMENT.md#evaluation).
 
+**Tell in-source products from experimental peptides.** `in_source` flags a confident PSM whose
+peptide is a co-eluting piece of a longer confident peptide of the same protein, or the same
+peptide having lost one neutral molecule, and names the root peptide it came from. It is on by
+default for semi-enzymatic and non-specific digests, whose search space contains those pieces, and
+it is annotation only: two columns in `results.sage.parquet` and `lfq.parquet`, no score, q-value
+or intensity changed. Each file's record says how many co-eluting pairs were found against how
+many chance would give. See [in-source fragmentation](DOCS.md#in-source-fragmentation).
+
 **Read instrument files directly.** Thermo RAW and mzMLb are read without conversion (upstream Sage
 reads mzML, MGF and Bruker `.d`), and timsTOF
 m/z and 1/K0 use the instrument's full calibration models. Each spectrum carries its analyzer and activation (HCD, CID,
