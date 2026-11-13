@@ -6,13 +6,15 @@ three arms are described there; this file is the raw record.
 ## Machine and protocol
 
 - 20 cores, 62 GB RAM, Linux 7.0, NVMe storage, `performance` CPU profile.
-- A scheduler ran each timing arm alone: it waited for the machine to go quiet,
-  reserved every core, and recorded what else touched the CPU during the run.
+- A scheduler reserved the whole machine for the timing runs: it waited for the
+  machine to go quiet, took every core, ran the three arms back to back inside
+  that one reservation, and recorded what else touched the CPU meanwhile.
 - 20 threads per arm (`RAYON_NUM_THREADS`), one run per arm, no repeats.
 - The five conversions ran first, one file per job, outside the timing runs, so
   no conversion shares a measurement with a search.
 - Both binaries were built with the same toolchain in release mode: Sage Plus
-  0.1.0-beta.18, upstream Sage v0.15.0-beta.2 from its tag.
+  0.1.0-beta.19 (commit 32a5ca5, reading `.raw` through `sage-plus-raw` 0.2.0),
+  upstream Sage v0.15.0-beta.2 from its tag.
 - FASTA: human, yeast and *E. coli* reference proteomes plus iRT peptides, the
   same file for all three arms.
 
@@ -37,12 +39,12 @@ Each conversion job peaked at 1.7–1.9 GB of resident memory and took 4m10s to
 
 | | `plus-raw` | `plus-mzml` | `upstream-mzml` |
 | --- | ---: | ---: | ---: |
-| Binary version | sage 0.1.0-beta.18 | sage 0.1.0-beta.18 | sage 0.15.0-beta.2 |
+| Binary version | sage 0.1.0-beta.19 | sage 0.1.0-beta.19 | sage 0.15.0-beta.2 |
 | Input | 5 `.raw` | 5 mzML | 5 mzML |
 | Conversion seconds | 0 | 1,288.57 (recorded) | 1,288.57 (recorded) |
-| Search seconds | 58.26 | 59.64 | 94.51 |
-| Total seconds | 58.26 | 1,348.21 | 1,383.08 |
-| Peak RSS (GiB) | 11.666 | 7.447 | 11.203 |
+| Search seconds | 61.87 | 64.23 | 101.69 |
+| Total seconds | 61.87 | 1,352.80 | 1,390.26 |
+| Peak RSS (GiB) | 7.810 | 7.413 | 11.159 |
 | PSMs at 1% FDR | 318,226 | 318,214 | 311,016 |
 | Peptides at 1% FDR | 60,429 | 60,441 | 59,051 |
 | Proteins at 1% FDR | 7,034 | 7,034 | 6,977 |
@@ -56,16 +58,20 @@ among rows whose `peptide_q` or `protein_q` is ≤ 0.01.
 
 ## What the scheduler recorded during the timing runs
 
-| Arm | Verdict | Foreign load | CPU clocks |
-| --- | --- | --- | --- |
-| `plus-raw` | clean | 0.61 cores over 59.5 s (threshold 4.0) | busy cores averaged 2,868 MHz (lowest 1,280), usual 2,752 MHz, 30,030 core / 15,313 package throttle events, peak 98 °C |
-| `plus-mzml` | clean | 0.58 cores over 60.9 s | averaged 2,677 MHz (lowest 400), usual 2,814 MHz, 30,058 core / 15,137 throttle events, peak 98 °C |
-| `upstream-mzml` | clean | 0.57 cores over 95.8 s | averaged 3,062 MHz (lowest 400), usual 2,814 MHz, 28,582 core / 15,121 throttle events, peak 100 °C |
+The three arms ran inside one exclusive reservation, so there is one record for
+all of them.
 
-No run was judged contended, and the three arms ran back to back under the same
-load, so they are comparable with each other. They are not comparable with
-numbers from another machine: this one throttled at 98–100 °C throughout, which
-costs every arm some clock speed, and the difference of 1.4 s between the two
+| | Recorded |
+| --- | --- |
+| Verdict | clean |
+| Wall time of the reservation | 231.9 s for the three searches |
+| Foreign load | 1.33 cores (307.9 CPU-s not attributable to the job; threshold 4.00) |
+| CPU clocks | busy cores averaged 2,716 MHz (lowest 400) against a usual 2,853 MHz, 92,416 core / 32,729 package throttle events, peak 100 °C, `performance` profile |
+
+The run was not judged contended, and the three arms ran back to back under the
+same load, so they are comparable with each other. They are not comparable with
+numbers from another machine: this one throttled at 100 °C throughout, which
+costs every arm some clock speed, and the difference of 2.4 s between the two
 Sage Plus arms is smaller than that effect.
 
 ## Reproducing it
