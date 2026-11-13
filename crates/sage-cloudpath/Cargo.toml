@@ -35,7 +35,7 @@ sage-plus-tdf = { version = "0.2.4", features = ["minitdf"] }
 # Only the MS1 denoiser (denoise.rs) still opens analysis.tdf with SQLite.
 rusqlite = { version = "0.41", features = ["bundled"] }
 # Thermo RAW reader.
-sage-plus-raw = "0.1.2"
+sage-plus-raw = "0.2.0"
 # Opt-in timsTOF MS1 denoising (bruker_config.denoise).
 dnoise-core = "0.5.0"
 rayon = "1.5"

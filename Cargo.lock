@@ -3657,9 +3657,9 @@ dependencies = [
 
 [[package]]
 name = "sage-plus-raw"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "030f1fb7ad22c50894135d7b7ea5365db33cf110efc31295edf126cc0aa04ec9"
+checksum = "56e105c205c7bdec660427f2f984a15d54e84b521dfc912453bca768e9f6b84f"
 dependencies = [
  "roxmltree",
  "thiserror 2.0.18",
