@@ -109,6 +109,78 @@ fn picked_peptide_competes_peptidoforms_that_render_the_same_string() {
     assert_eq!(features[4].peptide_q, 1.0);
 }
 
+/// Two library peptidoforms recorded under one group identity share a
+/// competition key without either carrying a label channel. The competition
+/// records one of the two indices, so the other has no entry of its own in
+/// `scores`; before the (key, slot) map covered unlabelled peptides it fell
+/// through to `peptide_q = 1.0` while its twin held the q-value their shared
+/// competition earned.
+#[test]
+fn picked_peptide_carries_a_shared_q_to_an_unlabelled_twin() {
+    let group = |sequence: &str, decoy: bool| {
+        let mut peptide = peptide(sequence, decoy);
+        peptide.set_label_group_override(Some(Arc::from("PEPTIDE(group)")));
+        peptide
+    };
+    let twin_a = group("PEPTIDE", false);
+    let twin_b = group("PEPTIDEK", false);
+
+    // The clash, with nothing labelled about it.
+    assert_eq!(PeptideKey::new(&twin_a), PeptideKey::new(&twin_b));
+    assert!(twin_a.label_channel().is_none());
+    assert!(twin_b.label_channel().is_none());
+
+    let db = IndexedDatabase {
+        peptides: vec![
+            twin_a,
+            twin_b,
+            peptide("AAAAA", false),
+            peptide("CCCCC", true),
+        ],
+        generate_decoys: false,
+        ..Default::default()
+    };
+    let mut features = [
+        Feature {
+            peptide_idx: PeptideIx(0),
+            discriminant_score: 10.0,
+            ..Default::default()
+        },
+        Feature {
+            peptide_idx: PeptideIx(1),
+            discriminant_score: 9.0,
+            ..Default::default()
+        },
+        Feature {
+            peptide_idx: PeptideIx(2),
+            discriminant_score: 8.0,
+            ..Default::default()
+        },
+        Feature {
+            peptide_idx: PeptideIx(3),
+            discriminant_score: 7.0,
+            ..Default::default()
+        },
+    ];
+
+    picked_peptide(&db, &mut features);
+
+    // The property is that the twins agree, whatever the competition earned.
+    assert_eq!(
+        features[0].peptide_q, features[1].peptide_q,
+        "both peptidoforms of one competition hold its q-value"
+    );
+    assert!(
+        features[0].peptide_q < 1.0,
+        "neither twin is orphaned at 1.0: {}",
+        features[0].peptide_q
+    );
+    // The two competitions are still separate: one group entry, one plain
+    // target, one decoy.
+    assert_eq!(features[2].peptide_q, features[0].peptide_q);
+    assert_eq!(features[3].peptide_q, 1.0);
+}
+
 /// The competition key itself: string-colliding peptidoforms are distinct, and
 /// a library peptidoform whose modification provenance was lost to ProForma
 /// mass deltas still competes on its recorded group identity.

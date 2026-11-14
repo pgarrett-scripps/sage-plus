@@ -154,29 +154,41 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
     }
 
     let (scores, passing) = Competition::assign_q_value(map, 0.01);
-    let label_scores = scores
+    // `scores` is keyed by the one peptide index each competition recorded, so
+    // a peptide that shares a competition key with it is absent: a label twin,
+    // two library peptidoforms recorded under one group identity, or whatever
+    // a later feature keys the same way. This map carries the q-value over to
+    // every one of them by (key, slot) rather than only to labelled peptides,
+    // so none of them falls through to 1.0 for want of its own entry. A key
+    // admits at most one target and one decoy index into `scores`, so the
+    // q-value it holds is the same one that index has.
+    let key_scores = scores
         .iter()
-        .filter_map(|(peptide_idx, q)| {
-            let peptide = &db[*peptide_idx];
-            peptide.label_channel().map(|_| {
+        .map(|(peptide_idx, q)| {
+            (
                 (
-                    (peptide_competition_key(db, *peptide_idx), peptide.decoy),
-                    *q,
-                )
-            })
+                    peptide_competition_key(db, *peptide_idx),
+                    db[*peptide_idx].decoy,
+                ),
+                *q,
+            )
         })
         .collect::<FnvHashMap<_, _>>();
 
     features.par_iter_mut().for_each(|feat| {
-        let peptide = &db[feat.peptide_idx];
-        feat.peptide_q = peptide
-            .label_channel()
-            .and_then(|_| {
-                label_scores
-                    .get(&(peptide_competition_key(db, feat.peptide_idx), peptide.decoy))
+        // The index lookup first: a peptide the competition recorded needs no
+        // key, and building one allocates.
+        feat.peptide_q = scores
+            .get(&feat.peptide_idx)
+            .copied()
+            .or_else(|| {
+                key_scores
+                    .get(&(
+                        peptide_competition_key(db, feat.peptide_idx),
+                        db[feat.peptide_idx].decoy,
+                    ))
                     .copied()
             })
-            .or_else(|| scores.get(&feat.peptide_idx).copied())
             .unwrap_or(1.0);
     });
 
