@@ -533,7 +533,13 @@ impl Runner {
             return;
         }
         let start = Instant::now();
-        let polymers = scan_polymers(spectra);
+        // `polymer_check` off means the file's MS1 peaks may never have been
+        // decoded, and means the user asked for no polymer scan either way.
+        let polymers = self
+            .parameters
+            .polymer_check
+            .then(|| scan_polymers(spectra))
+            .flatten();
         let diagnostic_ions = self
             .parameters
             .diagnostic_ions

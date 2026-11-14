@@ -114,6 +114,10 @@ pub struct Search {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub in_source: Option<InSourceSettings>,
 
+    /// Scan MS1 spectra for polymer contamination. The only quality control
+    /// that reads MS1 peaks.
+    pub polymer_check: bool,
+
     #[serde(skip_serializing)]
     pub output_directory: Url,
 
@@ -231,6 +235,14 @@ pub struct Input {
     /// co-elution tolerance between two quantified peaks, and `rt_tolerance`,
     /// the retention-time tolerance that is otherwise derived per file.
     pub in_source: Option<InSourceConfig>,
+    /// Scan each file's MS1 spectra for polymer contamination, reported in
+    /// `qc.tsv`, `qc.gradient.tsv` and `run-summary.json` under
+    /// `qc.polymers` (default true). It is the only quality control that
+    /// reads MS1 peaks, so turning it off lets a Thermo `.raw` search that
+    /// does not quantify decode no MS1 scan at all, which is most of such a
+    /// file; every MS1 column of `qc.tsv` is then empty, as it already is for
+    /// a Bruker file searched without `quant.lfq`.
+    pub polymer_check: Option<bool>,
 
     pub annotate_matches: Option<bool>,
     /// Record the SHA-256 of every local spectrum file in the Parquet footers
@@ -891,6 +903,7 @@ impl Input {
         let semi_or_nonspecific = database.enzyme.semi_enzymatic.unwrap_or(false)
             || database.enzyme.cleave_at.as_deref() == Some("");
         let in_source = InSourceConfig::resolve(self.in_source, semi_or_nonspecific);
+        let polymer_check = self.polymer_check.unwrap_or(true);
         if let Some(settings) = in_source.as_ref() {
             settings.validate().map_err(anyhow::Error::msg)?;
         }
@@ -949,6 +962,7 @@ impl Input {
             diagnostic_ions,
             immonium,
             in_source,
+            polymer_check,
             score_type,
             dia,
             prefilter_budgets: None,

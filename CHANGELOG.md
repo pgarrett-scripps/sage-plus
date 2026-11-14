@@ -214,23 +214,24 @@ entries are retained below for provenance.
   few peaks is a different reason and is not counted here. No output column changes.
 
 ### Changed
-- A Thermo `.raw` search that does not read MS1 no longer decodes MS1 scans. Every scan's peak
-  block was read, parsed and centroided whether the run used it or not, and on a DDA file the
-  MS1 scans are most of the file; the MS level now comes from the scan index and the scan event
-  before any peaks are read, which is the rule the Bruker reader already followed. On a 3.2 GB
-  PXD028735 `.raw` (124,726 scans, 33,002 of them MS1) at 8 threads, release build, one run at a
-  time on an idle machine, the file read falls from 0.95 to 0.56 seconds with the file in the
-  page cache, and peak memory from 2.70 to 2.30 GiB. A run that reads MS1, with `quant.lfq` or a
-  DIA mode, reads exactly what it read before at the same read time and the same peak memory,
-  and a scan whose metadata cannot be read is still decoded.
-
-  Nothing about the search changes: `results.sage.parquet` is byte-identical to the previous
-  commit's output, with and without `quant.lfq` (22,549 rows, every one of its 69 columns
-  identical). The reader keeps each undecoded scan's metadata, so the file's retention-time span
-  and its ten gradient bins are the ones it reports with MS1 decoded, and `qc.gradient.tsv`
-  differs only in `ms1_spectra` and `ms1_tic`. In `qc.tsv` the MS1 measurements are the only
-  difference: `ms1_spectra`, `ms1_read` and `ms1_tic` say MS1 was not read, and `top_polymer`
-  with `top_polymer_tic_pct` are empty because a polymer share is a share of MS1 intensity.
+- A Thermo `.raw` search decodes an MS1 scan only when something reads MS1 peaks. Every scan's
+  peak block was read, parsed and centroided whether the run used it or not, and on a DDA file
+  the MS1 scans are most of the file; the MS level now comes from the scan index and the scan
+  event before any peaks are read, which is the rule the Bruker reader already followed. Two
+  things read MS1 peaks: `quant.lfq`, and the polymer contamination check, which is the subject
+  of the new `polymer_check` setting below. With either of them on, which is the default, a
+  `.raw` search decodes exactly the scans it decoded before and every output is unchanged.
+- `polymer_check` (default true) turns the polymer contamination scan off. It is the only
+  quality control that reads MS1 peaks, so `"polymer_check": false` in a search that does not
+  quantify is what lets a Thermo `.raw` read skip MS1 decoding: on a 3.2 GB PXD028735 `.raw`
+  (124,726 scans, 33,002 of them MS1) at 8 threads, release build, one run at a time on an idle
+  machine, the file read falls from 0.95 to 0.56 seconds with the file in the page cache and
+  peak memory from 2.70 to 2.30 GiB. `results.sage.parquet` is byte-identical either way, and
+  the reader keeps each undecoded scan's metadata, so the file's retention-time span and its ten
+  gradient bins are the ones it reports with MS1 decoded; what `qc.tsv` loses is the MS1
+  measurements themselves (`ms1_spectra`, `ms1_read`, `ms1_tic`, `top_polymer`,
+  `top_polymer_tic_pct`), as it already does for a Bruker file searched without `quant.lfq`.
+  A scan whose metadata cannot be read is still decoded.
 
 - The database build produces the same peptide list and the same fragment index in less time.
   Both fragment generation passes looked a mass prefix up in a hash map once per generated

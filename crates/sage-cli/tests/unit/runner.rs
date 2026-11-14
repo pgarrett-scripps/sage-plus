@@ -703,6 +703,50 @@ fn diapasef_files_get_quality_control_scans() {
     std::fs::remove_dir_all(directory).ok();
 }
 
+/// The polymer check reads MS1 peaks, so a Thermo `.raw` search decodes them
+/// while it is on and skips them when it is off. A Bruker file is untouched
+/// either way: it has never been scanned for polymers without `quant.lfq`.
+#[test]
+fn the_polymer_check_decides_whether_a_thermo_raw_decodes_ms1() {
+    let (directory, _) = temporary_output("polymer-check-ms1");
+    let workspace = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let fixture = format!("{workspace}/tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let config = |polymer_check: serde_json::Value| {
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": {
+                "fasta": format!("{workspace}/tests/Q99536.fasta"),
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {},
+                "ion_kinds": ["b", "y"]
+            },
+            "precursor_tol": { "ppm": [-10, 10] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [fixture.clone()],
+            "polymer_check": polymer_check,
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        super::Runner::new(input.build().unwrap(), 1).unwrap()
+    };
+    let raw = Url::parse("file:///data/run.raw").unwrap();
+    let bruker = Url::parse("file:///data/run.d/analysis.tdf").unwrap();
+    let mzml = Url::parse("file:///data/run.mzML").unwrap();
+
+    // Default: the check is on, so the Thermo reader decodes MS1.
+    let on = config(serde_json::Value::Null);
+    assert!(!on.requires_ms1(), "nothing quantifies");
+    assert!(on.decodes_ms1_for_quality_control(&raw));
+    assert!(!on.decodes_ms1_for_quality_control(&bruker));
+    assert!(!on.decodes_ms1_for_quality_control(&mzml));
+
+    // Off: nothing reads MS1 peaks, so the Thermo reader decodes none.
+    let off = config(serde_json::Value::Bool(false));
+    assert!(!off.requires_ms1());
+    assert!(!off.decodes_ms1_for_quality_control(&raw));
+    assert!(!off.decodes_ms1_for_quality_control(&bruker));
+    std::fs::remove_dir_all(directory).ok();
+}
+
 #[test]
 fn diapasef_files_without_lfq_get_quality_control_scans() {
     let (directory, _) = temporary_output("tdf-dia-qc-no-ms1");

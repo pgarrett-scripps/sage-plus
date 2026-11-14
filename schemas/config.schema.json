@@ -2227,6 +2227,13 @@
         "null"
       ]
     },
+    "polymer_check": {
+      "description": "Scan each file's MS1 spectra for polymer contamination, reported in\n`qc.tsv`, `qc.gradient.tsv` and `run-summary.json` under\n`qc.polymers` (default true). It is the only quality control that\nreads MS1 peaks, so turning it off lets a Thermo `.raw` search that\ndoes not quantify decode no MS1 scan at all, which is most of such a\nfile; every MS1 column of `qc.tsv` is then empty, as it already is for\na Bruker file searched without `quant.lfq`.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "precursor_charge": {
       "maxItems": 2,
       "minItems": 2,

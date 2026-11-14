@@ -121,6 +121,7 @@
   "diagnostic_ions": false,
   "immonium": false,
   "in_source": false,
+  "polymer_check": true,
   "protein_grouping": true,
   "protein_grouping_peptide_fdr": 0.01,
   "bruker_config": {
