@@ -11,6 +11,7 @@ use crate::modification::{ModificationDefinition, ModificationSpecificity, SiteM
 use crate::peptide::{Peptide, Site};
 use crate::ptm_library::PtmLibrary;
 use crate::scoring::Feature;
+use itertools::Either;
 use rayon::prelude::*;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -40,6 +41,103 @@ pub struct Theoretical {
 /// Lower `f32` mass bits stored in each packed fragment. The remaining upper
 /// bits are shared by every search bucket with the same mass prefix.
 pub(super) const FRAGMENT_MASS_SUFFIX_BITS: u32 = 12;
+
+/// Fragment mass prefixes keyed by the upper bits of an `f32` mass, held in a
+/// flat array rather than a hash map.
+///
+/// The counting and writing passes each look a prefix up once per generated
+/// fragment, hundreds of millions of times in a modified search, and hashing a
+/// `u32` key costs more than generating the mass did. Every normal positive
+/// `f32` between 1 and 65,536 g/mol has its prefix in one contiguous band of
+/// 32,768 values, which no peptide fragment mass leaves; a prefix outside the
+/// band still counts, through the fallback map, so the index layout does not
+/// depend on which side of the band a mass falls.
+///
+/// The band is 32,768 slots, so a table costs 128 KB of counts or 256 KB of
+/// offsets per generation chunk, against an index of hundreds of megabytes.
+struct PrefixTable<T> {
+    dense: Vec<T>,
+    sparse: HashMap<u32, T>,
+}
+
+/// First prefix of [`PrefixTable`]'s flat band: the prefix of 1.0 g/mol.
+const DENSE_PREFIX_MIN: u32 = 0x3f80_0000 >> FRAGMENT_MASS_SUFFIX_BITS;
+/// Length of the flat band, up to (but not including) the prefix of 65,536 g/mol.
+const DENSE_PREFIX_LEN: usize =
+    ((0x4780_0000 >> FRAGMENT_MASS_SUFFIX_BITS) - DENSE_PREFIX_MIN) as usize;
+
+impl<T: Copy + Default + PartialEq> PrefixTable<T> {
+    fn new() -> Self {
+        Self {
+            dense: vec![T::default(); DENSE_PREFIX_LEN],
+            sparse: HashMap::new(),
+        }
+    }
+
+    #[inline]
+    fn slot(prefix: u32) -> Option<usize> {
+        prefix
+            .checked_sub(DENSE_PREFIX_MIN)
+            .map(|offset| offset as usize)
+            .filter(|offset| *offset < DENSE_PREFIX_LEN)
+    }
+
+    #[inline]
+    fn get(&self, prefix: u32) -> T {
+        match Self::slot(prefix) {
+            Some(offset) => self.dense[offset],
+            None => self.sparse.get(&prefix).copied().unwrap_or_default(),
+        }
+    }
+
+    #[inline]
+    fn get_mut(&mut self, prefix: u32) -> &mut T {
+        match Self::slot(prefix) {
+            Some(offset) => &mut self.dense[offset],
+            None => self.sparse.entry(prefix).or_default(),
+        }
+    }
+
+    /// Every prefix holding a value, in ascending prefix order.
+    fn prefixes(&self) -> Vec<u32> {
+        let default = T::default();
+        let mut outside = self
+            .sparse
+            .iter()
+            .filter(|(_, value)| **value != default)
+            .map(|(prefix, _)| *prefix)
+            .collect::<Vec<_>>();
+        outside.sort_unstable();
+        let split = outside.partition_point(|prefix| *prefix < DENSE_PREFIX_MIN);
+        let inside = self
+            .dense
+            .iter()
+            .enumerate()
+            .filter(|(_, value)| **value != default)
+            .map(|(offset, _)| offset as u32 + DENSE_PREFIX_MIN);
+        outside[..split]
+            .iter()
+            .copied()
+            .chain(inside)
+            .chain(outside[split..].iter().copied())
+            .collect()
+    }
+}
+
+impl<T: PartialEq> PartialEq for PrefixTable<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.dense == other.dense && self.sparse == other.sparse
+    }
+}
+
+impl<T> std::fmt::Debug for PrefixTable<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrefixTable")
+            .field("dense_len", &self.dense.len())
+            .field("sparse_len", &self.sparse.len())
+            .finish()
+    }
+}
 
 #[repr(C, packed)]
 #[derive(Copy, Clone)]
@@ -111,23 +209,30 @@ impl FragmentIndex {
             .map(|start| start..(start + chunk_size).min(peptides.len()))
             .collect::<Vec<_>>();
 
+        let started = std::time::Instant::now();
         let counts = ranges
             .par_iter()
             .map(|range| {
-                let mut counts = HashMap::<u32, u32>::new();
+                let mut counts = PrefixTable::<u32>::new();
                 for peptide in &peptides[range.clone()] {
                     for mass in preliminary_fragment_masses(parameters, peptide) {
                         let prefix = mass.to_bits() >> suffix_bits;
-                        *counts.entry(prefix).or_default() += 1;
+                        *counts.get_mut(prefix) += 1;
                     }
                 }
                 counts
             })
             .collect::<Vec<_>>();
 
+        log::debug!(
+            "database build: fragment counting pass {:#?} ({} chunks)",
+            started.elapsed(),
+            counts.len()
+        );
+        let started = std::time::Instant::now();
         let mut prefixes = counts
             .iter()
-            .flat_map(|counts| counts.keys().copied())
+            .flat_map(|counts| counts.prefixes())
             .collect::<Vec<_>>();
         prefixes.sort_unstable();
         prefixes.dedup();
@@ -137,7 +242,7 @@ impl FragmentIndex {
             .map(|prefix| {
                 let count = counts
                     .iter()
-                    .map(|counts| counts.get(&prefix).copied().unwrap_or_default() as usize)
+                    .map(|counts| counts.get(prefix) as usize)
                     .sum::<usize>();
                 (prefix, count)
             })
@@ -147,18 +252,22 @@ impl FragmentIndex {
             .map(|(_, count)| count.div_ceil(bucket_size))
             .sum();
 
-        let mut positions = vec![HashMap::<u32, usize>::new(); ranges.len()];
-        let mut limits = vec![HashMap::<u32, usize>::new(); ranges.len()];
+        let mut positions = (0..ranges.len())
+            .map(|_| PrefixTable::<usize>::new())
+            .collect::<Vec<_>>();
+        let mut limits = (0..ranges.len())
+            .map(|_| PrefixTable::<usize>::new())
+            .collect::<Vec<_>>();
         let mut buckets = Vec::with_capacity(bucket_count);
         let mut total = 0usize;
         for (prefix, prefix_count) in prefix_counts {
             let start = total;
             for (chunk, counts) in counts.iter().enumerate() {
-                let count = counts.get(&prefix).copied().unwrap_or_default() as usize;
+                let count = counts.get(prefix) as usize;
                 if count > 0 {
-                    positions[chunk].insert(prefix, total);
+                    *positions[chunk].get_mut(prefix) = total;
                     total += count;
-                    limits[chunk].insert(prefix, total);
+                    *limits[chunk].get_mut(prefix) = total;
                 }
             }
             assert_eq!(total - start, prefix_count);
@@ -172,6 +281,13 @@ impl FragmentIndex {
             }
         }
 
+        log::debug!(
+            "database build: fragment layout {:#?} ({} buckets, {} fragments)",
+            started.elapsed(),
+            buckets.len(),
+            total
+        );
+        let started = std::time::Instant::now();
         let mut uninitialized = Vec::<std::mem::MaybeUninit<PackedFragment>>::with_capacity(total);
         // SAFETY: the second generation pass writes every position exactly once
         // using the counts and disjoint offsets computed above.
@@ -186,11 +302,10 @@ impl FragmentIndex {
                     for mass in preliminary_fragment_masses(parameters, peptide) {
                         let bits = mass.to_bits();
                         let prefix = bits >> suffix_bits;
-                        let position = positions
-                            .get_mut(&prefix)
-                            .expect("counting and generation passes disagree");
+                        let limit = limits.get(prefix);
+                        let position = positions.get_mut(prefix);
                         assert!(
-                            *position < limits[&prefix],
+                            *position < limit,
                             "fragment generation exceeded the counted output range"
                         );
                         // SAFETY: every chunk owns a disjoint position range for
@@ -214,6 +329,10 @@ impl FragmentIndex {
                 );
             });
 
+        log::debug!(
+            "database build: fragment writing pass {:#?}",
+            started.elapsed()
+        );
         let pointer = uninitialized.as_mut_ptr().cast::<PackedFragment>();
         let len = uninitialized.len();
         let capacity = uninitialized.capacity();
@@ -374,24 +493,38 @@ pub fn preliminary_fragment_masses<'a>(
     parameters: &'a Parameters,
     peptide: &'a Peptide,
 ) -> impl Iterator<Item = f32> + 'a {
-    parameters
-        .ion_kinds
-        .iter()
-        .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
-        .filter(|group| match group.kind {
-            Kind::A | Kind::B | Kind::C => (group.series_index + 1) > parameters.min_ion_index,
-            Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
-                peptide.sequence.len().saturating_sub(1) - group.series_index
-                    > parameters.min_ion_index
-            }
-        })
-        .filter_map(|group| {
-            group
-                .variants
-                .into_iter()
-                .next()
-                .map(|ion| ion.monoisotopic_mass)
-        })
+    let min_ion_index = parameters.min_ion_index;
+    let last_index = peptide.sequence.len().saturating_sub(1);
+    let indexed = move |kind: Kind, series_index: usize| match kind {
+        Kind::A | Kind::B | Kind::C => (series_index + 1) > min_ion_index,
+        Kind::X | Kind::Y | Kind::Z | Kind::ZDot => last_index - series_index > min_ion_index,
+    };
+    parameters.ion_kinds.iter().flat_map(move |kind| {
+        let series = IonGroupSeries::new(peptide, *kind);
+        // Without losses every group holds the retained ion alone, which is
+        // what the index stores. Reading the base series instead skips a
+        // group, a `SmallVec` and a variant per fragment, hundreds of
+        // millions of times in a modified search, for the same masses.
+        match series.is_lossless() {
+            true => Either::Left(series.into_base().enumerate().filter_map(
+                move |(series_index, ion)| {
+                    (indexed(ion.kind, series_index) && ion.monoisotopic_mass > 0.0)
+                        .then_some(ion.monoisotopic_mass)
+                },
+            )),
+            false => Either::Right(
+                series
+                    .filter(move |group| indexed(group.kind, group.series_index))
+                    .filter_map(|group| {
+                        group
+                            .variants
+                            .into_iter()
+                            .next()
+                            .map(|ion| ion.monoisotopic_mass)
+                    }),
+            ),
+        }
+    })
 }
 
 #[derive(Default)]

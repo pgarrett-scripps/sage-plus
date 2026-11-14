@@ -248,11 +248,23 @@ impl Parameters {
     ) -> Vec<DigestGroup> {
         log::trace!("digesting fasta");
         let enzyme = self.enzyme_parameters();
+        let started = std::time::Instant::now();
         let digests = fasta.digest_with_custom_cleavages(&enzyme, custom_cleavages);
+        log::debug!(
+            "database build: cleavage {:#?} ({} digests)",
+            started.elapsed(),
+            digests.len()
+        );
 
         log::trace!("grouping digests");
         let start_num = digests.len();
+        let started = std::time::Instant::now();
         let digests = group_protein_digests(digests);
+        log::debug!(
+            "database build: grouping {:#?} ({} groups)",
+            started.elapsed(),
+            digests.len()
+        );
         log::trace!(
             "grouped {} digests into {} groups",
             start_num,
@@ -279,11 +291,20 @@ impl Parameters {
 
     /// Expand variable modifications and generate decoys from an unmodified digest.
     pub fn modify_digests(&self, digests: Vec<DigestGroup>) -> Vec<Peptide> {
+        let started = std::time::Instant::now();
+        // One collision key per target group, over a million of them in a
+        // human FASTA: hashing them on one thread cost as much as the whole
+        // modification expansion.
         let target_sequences = digests
-            .iter()
+            .par_iter()
             .filter(|digest| !digest.reference.decoy)
             .map(|digest| self.decoy_collision_key(&digest.reference.sequence))
             .collect::<HashSet<_>>();
+        log::debug!(
+            "database build: target sequences {:#?} ({} sequences)",
+            started.elapsed(),
+            target_sequences.len()
+        );
         self.modify_digests_with_target_sequences(digests, &target_sequences)
     }
 
@@ -315,6 +336,7 @@ impl Parameters {
         // order, so the output order is unchanged. Adapted from
         // theGreatHerrLebert/sage ccce5da (chunked peptide materialisation).
         let mut target_decoys = Vec::new();
+        let started = std::time::Instant::now();
         self.with_digest_expander(|expander| {
             let mut digests = digests.into_iter();
             loop {
@@ -332,7 +354,18 @@ impl Parameters {
                 );
             }
         });
+        log::debug!(
+            "database build: modification expansion {:#?} ({} peptides)",
+            started.elapsed(),
+            target_decoys.len()
+        );
+        let started = std::time::Instant::now();
         self.reorder_peptides_with_labels(&mut target_decoys);
+        log::debug!(
+            "database build: sort and deduplicate {:#?} ({} peptides)",
+            started.elapsed(),
+            target_decoys.len()
+        );
         target_decoys
     }
 

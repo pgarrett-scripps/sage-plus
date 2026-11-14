@@ -1,4 +1,5 @@
 use fnv::FnvHashSet;
+use rayon::prelude::*;
 use regex::Regex;
 use std::sync::Arc;
 
@@ -178,7 +179,10 @@ fn group_digests_by(
     // and missed-cleavage state) does not depend on which other digests are
     // grouped alongside, e.g. in prefilter sequence buckets. Within a group
     // the most enzymatic occurrence comes first and becomes the reference.
-    digests.sort_unstable_by(|a, b| {
+    // Being a total order, it also sorts in parallel to the same sequence:
+    // digests that tie on every key are the same occurrence of the same
+    // sequence in the same protein, so their order cannot be observed.
+    digests.par_sort_unstable_by(|a, b| {
         a.position
             .cmp(&b.position)
             .then(a.decoy.cmp(&b.decoy))

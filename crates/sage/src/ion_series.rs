@@ -133,6 +133,21 @@ impl<'p> IonGroupSeries<'p> {
         series
     }
 
+    /// No placement on this peptide carries a neutral loss and no generic
+    /// fragment losses are configured, so every group this series yields
+    /// holds exactly one variant: the retained ion of [`Self::base`]. A
+    /// caller that wants only retained masses, such as the fragment index
+    /// build, can then read the base series and skip building the groups.
+    pub fn is_lossless(&self) -> bool {
+        self.lossy.is_empty() && self.fragment_losses.is_none()
+    }
+
+    /// The underlying retained-ion series. Only the retained masses survive,
+    /// so this is the series itself when [`Self::is_lossless`].
+    pub fn into_base(self) -> IonSeries<'p> {
+        self.base
+    }
+
     fn contains_site(&self, site: Site, series_index: usize) -> bool {
         match (self.base.kind, site) {
             (Kind::A | Kind::B | Kind::C, Site::Nterm) => true,
