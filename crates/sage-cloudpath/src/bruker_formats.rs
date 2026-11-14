@@ -107,6 +107,7 @@ pub fn read_tsf(
                 fragment_charges: None,
                 mobility: None,
                 acquisition: TIMS_TOF,
+                metadata_only: false,
             },
             Some(row) => {
                 let half = row.isolation_width as f32 / 2.0;
@@ -229,6 +230,7 @@ fn ms2_spectrum(
         fragment_charges: None,
         mobility: None,
         acquisition: TIMS_TOF,
+        metadata_only: false,
     }
 }
 

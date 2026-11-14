@@ -333,6 +333,53 @@ fn census_bins_the_gradient_into_ten_equal_widths() {
     assert_eq!(census.bins[9].ms1_tic, 1500.0);
 }
 
+/// A scan kept without its peaks dates the file and measures nothing: the
+/// span and the bin edges are the file's, and no MS1 column is filled.
+#[test]
+fn census_counts_a_metadata_only_ms1_scan_for_the_span_alone() {
+    let undecoded = |rt: f32, tic: f32| RawSpectrum {
+        ms_level: 1,
+        scan_start_time: rt,
+        total_ion_current: tic,
+        metadata_only: true,
+        ..Default::default()
+    };
+    // A Thermo .raw searched without quantification: every MS1 scan kept for
+    // its scan time, the MS2 scans searched as usual.
+    let spectra = vec![
+        undecoded(0.0, 5_000.0),
+        at(2, 3.0, 0.0),
+        at(2, 6.0, 0.0),
+        undecoded(9.0, 7_000.0),
+    ];
+
+    let kept = census(&spectra);
+
+    assert_eq!((kept.rt_start, kept.rt_end), (0.0, 9.0), "the file's span");
+    assert_eq!(kept.ms2_spectra, 2);
+    assert_eq!(kept.ms1_spectra, 0, "no MS1 spectrum was read");
+    assert!(!kept.ms1_read);
+    assert!(kept.bins.iter().all(|bin| bin.ms1_spectra == 0));
+    assert!(kept.bins.iter().all(|bin| bin.ms1_tic == 0.0));
+    // The bin edges are the ones main computes with its MS1 scans decoded:
+    // nine minutes in ten bins of 0.9, so minute 3 is bin 3 and minute 6 bin 6.
+    assert_eq!(kept.bins[3].ms2_acquired, 1);
+    assert_eq!(kept.bins[6].ms2_acquired, 1);
+
+    // The same spectra with their peaks decoded count as MS1 again.
+    let decoded = spectra
+        .into_iter()
+        .map(|spectrum| RawSpectrum {
+            metadata_only: false,
+            ..spectrum
+        })
+        .collect::<Vec<_>>();
+    let decoded_census = census(&decoded);
+    assert_eq!(decoded_census.ms1_spectra, 2);
+    assert!(decoded_census.ms1_read);
+    assert_eq!(decoded_census.bins[0].ms1_tic, 5_000.0);
+}
+
 #[test]
 fn census_without_ms1_measures_nothing_about_ms1() {
     let census = census(&[at(2, 1.0, 0.0), at(2, 2.0, 0.0)]);

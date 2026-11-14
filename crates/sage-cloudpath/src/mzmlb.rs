@@ -153,6 +153,7 @@ impl MzMLbReader {
                     fragment_charges,
                     mobility: None,
                     acquisition,
+                    metadata_only: false,
                 }
             })
             .collect())

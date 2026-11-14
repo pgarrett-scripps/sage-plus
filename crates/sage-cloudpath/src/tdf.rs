@@ -380,6 +380,7 @@ impl TdfReader {
                             fragment_charges: None,
                             mobility: Some(mobility),
                             acquisition: TIMS_TOF,
+                            metadata_only: false,
                         };
                         Ok(Some(spec))
                     }
@@ -653,6 +654,7 @@ impl TdfReader {
             fragment_charges: None,
             mobility: None,
             acquisition: TIMS_TOF,
+            metadata_only: false,
         }
     }
 }

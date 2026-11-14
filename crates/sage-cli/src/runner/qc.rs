@@ -148,11 +148,17 @@ fn census(spectra: &[RawSpectrum]) -> SpectrumCensus {
     for spectrum in spectra {
         let bin = &mut census.bins[gradient_bin(spectrum.scan_start_time, start, end)];
         match spectrum.ms_level {
-            1 => {
+            // An MS1 scan a reader kept without decoding its peaks, which
+            // is what a Thermo `.raw` searched without quantification gives,
+            // still dates the file above, and so sets the retention-time span
+            // and the bin edges. Nothing was measured in it, so it counts as
+            // no MS1 spectrum and no TIC, and `ms1_read` stays false.
+            1 if !spectrum.metadata_only => {
                 census.ms1_spectra += 1;
                 bin.ms1_spectra += 1;
                 bin.ms1_tic += total_ion_current(spectrum);
             }
+            1 => {}
             level if level >= 2 => {
                 census.ms2_spectra += 1;
                 bin.ms2_acquired += 1;
@@ -403,13 +409,15 @@ fn sorted_peaks(
 }
 
 /// Polymer ladders in a file's centroided MS1 spectra. `None` when the file
-/// has no MS1 spectra.
+/// has no MS1 spectra whose peaks were read: a polymer share is a share of
+/// MS1 intensity, so a run that never decoded its MS1 peaks has nothing to
+/// scan.
 fn scan_polymers(spectra: &[RawSpectrum]) -> Option<PolymerFileStats> {
     let scanner = PolymerScanner::default();
     let empty = PolymerFileStats::new(&scanner.polymers);
     let mut stats = spectra
         .par_iter()
-        .filter(|spectrum| spectrum.ms_level == 1)
+        .filter(|spectrum| spectrum.ms_level == 1 && !spectrum.metadata_only)
         .fold(
             || None::<PolymerFileStats>,
             |stats, spectrum| {

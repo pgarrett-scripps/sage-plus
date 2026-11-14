@@ -177,6 +177,12 @@ pub struct RawSpectrum {
     pub mobility: Option<Vec<f32>>,
     /// Analyzer and activation that produced the peaks.
     pub acquisition: AcquisitionGroup,
+    /// True for a scan a reader kept without decoding its peaks, because the
+    /// run does not read that MS level: it carries the scan's metadata, which
+    /// dates the file for quality control, and measures nothing. False, the
+    /// default, for every scan a reader decoded, including one that genuinely
+    /// holds no peaks.
+    pub metadata_only: bool,
 }
 
 impl RawSpectrum {

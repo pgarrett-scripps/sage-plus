@@ -45,19 +45,27 @@ impl ThermoRawReader {
         let mut skipped: Option<(usize, sage_plus_raw::Error)> = None;
         let mut undecoded_ms1 = 0usize;
         for idx in 0..reader.num_scans() {
-            // The MS level is in the scan index and the scan event, so a scan
-            // the run will not read is passed over before its peak block is
-            // read, parsed and centroided. On a 3 GB DDA file the MS1 scans
-            // are most of the bytes. `requires_ms1` is tested first, so a run
-            // that reads MS1 does not pay for a metadata lookup per scan.
-            let decode = requires_ms1
-                || decodes_scan(
-                    sage_plus_raw::scan_metadata(reader.raw(), idx).map(|meta| meta.ms_level),
-                    false,
-                );
-            if !decode {
-                undecoded_ms1 += 1;
-                continue;
+            // The MS level and the scan's own metadata are in the scan index
+            // and the scan event, so a scan the run will not search is never
+            // decoded: its peak block is not read, parsed or centroided, and
+            // on a 3 GB DDA file those are most of the bytes. `requires_ms1`
+            // is tested first, so a run that reads MS1 does not pay for a
+            // metadata lookup per scan.
+            if !requires_ms1 {
+                let metadata = sage_plus_raw::scan_metadata(reader.raw(), idx);
+                if !decodes_scan(metadata.as_ref().map(|meta| meta.ms_level), false) {
+                    // The scan still dates the file. Quality control takes a
+                    // file's retention-time span, and the gradient bins over
+                    // it, from the scans it is given, so the spectrum is kept
+                    // with its metadata and without peaks: it says when the
+                    // instrument scanned and measures nothing, and nothing
+                    // counts it as an MS1 spectrum that was read.
+                    if let Some(metadata) = metadata {
+                        spectra.push(self.undecoded(&metadata));
+                    }
+                    undecoded_ms1 += 1;
+                    continue;
+                }
             }
             match reader.read_spectrum_into(idx, false, &mut mz, &mut intensity) {
                 Ok(header) => {
@@ -110,6 +118,33 @@ impl ThermoRawReader {
         Ok(spectra)
     }
 
+    /// A kept scan whose peaks were not decoded: the same fields
+    /// [`Self::convert`] fills from a decoded scan's record, taken from the
+    /// scan metadata that decided to skip it, and no peaks. It dates the file
+    /// for quality control and measures nothing.
+    fn undecoded(&self, metadata: &sage_plus_raw::ScanMetadata) -> RawSpectrum {
+        RawSpectrum {
+            file_id: self.file_id,
+            ms_level: metadata.ms_level as u8,
+            id: scan_id(metadata.scan_number),
+            precursors: Vec::new(),
+            representation: Representation::Centroid,
+            scan_start_time: metadata.retention_time_min as f32,
+            ion_injection_time: metadata.ion_injection_time_ms.unwrap_or_default() as f32,
+            total_ion_current: metadata.total_ion_current as f32,
+            mz: Vec::new(),
+            intensity: Vec::new(),
+            fragment_charges: None,
+            mobility: None,
+            acquisition: metadata
+                .filter
+                .as_deref()
+                .map(AcquisitionGroup::from_thermo_filter)
+                .unwrap_or_default(),
+            metadata_only: true,
+        }
+    }
+
     /// Build a Sage spectrum from one decoded scan. The peak arrays are
     /// passed apart from the scan's metadata so the read loop can keep its
     /// m/z buffer across scans and hand the intensities over without a copy:
@@ -149,10 +184,7 @@ impl ThermoRawReader {
         RawSpectrum {
             file_id: self.file_id,
             ms_level: record.ms_level as u8,
-            id: format!(
-                "controllerType=0 controllerNumber=1 scan={}",
-                record.scan_number
-            ),
+            id: scan_id(record.scan_number),
             precursors: precursor.into_iter().collect(),
             // Scans are read with `include_profile` false, which resolves
             // every scan to its centroid peak list even when the nominal
@@ -166,12 +198,18 @@ impl ThermoRawReader {
             fragment_charges: None,
             mobility: None,
             acquisition,
+            metadata_only: false,
         }
     }
 }
 
 /// Record a scan that could not be decoded: how many failed, and the first
 /// error. A scan that fails is skipped rather than failing the whole file.
+/// A scan's Thermo native identifier.
+fn scan_id(scan_number: u32) -> String {
+    format!("controllerType=0 controllerNumber=1 scan={scan_number}")
+}
+
 /// Whether the scan at an index must be decoded, from its MS level alone.
 ///
 /// A run that reads MS1 decodes every scan. Otherwise an MS1 scan is passed
