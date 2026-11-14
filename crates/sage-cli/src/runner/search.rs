@@ -48,6 +48,43 @@ pub(super) fn widen_for_recalibration(tolerance: Tolerance) -> Tolerance {
 /// Dropping the allocations here, rather than not filling them in
 /// `SpectrumProcessor::process`, keeps the content of a public field in
 /// sage-core the same for every library caller.
+/// One message per file, in file order, for MS2 scans that
+/// [`ProcessedSpectrum::is_searchable`] drops only because no precursor was
+/// recorded: they carry peaks enough to search and nothing to search them
+/// against.
+///
+/// Our readers keep such a scan on purpose, so a converted file that lost its
+/// precursor information is searched, finds nothing, and until now said
+/// nothing about why. A file with a precursor on every MS2 scan produces no
+/// message. File order keeps two runs of the same input logging the same lines.
+pub(super) fn ms2_without_precursor_warnings(
+    spectra: &[ProcessedSpectrum],
+    min_peaks: usize,
+    file_name: impl Fn(usize) -> String,
+) -> Vec<String> {
+    let mut counts: HashMap<usize, usize> = HashMap::new();
+    for spectrum in spectra.iter().filter(|spectrum| {
+        spectrum.level == 2 && spectrum.precursors.is_empty() && spectrum.masses.len() >= min_peaks
+    }) {
+        *counts.entry(spectrum.file_id).or_default() += 1;
+    }
+    let mut counts = counts.into_iter().collect::<Vec<_>>();
+    counts.sort_unstable();
+    counts
+        .into_iter()
+        .map(|(file_id, count)| match count {
+            1 => format!(
+                "{}: 1 MS2 scan was not searched because no precursor was recorded for it",
+                file_name(file_id)
+            ),
+            count => format!(
+                "{}: {count} MS2 scans were not searched because no precursor was recorded for them",
+                file_name(file_id)
+            ),
+        })
+        .collect()
+}
+
 pub(super) fn release_unread_ms1_columns(ms1_spectra: &mut [ProcessedSpectrum]) {
     for spectrum in ms1_spectra {
         spectrum.charges = Vec::new();
@@ -461,6 +498,21 @@ impl Runner {
         msn_spectra: &[ProcessedSpectrum],
     ) -> (Vec<Feature>, HashMap<usize, usize>) {
         use std::sync::atomic::{AtomicUsize, Ordering};
+        for warning in
+            ms2_without_precursor_warnings(msn_spectra, self.parameters.min_peaks, |file_id| {
+                self.parameters
+                    .mzml_paths
+                    .get(file_id)
+                    .map(|url| {
+                        sage_cloudpath::filename(url)
+                            .unwrap_or_else(|| url.as_str())
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| format!("file {file_id}"))
+            })
+        {
+            log::warn!("{warning}");
+        }
         let counter = AtomicUsize::new(0);
         let start = Instant::now();
         let occurrences = spectrum_id_occurrences(msn_spectra);
