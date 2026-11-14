@@ -351,7 +351,7 @@ impl Runner {
                 "contaminants: {} of {} confident PSMs ({:.2}%) from {} proteins",
                 stats.contaminant_psms,
                 stats.confident_psms,
-                100.0 * stats.contaminant_psm_share,
+                stats.contaminant_psm_pct,
                 stats.proteins
             );
         }
@@ -980,9 +980,9 @@ impl Runner {
     ) -> Option<super::summary::ContaminantRunStats> {
         let path = self.database_parameters.contaminant_fasta.clone()?;
         let classes = self.protein_classes.as_ref()?;
-        let share = |contaminants: usize, confident: usize| match confident {
+        let pct = |contaminants: usize, confident: usize| match confident {
             0 => 0.0,
-            total => contaminants as f32 / total as f32,
+            total => 100.0 * contaminants as f32 / total as f32,
         };
         let mut per_file = filenames
             .iter()
@@ -1012,7 +1012,7 @@ impl Runner {
             }
         }
         for file in &mut per_file {
-            file.contaminant_psm_share = share(file.contaminant_psms, file.confident_psms);
+            file.contaminant_psm_pct = pct(file.contaminant_psms, file.confident_psms);
         }
         Some(super::summary::ContaminantRunStats {
             path,
@@ -1025,7 +1025,7 @@ impl Runner {
                 .count(),
             confident_psms,
             contaminant_psms,
-            contaminant_psm_share: share(contaminant_psms, confident_psms),
+            contaminant_psm_pct: pct(contaminant_psms, confident_psms),
             files: per_file,
         })
     }

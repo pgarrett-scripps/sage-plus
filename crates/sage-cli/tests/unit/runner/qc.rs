@@ -422,13 +422,18 @@ fn identification_rates_are_shares_of_acquired_spectra() {
     assert_eq!(stats.identified_pct(), 40.0);
     assert_eq!(stats.empty_bins(), 2);
     assert_eq!(stats.bin_pct_range(), Some((0.0, 50.0)));
-    // A bin that acquired nothing is not a dropout and not a rate.
+    // A bin that acquired nothing is not a dropout and not a rate: it is
+    // counted on its own, so the two cannot be confused in qc.tsv.
     let mut quiet = stats.clone();
     quiet.bins.iter_mut().for_each(|bin| {
         bin.ms2_acquired = 0;
         bin.ms2_identified = 0;
     });
+    assert_eq!(quiet.no_ms2_bins(), quiet.bins.len());
     assert_eq!(quiet.empty_bins(), 0);
+    // Every bin of the fixture acquired MS2 spectra, so the two counts
+    // separate the dropouts from the silence.
+    assert_eq!(stats.no_ms2_bins(), 0);
     assert_eq!(quiet.bin_pct_range(), None);
     assert_eq!(quiet.bins[0].identified_pct(), 0.0);
 }
@@ -480,6 +485,7 @@ fn qc_tables_have_the_published_columns_and_one_row_per_file() {
     assert_eq!(column("proteins"), "12");
     assert_eq!(column("ms1_read"), "1");
     assert_eq!(column("empty_gradient_bins"), "2");
+    assert_eq!(column("no_ms2_gradient_bins"), "0");
     assert_eq!(column("min_bin_identified_pct"), "0.000");
     assert_eq!(column("max_bin_identified_pct"), "50.000");
     // No digestion row and no polymer row for this file: the digestion
@@ -635,13 +641,13 @@ fn qc_table_repeats_the_headline_of_every_other_pass() {
         peptides: 5000,
         confident_psms: 100,
         contaminant_psms: 7,
-        contaminant_psm_share: 0.07,
+        contaminant_psm_pct: 7.0,
         files: vec![ContaminantFileStats {
             file_id: 0,
             filename: "a.mzML".into(),
             confident_psms: 100,
             contaminant_psms: 7,
-            contaminant_psm_share: 0.07,
+            contaminant_psm_pct: 7.0,
         }],
     };
     let qc = String::from_utf8(
@@ -679,7 +685,8 @@ fn qc_table_repeats_the_headline_of_every_other_pass() {
     assert_eq!(column("top_modification_occupancy_pct"), "42.500");
     // The contaminant share keeps the run summary's unit: a fraction.
     assert_eq!(column("contaminant_psms"), "7");
-    assert_eq!(column("contaminant_psm_share"), "0.070000");
+    // A percent, like every other share in the table.
+    assert_eq!(column("contaminant_psm_pct"), "7.000");
     // in_source is off here, so the column is empty rather than zero.
     assert_eq!(column("in_source_flagged_psms"), "");
 }

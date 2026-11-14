@@ -106,11 +106,16 @@ entries are retained below for provenance.
   expectation with that shift and the Jensen-Shannon distance from `qc.composition.tsv`, the
   charge-state shares, labelled peak width and match-between-runs share from
   `qc.chromatography.tsv`, the most occupied modification from `qc.modifications.tsv`, the
-  contaminant share and the in-source flagged count where those features are on, and a summary
-  of its gradient bins. Every one of those is the number its own output reports, read from the
-  stats that pass already computed, and a column whose pass measured nothing is empty, not zero. It repeats the per-file headline
-  number of every other QC output so one table shows a whole run, and it has no `total` row
-  because a retention-time span and an identification rate do not pool across files.
+  contaminant percent and the in-source flagged count where those features are on, and a summary
+  of its gradient bins: how many bins acquired MS2 spectra and identified none, how many acquired
+  no MS2 spectrum at all, and the lowest and highest identification rate among the bins that
+  acquired MS2 spectra. Every share in the table is a percent named `*_pct`, including
+  `contaminant_psm_pct`, which `run-summary.json` now also reports as a percent under
+  `contaminants` instead of the fraction `contaminant_psm_share`. Every one of those is the number
+  its own output reports, read from the stats that pass already computed, and a column whose pass
+  measured nothing is empty, not zero. It repeats the per-file headline number of every other QC
+  output so one table shows a whole run, and it has no `total` row because a retention-time span
+  and an identification rate do not pool across files.
 - Every search also writes `qc.gradient.tsv`: each file split into ten equal-width
   retention-time bins over its own span, with MS2 spectra acquired, MS2 spectra identified and
   summed MS1 total ion current per bin, which is where a spray dropout or a dead region of the
@@ -118,8 +123,8 @@ entries are retained below for provenance.
   (`schemas/qc.v1.tsv.schema.json`, `schemas/qc_gradient.v1.tsv.schema.json`) checked against a
   real run by `crates/sage-cli/tests/integration.rs`. The numbers come from data the search
   already holds: one pass over each file's spectra where the polymer scan already runs, and one
-  pass over the PSMs after FDR. Nothing existing changes; `run-summary.json` gains only the two
-  new paths in `output_paths`.
+  pass over the PSMs after FDR. Nothing existing changes beyond that one renamed summary key;
+  `run-summary.json` otherwise gains only the two new paths in `output_paths`.
 
 - `database.contaminant_fasta` searches a second FASTA of contaminant proteins alongside
   `database.fasta`. Its proteins are ordinary targets: same enzyme, same modifications, same

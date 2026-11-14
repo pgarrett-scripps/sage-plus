@@ -1202,7 +1202,7 @@ alongside the library, because the location table does not embed chemical masses
   alongside `fasta` (default: unset). Its proteins are ordinary targets with the same enzyme,
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
   belongs to a contaminant, in the `is_contaminant` column, and `run-summary.json` reports the
-  contaminant share of the confident PSMs for the run and per file. Unset leaves every output
+  contaminant percent of the confident PSMs for the run and per file. Unset leaves every output
   column as it was. One is bundled, `assets/contaminants/universal-contaminants.fasta`, and
   searched only when this key names it. See [Contaminant proteins](#contaminant-proteins) and
   [The bundled contaminant FASTA](#the-bundled-contaminant-fasta).
@@ -1950,8 +1950,8 @@ What it writes:
 - `is_contaminant` in `results.sage.parquet`, null on every row when no contaminant FASTA was
   searched, and null on decoy rows.
 - `contaminants` in `run-summary.json`: the file, its protein count, how many database peptides
-  belong to a contaminant, and the contaminant share of the **confident PSMs**, for the run and
-  per acquisition file. `confident_psms` is the denominator of that share: target PSMs whose
+  belong to a contaminant, and the contaminant percent of the **confident PSMs**
+  (`contaminant_psm_pct`), for the run and per acquisition file. `confident_psms` is the denominator of that share: target PSMs whose
   `spectrum_q` **and** `peptide_q` are both at most 0.01. It is therefore smaller than
   `psms_at_one_percent_fdr`, which counts target PSMs at 1% spectrum q-value alone — on one
   PXD028735 file, 51,164 against 51,729.
@@ -2059,19 +2059,19 @@ One row per input file, one column per metric, repeating the headline number of 
 - `rt_start_min`, `rt_end_min`: First and last scan start time read, in minutes.
 - `ms1_read`: 1 when the file's MS1 spectra were read, 0 when they were not (an MGF, or a Bruker TDF file without `quant.lfq`). Every MS1 column is zero when this is 0 because nothing was measured, not because the measurement was zero.
 - `ms1_tic`: MS1 total ion current summed over the file: each spectrum's stated total ion current, or its summed peak intensities where the file states none. This includes profile MS1 spectra, which the polymer check skips, so it is not the `total_ion_current` of `qc.polymers`.
-- `psms`, `peptides`, `proteins`: Rank-1 target PSMs at 1% spectrum q-value; distinct target peptide sequences (modifications ignored) among those that also pass the peptide q-value; distinct protein accessions among those that also pass the protein q-value, which only proteotypic peptides can. `peptides` is not decoy-corrected, unlike `digestion_peptides`.
+- `psms`, `peptides`, `proteins`: Rank-1 target PSMs at 1% spectrum q-value; distinct target peptide sequences (modifications ignored) among those that also pass the peptide q-value; distinct protein accessions among those that also pass the protein q-value, which only proteotypic peptides can. `peptides` counts what was identified, with no decoy correction; `digestion_peptides` is that same count with the decoy sequences subtracted, so the two differ by how many of those identifications are expected to be false.
 - `ms2_identified`, `ms2_identified_pct`: MS2 spectra carrying at least one of those PSMs, and their percent of `ms2_spectra`. `ms2_identified` is below `psms` when a chimeric search reported several rank-1 PSMs for one spectrum.
 - `q_value`: The q-value threshold every count in the row used (0.01).
-- `digestion_peptides`, `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: This file's row of `digestion.tsv`, repeated.
+- `digestion_peptides`, `missed_cleavage_pct`, `semi_n_pct`, `semi_c_pct`, `non_enzymatic_pct`: This file's row of `digestion.tsv`, repeated. `digestion_peptides` is `peptides` minus the distinct decoy sequences passing the same filter, floored at zero, and is the denominator of the four percentages beside it; it is in the table because those percentages are meaningless without it.
 - `top_polymer`, `top_polymer_tic_pct`: The polymer carrying the largest share of this file's MS1 TIC, and that share, from `qc.polymers`; `-` and 0 when the file's MS1 spectra were not read.
 - `largest_shift_residue`, `largest_shift_log2_ratio`, `jensen_shannon_distance`: This file's headline numbers from `qc.composition.tsv`: the residue whose observed share moved furthest from the database's expectation, that shift as a log2 ratio, and the Jensen-Shannon distance over the whole profile. All three are empty, as in `qc.composition.tsv`, when no residue has a finite ratio or neither profile counted residues, because an absent shift is not a shift of zero.
 - `charge_1_pct`, `charge_2_pct`, `charge_3_pct`, `charge_4_plus_pct`, `charge_unknown_pct`: Charge-state shares of this file's confident precursors, from `qc.chromatography.tsv`. Charge 4 stands for 4 and above, and the unknown column is there so the five sum to 100.
 - `peak_width`, `peak_width_kind`: The file's chromatographic width in its own retention-time unit, and which quantity that width is (`lfq_median_fwhm` with quantification, otherwise the repeat-PSM spread or its fallback). A width in one file's unit is not comparable with another's unless the kind matches.
 - `quantified_precursors`, `transferred_pct`: Precursors with an integrated intensity in this file, and the percent of them carried in by match-between-runs with no direct MS2 evidence here. Empty without quantification.
 - `modifications_searched`, `top_modification`, `top_modification_occupancy_pct`: How many searched variable-modification definitions `qc.modifications.tsv` reports for this file, the one with the highest occupancy, named as that table names it, and its percent of eligible sites. Empty when no modification was searched.
-- `contaminant_psms`, `contaminant_psm_share`: This file's confident PSMs from the contaminant FASTA and their share of its confident PSMs, in the same unit as `run-summary.json` (a fraction, not a percent). Empty without `database.contaminant_fasta`.
+- `contaminant_psms`, `contaminant_psm_pct`: This file's confident PSMs from the contaminant FASTA and their percent of its confident PSMs, the same number `run-summary.json` reports under `contaminants.files`. Empty without `database.contaminant_fasta`.
 - `in_source_flagged_psms`: PSMs of this file flagged as in-source fragmentation or in-source neutral-loss products. Empty when `in_source` is off.
-- `gradient_bins`, `empty_gradient_bins`, `min_bin_identified_pct`, `max_bin_identified_pct`: Summary of this file's rows in `qc.gradient.tsv`: how many bins it was split into (10, or 0 for a file with no spectra), how many of them acquired MS2 spectra and identified none, and the lowest and highest identification rate among the bins that acquired MS2 spectra.
+- `gradient_bins`, `empty_gradient_bins`, `no_ms2_gradient_bins`, `min_bin_identified_pct`, `max_bin_identified_pct`: Summary of this file's rows in `qc.gradient.tsv`: how many bins it was split into (10, or 0 for a file with no spectra), how many of them acquired MS2 spectra and identified none, how many acquired no MS2 spectrum at all, and the lowest and highest identification rate among the bins that acquired MS2 spectra. A bin with no MS2 spectrum is not an empty bin: nothing was tried in it, which is ordinary at the start and end of a gradient, so it is counted separately and left out of the two rates. `qc.gradient.tsv` says which bin is which.
 
 ### Identification rate across the gradient (`qc.gradient.tsv`)
 

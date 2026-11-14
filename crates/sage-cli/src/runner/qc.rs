@@ -1156,12 +1156,20 @@ impl IdentificationFileStats {
     }
 
     /// Bins that acquired MS2 spectra and identified none: a dead region of
-    /// the gradient, or a spray dropout.
+    /// the gradient, or a spray dropout. A bin that acquired no MS2 spectrum
+    /// is not one of these, because nothing was tried there; those are
+    /// counted by [`Self::no_ms2_bins`].
     pub fn empty_bins(&self) -> usize {
         self.bins
             .iter()
             .filter(|bin| bin.ms2_acquired > 0 && bin.ms2_identified == 0)
             .count()
+    }
+
+    /// Bins that acquired no MS2 spectrum at all, which is ordinary at the
+    /// start and end of a gradient and says nothing about identification.
+    pub fn no_ms2_bins(&self) -> usize {
+        self.bins.iter().filter(|bin| bin.ms2_acquired == 0).count()
     }
 
     /// Lowest and highest identification rate among the bins that acquired
@@ -1370,10 +1378,11 @@ pub(super) fn serialize_qc(sources: &QcSources<'_>) -> anyhow::Result<Vec<u8>> {
         "top_modification",
         "top_modification_occupancy_pct",
         "contaminant_psms",
-        "contaminant_psm_share",
+        "contaminant_psm_pct",
         "in_source_flagged_psms",
         "gradient_bins",
         "empty_gradient_bins",
+        "no_ms2_gradient_bins",
         "min_bin_identified_pct",
         "max_bin_identified_pct",
     ])?;
@@ -1484,11 +1493,12 @@ pub(super) fn serialize_qc(sources: &QcSources<'_>) -> anyhow::Result<Vec<u8>> {
             // Contaminants and in-source products, empty when those are off.
             contaminant.map_or(String::new(), |row| row.contaminant_psms.to_string()),
             contaminant.map_or(String::new(), |row| {
-                format!("{:.6}", row.contaminant_psm_share)
+                format!("{:.3}", row.contaminant_psm_pct)
             }),
             flagged.map_or(String::new(), |count| count.to_string()),
             file.bins.len().to_string(),
             file.empty_bins().to_string(),
+            file.no_ms2_bins().to_string(),
             format!("{min_pct:.3}"),
             format!("{max_pct:.3}"),
         ])?;

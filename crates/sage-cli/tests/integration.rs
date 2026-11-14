@@ -986,8 +986,10 @@ fn quality_control_outputs_are_written() -> anyhow::Result<()> {
     assert_eq!(column("modifications_searched"), "1");
     assert_eq!(column("top_modification"), "peptide_n_term +42.0106");
     assert_eq!(column("gradient_bins"), "10");
-    // One bin acquired the spectrum and identified nothing.
+    // One bin acquired the spectrum and identified nothing; the other nine
+    // acquired no MS2 spectrum at all, which is not the same thing.
     assert_eq!(column("empty_gradient_bins"), "1");
+    assert_eq!(column("no_ms2_gradient_bins"), "9");
     assert_eq!(column("min_bin_identified_pct"), "0.000");
     assert_eq!(column("max_bin_identified_pct"), "0.000");
     assert!(

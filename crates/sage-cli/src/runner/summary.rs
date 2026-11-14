@@ -251,8 +251,9 @@ pub struct ContaminantRunStats {
     /// contaminants.
     pub confident_psms: usize,
     pub contaminant_psms: usize,
-    /// `contaminant_psms` over `confident_psms`, or 0 where there are none.
-    pub contaminant_psm_share: f32,
+    /// `contaminant_psms` as a percent of `confident_psms`, or 0 where there
+    /// are none. A percent, like every other share Sage reports.
+    pub contaminant_psm_pct: f32,
     /// The same per acquisition file.
     pub files: Vec<ContaminantFileStats>,
 }
@@ -264,7 +265,8 @@ pub struct ContaminantFileStats {
     pub filename: String,
     pub confident_psms: usize,
     pub contaminant_psms: usize,
-    pub contaminant_psm_share: f32,
+    /// Percent of this file's `confident_psms`.
+    pub contaminant_psm_pct: f32,
 }
 
 /// Entrapment proteins of one run, and what they say about the search's false

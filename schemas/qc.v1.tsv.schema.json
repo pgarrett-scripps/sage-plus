@@ -61,7 +61,7 @@
     {
       "name": "peptides",
       "type": "integer",
-      "description": "Distinct target peptide sequences (modifications ignored) among PSMs that also pass the peptide q-value. Not decoy-corrected, unlike digestion_peptides."
+      "description": "Distinct target peptide sequences (modifications ignored) among PSMs that also pass the peptide q-value. Counts what was identified, with no decoy correction; digestion_peptides is the same count with the decoy sequences subtracted."
     },
     {
       "name": "proteins",
@@ -76,7 +76,7 @@
     {
       "name": "digestion_peptides",
       "type": "integer",
-      "description": "The `peptides` column of this file's digestion.tsv row: distinct target peptide sequences minus distinct decoy sequences, floored at zero."
+      "description": "The `peptides` column of this file's digestion.tsv row: the same distinct target sequences minus the distinct decoy sequences passing the same filter, floored at zero, which is the denominator of the four digestion percentages in this row. Lower than `peptides` by the number of decoy sequences, so the two differ by how many identifications at this threshold are expected to be false."
     },
     {
       "name": "missed_cleavage_pct",
@@ -238,12 +238,12 @@
       "description": "Confident PSMs of this file whose peptide belongs to a contaminant protein, from run-summary.json under contaminants.files. Empty without a `database.contaminant_fasta`."
     },
     {
-      "name": "contaminant_psm_share",
+      "name": "contaminant_psm_pct",
       "type": "number",
       "constraints": {
         "required": false
       },
-      "description": "Those PSMs over this file's confident PSMs, as the run summary reports it: a fraction, not a percent. Empty without a contaminant FASTA."
+      "description": "Those PSMs as a percent of this file's confident PSMs, as run-summary.json reports it under contaminants.files. Empty without a contaminant FASTA."
     },
     {
       "name": "in_source_flagged_psms",
@@ -261,7 +261,12 @@
     {
       "name": "empty_gradient_bins",
       "type": "integer",
-      "description": "Bins that acquired MS2 spectra and identified none: a dead region of the gradient, or a spray dropout."
+      "description": "Bins that acquired MS2 spectra and identified none: a dead region of the gradient, or a spray dropout. A bin that acquired no MS2 spectrum is not counted here, because nothing was tried in it; those are no_ms2_gradient_bins. qc.gradient.tsv names the bins."
+    },
+    {
+      "name": "no_ms2_gradient_bins",
+      "type": "integer",
+      "description": "Bins that acquired no MS2 spectrum at all, which is ordinary at the start and end of a gradient; those bins have no identification rate and are excluded from empty_gradient_bins, min_bin_identified_pct and max_bin_identified_pct."
     },
     {
       "name": "min_bin_identified_pct",
