@@ -19,7 +19,15 @@ impl ThermoRawReader {
         Self { file_id }
     }
 
-    pub fn parse(&self, path: impl AsRef<Path>) -> sage_plus_raw::Result<Vec<RawSpectrum>> {
+    /// Read the file's spectra. MS1 scans are decoded only when
+    /// `requires_ms1` is set: a search reads MS2 scans, and only
+    /// quantification (and DIA) reads MS1, which is the same rule the Bruker
+    /// reader already follows.
+    pub fn parse(
+        &self,
+        path: impl AsRef<Path>,
+        requires_ms1: bool,
+    ) -> sage_plus_raw::Result<Vec<RawSpectrum>> {
         let path = path.as_ref();
         // One handle for the structure and the scans, and one m/z buffer and
         // one block buffer (inside the reader) for the whole file, instead of
@@ -35,7 +43,22 @@ impl ThermoRawReader {
         let mut dropped = 0usize;
         let mut unsearchable = 0usize;
         let mut skipped: Option<(usize, sage_plus_raw::Error)> = None;
+        let mut undecoded_ms1 = 0usize;
         for idx in 0..reader.num_scans() {
+            // The MS level is in the scan index and the scan event, so a scan
+            // the run will not read is passed over before its peak block is
+            // read, parsed and centroided. On a 3 GB DDA file the MS1 scans
+            // are most of the bytes. `requires_ms1` is tested first, so a run
+            // that reads MS1 does not pay for a metadata lookup per scan.
+            let decode = requires_ms1
+                || decodes_scan(
+                    sage_plus_raw::scan_metadata(reader.raw(), idx).map(|meta| meta.ms_level),
+                    false,
+                );
+            if !decode {
+                undecoded_ms1 += 1;
+                continue;
+            }
             match reader.read_spectrum_into(idx, false, &mut mz, &mut intensity) {
                 Ok(header) => {
                     dropped += header.dropped_peaks;
@@ -53,6 +76,13 @@ impl ThermoRawReader {
             }
         }
 
+        if undecoded_ms1 > 0 {
+            log::debug!(
+                "{}: {} MS1 scans were not decoded; this search reads only MS2",
+                path.display(),
+                undecoded_ms1
+            );
+        }
         if let Some((failed, error)) = skipped {
             log::warn!(
                 "skipped {} of {} scans in {} that could not be decoded; first error: {}",
@@ -142,6 +172,15 @@ impl ThermoRawReader {
 
 /// Record a scan that could not be decoded: how many failed, and the first
 /// error. A scan that fails is skipped rather than failing the whole file.
+/// Whether the scan at an index must be decoded, from its MS level alone.
+///
+/// A run that reads MS1 decodes every scan. Otherwise an MS1 scan is passed
+/// over, and a scan whose metadata could not be read is decoded, so nothing is
+/// dropped on a guess.
+fn decodes_scan(level: Option<u32>, requires_ms1: bool) -> bool {
+    requires_ms1 || level != Some(1)
+}
+
 pub(crate) fn note_skipped(
     skipped: &mut Option<(usize, sage_plus_raw::Error)>,
     error: sage_plus_raw::Error,

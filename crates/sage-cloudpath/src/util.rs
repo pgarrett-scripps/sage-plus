@@ -85,7 +85,7 @@ pub fn read_spectra(
         FileFormat::MzMLb => read_mzmlb(url, file_id, sn),
         FileFormat::MGF => read_mgf(url, file_id),
         FileFormat::TDF => read_tdf(url, file_id, bruker_processor, requires_ms1),
-        FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn),
+        FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn, requires_ms1),
         FileFormat::Unidentified => Err(Error::Unsupported(format!(
             "unable to determine the spectra format for `{url}`"
         ))),
@@ -125,10 +125,14 @@ pub fn read_mzmlb(
     ))
 }
 
+/// Read a local Thermo `.raw` file. `requires_ms1` passes through to the
+/// reader, which decodes MS1 scans only when the run reads them, as
+/// [`read_tdf`] does for Bruker input.
 pub fn read_thermoraw(
     url: &Url,
     file_id: usize,
     signal_to_noise: Option<u8>,
+    requires_ms1: bool,
 ) -> Result<Vec<RawSpectrum>, Error> {
     if signal_to_noise.is_some() {
         return Err(Error::Unsupported(
@@ -143,7 +147,7 @@ pub fn read_thermoraw(
 
     let path = url.to_file_path().map_err(|_| Error::InvalidUri)?;
     crate::thermoraw::ThermoRawReader::with_file_id(file_id)
-        .parse(path)
+        .parse(path, requires_ms1)
         .map_err(Error::ThermoRaw)
 }
 

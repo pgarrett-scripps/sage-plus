@@ -28,7 +28,7 @@ fn mzmlb_without_feature_returns_build_instructions() {
 fn thermoraw_rejects_signal_to_noise_mode() {
     let url = Url::parse("file:///tmp/example.raw").unwrap();
     assert!(matches!(
-        read_thermoraw(&url, 0, Some(2)),
+        read_thermoraw(&url, 0, Some(2), true),
         Err(Error::Unsupported(_))
     ));
 }
@@ -73,7 +73,7 @@ fn only_bruker_reads_within_file_in_parallel() {
 fn local_only_formats_reject_remote_urls() {
     let url = Url::parse("s3://bucket/run.raw").unwrap();
     assert!(matches!(
-        read_thermoraw(&url, 0, None),
+        read_thermoraw(&url, 0, None, true),
         Err(Error::InvalidUri)
     ));
     let url = Url::parse("s3://bucket/run.d").unwrap();

@@ -97,6 +97,48 @@ fn implausible_precursor_mz_is_not_searched() {
     assert_eq!(spectrum.precursors[0].mz, 810.16);
 }
 
+/// MS1 scans are decoded only for a run that reads them; a scan whose
+/// metadata could not be read is decoded either way.
+#[test]
+fn only_a_run_that_reads_ms1_decodes_ms1_scans() {
+    use super::decodes_scan;
+
+    // A search that reads MS1 (quantification, DIA) takes every scan.
+    assert!(decodes_scan(Some(1), true));
+    assert!(decodes_scan(Some(2), true));
+    assert!(decodes_scan(None, true));
+
+    // A search that does not pays for the MS2 scans alone.
+    assert!(!decodes_scan(Some(1), false));
+    assert!(decodes_scan(Some(2), false));
+    assert!(decodes_scan(Some(3), false));
+    assert!(
+        decodes_scan(None, false),
+        "a scan whose level is unknown is decoded, not dropped on a guess"
+    );
+}
+
+/// The same MS2 spectra reach the search whether or not MS1 is read.
+#[test]
+fn skipping_ms1_keeps_every_ms2_scan() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/thermo/Angiotensin_325-CID.raw");
+    let reader = ThermoRawReader::with_file_id(0);
+    let with_ms1 = reader.parse(&path, true).unwrap();
+    let without_ms1 = reader.parse(&path, false).unwrap();
+
+    assert_eq!(with_ms1.len(), 10);
+    assert!(with_ms1.iter().all(|spectrum| spectrum.ms_level == 2));
+    assert_eq!(without_ms1.len(), with_ms1.len());
+    for (kept, reference) in without_ms1.iter().zip(&with_ms1) {
+        assert_eq!(kept.id, reference.id);
+        assert_eq!(kept.ms_level, reference.ms_level);
+        assert_eq!(kept.mz, reference.mz);
+        assert_eq!(kept.intensity, reference.intensity);
+        assert_eq!(kept.precursors.len(), reference.precursors.len());
+    }
+}
+
 #[test]
 fn parses_real_raw_file() {
     let path =
@@ -213,7 +255,7 @@ fn raw_ms_levels_match_vendor_conversion() {
             .split(',')
             .map(|count| count.parse::<usize>().unwrap())
             .collect::<Vec<_>>();
-        let spectra = ThermoRawReader::with_file_id(0).parse(path).unwrap();
+        let spectra = ThermoRawReader::with_file_id(0).parse(path, true).unwrap();
         let observed = (1..=expected.len())
             .map(|level| {
                 spectra

@@ -818,7 +818,8 @@ fn main() -> anyhow::Result<()> {
     };
     let url = sage_cloudpath::to_url(&args.raw)?;
     let mut raw = if !tims {
-        sage_cloudpath::util::read_thermoraw(&url, 0, None).map_err(|e| anyhow::anyhow!("{e:?}"))?
+        sage_cloudpath::util::read_thermoraw(&url, 0, None, true)
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?
     } else if matches!(args.mode.as_str(), "wide" | "hillfilter") {
         sage_cloudpath::util::read_spectra(&url, 0, None, Default::default(), false)
             .map_err(|e| anyhow::anyhow!("{e:?}"))?
