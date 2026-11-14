@@ -55,19 +55,22 @@ pub(super) const FRAGMENT_MASS_SUFFIX_BITS: u32 = 12;
 ///
 /// The band is 32,768 slots, so a table costs 128 KB of counts or 256 KB of
 /// offsets per generation chunk, against an index of hundreds of megabytes.
-struct PrefixTable<T> {
+///
+/// Visible to the rest of `database` for the module's unit tests, as
+/// [`PackedFragment`] is.
+pub(super) struct PrefixTable<T> {
     dense: Vec<T>,
     sparse: HashMap<u32, T>,
 }
 
 /// First prefix of [`PrefixTable`]'s flat band: the prefix of 1.0 g/mol.
-const DENSE_PREFIX_MIN: u32 = 0x3f80_0000 >> FRAGMENT_MASS_SUFFIX_BITS;
+pub(super) const DENSE_PREFIX_MIN: u32 = 0x3f80_0000 >> FRAGMENT_MASS_SUFFIX_BITS;
 /// Length of the flat band, up to (but not including) the prefix of 65,536 g/mol.
-const DENSE_PREFIX_LEN: usize =
+pub(super) const DENSE_PREFIX_LEN: usize =
     ((0x4780_0000 >> FRAGMENT_MASS_SUFFIX_BITS) - DENSE_PREFIX_MIN) as usize;
 
 impl<T: Copy + Default + PartialEq> PrefixTable<T> {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             dense: vec![T::default(); DENSE_PREFIX_LEN],
             sparse: HashMap::new(),
@@ -75,7 +78,7 @@ impl<T: Copy + Default + PartialEq> PrefixTable<T> {
     }
 
     #[inline]
-    fn slot(prefix: u32) -> Option<usize> {
+    pub(super) fn slot(prefix: u32) -> Option<usize> {
         prefix
             .checked_sub(DENSE_PREFIX_MIN)
             .map(|offset| offset as usize)
@@ -83,7 +86,7 @@ impl<T: Copy + Default + PartialEq> PrefixTable<T> {
     }
 
     #[inline]
-    fn get(&self, prefix: u32) -> T {
+    pub(super) fn get(&self, prefix: u32) -> T {
         match Self::slot(prefix) {
             Some(offset) => self.dense[offset],
             None => self.sparse.get(&prefix).copied().unwrap_or_default(),
@@ -91,7 +94,7 @@ impl<T: Copy + Default + PartialEq> PrefixTable<T> {
     }
 
     #[inline]
-    fn get_mut(&mut self, prefix: u32) -> &mut T {
+    pub(super) fn get_mut(&mut self, prefix: u32) -> &mut T {
         match Self::slot(prefix) {
             Some(offset) => &mut self.dense[offset],
             None => self.sparse.entry(prefix).or_default(),
@@ -99,7 +102,7 @@ impl<T: Copy + Default + PartialEq> PrefixTable<T> {
     }
 
     /// Every prefix holding a value, in ascending prefix order.
-    fn prefixes(&self) -> Vec<u32> {
+    pub(super) fn prefixes(&self) -> Vec<u32> {
         let default = T::default();
         let mut outside = self
             .sparse

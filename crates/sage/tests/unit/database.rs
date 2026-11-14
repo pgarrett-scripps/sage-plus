@@ -3519,3 +3519,177 @@ fn contaminant_proteins_mark_their_peptides_by_accession() {
     // Rule 1: the class never changes what a decoy is.
     assert!(peptides.iter().any(|peptide| peptide.decoy));
 }
+
+#[test]
+fn prefix_table_keeps_the_boundary_slots_in_the_flat_band() {
+    let first = 1.0f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    assert_eq!(first, DENSE_PREFIX_MIN, "the band starts at 1.0 g/mol");
+    let last = DENSE_PREFIX_MIN + DENSE_PREFIX_LEN as u32 - 1;
+    let middle = 1_000.0f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    assert!(
+        middle > first && middle < last,
+        "a real fragment mass is inside"
+    );
+
+    let mut counts = PrefixTable::<u32>::new();
+    for prefix in [first, middle, last, middle] {
+        *counts.get_mut(prefix) += 1;
+    }
+
+    assert_eq!(counts.get(first), 1);
+    assert_eq!(counts.get(middle), 2);
+    assert_eq!(counts.get(last), 1);
+    assert_eq!(counts.get(middle - 1), 0, "an untouched slot counts zero");
+    // Ascending prefix order is what the index layout reads them in.
+    assert_eq!(counts.prefixes(), vec![first, middle, last]);
+}
+
+#[test]
+fn prefix_table_counts_prefixes_outside_the_flat_band() {
+    // 0.5 g/mol sits below the band, 65,536 and 10^9 above it. No peptide
+    // fragment reaches either, so these only ever use the fallback map.
+    let below = 0.5f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    let above = 65_536.0f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    let far_above = 1.0e9f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    let inside = 1_000.0f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    assert!(below < DENSE_PREFIX_MIN);
+    assert!(above >= DENSE_PREFIX_MIN + DENSE_PREFIX_LEN as u32);
+    assert!(far_above > above);
+
+    let mut counts = PrefixTable::<u32>::new();
+    *counts.get_mut(below) += 3;
+    *counts.get_mut(inside) += 1;
+    *counts.get_mut(above) += 2;
+    *counts.get_mut(far_above) += 1;
+
+    assert_eq!(
+        counts.get(below),
+        3,
+        "the fallback counts as the array does"
+    );
+    assert_eq!(counts.get(above), 2);
+    assert_eq!(counts.get(far_above), 1);
+    assert_eq!(counts.get(inside), 1);
+    assert_eq!(
+        counts.prefixes(),
+        vec![below, inside, above, far_above],
+        "below the band, then the band, then above it, each ascending"
+    );
+}
+
+#[test]
+fn prefix_table_equality_covers_the_fallback() {
+    // The writing pass asserts that every position reached its limit by
+    // comparing two tables, so equality has to see fallback entries too.
+    let below = 0.5f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    let inside = 1_000.0f32.to_bits() >> FRAGMENT_MASS_SUFFIX_BITS;
+    let table = |values: &[(u32, usize)]| {
+        let mut table = PrefixTable::<usize>::new();
+        for (prefix, value) in values {
+            *table.get_mut(*prefix) = *value;
+        }
+        table
+    };
+
+    assert!(table(&[(inside, 7), (below, 3)]) == table(&[(below, 3), (inside, 7)]));
+    assert!(table(&[(inside, 7)]) != table(&[(inside, 8)]));
+    assert!(
+        table(&[(below, 3)]) != table(&[(below, 4)]),
+        "a difference only in the fallback is still a difference"
+    );
+    assert!(table(&[]) == table(&[]));
+}
+
+#[test]
+fn preliminary_fragment_masses_match_the_ion_group_path() {
+    use crate::ion_series::IonGroupSeries;
+    use crate::modification::NeutralLossMode;
+
+    let parameters = Builder {
+        generate_decoys: Some(false),
+        ..Builder::default()
+    }
+    .make_parameters()
+    .expect("valid test configuration");
+
+    // What the generator did before the retained-ion fast path: build every
+    // group and keep its first variant.
+    let through_groups = |peptide: &Peptide| {
+        parameters
+            .ion_kinds
+            .iter()
+            .flat_map(|kind| IonGroupSeries::new(peptide, *kind))
+            .filter(|group| match group.kind {
+                Kind::A | Kind::B | Kind::C => (group.series_index + 1) > parameters.min_ion_index,
+                Kind::X | Kind::Y | Kind::Z | Kind::ZDot => {
+                    peptide.sequence.len().saturating_sub(1) - group.series_index
+                        > parameters.min_ion_index
+                }
+            })
+            .filter_map(|group| {
+                group
+                    .variants
+                    .into_iter()
+                    .next()
+                    .map(|ion| ion.monoisotopic_mass)
+            })
+            .collect::<Vec<f32>>()
+    };
+    let peptide_of = |sequence: &str| {
+        Peptide::try_from(Digest {
+            sequence: sequence.into(),
+            ..Default::default()
+        })
+        .expect("valid test sequence")
+    };
+    let modified = |losses: &[f32], mode: NeutralLossMode| {
+        let modification = Arc::new(ModificationDefinition {
+            mass: 15.994_915,
+            name: Some(Arc::from("TestMod")),
+            neutral_losses: Arc::from(losses.to_vec()),
+            site_losses: None,
+            neutral_loss_mode: mode,
+            channel_offsets: Arc::default(),
+        });
+        peptide_of("PEPTIMDEK")
+            .apply(
+                &[(
+                    ModificationSpecificity::Residue(b'M'),
+                    modification,
+                    Some(1),
+                )],
+                &HashMap::default(),
+                1,
+                None,
+            )
+            .into_iter()
+            .find(|peptide| peptide.to_string().contains("TestMod"))
+            .expect("the modification applies to M")
+    };
+
+    let unmodified = peptide_of("PEPTIDEK");
+    let without_loss = modified(&[], NeutralLossMode::Optional);
+    let optional_loss = modified(&[18.010_565], NeutralLossMode::Optional);
+    let required_loss = modified(&[18.010_565], NeutralLossMode::Required);
+
+    // Which branch each peptide takes, so both are known to be exercised.
+    for (peptide, lossless) in [
+        (&unmodified, true),
+        (&without_loss, true),
+        (&optional_loss, false),
+        (&required_loss, false),
+    ] {
+        assert_eq!(
+            IonGroupSeries::new(peptide, Kind::B).is_lossless(),
+            lossless,
+            "{peptide} takes the wrong branch"
+        );
+        let fast = preliminary_fragment_masses(&parameters, peptide).collect::<Vec<f32>>();
+        assert!(!fast.is_empty(), "{peptide} generates fragments");
+        assert_eq!(
+            fast,
+            through_groups(peptide),
+            "{peptide} must yield the same masses in the same order either way"
+        );
+    }
+}
