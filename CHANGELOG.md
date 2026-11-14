@@ -206,6 +206,12 @@ entries are retained below for provenance.
   difference in peak widths is not a difference in minutes. In-source products pile up at a
   difference of zero while unrelated pairs spread out, so the density of pairs 1 to 5 units from
   zero says how much of a flagged set could be coincidence.
+- A searched file whose MS2 scans record no precursor now says so, as one warning per file in
+  file order: how many MS2 scans were not searched because no precursor was recorded for them.
+  Such a scan is dropped by the searchability filter, and nothing said so, so a converted file
+  that lost its precursor information was searched, reported nothing and gave no reason for it.
+  A file whose MS2 scans all carry a precursor says nothing, and a scan dropped for carrying too
+  few peaks is a different reason and is not counted here. No output column changes.
 
 ### Changed
 - The database build produces the same peptide list and the same fragment index in less time.
@@ -234,6 +240,14 @@ entries are retained below for provenance.
   user sees wherever the configuration is assembled, including by a caller that builds the
   settings in Rust rather than from JSON. A configuration whose keys are all valid produces
   exactly what it did before.
+- A peptide sharing a picked-peptide competition key with another peptide is reported with the
+  q-value their competition earned instead of 1.0. `picked_peptide` records one peptide index
+  per competition, and the map that carried that competition's q-value to the other peptides of
+  the same key was built only for peptides carrying a label channel; a clash on any unlabelled
+  path, of which two library peptidoforms recorded under one group identity is the reachable
+  one, reported a peptide as though it had failed. Where no key is shared nothing changes: on a
+  plain and on a SILAC configuration `results.sage.parquet` is byte-identical to the output of a
+  binary built from the previous commit.
 
 ## [v0.1.0-beta.19] - 2026-11-12
 
