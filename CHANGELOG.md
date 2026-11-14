@@ -214,6 +214,17 @@ entries are retained below for provenance.
   few peaks is a different reason and is not counted here. No output column changes.
 
 ### Changed
+- A Thermo `.raw` search that does not read MS1 no longer decodes MS1 scans. Every scan's peak
+  block was read, parsed and centroided whether the run used it or not, and on a DDA file the
+  MS1 scans are most of the file; the MS level now comes from the scan index and the scan event
+  before any peaks are read, which is the rule the Bruker reader already followed. On a 3.2 GB
+  PXD028735 `.raw` (124,726 scans, 33,002 of them MS1) at 8 threads, release build, one run at
+  a time on an idle machine, the file read falls from 0.90 to 0.52 seconds and peak memory from
+  2.70 to 2.26 GiB, with `results.sage.parquet` byte-identical to the previous commit's output
+  (22,549 rows, every one of its 69 columns identical). The file was in the page cache, so that
+  is the decoding cost; a cold read saves the bytes as well. A run that reads MS1, with
+  `quant.lfq` or a DIA mode, reads exactly what it read before, at the same read time and the
+  same peak memory, and a scan whose metadata cannot be read is still decoded.
 - The database build produces the same peptide list and the same fragment index in less time.
   Both fragment generation passes looked a mass prefix up in a hash map once per generated
   fragment, hundreds of millions of times in a modified search, and hashing a `u32` key cost
