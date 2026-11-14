@@ -207,6 +207,25 @@ entries are retained below for provenance.
   difference of zero while unrelated pairs spread out, so the density of pairs 1 to 5 units from
   zero says how much of a flagged set could be coincidence.
 
+### Changed
+- The database build produces the same peptide list and the same fragment index in less time.
+  Both fragment generation passes looked a mass prefix up in a hash map once per generated
+  fragment, hundreds of millions of times in a modified search, and hashing a `u32` key cost
+  more than generating the mass did; the counts, the write positions and their limits now live
+  in a flat array indexed by the prefix, with a map kept for a prefix outside the band that real
+  fragment masses occupy. A peptide whose placements carry no neutral loss, with no generic
+  fragment losses configured, reads its retained fragment masses straight from the ion series
+  instead of building an ion group and a loss variant per fragment. The digest's grouping sort
+  and its target-sequence set are built in parallel rather than on one thread. On one PXD028735
+  file against a human FASTA, release build, 8 threads, the reported build time falls from 3.97
+  to 2.19 seconds with no variable modification and from 15.07 to 9.36 seconds with `M`
+  +15.9949 and `S/T/Y` +79.966331, against 2.12 and 8.17 seconds for upstream v0.15.0-beta.2 on
+  the same configurations. Nothing about the search changes: on both configurations every column
+  of `results.sage.parquet` is identical, row for row, to the output of a binary built from the
+  previous commit, and the file is byte-identical once both binaries stamp the same commit into
+  its provenance. The build's stages are now logged at debug level, as
+  `database build: <stage> <elapsed>`.
+
 ### Fixed
 - A modification key that is not a site specificity is reported instead of panicking.
   `validate_mods`, `validate_var_mods` and `Database::make_parameters` now return
