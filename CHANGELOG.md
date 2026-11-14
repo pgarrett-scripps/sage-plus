@@ -225,8 +225,9 @@ entries are retained below for provenance.
   quality control that reads MS1 peaks, so `"polymer_check": false` in a search that does not
   quantify is what lets a Thermo `.raw` read skip MS1 decoding: on a 3.2 GB PXD028735 `.raw`
   (124,726 scans, 33,002 of them MS1) at 8 threads, release build, one run at a time on an idle
-  machine, the file read falls from 0.95 to 0.56 seconds with the file in the page cache and
-  peak memory from 2.70 to 2.30 GiB. `results.sage.parquet` is byte-identical either way, and
+  machine, the file read falls from 0.94 to 0.53 seconds with the file in the page cache and
+  peak memory from 2.69 to 2.29 GiB, while the same configuration with the check on reads and
+  reports exactly what the previous commit did. `results.sage.parquet` is byte-identical either way, and
   the reader keeps each undecoded scan's metadata, so the file's retention-time span and its ten
   gradient bins are the ones it reports with MS1 decoded; what `qc.tsv` loses is the MS1
   measurements themselves (`ms1_spectra`, `ms1_read`, `ms1_tic`, `top_polymer`,
