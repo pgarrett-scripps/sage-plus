@@ -53,6 +53,11 @@ impl Default for PtmLocalizationSettings {
     }
 }
 
+/// The default of [`Search::polymer_check`], which is not serialized.
+fn polymer_check_is_default(polymer_check: &bool) -> bool {
+    *polymer_check
+}
+
 #[derive(Serialize, Clone)]
 /// Actual search parameters - may include overrides or default values not set by user
 pub struct Search {
@@ -116,6 +121,11 @@ pub struct Search {
 
     /// Scan MS1 spectra for polymer contamination. The only quality control
     /// that reads MS1 peaks.
+    ///
+    /// Serialized only when it is off, so the configuration recorded in a
+    /// default run's output provenance is the one earlier versions recorded:
+    /// an absent key means the check ran, as it always has.
+    #[serde(skip_serializing_if = "polymer_check_is_default")]
     pub polymer_check: bool,
 
     #[serde(skip_serializing)]
