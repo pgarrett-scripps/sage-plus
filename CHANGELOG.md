@@ -109,13 +109,17 @@ entries are retained below for provenance.
   contaminant percent and the in-source flagged count where those features are on, and a summary
   of its gradient bins: how many bins acquired MS2 spectra and identified none, how many acquired
   no MS2 spectrum at all, and the lowest and highest identification rate among the bins that
-  acquired MS2 spectra. Every share in the table is a percent named `*_pct`, including
-  `contaminant_psm_pct`, which `run-summary.json` now also reports as a percent under
-  `contaminants` instead of the fraction `contaminant_psm_share`. Every one of those is the number
-  its own output reports, read from the stats that pass already computed, and a column whose pass
-  measured nothing is empty, not zero. It repeats the per-file headline number of every other QC
-  output so one table shows a whole run, and it has no `total` row because a retention-time span
-  and an identification rate do not pool across files.
+  count. Those three bin columns consider only the bins that acquired at least 1% of the file's
+  MS2 spectra, because a rate over a handful of scans is noise: on one PXD028735 file the last bin
+  acquired 2 MS2 spectra and identified both, which would otherwise report the file's best region
+  as 100%. `no_ms2_gradient_bins` stays literal and `qc.gradient.tsv` keeps every bin with its own
+  counts. Every share in the table is a percent named `*_pct`, including `contaminant_psm_pct`,
+  which `run-summary.json` now also reports as a percent under `contaminants` instead of the
+  fraction `contaminant_psm_share`. Every one of those is the number its own output reports, read
+  from the stats that pass already computed, and a column whose pass measured nothing is empty,
+  not zero. It repeats the per-file headline number of every other QC output so one table shows a
+  whole run, and it has no `total` row because a retention-time span and an identification rate do
+  not pool across files.
 - Every search also writes `qc.gradient.tsv`: each file split into ten equal-width
   retention-time bins over its own span, with MS2 spectra acquired, MS2 spectra identified and
   summed MS1 total ion current per bin, which is where a spray dropout or a dead region of the

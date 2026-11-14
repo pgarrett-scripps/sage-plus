@@ -27,6 +27,15 @@ const DIGESTION_Q_VALUE: f32 = QC_Q_VALUE;
 /// `qc.gradient.tsv`.
 const GRADIENT_BINS: usize = 10;
 
+/// Share of a file's MS2 spectra a gradient bin must have acquired before it
+/// counts towards the headline bin columns of `qc.tsv`
+/// (`empty_gradient_bins`, `min_bin_identified_pct`,
+/// `max_bin_identified_pct`). The edge bins of a gradient can hold a handful
+/// of scans, and an identification rate over two spectra is noise that would
+/// otherwise set a whole file's reported range. `qc.gradient.tsv` keeps every
+/// bin with its own counts, so nothing is hidden.
+const HEADLINE_BIN_MS2_SHARE: f64 = 0.01;
+
 /// Spectrum- and peptide-level q-value a PSM must pass to count towards the
 /// modification occupancy table. The same threshold as
 /// [`DIGESTION_Q_VALUE`], so both tables describe the same identifications.
@@ -1155,31 +1164,41 @@ impl IdentificationFileStats {
         identified_pct(self.ms2_identified, self.census.ms2_spectra)
     }
 
-    /// Bins that acquired MS2 spectra and identified none: a dead region of
-    /// the gradient, or a spray dropout. A bin that acquired no MS2 spectrum
-    /// is not one of these, because nothing was tried there; those are
-    /// counted by [`Self::no_ms2_bins`].
-    pub fn empty_bins(&self) -> usize {
+    /// Bins carrying enough of the file's MS2 spectra for their
+    /// identification rate to mean something: at least
+    /// [`HEADLINE_BIN_MS2_SHARE`] of them, and at least one. A file that
+    /// acquired no MS2 spectrum has none.
+    fn headline_bins(&self) -> impl Iterator<Item = &GradientBinStats> {
+        let floor = HEADLINE_BIN_MS2_SHARE * self.census.ms2_spectra as f64;
         self.bins
             .iter()
-            .filter(|bin| bin.ms2_acquired > 0 && bin.ms2_identified == 0)
+            .filter(move |bin| bin.ms2_acquired > 0 && bin.ms2_acquired as f64 >= floor)
+    }
+
+    /// Bins that acquired a meaningful share of the file's MS2 spectra and
+    /// identified none: a dead region of the gradient, or a spray dropout. A
+    /// bin that acquired no MS2 spectrum is not one of these, because nothing
+    /// was tried there; those are counted by [`Self::no_ms2_bins`]. A bin
+    /// holding a handful of scans is not one either, because a rate over a
+    /// handful of spectra is noise; see [`HEADLINE_BIN_MS2_SHARE`].
+    pub fn empty_bins(&self) -> usize {
+        self.headline_bins()
+            .filter(|bin| bin.ms2_identified == 0)
             .count()
     }
 
     /// Bins that acquired no MS2 spectrum at all, which is ordinary at the
     /// start and end of a gradient and says nothing about identification.
+    /// Literal: a bin with one MS2 spectrum is not counted here, however
+    /// little that is.
     pub fn no_ms2_bins(&self) -> usize {
         self.bins.iter().filter(|bin| bin.ms2_acquired == 0).count()
     }
 
-    /// Lowest and highest identification rate among the bins that acquired
-    /// MS2 spectra; `None` when no bin did.
+    /// Lowest and highest identification rate among the bins that carry the
+    /// headline columns ([`Self::headline_bins`]); `None` when no bin does.
     pub fn bin_pct_range(&self) -> Option<(f64, f64)> {
-        let mut shares = self
-            .bins
-            .iter()
-            .filter(|bin| bin.ms2_acquired > 0)
-            .map(|bin| bin.identified_pct());
+        let mut shares = self.headline_bins().map(|bin| bin.identified_pct());
         let first = shares.next()?;
         Some(shares.fold((first, first), |(low, high), share| {
             (low.min(share), high.max(share))

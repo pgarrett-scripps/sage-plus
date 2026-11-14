@@ -261,22 +261,22 @@
     {
       "name": "empty_gradient_bins",
       "type": "integer",
-      "description": "Bins that acquired MS2 spectra and identified none: a dead region of the gradient, or a spray dropout. A bin that acquired no MS2 spectrum is not counted here, because nothing was tried in it; those are no_ms2_gradient_bins. qc.gradient.tsv names the bins."
+      "description": "Bins that acquired MS2 spectra and identified none: a dead region of the gradient, or a spray dropout. A bin that acquired no MS2 spectrum is not counted here, because nothing was tried in it; those are no_ms2_gradient_bins. A bin counts towards this column only when it acquired at least 1% of the file's MS2 spectra: the edge bins of a gradient can hold a handful of scans, and a rate over a handful of spectra is noise. qc.gradient.tsv keeps every bin with its own counts."
     },
     {
       "name": "no_ms2_gradient_bins",
       "type": "integer",
-      "description": "Bins that acquired no MS2 spectrum at all, which is ordinary at the start and end of a gradient; those bins have no identification rate and are excluded from empty_gradient_bins, min_bin_identified_pct and max_bin_identified_pct."
+      "description": "Bins that acquired no MS2 spectrum at all, which is ordinary at the start and end of a gradient; those bins have no identification rate. Literal: a bin with one MS2 spectrum is not counted here, however little that is, though it is too small to set empty_gradient_bins, min_bin_identified_pct or max_bin_identified_pct."
     },
     {
       "name": "min_bin_identified_pct",
       "type": "number",
-      "description": "Lowest ms2_identified_pct among the bins that acquired MS2 spectra; zero when none did."
+      "description": "Lowest ms2_identified_pct among the bins that carry this column; zero when no bin does. A bin counts towards this column only when it acquired at least 1% of the file's MS2 spectra: the edge bins of a gradient can hold a handful of scans, and a rate over a handful of spectra is noise. qc.gradient.tsv keeps every bin with its own counts."
     },
     {
       "name": "max_bin_identified_pct",
       "type": "number",
-      "description": "Highest ms2_identified_pct among those bins; zero when none did."
+      "description": "Highest ms2_identified_pct among those bins; zero when none qualifies. A bin counts towards this column only when it acquired at least 1% of the file's MS2 spectra: the edge bins of a gradient can hold a handful of scans, and a rate over a handful of spectra is noise. qc.gradient.tsv keeps every bin with its own counts."
     }
   ]
 }

@@ -417,6 +417,48 @@ fn identification_fixture() -> IdentificationFileStats {
 }
 
 #[test]
+fn a_bin_with_a_handful_of_scans_does_not_set_the_headline_columns() {
+    // A real gradient: eight bins carrying the run, one edge bin with two
+    // scans that happen to be identified, and one with two that are not.
+    let mut stats = identification_fixture();
+    stats.census.ms2_spectra = 1000;
+    stats.bins = (0..10)
+        .map(|bin| GradientBinStats {
+            bin,
+            rt_start: bin as f32,
+            rt_end: bin as f32 + 1.0,
+            ms2_acquired: match bin {
+                0 => 2,
+                9 => 2,
+                _ => 124,
+            },
+            ms2_identified: match bin {
+                0 => 0,
+                9 => 2,
+                _ => 62,
+            },
+            ms1_spectra: 2,
+            ms1_tic: 1000.0,
+        })
+        .collect();
+    // 1% of 1000 is 10 scans, so neither edge bin counts: the range is the
+    // eight real bins, and the two-scan bin that identified nothing is not a
+    // dropout.
+    assert_eq!(stats.bin_pct_range(), Some((50.0, 50.0)));
+    assert_eq!(stats.empty_bins(), 0);
+    // Those bins are still in qc.gradient.tsv with their own counts, and
+    // neither is counted as having acquired no MS2 spectrum.
+    assert_eq!(stats.no_ms2_bins(), 0);
+    assert_eq!(stats.bins[9].identified_pct(), 100.0);
+
+    // Below the floor every bin is small, so the file reports no range.
+    let mut quiet = stats.clone();
+    quiet.census.ms2_spectra = 1_000_000;
+    assert_eq!(quiet.bin_pct_range(), None);
+    assert_eq!(quiet.empty_bins(), 0);
+}
+
+#[test]
 fn identification_rates_are_shares_of_acquired_spectra() {
     let stats = identification_fixture();
     assert_eq!(stats.identified_pct(), 40.0);
