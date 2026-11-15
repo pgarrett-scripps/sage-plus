@@ -1186,3 +1186,53 @@ async fn the_first_corrupt_array_in_file_order_is_reported() {
         "expected the first spectrum's base64 error, got {result:?}"
     );
 }
+
+#[tokio::test]
+async fn ms1_arrays_are_not_decoded_when_the_search_reads_only_ms2() -> Result<(), MzMLError> {
+    let minutes = |rt: &str| {
+        format!(
+            r#"<cvParam accession="MS:1000016" value="{rt}" unitAccession="UO:0000031"/>
+               <cvParam accession="MS:1000927" value="25"/>"#
+        )
+    };
+    let input = wrap(&[
+        simple_spectrum("scan=1", 1, "300", &minutes("1"), ""),
+        simple_spectrum("scan=2", 2, "200", &minutes("2"), ""),
+        simple_spectrum("scan=3", 1, "400", &minutes("3"), ""),
+        simple_spectrum("scan=4", 2, "250", &minutes("4"), ""),
+    ]);
+    let full = MzMLReader::with_file_id(5).parse(input.as_bytes()).await?;
+    // A batch per spectrum, so the skip is also crossed with the mid-parse flush.
+    let mut reader = MzMLReader::with_file_id(5);
+    reader.set_decode_ms1(false).set_decode_batch_bytes(1);
+    let skipped = reader.parse(input.as_bytes()).await?;
+
+    // Every spectrum is still there, in file order, with its metadata.
+    assert_eq!(skipped.len(), full.len());
+    for (skipped, full) in skipped.iter().zip(&full) {
+        assert_eq!(skipped.id, full.id);
+        assert_eq!(skipped.file_id, full.file_id);
+        assert_eq!(skipped.ms_level, full.ms_level);
+        assert_eq!(skipped.scan_start_time, full.scan_start_time);
+        assert_eq!(skipped.ion_injection_time, full.ion_injection_time);
+        assert_eq!(skipped.total_ion_current, full.total_ion_current);
+        assert_eq!(skipped.representation, full.representation);
+        if full.ms_level == 1 {
+            // MS1: kept without peaks, and marked so nothing counts it as read.
+            assert!(skipped.metadata_only, "{}", skipped.id);
+            assert!(skipped.mz.is_empty() && skipped.intensity.is_empty());
+        } else {
+            // MS2: decoded exactly as before.
+            assert!(!skipped.metadata_only);
+            assert_eq!(skipped.mz, full.mz);
+            assert_eq!(skipped.intensity, full.intensity);
+            assert_eq!(
+                format!("{:?}", skipped.precursors),
+                format!("{:?}", full.precursors)
+            );
+        }
+    }
+    // The default reads MS1 peaks, as it always has.
+    assert!(full.iter().all(|s| !s.metadata_only && s.mz.len() == 3));
+    Ok(())
+}

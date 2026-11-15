@@ -731,19 +731,24 @@ fn the_polymer_check_decides_whether_a_thermo_raw_decodes_ms1() {
     let raw = Url::parse("file:///data/run.raw").unwrap();
     let bruker = Url::parse("file:///data/run.d/analysis.tdf").unwrap();
     let mzml = Url::parse("file:///data/run.mzML").unwrap();
+    let mzmlb = Url::parse("file:///data/run.mzMLb").unwrap();
 
-    // Default: the check is on, so the Thermo reader decodes MS1.
+    // Default: the check is on, so the Thermo, mzML and mzMLb readers decode
+    // MS1, as they always have.
     let on = config(serde_json::Value::Null);
     assert!(!on.requires_ms1(), "nothing quantifies");
     assert!(on.decodes_ms1_for_quality_control(&raw));
     assert!(!on.decodes_ms1_for_quality_control(&bruker));
-    assert!(!on.decodes_ms1_for_quality_control(&mzml));
+    assert!(on.decodes_ms1_for_quality_control(&mzml));
+    assert!(on.decodes_ms1_for_quality_control(&mzmlb));
 
-    // Off: nothing reads MS1 peaks, so the Thermo reader decodes none.
+    // Off: nothing reads MS1 peaks, so no reader decodes them.
     let off = config(serde_json::Value::Bool(false));
     assert!(!off.requires_ms1());
     assert!(!off.decodes_ms1_for_quality_control(&raw));
     assert!(!off.decodes_ms1_for_quality_control(&bruker));
+    assert!(!off.decodes_ms1_for_quality_control(&mzml));
+    assert!(!off.decodes_ms1_for_quality_control(&mzmlb));
     std::fs::remove_dir_all(directory).ok();
 }
 

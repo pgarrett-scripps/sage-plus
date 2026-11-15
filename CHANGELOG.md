@@ -31,6 +31,11 @@ entries are retained below for provenance.
   near-zero wrong sites (3 of 6,332 and 2 of 467) at 47% and 38% coverage. The scoring rule, the
   accessions and the per-margin table are published with the numbers, and the Beta 14 figures
   are marked as the three-file subset they were measured on. No behaviour changes.
+- mzML and mzMLb searches skip MS1 decoding under the rule the Thermo `.raw` reader already
+  follows: with `polymer_check` off, no `quant.lfq` and no DIA, MS1 arrays are not decoded and
+  each MS1 spectrum is kept with its metadata only, so quality control still has the file's
+  retention-time span and `ms1_read` is 0. No configuration key is added, PSMs are
+  unchanged, and with the default `polymer_check: true` every output is byte-identical.
 
 ## [v0.1.0-beta.21] - 2026-11-14
 

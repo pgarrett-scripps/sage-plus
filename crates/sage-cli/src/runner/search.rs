@@ -601,17 +601,20 @@ impl Runner {
     /// Whether one file's MS1 peaks are decoded for quality control.
     ///
     /// The polymer check is a share of MS1 intensity, so it needs the peaks.
-    /// A Thermo `.raw` search has always decoded its MS1 scans and so has
-    /// always reported polymer shares: it keeps decoding them while the check
-    /// is on, and a configuration that reported a share still reports it.
+    /// Thermo `.raw`, mzML and mzMLb searches have always decoded their MS1
+    /// spectra and so have always reported polymer shares: they keep decoding
+    /// them while the check is on, and a configuration that reported a share
+    /// still reports it. With the check off they decode MS1 only for
+    /// quantification or DIA, like every reader.
     /// A Bruker search has never decoded MS1 frames without `quant.lfq` and
     /// has never had a `qc.polymers` entry, so the check does not start
     /// reading them now, which would add a frame read to every `.d` search.
-    /// Readers that decode MS1 anyway, mzML and mzMLb, are unaffected either
-    /// way.
     pub(super) fn decodes_ms1_for_quality_control(&self, path: &Url) -> bool {
         self.parameters.polymer_check
-            && matches!(FileFormat::from(path.as_ref()), FileFormat::ThermoRaw)
+            && matches!(
+                FileFormat::from(path.as_ref()),
+                FileFormat::ThermoRaw | FileFormat::MzML | FileFormat::MzMLb
+            )
     }
 
     pub(super) fn process_chunk(

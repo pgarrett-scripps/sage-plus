@@ -81,8 +81,8 @@ pub fn read_spectra(
     requires_ms1: bool,
 ) -> Result<Vec<RawSpectrum>, Error> {
     match FileFormat::from(url.as_ref()) {
-        FileFormat::MzML => read_mzml(url, file_id, sn),
-        FileFormat::MzMLb => read_mzmlb(url, file_id, sn),
+        FileFormat::MzML => read_mzml_spectra(url, file_id, sn, requires_ms1),
+        FileFormat::MzMLb => read_mzmlb_spectra(url, file_id, sn, requires_ms1),
         FileFormat::MGF => read_mgf(url, file_id),
         FileFormat::TDF => read_tdf(url, file_id, bruker_processor, requires_ms1),
         FileFormat::ThermoRaw => read_thermoraw(url, file_id, sn, requires_ms1),
@@ -92,11 +92,23 @@ pub fn read_spectra(
     }
 }
 
-#[cfg(feature = "mzmlb")]
+/// Read every spectrum of a local mzMLb file, MS1 arrays included.
 pub fn read_mzmlb(
     url: &Url,
     file_id: usize,
     signal_to_noise: Option<u8>,
+) -> Result<Vec<RawSpectrum>, Error> {
+    read_mzmlb_spectra(url, file_id, signal_to_noise, true)
+}
+
+/// [`read_mzmlb`], decoding MS1 arrays only when `requires_ms1` is set, as
+/// [`read_thermoraw`] does.
+#[cfg(feature = "mzmlb")]
+fn read_mzmlb_spectra(
+    url: &Url,
+    file_id: usize,
+    signal_to_noise: Option<u8>,
+    requires_ms1: bool,
 ) -> Result<Vec<RawSpectrum>, Error> {
     if signal_to_noise.is_some() {
         return Err(Error::Unsupported(
@@ -110,15 +122,17 @@ pub fn read_mzmlb(
     }
     let path = url.to_file_path().map_err(|_| Error::InvalidUri)?;
     crate::mzmlb::MzMLbReader::with_file_id(file_id)
+        .set_decode_ms1(requires_ms1)
         .parse(path)
         .map_err(Error::IO)
 }
 
 #[cfg(not(feature = "mzmlb"))]
-pub fn read_mzmlb(
+fn read_mzmlb_spectra(
     _url: &Url,
     _file_id: usize,
     _signal_to_noise: Option<u8>,
+    _requires_ms1: bool,
 ) -> Result<Vec<RawSpectrum>, Error> {
     Err(Error::Unsupported(
         "mzMLb support is optional. Rebuild Sage with the `mzmlb` feature enabled".into(),
@@ -151,14 +165,27 @@ pub fn read_thermoraw(
         .map_err(Error::ThermoRaw)
 }
 
+/// Read every spectrum of an mzML file, MS1 arrays included.
 pub fn read_mzml(
     url: &Url,
     file_id: usize,
     signal_to_noise: Option<u8>,
 ) -> Result<Vec<RawSpectrum>, Error> {
+    read_mzml_spectra(url, file_id, signal_to_noise, true)
+}
+
+/// [`read_mzml`], decoding MS1 arrays only when `requires_ms1` is set, as
+/// [`read_thermoraw`] does.
+fn read_mzml_spectra(
+    url: &Url,
+    file_id: usize,
+    signal_to_noise: Option<u8>,
+    requires_ms1: bool,
+) -> Result<Vec<RawSpectrum>, Error> {
     read_and_execute(url, |bf| async move {
         Ok(crate::mzml::MzMLReader::with_file_id(file_id)
             .set_signal_to_noise(signal_to_noise)
+            .set_decode_ms1(requires_ms1)
             .parse(bf)
             .await?)
     })

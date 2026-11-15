@@ -376,6 +376,10 @@ pub struct MzMLReader {
     // If set to Some(level) and noise intensities are present in the MzML file,
     // divide intensities at this MS-level by noise to calculate S/N
     signal_to_noise: Option<u8>,
+    /// Whether MS1 arrays are decoded. When false an MS1 spectrum is kept
+    /// with its metadata and no peaks ([`RawSpectrum::metadata_only`]), as
+    /// the Thermo `.raw` reader does for a search that reads only MS2.
+    decode_ms1: bool,
 
     file_id: usize,
     /// How much base64 one decode batch holds, [`DECODE_BATCH_BYTES`] unless a
@@ -394,6 +398,7 @@ impl MzMLReader {
             ms_level: Some(ms_level),
             file_id,
             signal_to_noise: None,
+            decode_ms1: true,
             decode_batch_bytes: DECODE_BATCH_BYTES,
         }
     }
@@ -402,6 +407,7 @@ impl MzMLReader {
         Self {
             ms_level: None,
             signal_to_noise: None,
+            decode_ms1: true,
             file_id,
             decode_batch_bytes: DECODE_BATCH_BYTES,
         }
@@ -423,6 +429,24 @@ impl MzMLReader {
     pub fn set_signal_to_noise(&mut self, sn: Option<u8>) -> &mut Self {
         self.signal_to_noise = sn;
         self
+    }
+
+    /// Decode MS1 arrays (the default), or keep MS1 spectra without peaks.
+    ///
+    /// A search that reads only MS2 passes false: the MS1 base64 is neither
+    /// copied, decoded nor inflated, and each MS1 spectrum is returned with
+    /// its metadata, `metadata_only` set and no peaks. It still dates the file
+    /// for quality control and measures nothing.
+    pub fn set_decode_ms1(&mut self, decode_ms1: bool) -> &mut Self {
+        self.decode_ms1 = decode_ms1;
+        self
+    }
+
+    /// Whether the arrays of a spectrum at this MS level are passed over. A
+    /// spectrum whose level is not known yet (0) is decoded, so nothing is
+    /// dropped on a guess.
+    fn skips_arrays(&self, ms_level: u8) -> bool {
+        !self.decode_ms1 && ms_level == 1
     }
 
     /// Here be dragons -
@@ -448,6 +472,7 @@ impl MzMLReader {
         let mut iso_window_lo: Option<f32> = None;
         let mut iso_window_hi: Option<f32> = None;
         let mut spectra = Vec::new();
+        let mut undecoded_ms1 = 0usize;
 
         let mut referenceable_params: HashMap<String, Vec<CvParam>> = HashMap::new();
         let mut current_referenceable_group: Option<String> = None;
@@ -668,6 +693,11 @@ impl MzMLReader {
                                 continue;
                             }
                         }
+                        // An MS1 array this search does not read is not
+                        // copied out of the XML buffer.
+                        if self.skips_arrays(spectrum.ms_level) {
+                            binary_array = None;
+                        }
                         let raw = text.into_inner();
                         // There are occasionally empty binary data arrays, or unknown CVs
                         if raw.is_empty() || binary_array.is_none() {
@@ -742,6 +772,14 @@ impl MzMLReader {
                                     .map(|&level| level == spectrum.ms_level)
                                     .unwrap_or(true);
 
+                            if allow && self.skips_arrays(spectrum.ms_level) {
+                                // The level is read before the arrays, so
+                                // none were kept; clearing covers a file that
+                                // states it after them.
+                                pending_arrays.clear();
+                                spectrum.metadata_only = true;
+                                undecoded_ms1 += 1;
+                            }
                             if allow {
                                 pending.push(PendingSpectrum {
                                     spectrum,
@@ -778,6 +816,12 @@ impl MzMLReader {
             buf.clear();
         }
         decode_batch(pending, self.signal_to_noise, &mut spectra)?;
+        if undecoded_ms1 > 0 {
+            log::debug!(
+                "{} MS1 spectra were not decoded; this search reads only MS2",
+                undecoded_ms1
+            );
+        }
         Ok(spectra)
     }
 }
