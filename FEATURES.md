@@ -69,8 +69,9 @@ how many chance would give, split by where the product sits in its parent. See
 [in-source fragmentation](DOCS.md#in-source-fragmentation).
 
 **Read instrument files directly.** Thermo RAW and mzMLb are read without conversion (upstream Sage
-reads mzML, MGF and Bruker `.d`), and timsTOF
-m/z and 1/K0 use the instrument's full calibration models. Each spectrum carries its analyzer and activation (HCD, CID,
+reads mzML, MGF and Bruker `.d`). timsTOF 1/K0 uses the instrument's TimsCalibration model,
+matching the Bruker SDK, and TSF m/z uses its MzCalibration model (timsrust's linear scale is up
+to ~30 ppm off there). timsTOF TDF m/z stays on the same linear scale as timsrust. Each spectrum carries its analyzer and activation (HCD, CID,
 ETD, EThcD, ETciD), so recalibration never mixes scan types. See [inputs](DOCS.md#spectrum-paths).
 
 ## Features by outcome

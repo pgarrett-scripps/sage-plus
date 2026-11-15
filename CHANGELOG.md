@@ -31,6 +31,11 @@ entries are retained below for provenance.
   near-zero wrong sites (3 of 6,332 and 2 of 467) at 47% and 38% coverage. The scoring rule, the
   accessions and the per-margin table are published with the numbers, and the Beta 14 figures
   are marked as the three-file subset they were measured on. No behaviour changes.
+- `FEATURES.md`, `README.md` and `DOCS.md` no longer say timsTOF m/z uses the instrument's
+  calibration model. TDF m/z has used timsrust's linear scale since the reader moved to
+  `sage-plus-tdf`; only 1/K0 (TDF) and TSF m/z use the stored models. `DOCS.md` also says that
+  `ion_mobility_scale: "linear"` is the scale of Beta 6 (timsrust 0.6.5, linear in √(1/K0)),
+  not that of upstream Sage on timsrust 0.6.6 and later. No behaviour changes.
 
 ## [v0.1.0-beta.21] - 2026-11-14
 
