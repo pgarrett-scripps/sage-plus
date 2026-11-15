@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.20] - 2026-11-14
+
 ### Added
 - A contaminant FASTA ships with Sage Plus: `assets/contaminants/universal-contaminants.fasta`,
   381 entries of laboratory background, in the release archives under `assets/contaminants/` and

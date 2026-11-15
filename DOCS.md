@@ -222,7 +222,7 @@ keys are written to all of them: `results.sage.parquet`, `matched_fragments.sage
 | Key | Value |
 | --- | --- |
 | `sage.provenance.version` | Version of this key set, currently `1`. |
-| `sage.version` | Sage Plus version, such as `0.1.0-beta.18`. |
+| `sage.version` | Sage Plus version, such as `0.1.0-beta.20`. |
 | `sage.git_commit` | Commit the binary was built from. Omitted when unknown. Uncommitted changes are not recorded. `SAGE_GIT_COMMIT` at build time overrides it. |
 | `sage.config` | JSON. The effective configuration with every default filled in, as in `results.json` without `output_paths`. |
 | `sage.inputs` | JSON list, one entry per spectrum file: `name`, `path`, `size_bytes`, `sha256`, and `sha256_skipped` giving the reason when `sha256` is null. |
@@ -619,8 +619,8 @@ For additional information about configuration options and output file formats, 
 Sage can be used from a docker image!
 
 ```shell
-$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.18
-$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.18 sage -o /data /data/config.json
+$ docker pull ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.20
+$ docker run -it --rm -v ${PWD}:/data ghcr.io/pgarrett-scripps/sage-plus:v0.1.0-beta.20 sage -o /data /data/config.json
 # The sage executable is located in /app/sage in the image
 ```
 
@@ -679,7 +679,7 @@ Example:
 
 - **peptide_min_mass**: Float. The minimum monoisotopic mass of peptides to fragment *in silico* (default: 500.0).
 - **peptide_max_mass**: Float. The maximum monoisotopic mass of peptides to fragment *in silico* (default: 5000.0).
-- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot" (also accepted for the last: "zdot", "z." and "z_radical", upstream Sage's name for it; Sage Plus writes "z_dot"). `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. On the dual HCD/ETD dataset PXD018176, `["b", "y", "c", "z_dot"]` gave 5,832 ETD PSMs at 1% FDR against 4,067 with `["b", "y", "c", "z"]` (+43%), with HCD scans unchanged and EThcD flat (measured for Beta 9). Required; there is no default.
+- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot" (also accepted for the last: "zdot", "z." and "z_radical", upstream Sage's name for it; Sage Plus writes "z_dot"). `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. On the dual HCD/ETD dataset PXD018176, `["b", "y", "c", "z_dot"]` gave 5,832 ETD PSMs at 1% FDR against 4,067 with `["b", "y", "c", "z"]` (+43%), with HCD scans unchanged and EThcD flat (measured for Beta 9, before the c/x/z fragment-mass fix in v0.1.0-beta.20; re-measured after it on the deposited `.raw` in [head-to-head](benchmarks/HEADTOHEAD-2026-10.md#re-measured-2026-11-14-after-the-cxz-fragment-mass-fix)). Required; there is no default.
 - **min_ion_index**: Integer. Do not generate b1/bN/y1/yN ions for preliminary searching if `min_ion_index = N`. Does not affect full scoring of PSMs (default: 2).
 
 Example:
