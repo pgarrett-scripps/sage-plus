@@ -46,13 +46,18 @@ entries are retained below for provenance.
   not that of upstream Sage on timsrust 0.6.6 and later. No behaviour changes.
 
 ### Fixed
-- timsTOF ddaPASEF precursors whose `MonoisotopicMz` and `Charge` Bruker left NULL are searched
-  again. About 1.3% of the precursors of a timsTOF Ultra 2 run have no monoisotopic m/z, and
-  the reader searched them at m/z 0, so none could match. They are now searched at the
+- timsTOF ddaPASEF precursors whose `MonoisotopicMz` and `Charge` Bruker left NULL can now be
+  identified. About 1.3% of the precursors of a timsTOF Ultra 2 run have no monoisotopic m/z,
+  and the reader searched them at m/z 0, so none could match. They are now searched at the
   quadrupole isolation centre with the charge unknown, so the configured charge range is tried,
   as upstream Sage does since its timsrust 0.6.7 update. **Results change for timsTOF DDA
-  input**. A spectrum that had a recorded monoisotopic m/z is searched exactly as
-  before. diaPASEF, TSF and miniTDF input is unchanged.
+  input**: on two PXD070049 timsTOF Ultra 2 ddaPASEF runs, PSMs at 1% FDR rise from 37,149 to
+  37,772 and from 38,367 to 39,017 (+1.7%), peptides from 25,386 to 25,417 and from 26,263 to
+  26,308, and protein groups move from 4,736 to 4,746 and from 4,759 to 4,755. A spectrum that
+  had a recorded monoisotopic m/z is searched exactly as before: every PSM row of the earlier
+  build is still there with the same peptide, score and match evidence, and only the
+  discriminant and the q-values move, because the new PSMs join the same rescoring and FDR.
+  diaPASEF, TSF and miniTDF input is unchanged.
 
 ## [v0.1.0-beta.21] - 2026-11-14
 
