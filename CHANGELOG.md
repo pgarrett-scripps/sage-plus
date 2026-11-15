@@ -9,6 +9,20 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Fixed
+- The release workflow builds its container again. The `docker` job does not build from the
+  repository: it stages a minimal context in `.release/docker` and builds from that, and the
+  staging step copied the Dockerfile, `THIRD_PARTY_NOTICES.md` and `licenses` but not `assets`.
+  Since `4d2ceb9` the Dockerfile has `COPY assets/contaminants/`, so the AMD64 build failed with
+  `"/assets/contaminants": not found` and the v0.1.0-beta.20 run published nothing. The staging
+  step now copies `assets` as well (208 KB, the contaminant FASTA and its provenance).
+- `scripts/check-release-container.sh` keeps that class of break out of a release. It replays the
+  staging commands read out of the release workflow itself, so the two cannot drift, and fails if
+  any `COPY` source in the Dockerfile is missing from the staged context; the Rust workflow runs
+  it beside `check-release-version.sh`, which costs about a second and needs no Docker. With
+  `--build PATH` it also assembles the context around a statically linked binary, builds the
+  image and checks that `sage --version` and the bundled contaminant FASTA work inside it.
+
 ## [v0.1.0-beta.20] - 2026-11-14
 
 ### Added

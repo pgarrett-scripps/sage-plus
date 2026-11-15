@@ -37,6 +37,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check release version inheritance
         run: bash scripts/check-release-version.sh
+      - name: Check the release container context
+        run: bash scripts/check-release-container.sh
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run Clippy

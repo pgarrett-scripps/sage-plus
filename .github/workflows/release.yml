@@ -209,7 +209,7 @@ jobs:
           archive="sage-plus-${{ needs.version.outputs.release_tag }}-x86_64-unknown-linux-musl"
           tar xzf ".release/input/$archive.tar.gz" -C .release/input
           mkdir -p .release/docker/target/x86_64-unknown-linux-musl/release
-          cp -R Dockerfile THIRD_PARTY_NOTICES.md licenses .release/docker/
+          cp -R Dockerfile THIRD_PARTY_NOTICES.md licenses assets .release/docker/
           mkdir -p .release/docker/crates/sage/data
           cp crates/sage/data/LICENSE-unimod.txt .release/docker/crates/sage/data/
           cp ".release/input/$archive/sage" .release/docker/target/x86_64-unknown-linux-musl/release/
