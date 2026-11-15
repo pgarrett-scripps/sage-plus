@@ -51,7 +51,7 @@ fn a_localization_is_declined_for_a_decoy_win_or_a_high_q_value() {
 #[test]
 fn the_counts_are_what_the_site_report_leaves_out() {
     let cutoff = 0.01;
-    let mods = vec![
+    let mods = [
         localization(false, 0.001),
         localization(false, 0.5),
         localization(true, 0.0),
