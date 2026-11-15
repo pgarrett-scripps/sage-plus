@@ -8,7 +8,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 | # | Comparison | Upstream Sage v0.15.0-beta.2 | Sage Plus main 9483f1c | Note |
 |---|---|---|---|---|
 | 1 | DDA HYE (PXD028735, 4 files, 3 repeats) | 247,102 PSMs / 57,009 peptides / 6,916 protein groups; median wall 107.6 s; median peak RSS 7.57 GiB | 250,060 / 57,700 / 7,028; median wall 113.7 s; median peak RSS 6.19 GiB | IDs were identical in all 3 repeats. Wall time is within noise, and the Plus median is slower. |
-| 2 | ETD (PXD018176, dual HCD/ETD) | `z` ions: 14,395 PSMs (ETD scans 4,515) / 7,495 peptides / 711 groups; 7.5 s; 1.27 GiB | `z_dot` ions: 16,818 PSMs (ETD scans 6,799) / 7,631 / 725; 6.31 s; 0.82 GiB. With `z` ions: 14,686 (ETD 4,674) / 7,588 / 719 | Medians of 3 repeats. ETD-scan PSMs: +51% with `z_dot`, +3.5% with `z`. |
+| 2 | ETD (PXD018176, dual HCD/ETD) | `z` ions: 14,395 PSMs (ETD scans 4,515) / 7,495 peptides / 711 groups; 7.5 s; 1.27 GiB | `z_dot` ions: 16,818 PSMs (ETD scans 6,799) / 7,631 / 725; 6.31 s; 0.82 GiB. With `z` ions: 14,686 (ETD 4,674) / 7,588 / 719 | Medians of 3 repeats, searching the mzML. ETD-scan PSMs: +51% with `z_dot`, +3.5% with `z`. Re-measured on 2026-11-14 after the c/x/z fragment-mass fix, reading the `.raw`: 16,812 PSMs (ETD 6,803) / 7,637 / 723, +45.5% against our own `z` arm and the +51% against upstream unchanged (see section 2). |
 | 3 | Phospho (PXD007058, 2 files, max_variable_mods 1) | 14,825 PSMs / 6,583 peptides / 4,845 phospho peptides; 26.6 s; 8.06 GiB. Site localization: not available | 14,838 / **6,226** / **4,484**; **44.3 s**; 4.75 GiB. Localization: 2,930 phospho protein sites at 1% site FDR | Plus finds fewer peptides and is slower. The mass-offset arm gives 15,227 / 6,405 / 4,664 in 29.0 s and 1.83 GiB. |
 | 4 | Huge DB (human + 100x IGC gut catalog) | not measured | not measured | Blocked: needs 24 GB free under memgate; the shared machine had about 11 GiB available. |
 | 5 | Thermo RAW end to end (2 PXD007058 files) | ThermoRawFileParser 89.6 s + search 29.0 s = 118.6 s (14,825 PSMs) | Direct .raw read: 44.5 s (14,834 PSMs) | Plus is 2.7x faster end to end. Plus IDs from .raw are within 4 PSMs of its own mzML run. |
@@ -24,7 +24,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 ## Setup
 
 - **Upstream binary:** the official release tarball at `/home/ty/tools/sage-upstream-v0.15.0-beta.2/sage-v0.15.0-beta.2-x86_64-unknown-linux-gnu/sage`. It was run with `--disable-telemetry-i-dont-want-to-improve-sage`.
-- **Sage Plus binary:** `/mnt/data1/build-cache/target-b18-bench/release/sage`.
+- **Sage Plus binary:** built for this session on a desktop workstation, local drive, not retained.
   - Built with `cargo build --release` from a clean worktree at main `9483f1c4eb33f3f2ee4b4b5c1b4475fa6d207b34` ("Use the reader crates from crates.io"). The build log is `build.log` (5m42s).
   - The binary reports version 0.1.0-beta.17. The version string has not been bumped since Beta 17.
   - sha256 `745de67125784e1ad2d151e5598071fd255fac43f39739314805731fbc87529a`
@@ -34,7 +34,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
   - `loadlog.tsv` samples the 1-minute load average and MemAvailable every 30 s. Over the whole session the mean was 13.2, the max 24.7, and the minimum MemAvailable 3.2 GiB.
   - The load average includes the engine's own 16 threads.
   - Per-run load windows are in `results.json` under `load`. Runs shorter than 30 s have no sample.
-- **Memory gate:** every search ran under `/mnt/data1/explore-data/memgate.sh` with `MEMGATE_HEADROOM_GB=2`. The default of 3 never admitted an 8 GB job on this machine.
+- **Memory gate:** every search ran under a `memgate.sh` wrapper on the same workstation (local drive, not retained) with `MEMGATE_HEADROOM_GB=2`. The default of 3 never admitted an 8 GB job on this machine.
 - **Run directories:** each one (`<comparison>/<arm>/runN/`) holds:
   - `config.used.json`, `command.txt`, `env.txt` (threads, gate, binary sha256)
   - `stdout.log`, `stderr.log`, `time.txt` (`/usr/bin/time -v`)
@@ -89,7 +89,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 - **Search settings:** missed cleavages 2, length 7–50, CAM fixed, Met-ox variable, max_variable_mods 2, precursor ±10 ppm, fragment ±20 ppm, isotope errors −1..3, deisotope on, max_fragment_charge 2.
 - **Ion kinds:** `b,y,c,z` (`configs/c2-etd-z.json`) or `b,y,c,z_dot` (`configs/c2-etd-zdot.json`).
 - **Runs:** 3 repeats per arm, alternating. Memgate 4.
-- **Scan types:** the HCD/ETD split is taken from the scan-group table `/mnt/data1/scan-profile-bench/sim/B191108_09_Lumos_AB_DE_165_Ec_dualHCD_ETD_1.groups.tsv`.
+- **Scan types:** the HCD/ETD split came from a scan-group table for `B191108_09_Lumos_AB_DE_165_Ec_dualHCD_ETD_1` (PXD018176) built on a desktop workstation, local drive, not retained. It was rebuilt from the `.raw` for the 2026-11-14 re-measurement below, which agrees with it to within 15 HCD-scan PSMs.
 
 | Arm | PSMs | HCD-scan PSMs | ETD-scan PSMs | Peptides | Protein groups | Median wall | Median RSS |
 |---|---|---|---|---|---|---|---|
@@ -100,6 +100,44 @@ All numbers below come from files in this directory. `results.json` holds the sa
 - The IDs were identical across the 3 repeats of every arm.
 - Upstream has no `z_dot` ion kind.
 - Plus with `z` measures the engine difference at equal ion kinds. Plus with `z_dot` adds the effect of the ion kind.
+
+### Re-measured 2026-11-14, after the c/x/z fragment-mass fix
+
+The ammonia constant in `IonSeries::new` was one electron light until main `fa072b2`, so c ions
+were 0.549 mDa too light and x, z and z-dot ions 0.549 mDa too heavy. The arms above were
+measured before that fix. They were re-measured afterwards, and **this is not the same input**:
+the mzML of the table above and the `ecoli_k12_sp.fasta` it used are both gone, so the
+re-measurement reads the deposited `.raw` of the same file,
+`B191108_09_Lumos_AB_DE_165_Ec_dualHCD_ETD_1.raw` from PXD018176 (604,032,589 bytes, sha256
+begins `03f00f59`), against the submitters' own FASTA deposit `UP000000625_83333.fasta`
+(4,391 entries, sha256 begins `45ede201`). Binaries: main `0e2eff8` before, `fa072b2` after,
+each built in its own worktree and target directory. The HCD/ETD split was rebuilt from the
+`.raw`'s own scan activations (6,765 MS1, 13,846 MS2 HCD, 13,522 MS2 ETD) and agrees with the
+split used above to within 15 HCD-scan PSMs. These were not timing runs, so no wall time or
+peak memory from them is quoted. Every number is from each arm's `run-summary.json`
+(`psms/peptides/proteins/protein_groups_at_one_percent_fdr`). Full record:
+`audits/etd-mass-fix-check-2026-11.md` in the project's shared audit directory, with its own
+`README.md` and `checksums.txt` beside the data.
+
+| Arm | | PSMs | ETD-scan PSMs | HCD-scan PSMs | Peptides | Protein groups |
+|---|---|---:|---:|---:|---:|---:|
+| `b,y,c,z` | before (`0e2eff8`) | 14,678 | 4,673 | 10,005 | 7,589 | 718 |
+| | after (`fa072b2`) | 14,676 | 4,675 | 10,001 | 7,590 | 718 |
+| `b,y,c,z_dot` | before (`0e2eff8`) | 16,796 | 6,792 | 10,004 | 7,629 | 724 |
+| | after (`fa072b2`) | **16,812** | **6,803** | 10,009 | **7,637** | 723 |
+
+- **The October baseline reproduces through the format change:** every column of the `before`
+  rows is within 0.13% of the published table (PSMs 14,686 to 14,678 and 16,818 to 16,796),
+  across a different file format, a different FASTA deposit and a month of commits.
+- **The fix costs nothing and gains a little:** +16 PSMs and +8 peptides (+0.10%) on the
+  `z_dot` arm, −2 PSMs on the even-electron `z` arm.
+- **The evidence that it is right is the mass error, not the counts.** Median signed fragment
+  mass error over matched rank-1 target fragments: b and y identical to four decimals before
+  and after (−0.268 and −0.411 ppm), c moves +0.226 to −0.526 ppm and z-dot −1.236 to
+  −0.456 ppm, each by 0.549 mDa at its series' median m/z and in opposite directions. The
+  z-dot series, which disagreed with b and y by about 0.8-1.0 ppm, now agrees with them inside
+  0.2 ppm, and the whole-file `recommended_tolerances.fragment.sigma_ppm` falls from 1.628 to
+  1.528 ppm on that arm.
 
 ## 3. Phospho: PXD007058
 
@@ -137,7 +175,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 ## 4. Huge DB: blocked, not measured
 
 - **Configs:**
-  - `configs/c4-plus.json`: copied from the Beta 11 run `large-db-20260925/runs-v2-mp4/hek-igc-100x-prefilter/config.json`, with paths changed to `/mnt/data1` and `semi_enzymatic` / `ion_kinds` made explicit.
+  - `configs/c4-plus.json`: copied from the Beta 11 run `large-db-20260925/runs-v2-mp4/hek-igc-100x-prefilter/config.json`, with the input paths changed to this workstation's local drive (not retained) and `semi_enzymatic` / `ion_kinds` made explicit.
   - `configs/c4-upstream.json`: the same settings with the Plus-only keys removed (`max_memory_gb`, `min_free_memory_gb`, `output_filter`, `score_type`, `prefilter*`).
 - **FASTA:** `human-igc-100x.fasta` (human + gut IGC catalog).
 - **Input:** `PXD001468 b1906_293T_proteinID_01A_QE3_122212.mgf`.
@@ -150,7 +188,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 ## 5. Thermo RAW end to end: PXD007058, the same 2 files as C3
 
 - **Converter:** ThermoRawFileParser 2.0.0-dev, the official Linux release.
-  - Location: `/mnt/data1/tools/trfp-v2.0.0-dev-linux/`; zip sha256 begins `19566762`.
+  - Unpacked on a desktop workstation, local drive, not retained; the release zip's sha256 begins `19566762`.
   - Arguments: `-f 2 -l 3`, the same as the original conversions. The commands are in `c5-raw/convert/*.command.txt`.
 - **Upstream:** convert both files, then search the fresh mzMLs (`configs/c5-upstream-mzml.json`).
 - **Sage Plus:** search the `.raw` files directly (`configs/c5-plus-raw.json`).
