@@ -93,8 +93,10 @@ Search: trypsin, 1 missed cleavage, 7-50 residues, CAM fixed, Met-ox variable, �
 precursor, ±20 ppm fragment, generated decoys, RT prediction on, `output_filter.psm_q_value`
 1.0. Baseline = origin/main (beta.12, `54668e1`), picked = this branch. Only the FDR code
 differs, so PSMs and scores are identical. Configs, logs and outputs:
-`/mnt/data1/sage-plus-scientific/picked-fdr-20260927/`; analysis script
-`benchmarks/picked_fdr_entrapment.py`.
+a `picked-fdr-20260927/` directory on a desktop
+workstation, local drive, not retained; the inputs are PXD001468
+`b1906_293T_proteinID_01A` and `b1937_293T_proteinID_01B`, and the analysis script
+`benchmarks/picked_fdr_entrapment.py` is in this repository.
 
 ### At q ≤ 1%
 
