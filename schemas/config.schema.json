@@ -756,6 +756,13 @@
             "null"
           ]
         },
+        "rescue": {
+          "description": "Search each file's unidentified MS2 spectra a second time for the\nin-source products of its confident peptides, each only where its\nparent elutes (default false). See [`crate::in_source_rescue`].",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "rt_tolerance": {
           "description": "Co-elution tolerance in the file's retention-time units. When unset,\neach file's tolerance is derived from the spread of its own repeated\npeptides; see [`derive_rt_tolerance`].",
           "exclusiveMinimum": 0.0,
