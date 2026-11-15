@@ -760,6 +760,19 @@ impl IndexedDatabase {
         self.offset_peptides.len()
     }
 
+    /// The indexed peptide with the same peptidoform as `peptide`, if any.
+    pub fn indexed_peptidoform(&self, peptide: &Peptide) -> Option<PeptideIx> {
+        self.find_indexed(peptide)
+    }
+
+    /// Store a peptide the fragment index was not built with, such as an
+    /// in-source rescue product, beside the materialized mass-offset
+    /// peptidoforms, and return its index. The caller deduplicates.
+    pub fn push_unindexed_peptide(&mut self, peptide: Peptide) -> PeptideIx {
+        self.offset_peptides.push(peptide);
+        PeptideIx((self.peptides.len() + self.offset_peptides.len() - 1) as u32)
+    }
+
     fn find_indexed(&self, peptide: &Peptide) -> Option<PeptideIx> {
         const MASS_EPSILON: f32 = 1e-3;
         let start = self.peptides.partition_point(|candidate| {

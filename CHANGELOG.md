@@ -10,6 +10,13 @@ entries are retained below for provenance.
 ## [Unreleased]
 
 ### Added
+- `in_source.rescue` (default false): a second pass that searches each file's unidentified MS2
+  spectra for the in-source products of its confident peptides, N- and C-terminal truncations
+  down to the enzyme's minimum length and water and ammonia losses, each only where its parent
+  elutes. Rescued PSMs get their own target-decoy q-values, never enter the main FDR, protein
+  inference or quantification, and are added to `results.sage.parquet` with their parent and a
+  new `in_source_rescued` column, written only when the option is on (schema version 9, or 10
+  with precursor labels). With the option off, which is the default, every output is unchanged.
 - `run-summary.json` says how many localizations the site reports leave out, and why:
   `ptm_localization.decoy_arrangement_wins` counts those where an impossible-site decoy
   arrangement won the competition -- which holds whatever `localization_q_value` is set to --

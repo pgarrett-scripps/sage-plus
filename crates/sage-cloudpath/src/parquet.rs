@@ -73,7 +73,8 @@ mod spectral_library;
 
 pub use lfq::{build_lfq_schema, serialize_lfq};
 pub use results::{
-    build_matched_fragment_schema, build_schema, serialize_features, serialize_matched_fragments,
+    build_matched_fragment_schema, build_schema, serialize_features,
+    serialize_features_with_rescue, serialize_matched_fragments,
 };
 pub use sites::{
     deserialize_custom_cleavage_sites, deserialize_ptm_library, serialize_protein_sites,

@@ -137,6 +137,11 @@ pub struct InSourceSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(extend("exclusiveMinimum" = 0.0))]
     pub apex_fwhm_fraction: Option<f32>,
+    /// Search each file's unidentified MS2 spectra a second time for the
+    /// in-source products of its confident peptides, each only where its
+    /// parent elutes (default false). See [`crate::in_source_rescue`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rescue: Option<bool>,
 }
 
 impl InSourceSettings {
@@ -155,6 +160,11 @@ impl InSourceSettings {
             }
         }
         Ok(())
+    }
+
+    /// Whether the in-source rescue pass runs.
+    pub fn rescue(&self) -> bool {
+        self.rescue.unwrap_or(false)
     }
 
     /// The fraction of a peak width within which two apexes are one peak.
@@ -329,6 +339,16 @@ impl PeakApexes {
         }
     }
 
+    /// Peaks given directly, by peptide and file, with no quantified rows: for
+    /// callers that only ask [`Self::peaks`], such as the rescue windows.
+    pub fn from_peaks(peaks: impl IntoIterator<Item = (PeptideIx, usize, PeakShape)>) -> Self {
+        let mut out = Self::default();
+        for (peptide, file_id, shape) in peaks {
+            out.peaks.entry((peptide, file_id)).or_default().push(shape);
+        }
+        out
+    }
+
     /// The peak of one quantified row: that precursor, in that file. A row
     /// without a peak there has none.
     pub fn row(&self, id: &PrecursorId, file_id: usize) -> Option<&PeakShape> {
@@ -463,12 +483,33 @@ pub struct InSourceAnnotations {
     apex_fraction: f32,
     apexes: Option<PeakApexes>,
     files: Vec<InSourceFileStats>,
+    /// PSMs found by the rescue pass, kept apart so that every count of
+    /// flagged PSMs stays the annotation's own.
+    rescued: FnvHashMap<usize, InSourceAnnotation>,
 }
 
 impl InSourceAnnotations {
-    /// The annotation of a PSM, by `psm_id`.
+    /// The annotation of a PSM, by `psm_id`: a flagged PSM of the main search
+    /// or a PSM of the rescue pass.
     pub fn psm(&self, psm_id: usize) -> Option<&InSourceAnnotation> {
-        self.by_psm.get(&psm_id)
+        self.by_psm
+            .get(&psm_id)
+            .or_else(|| self.rescued.get(&psm_id))
+    }
+
+    /// Record a PSM of the rescue pass and the parent it is a product of.
+    pub fn insert_rescued(&mut self, psm_id: usize, annotation: InSourceAnnotation) {
+        self.rescued.insert(psm_id, annotation);
+    }
+
+    /// Whether a PSM came from the rescue pass.
+    pub fn is_rescued(&self, psm_id: usize) -> bool {
+        self.rescued.contains_key(&psm_id)
+    }
+
+    /// The quantified peaks the annotation was given, if quantification ran.
+    pub fn apexes(&self) -> Option<&PeakApexes> {
+        self.apexes.as_ref()
     }
 
     /// The product/parent pairs of a peptide that passed the sequence and mass

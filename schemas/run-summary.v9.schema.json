@@ -829,6 +829,27 @@
           "items": {
             "$ref": "#/$defs/InSourceFileStats"
           }
+        },
+        "rescue": {
+          "type": "array",
+          "description": "The in-source rescue pass, one record per file; absent unless `in_source.rescue` is on. Rescued PSMs are counted at rescue q-value <= 0.01, computed by target-decoy competition within each file's rescue set only.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "file_id": {"type": "integer", "minimum": 0},
+              "parents": {"type": "integer", "minimum": 0, "description": "Confident target peptides of the file used as parents."},
+              "candidates": {"type": "integer", "minimum": 0, "description": "Target candidates searched, after those already in the database were dropped; each has one decoy."},
+              "searched_spectra": {"type": "integer", "minimum": 0, "description": "MS2 spectra of the file with no confident PSM."},
+              "target_hits": {"type": "integer", "minimum": 0},
+              "decoy_hits": {"type": "integer", "minimum": 0},
+              "rescued_psms": {"type": "integer", "minimum": 0},
+              "rescued_suffix": {"type": "integer", "minimum": 0},
+              "rescued_prefix": {"type": "integer", "minimum": 0},
+              "rescued_loss": {"type": "integer", "minimum": 0},
+              "null_shift_widths": {"type": "number", "description": "Present only in a null-control run of the test harness."}
+            },
+            "required": ["file_id", "parents", "candidates", "searched_spectra", "target_hits", "decoy_hits", "rescued_psms", "rescued_suffix", "rescued_prefix", "rescued_loss"]
+          }
         }
       }
     },

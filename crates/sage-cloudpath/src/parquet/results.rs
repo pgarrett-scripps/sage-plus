@@ -3,28 +3,35 @@ use sage_core::immonium::ImmoniumSettings;
 use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    build_results_schema(false)
+    build_results_schema(false, false)
 }
 
 /// Schema version of `results.sage.parquet`: 7 without precursor labels, 8
-/// with them. Versions 3 and 4 added the nullable fragment-loss and immonium
+/// with them, and 9 and 10 for the same two with the `in_source_rescued`
+/// column, which is written only when `in_source.rescue` is on so that every
+/// other search keeps writing the file it always did. Versions 3 and 4 added the nullable fragment-loss and immonium
 /// columns to versions 1 and 2; versions 5 and 6 added `localized_peptide`;
 /// versions 7 and 8 add `in_source_parent_peptide` and `in_source_type`. As
 /// with every optional column before them, the columns are always written and
 /// are null when the option is off.
-fn results_schema_version(has_labels: bool) -> &'static str {
-    if has_labels {
-        "8"
-    } else {
-        "7"
+fn results_schema_version(has_labels: bool, rescue: bool) -> &'static str {
+    match (has_labels, rescue) {
+        (false, false) => "7",
+        (true, false) => "8",
+        (false, true) => "9",
+        (true, true) => "10",
     }
 }
 
-fn build_results_schema(has_labels: bool) -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(if has_labels {
-        include_str!("../../../../schemas/results.sage.v8.parquet.schema")
-    } else {
-        include_str!("../../../../schemas/results.sage.v7.parquet.schema")
+fn build_results_schema(
+    has_labels: bool,
+    rescue: bool,
+) -> Result<Type, parquet::errors::ParquetError> {
+    parquet::schema::parser::parse_message_type(match (has_labels, rescue) {
+        (false, false) => include_str!("../../../../schemas/results.sage.v7.parquet.schema"),
+        (true, false) => include_str!("../../../../schemas/results.sage.v8.parquet.schema"),
+        (false, true) => include_str!("../../../../schemas/results.sage.v9.parquet.schema"),
+        (true, true) => include_str!("../../../../schemas/results.sage.v10.parquet.schema"),
     })
 }
 
@@ -169,16 +176,50 @@ pub fn serialize_features(
     // was searched; without one `is_contaminant` is null on every row.
     protein_classes: Option<&sage_core::fasta::ProteinClasses>,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
+    serialize_features_with_rescue(
+        features,
+        reporter_ions,
+        spectrum_occurrences,
+        filenames,
+        database,
+        output_psm_q_value,
+        provenance,
+        immonium,
+        localization_q_cutoff,
+        in_source,
+        protein_classes,
+        false,
+    )
+}
+
+/// [`serialize_features`], with the `in_source_rescued` column when `rescue`
+/// is set: true on the rows of the in-source rescue pass, which
+/// [`InSourceAnnotations::is_rescued`] names, and false on every other row.
+#[allow(clippy::too_many_arguments)]
+pub fn serialize_features_with_rescue(
+    features: &[&Feature],
+    reporter_ions: &[TmtQuant],
+    spectrum_occurrences: &HashMap<usize, usize>,
+    filenames: &[String],
+    database: &IndexedDatabase,
+    output_psm_q_value: f32,
+    provenance: &[(String, String)],
+    immonium: Option<&ImmoniumSettings>,
+    localization_q_cutoff: Option<f32>,
+    in_source: Option<&InSourceAnnotations>,
+    protein_classes: Option<&sage_core::fasta::ProteinClasses>,
+    rescue: bool,
+) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let has_fragment_losses = database.fragment_losses.is_some();
-    let schema = build_results_schema(has_labels)?;
+    let schema = build_results_schema(has_labels, rescue)?;
 
     let options = writer_properties(
         vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(results_schema_version(has_labels).into()),
+                Some(results_schema_version(has_labels, rescue).into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
@@ -546,6 +587,16 @@ pub fn serialize_features(
                         .map(|classes| classes.is_entrapment(peptide.proteins.iter()))
                 }),
             )?;
+        }
+        if rescue {
+            if let Some(column) = rg.next_column()? {
+                write_optional_column::<BoolType>(
+                    column,
+                    features.iter().map(|f| {
+                        Some(in_source.is_some_and(|annotations| annotations.is_rescued(f.psm_id)))
+                    }),
+                )?;
+            }
         }
 
         rg.close()?;

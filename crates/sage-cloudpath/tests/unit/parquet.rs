@@ -481,6 +481,7 @@ fn in_source_columns_are_null_when_off_and_filled_when_on() -> parquet::errors::
         &InSourceSettings {
             rt_tolerance: Some(0.2),
             apex_fwhm_fraction: None,
+            rescue: None,
         },
         None,
     );
@@ -623,6 +624,7 @@ fn lfq_in_source_columns_judge_a_row_on_its_own_apex() -> parquet::errors::Resul
         &InSourceSettings {
             rt_tolerance: Some(0.2),
             apex_fwhm_fraction: None,
+            rescue: None,
         },
         Some(sage_core::in_source::PeakApexes::from_areas(&areas)),
     );
@@ -1442,5 +1444,106 @@ fn is_entrapment_is_set_only_when_every_protein_of_the_peptide_is() -> parquet::
             .expect("the is_contaminant column is always written");
         assert_eq!(value, "null");
     }
+    Ok(())
+}
+
+/// A results file's schema version and its rows, every value as text.
+type VersionAndRows = (Option<String>, Vec<HashMap<String, String>>);
+
+#[test]
+fn the_rescue_column_is_written_only_when_the_rescue_pass_ran() -> parquet::errors::Result<()> {
+    use sage_core::in_source::{InSourceAnnotation, InSourceAnnotations, InSourceKind, Placement};
+    let mut database = IndexedDatabase::default();
+    for sequence in ["PEPTIDEK", "PTIDEK"] {
+        database.peptides.push(Peptide {
+            sequence: sequence.as_bytes().into(),
+            proteins: vec![Arc::from("P1")].into(),
+            ..Peptide::default()
+        });
+    }
+    let features = [0, 1].map(|index| Feature {
+        psm_id: index as usize,
+        peptide_idx: PeptideIx(index),
+        ..Feature::default()
+    });
+    let mut annotations = InSourceAnnotations::default();
+    annotations.insert_rescued(
+        1,
+        InSourceAnnotation {
+            parent: PeptideIx(0),
+            kind: InSourceKind {
+                placement: Placement::Suffix,
+                loss: None,
+            },
+        },
+    );
+    let write = |rescue| {
+        serialize_features_with_rescue(
+            &features.iter().collect::<Vec<_>>(),
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            Some(&annotations),
+            None,
+            rescue,
+        )
+    };
+    let read = |bytes: Vec<u8>| -> parquet::errors::Result<VersionAndRows> {
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        let version = reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.key == "sage.schema.version")
+            .and_then(|entry| entry.value.clone());
+        let rows = reader
+            .get_row_iter(None)?
+            .map(|row| {
+                row.map(|row| {
+                    row.get_column_iter()
+                        .map(|(name, field)| (name.clone(), field.to_string()))
+                        .collect::<HashMap<_, _>>()
+                })
+            })
+            .collect::<parquet::errors::Result<Vec<_>>>()?;
+        Ok((version, rows))
+    };
+
+    // Off: the file every search has always written, with no new column.
+    let (version, rows) = read(write(false)?)?;
+    assert_eq!(version.as_deref(), Some("7"));
+    assert!(!rows[0].contains_key("in_source_rescued"));
+    assert_eq!(
+        write(false)?,
+        serialize_features(
+            &features.iter().collect::<Vec<_>>(),
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            Some(&annotations),
+            None,
+        )?
+    );
+
+    // On: version 9, the column false on the search's row and true on the
+    // rescued one, whose parent and type are filled like any flagged PSM's.
+    let (version, rows) = read(write(true)?)?;
+    assert_eq!(version.as_deref(), Some("9"));
+    assert_eq!(rows[0]["in_source_rescued"], "false");
+    assert_eq!(rows[1]["in_source_rescued"], "true");
+    assert_eq!(rows[1]["in_source_parent_peptide"], "\"PEPTIDEK\"");
+    assert_eq!(rows[1]["in_source_type"], "\"fragment:suffix\"");
     Ok(())
 }

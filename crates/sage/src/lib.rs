@@ -14,6 +14,7 @@ pub mod fragment_loss;
 pub mod heap;
 pub mod immonium;
 pub mod in_source;
+pub mod in_source_rescue;
 pub mod ion_series;
 pub mod isotopes;
 pub mod lfq;

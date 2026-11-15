@@ -93,6 +93,7 @@ fn settings(rt_tolerance: f32) -> InSourceSettings {
     InSourceSettings {
         rt_tolerance: Some(rt_tolerance),
         apex_fwhm_fraction: None,
+        rescue: None,
     }
 }
 
@@ -967,6 +968,7 @@ fn an_unset_option_follows_the_digest_and_true_or_false_overrides_it() {
     let configured = InSourceSettings {
         rt_tolerance: Some(0.5),
         apex_fwhm_fraction: Some(0.3),
+        rescue: None,
     };
     assert_eq!(
         InSourceConfig::resolve(Some(InSourceConfig::Settings(configured)), false),
@@ -980,6 +982,7 @@ fn a_tolerance_of_zero_or_worse_is_rejected() {
     assert!(InSourceSettings {
         rt_tolerance: Some(0.25),
         apex_fwhm_fraction: Some(0.25),
+        rescue: None,
     }
     .validate()
     .is_ok());
@@ -989,6 +992,7 @@ fn a_tolerance_of_zero_or_worse_is_rejected() {
             InSourceSettings {
                 rt_tolerance: Some(bad),
                 apex_fwhm_fraction: None,
+                rescue: None,
             }
             .validate()
             .is_err(),
@@ -998,6 +1002,7 @@ fn a_tolerance_of_zero_or_worse_is_rejected() {
             InSourceSettings {
                 rt_tolerance: None,
                 apex_fwhm_fraction: Some(bad),
+                rescue: None,
             }
             .validate()
             .is_err(),

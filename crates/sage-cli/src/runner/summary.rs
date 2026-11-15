@@ -81,6 +81,9 @@ pub struct InSourceRunStats {
     #[serde(default)]
     pub modes: Vec<sage_core::in_source::InSourceModeStats>,
     pub files: Vec<sage_core::in_source::InSourceFileStats>,
+    /// The rescue pass, per file, when `in_source.rescue` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rescue: Option<Vec<sage_core::in_source_rescue::InSourceRescueFileStats>>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target

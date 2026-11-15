@@ -379,7 +379,7 @@ impl Runner {
         // quantification ran, the peaks: a product and its parent are judged
         // on their apexes wherever both were quantified in the file, and on
         // PSM retention times otherwise. It changes no feature.
-        let in_source = self.parameters.in_source.as_ref().map(|settings| {
+        let mut in_source = self.parameters.in_source.as_ref().map(|settings| {
             let apexes = areas
                 .as_ref()
                 .map(sage_core::in_source::PeakApexes::from_areas);
@@ -461,10 +461,28 @@ impl Runner {
         log::info!("{}", recommended_tolerances.log_line());
         log::trace!("writing outputs");
 
+        // The in-source rescue pass runs after every calculation its PSMs must
+        // stay out of: spectrum, peptide and protein FDR, protein inference
+        // and quantification. Its rows are written to `results.sage.parquet`
+        // only, after the search's own.
+        let rescue_settings = self
+            .parameters
+            .in_source
+            .filter(|settings| settings.rescue());
+        let (rescued_features, in_source_rescue) = match (rescue_settings, in_source.as_mut()) {
+            (Some(settings), Some(annotations)) => {
+                let (rescued, stats) =
+                    self.in_source_rescue(&outputs.features, &settings, annotations)?;
+                (rescued, Some(stats))
+            }
+            _ => (Vec::new(), None),
+        };
+
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
         let output_features = outputs
             .features
             .iter()
+            .chain(rescued_features.iter())
             .filter(|feature| passes_output_filter(feature, output_psm_q_value))
             .collect::<Vec<_>>();
         log::info!(
@@ -481,7 +499,7 @@ impl Runner {
         );
         self.parquet_provenance = provenance.parquet_metadata();
 
-        let bytes = sage_cloudpath::parquet::serialize_features(
+        let bytes = sage_cloudpath::parquet::serialize_features_with_rescue(
             &output_features,
             &outputs.quant,
             &spectrum_occurrences,
@@ -496,6 +514,7 @@ impl Runner {
                 .then_some(self.parameters.ptm_localization.localization_q_value),
             in_source.as_ref(),
             self.protein_classes.as_ref(),
+            in_source_rescue.is_some(),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -803,6 +822,7 @@ impl Runner {
                 flagged_psms: annotations.flagged_psms(),
                 modes: annotations.run_modes(),
                 files: annotations.files().to_vec(),
+                rescue: in_source_rescue.clone(),
             }),
             modifications: ModificationRunStats {
                 static_definitions: self.database_parameters.static_mods.len(),
