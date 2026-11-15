@@ -475,7 +475,7 @@ impl TdfReader {
                     let scan = scan as u32;
                     let inverse_ion_mobility = scale.precursor(*id as usize, parent as usize, scan);
                     let precursor = Precursor {
-                        mz: precursor.monoisotopic_mz.unwrap_or_default() as f32,
+                        mz: dda_precursor_mz(precursor.monoisotopic_mz, last.isolation_mz) as f32,
                         charge: precursor
                             .charge
                             .and_then(|charge| i8::try_from(charge).ok())
@@ -953,6 +953,21 @@ impl PeakBuffer {
             .drain(..)
             .map(|x| (x.mz, (x.intensity, x.im)))
             .unzip()
+    }
+}
+
+/// The precursor m/z a ddaPASEF spectrum is searched at.
+///
+/// Bruker leaves `Precursors.MonoisotopicMz` (and `Charge`) NULL when its
+/// feature finder could not assign a monoisotopic peak, about 1% of precursors
+/// on a timsTOF Ultra 2 run. Such a precursor was still isolated, so it is
+/// searched at the quadrupole isolation centre, with the charge left unknown so
+/// the configured charge range is tried, as upstream Sage does since a9c2ecb. A
+/// zero or non-finite value is treated as missing, as upstream does.
+fn dda_precursor_mz(monoisotopic_mz: Option<f64>, isolation_mz: f64) -> f64 {
+    match monoisotopic_mz {
+        Some(mz) if mz.is_finite() && mz > 0.0 => mz,
+        _ => isolation_mz,
     }
 }
 

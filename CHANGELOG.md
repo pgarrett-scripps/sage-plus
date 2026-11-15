@@ -45,6 +45,15 @@ entries are retained below for provenance.
   `ion_mobility_scale: "linear"` is the scale of Beta 6 (timsrust 0.6.5, linear in √(1/K0)),
   not that of upstream Sage on timsrust 0.6.6 and later. No behaviour changes.
 
+### Fixed
+- timsTOF ddaPASEF precursors whose `MonoisotopicMz` and `Charge` Bruker left NULL are searched
+  again. About 1.3% of the precursors of a timsTOF Ultra 2 run have no monoisotopic m/z, and
+  the reader searched them at m/z 0, so none could match. They are now searched at the
+  quadrupole isolation centre with the charge unknown, so the configured charge range is tried,
+  as upstream Sage does since its timsrust 0.6.7 update. **Results change for timsTOF DDA
+  input**. A spectrum that had a recorded monoisotopic m/z is searched exactly as
+  before. diaPASEF, TSF and miniTDF input is unchanged.
+
 ## [v0.1.0-beta.21] - 2026-11-14
 
 v0.1.0-beta.20 was tagged and its release run published nothing, because the container build

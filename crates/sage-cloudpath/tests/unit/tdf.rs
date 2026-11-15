@@ -358,3 +358,20 @@ fn non_finite_mz_peaks_are_dropped_instead_of_panicking() {
     assert_eq!(intensity, vec![10.0, 7.0]);
     assert_eq!(mobility, vec![1.0, 1.2]);
 }
+
+#[test]
+fn a_null_monoisotopic_mz_is_searched_at_the_isolation_centre() {
+    // A recorded monoisotopic m/z is used as it always was.
+    assert_eq!(dda_precursor_mz(Some(812.4031), 812.9), 812.4031);
+    // NULL in the TDF, and the zero or non-finite values upstream also treats
+    // as missing, fall back to the quadrupole isolation centre.
+    for missing in [
+        None,
+        Some(0.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+        Some(-1.0),
+    ] {
+        assert_eq!(dda_precursor_mz(missing, 924.0), 924.0, "{missing:?}");
+    }
+}
