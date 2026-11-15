@@ -18,9 +18,9 @@
 //! spectra and scoring them is the runner's.
 
 use crate::database::PeptideIx;
-use crate::enzyme::{Position, ProteinOccurrence};
+use crate::enzyme::{Enzyme, Position, ProteinOccurrence};
 use crate::in_source::{InSourceKind, PeakApexes, Placement};
-use crate::mass::{monoisotopic, H2O, NH3};
+use crate::mass::{monoisotopic, Tolerance, H2O, NEUTRON, NH3};
 use crate::modification::ModificationDefinition;
 use crate::peptide::{AppliedModification, CompactModifications, Peptide, Site};
 use fnv::FnvHashMap;
@@ -41,6 +41,47 @@ pub const RESCUE_REPORT_PSMS: usize = 10;
 /// the rescued count must fall to about the claimed error rate. It is not a
 /// configuration key and is never set in a real search.
 pub const NULL_SHIFT_ENV: &str = "SAGE_IN_SOURCE_RESCUE_NULL_SHIFT";
+
+/// Widest precursor mass window, in daltons, the rescue pass accepts: the
+/// configured tolerance at the heaviest peptide plus the largest isotope
+/// error. The lightest product is the parent less ammonia, 17.0265 Da, so a
+/// window this narrow can never take a parent's own spectrum, whose precursor
+/// is the parent's mass, as a product's. Wider, the parent's spectra that
+/// missed the main threshold would match its truncations, which share its y-
+/// or b-series, and reversed decoys cannot model that: the rescue q-value
+/// would be anti-conservative.
+pub const MAX_PRECURSOR_REACH_DA: f32 = 16.0;
+
+/// Why the rescue pass cannot run with this precursor tolerance, if so.
+pub fn precursor_reach_problem(
+    precursor_tol: Tolerance,
+    isotope_errors: (i8, i8),
+    peptide_max_mass: f32,
+) -> Option<String> {
+    let (lo, hi, scale) = match precursor_tol {
+        Tolerance::Da(lo, hi) => (lo, hi, 1.0),
+        Tolerance::Ppm(lo, hi) => (lo, hi, peptide_max_mass * 1e-6),
+        Tolerance::Pct(lo, hi) => (lo, hi, peptide_max_mass * 1e-2),
+    };
+    // `f32::max` drops a NaN operand, so a NaN bound is tested on its own.
+    let half_width = if lo.is_finite() && hi.is_finite() {
+        lo.abs().max(hi.abs()) * scale
+    } else {
+        f32::INFINITY
+    };
+    let isotopes = f32::from(
+        isotope_errors
+            .0
+            .unsigned_abs()
+            .max(isotope_errors.1.unsigned_abs()),
+    );
+    let reach = half_width + isotopes * NEUTRON;
+    (!reach.is_finite() || reach >= MAX_PRECURSOR_REACH_DA).then(|| {
+        format!(
+            "the precursor window reaches {reach:.2} Da at {peptide_max_mass} Da (tolerance plus isotope errors); in_source.rescue needs it below {MAX_PRECURSOR_REACH_DA} Da, the smallest product-to-parent mass difference less a margin, or a parent's own spectra would match its products"
+        )
+    })
+}
 
 /// One product a parent can give in the source, as a peptide to search.
 #[derive(Clone, Debug)]
@@ -67,12 +108,13 @@ pub struct RescueCandidate {
 ///
 /// The modifications on the residues a piece keeps stay where they were; a
 /// terminal modification of the parent stays only on a piece that keeps that
-/// terminus. A parent whose sequence is not a view of a stored sequence, or
-/// that is a decoy, gives nothing.
+/// terminus. Missed cleavages are counted on the piece itself with `enzyme`.
+/// A decoy parent gives nothing.
 pub fn candidates_of(
     parent: &Peptide,
     parent_idx: PeptideIx,
     min_len: usize,
+    enzyme: Option<&Enzyme>,
 ) -> Vec<RescueCandidate> {
     if parent.decoy {
         return Vec::new();
@@ -105,6 +147,14 @@ pub fn candidates_of(
         }
     }
     out.into_iter()
+        .map(|(mut peptide, kind)| {
+            if let Some(enzyme) = enzyme {
+                peptide.missed_cleavages =
+                    crate::digestion::missed_cleavages(enzyme, peptide.sequence.as_bytes())
+                        .min(u8::MAX as usize) as u8;
+            }
+            (peptide, kind)
+        })
         .map(|(peptide, kind)| RescueCandidate {
             peptide,
             parent: parent_idx,
@@ -314,6 +364,14 @@ pub struct InSourceRescueFileStats {
     pub rescued_suffix: usize,
     pub rescued_prefix: usize,
     pub rescued_loss: usize,
+    /// Candidate pairs dropped because the decoy equals its own target (a
+    /// palindromic interior) or a target of this rescue set or of the
+    /// database, as the database digest drops such decoys.
+    pub dropped_decoy_collisions: usize,
+    /// Why the file was not searched, when it was not: its spectra could not
+    /// be read again. The run carries on without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<String>,
     /// Set when the null-control harness shifted the windows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub null_shift_widths: Option<f32>,

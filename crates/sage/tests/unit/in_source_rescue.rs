@@ -23,6 +23,10 @@ fn database() -> IndexedDatabase {
     builder.make_parameters().unwrap().build(fasta)
 }
 
+fn trypsin() -> Option<crate::enzyme::Enzyme> {
+    crate::enzyme::Enzyme::new("KR", "P", true, false)
+}
+
 #[test]
 fn the_whole_span_reproduces_the_parent() {
     let db = database();
@@ -57,7 +61,7 @@ fn pieces_keep_their_residues_modifications_and_the_right_mass() {
         })
         .expect("an acetylated, oxidised target");
     let len = parent.sequence.len();
-    let candidates = candidates_of(parent, PeptideIx(0), 4);
+    let candidates = candidates_of(parent, PeptideIx(0), 4, trypsin().as_ref());
     // Every suffix and prefix down to 4 residues, and two losses.
     assert_eq!(candidates.len(), 2 * (len - 4) + 2);
     for candidate in &candidates {
@@ -99,6 +103,11 @@ fn pieces_keep_their_residues_modifications_and_the_right_mass() {
             candidate.kind
         );
         assert!(!piece.decoy);
+        // Missed cleavages are the piece's own, not the parent's.
+        assert_eq!(
+            piece.missed_cleavages as usize,
+            crate::digestion::missed_cleavages(&trypsin().unwrap(), piece.sequence.as_bytes())
+        );
         assert!(candidate.kind.placement == Placement::SameSpan || piece.semi_enzymatic);
         let site = &piece.protein_sites[0];
         assert_eq!(
@@ -116,11 +125,11 @@ fn pieces_keep_their_residues_modifications_and_the_right_mass() {
 fn decoy_parents_and_short_parents_give_nothing_shorter_than_the_minimum() {
     let db = database();
     let decoy = db.peptides.iter().find(|p| p.decoy).unwrap();
-    assert!(candidates_of(decoy, PeptideIx(0), 4).is_empty());
+    assert!(candidates_of(decoy, PeptideIx(0), 4, trypsin().as_ref()).is_empty());
     let target = db.peptides.iter().find(|p| !p.decoy).unwrap();
     let len = target.sequence.len();
     // A minimum at the parent's own length leaves only the two losses.
-    let only_losses = candidates_of(target, PeptideIx(0), len);
+    let only_losses = candidates_of(target, PeptideIx(0), len, trypsin().as_ref());
     assert_eq!(only_losses.len(), 2);
     assert!(only_losses
         .iter()
@@ -183,4 +192,110 @@ fn q_values_are_target_decoy_competition_within_the_set() {
         assert!((got - want).abs() < 1e-6, "{q:?}");
     }
     assert!(competition_q_values(&[]).is_empty());
+}
+
+#[test]
+fn a_b_type_piece_shifts_its_y_series_by_water_and_leaves_its_b_series() {
+    use crate::ion_series::{IonSeries, Kind};
+    let db = database();
+    let parent = db
+        .peptides
+        .iter()
+        .find(|p| !p.decoy && p.sequence.len() >= 8)
+        .unwrap();
+    let end = parent.sequence.len() - 2;
+    let piece = truncate(parent, 0..end, None, Some(-H2O)).unwrap();
+    let ordinary = truncate(parent, 0..end, None, None).unwrap();
+    let ions = |peptide, kind| {
+        IonSeries::new(peptide, kind)
+            .map(|ion| ion.monoisotopic_mass)
+            .collect::<Vec<_>>()
+    };
+    let (b_piece, b_ordinary) = (ions(&piece, Kind::B), ions(&ordinary, Kind::B));
+    assert_eq!(b_piece.len(), b_ordinary.len());
+    for (a, b) in b_piece.iter().zip(&b_ordinary) {
+        assert!((a - b).abs() < 1e-3, "b {a} vs {b}");
+    }
+    let (y_piece, y_ordinary) = (ions(&piece, Kind::Y), ions(&ordinary, Kind::Y));
+    assert_eq!(y_piece.len(), y_ordinary.len());
+    for (a, b) in y_piece.iter().zip(&y_ordinary) {
+        assert!((a - (b - H2O)).abs() < 1e-3, "y {a} vs {b} - H2O");
+    }
+}
+
+#[test]
+fn tied_scores_share_one_q_value() {
+    // A target and a decoy tie at the top: both take (1 + 1) / 1, then the
+    // running minimum from below.
+    let evidence = [(9.0, false), (9.0, true), (8.0, false), (7.0, false)];
+    let q = competition_q_values(&evidence);
+    assert_eq!(q[0], q[1]);
+    // Thresholds: 9 -> (1+1)/1 = 1; 8 -> 2/2 = 1; 7 -> 2/3.
+    for (got, want) in q.iter().zip([2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0]) {
+        assert!((got - want).abs() < 1e-6, "{q:?}");
+    }
+}
+
+#[test]
+fn label_channel_masses_survive_truncation() {
+    // A SILAC K8/R10 search: heavy and light partners are expanded from
+    // channel offsets, and the label sits on the C-terminal K or R.
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"missed_cleavages": 1, "min_len": 5, "max_len": 30},
+        "static_mods": {
+            "CAM": {"mass": 57.021464, "sites": ["C"]},
+            "SILAC-K": {"mass": 0.0, "sites": ["K"], "channel_offsets": {"light": 0.0, "heavy": 8.014199}},
+            "SILAC-R": {"mass": 0.0, "sites": ["R"], "channel_offsets": {"light": 0.0, "heavy": 10.008269}}
+        },
+        "generate_decoys": true
+    }))
+    .unwrap();
+    let fasta = Fasta::parse(
+        ">P1\nMSTEACMPLLGQRVDAHCMNEILTKSSWYPEAGCLLK\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    let db = builder.make_parameters().unwrap().build(fasta);
+    let heavy = db
+        .peptides
+        .iter()
+        .filter(|p| !p.decoy && p.label_channel_str() == Some("heavy"))
+        .collect::<Vec<_>>();
+    assert!(!heavy.is_empty(), "no heavy peptides were expanded");
+    for parent in db.peptides.iter().filter(|p| !p.decoy) {
+        let len = parent.sequence.len();
+        let whole = truncate(parent, 0..len, None, None).unwrap();
+        assert!(
+            (whole.monoisotopic - parent.monoisotopic).abs() < 1e-3,
+            "{parent}: {} vs {}",
+            whole.monoisotopic,
+            parent.monoisotopic
+        );
+        assert_eq!(whole.label_channel_str(), parent.label_channel_str());
+        // A suffix keeps the C-terminal K or R, and its label mass.
+        let suffix = truncate(parent, 1..len, None, None).unwrap();
+        let first = parent.sequence.as_bytes()[0];
+        let expected = parent.monoisotopic
+            - monoisotopic(first)
+            - parent.modification_at(0)
+            - parent.nterm.unwrap_or(0.0);
+        assert!(
+            (suffix.monoisotopic - expected).abs() < 1e-3,
+            "{parent} suffix: {} vs {expected}",
+            suffix.monoisotopic
+        );
+    }
+}
+
+#[test]
+fn the_precursor_window_must_stay_short_of_the_lightest_product() {
+    // 20 ppm at 5,000 Da with isotope errors -1..3: 0.1 + 3 x 1.00335 Da.
+    assert!(precursor_reach_problem(Tolerance::Ppm(-20.0, 20.0), (-1, 3), 5000.0).is_none());
+    // An open search reaches the parent itself.
+    let problem = precursor_reach_problem(Tolerance::Da(-500.0, 100.0), (0, 0), 5000.0).unwrap();
+    assert!(problem.contains("500.00 Da"), "{problem}");
+    // So do wide isotope errors on a narrow tolerance.
+    assert!(precursor_reach_problem(Tolerance::Ppm(-10.0, 10.0), (-16, 0), 5000.0).is_some());
+    assert!(precursor_reach_problem(Tolerance::Ppm(f32::NAN, 10.0), (0, 0), 5000.0).is_some());
 }

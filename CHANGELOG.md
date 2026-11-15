@@ -16,7 +16,10 @@ entries are retained below for provenance.
   elutes. Rescued PSMs get their own target-decoy q-values, never enter the main FDR, protein
   inference or quantification, and are added to `results.sage.parquet` with their parent and a
   new `in_source_rescued` column, written only when the option is on (schema version 9, or 10
-  with precursor labels). With the option off, which is the default, every output is unchanged.
+  with precursor labels). A file that cannot be read again is skipped and recorded rather than
+  failing the run, and the pass is skipped for a precursor window of 16 Da or more (open
+  searches), where its q-value would be optimistic. With the option off, which is the default,
+  every output is unchanged.
 - `run-summary.json` says how many localizations the site reports leave out, and why:
   `ptm_localization.decoy_arrangement_wins` counts those where an impossible-site decoy
   arrangement won the competition -- which holds whatever `localization_q_value` is set to --

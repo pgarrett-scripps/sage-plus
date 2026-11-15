@@ -1516,26 +1516,40 @@ fn the_rescue_column_is_written_only_when_the_rescue_pass_ran() -> parquet::erro
         Ok((version, rows))
     };
 
-    // Off: the file every search has always written, with no new column.
+    // Off: the file every search has always written. Its top-level fields are
+    // exactly the version 7 schema file's, and version 9 is that schema with
+    // one field more.
+    let fields = |bytes: Vec<u8>| -> parquet::errors::Result<Vec<String>> {
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes))?;
+        Ok(reader
+            .metadata()
+            .file_metadata()
+            .schema()
+            .get_fields()
+            .iter()
+            .map(|field| field.name().to_string())
+            .collect())
+    };
+    let schema_fields = |text: &str| -> parquet::errors::Result<Vec<String>> {
+        Ok(parquet::schema::parser::parse_message_type(text)?
+            .get_fields()
+            .iter()
+            .map(|field| field.name().to_string())
+            .collect())
+    };
+    let v7 = schema_fields(include_str!(
+        "../../../../schemas/results.sage.v7.parquet.schema"
+    ))?;
+    let v9 = schema_fields(include_str!(
+        "../../../../schemas/results.sage.v9.parquet.schema"
+    ))?;
+    assert_eq!(v9[..v9.len() - 1], v7[..]);
+    assert_eq!(v9.last().map(String::as_str), Some("in_source_rescued"));
+    assert_eq!(fields(write(false)?)?, v7);
+    assert_eq!(fields(write(true)?)?, v9);
     let (version, rows) = read(write(false)?)?;
     assert_eq!(version.as_deref(), Some("7"));
     assert!(!rows[0].contains_key("in_source_rescued"));
-    assert_eq!(
-        write(false)?,
-        serialize_features(
-            &features.iter().collect::<Vec<_>>(),
-            &[],
-            &HashMap::new(),
-            &["run-a".into()],
-            &database,
-            1.0,
-            &[],
-            None,
-            None,
-            Some(&annotations),
-            None,
-        )?
-    );
 
     // On: version 9, the column false on the search's row and true on the
     // rescued one, whose parent and type are filled like any flagged PSM's.

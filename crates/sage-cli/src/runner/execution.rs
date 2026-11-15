@@ -313,6 +313,13 @@ impl Runner {
             .map(|entry| entry.fragments.len())
             .sum::<usize>();
 
+        // The in-source rescue pass writes its rows on the aligned scale too.
+        let rescue_alignments = self
+            .parameters
+            .in_source
+            .is_some_and(|settings| settings.rescue())
+            .then(|| alignments.clone())
+            .flatten();
         let areas = alignments.and_then(|alignments| {
             if self.parameters.quant.lfq {
                 log::trace!("performing LFQ");
@@ -471,8 +478,12 @@ impl Runner {
             .filter(|settings| settings.rescue());
         let (rescued_features, in_source_rescue) = match (rescue_settings, in_source.as_mut()) {
             (Some(settings), Some(annotations)) => {
-                let (rescued, stats) =
-                    self.in_source_rescue(&outputs.features, &settings, annotations)?;
+                let (rescued, stats) = self.in_source_rescue(
+                    &outputs.features,
+                    &settings,
+                    annotations,
+                    rescue_alignments.as_deref(),
+                )?;
                 (rescued, Some(stats))
             }
             _ => (Vec::new(), None),
@@ -488,7 +499,7 @@ impl Runner {
         log::info!(
             "writing {} of {} PSMs at spectrum q-value <= {}",
             output_features.len(),
-            outputs.features.len(),
+            outputs.features.len() + rescued_features.len(),
             output_psm_q_value
         );
 

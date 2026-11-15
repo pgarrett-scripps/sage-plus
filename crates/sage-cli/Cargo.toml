@@ -13,6 +13,10 @@ publish = false
 default = ["mzmlb", "cloud"]
 mzmlb = ["sage-cloudpath/mzmlb"]
 cloud = ["sage-cloudpath/cloud"]
+# Test harness only: read SAGE_IN_SOURCE_RESCUE_NULL_SHIFT to shift the
+# in-source rescue co-elution windows for the null control. Never in a
+# released build.
+in-source-rescue-null-control = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

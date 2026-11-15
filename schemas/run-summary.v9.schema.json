@@ -846,9 +846,11 @@
               "rescued_suffix": {"type": "integer", "minimum": 0},
               "rescued_prefix": {"type": "integer", "minimum": 0},
               "rescued_loss": {"type": "integer", "minimum": 0},
+              "dropped_decoy_collisions": {"type": "integer", "minimum": 0, "description": "Candidate pairs dropped because the decoy reads as its own target, another candidate or a database peptide."},
+              "skipped": {"type": "string", "description": "Why the file was not searched: its spectra could not be read again, or the pass cannot run with this search's settings."},
               "null_shift_widths": {"type": "number", "description": "Present only in a null-control run of the test harness."}
             },
-            "required": ["file_id", "parents", "candidates", "searched_spectra", "target_hits", "decoy_hits", "rescued_psms", "rescued_suffix", "rescued_prefix", "rescued_loss"]
+            "required": ["file_id", "parents", "candidates", "searched_spectra", "target_hits", "decoy_hits", "rescued_psms", "rescued_suffix", "rescued_prefix", "rescued_loss", "dropped_decoy_collisions"]
           }
         }
       }
