@@ -253,6 +253,20 @@ entries are retained below for provenance.
   `database build: <stage> <elapsed>`.
 
 ### Fixed
+- c, x, z and z-dot fragment masses were off by one electron mass (0.549 mDa). The ammonia
+  constant in `IonSeries::new` was `N + 2H + proton` (17.026001) instead of neutral
+  `N + 3H` (17.026549), so every c ion was 0.549 mDa too light and every x, z and z-dot ion
+  0.549 mDa too heavy: 4.8 ppm at c1 and 4.2 ppm at z-dot 1, falling to about 0.8 ppm at
+  m/z 670. With a 20 ppm fragment tolerance that moved which matches a c/z search found; a
+  b/y search never used the constant and is unchanged. Upstream fixed the same constant in
+  `cb9934f`, which is an ancestor of this tree, but the merge kept the Sage Plus
+  `ion_series.rs`. A radical z ion is now `y - NH2` with `NH2 = N + 2H`, the way upstream
+  writes it, and the whole a/b/c/x/y/z/z-dot series of PEPTIDE is pinned in
+  `crates/sage/tests/unit/ion_series.rs` against m/z computed by hand from the element
+  masses, to 0.2 mDa.
+- `z_radical`, upstream's name for the z-dot ion (`cb9934f`), is accepted in `ion_kinds`
+  beside `z_dot`, `zdot` and `z.`. Sage Plus still writes `z_dot` everywhere, so a
+  configuration using either name produces the same output and the same provenance.
 - A modification key that is not a site specificity is reported instead of panicking.
   `validate_mods`, `validate_var_mods` and `Database::make_parameters` now return
   `Result`, carrying `invalid modification key \`<key>\`` — the message

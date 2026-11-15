@@ -17,7 +17,7 @@ implementation and does not carry the upstream one:
 | Upstream | Sage Plus keeps |
 | --- | --- |
 | named PTMs (`44be82a`) | named modifications with explicit sites |
-| radical z ions, `Kind::ZRadical` (`cb9934f`) | `z_dot` ions, `Kind::ZDot` |
+| radical z ions, `Kind::ZRadical` (`cb9934f`) | `z_dot` ions, `Kind::ZDot`, with `z_radical` accepted as a configuration alias. The ammonia constant that commit also fixed is now taken as written there |
 | per-mod variable modification limits (`2c9922e`) | per-modification `max_count`/`max_total_count` (see [DOCS.md](DOCS.md#static-and-variable-behavior)) |
 | timsrust 0.6.7, OpenTFRaw | `sage-plus-tdf` and `sage-plus-raw` from crates.io |
 | telemetry and its URL change (`a5eaa01`) | telemetry removed |

@@ -679,7 +679,7 @@ Example:
 
 - **peptide_min_mass**: Float. The minimum monoisotopic mass of peptides to fragment *in silico* (default: 500.0).
 - **peptide_max_mass**: Float. The maximum monoisotopic mass of peptides to fragment *in silico* (default: 5000.0).
-- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot". `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. On the dual HCD/ETD dataset PXD018176, `["b", "y", "c", "z_dot"]` gave 5,832 ETD PSMs at 1% FDR against 4,067 with `["b", "y", "c", "z"]` (+43%), with HCD scans unchanged and EThcD flat (measured for Beta 9). Required; there is no default.
+- **ion_kinds**: List of strings. Which fragment ions to produce? Allowed values: "a", "b", "c", "x", "y", "z", "z_dot" (also accepted for the last: "zdot", "z." and "z_radical", upstream Sage's name for it; Sage Plus writes "z_dot"). `"z"` is the even-electron z ion (y − NH3); `"z_dot"` is the radical z• ion (z + H) that ETD and EThcD produce, so ETD searches should usually use `["b", "y", "c", "z_dot"]`. On the dual HCD/ETD dataset PXD018176, `["b", "y", "c", "z_dot"]` gave 5,832 ETD PSMs at 1% FDR against 4,067 with `["b", "y", "c", "z"]` (+43%), with HCD scans unchanged and EThcD flat (measured for Beta 9). Required; there is no default.
 - **min_ion_index**: Integer. Do not generate b1/bN/y1/yN ions for preliminary searching if `min_ion_index = N`. Does not affect full scoring of PSMs (default: 2).
 
 Example:

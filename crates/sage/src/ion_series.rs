@@ -28,7 +28,7 @@ pub enum Kind {
     /// Even-electron z ion, y - NH3.
     Z,
     /// Radical z-dot ion, z + H: the z ion ETD and EThcD produce.
-    #[serde(rename = "z_dot", alias = "zdot", alias = "z.")]
+    #[serde(rename = "z_dot", alias = "zdot", alias = "z.", alias = "z_radical")]
     ZDot,
 }
 
@@ -256,9 +256,13 @@ impl<'p> IonSeries<'p> {
         const C: f32 = 12.0;
         const O: f32 = 15.994914;
         const H: f32 = 1.007825;
-        const PRO: f32 = 1.0072764;
         const N: f32 = 14.003074;
-        const NH3: f32 = N + H * 2.0 + PRO;
+        // Neutral ammonia and the NH2 that a radical z ion loses from y. The
+        // third hydrogen was a proton (1.0072764) here, one electron light, so
+        // every c ion came out 0.55 mDa too light and every x, z and z-dot ion
+        // 0.55 mDa too heavy. Upstream fixed the same constant in cb9934f.
+        const NH2: f32 = N + H * 2.0;
+        const NH3: f32 = N + H * 3.0;
 
         let cumulative_mass = match kind {
             Kind::A => peptide.nterm.unwrap_or_default() - (C + O),
@@ -269,7 +273,7 @@ impl<'p> IonSeries<'p> {
             }
             Kind::Y => peptide.monoisotopic - peptide.nterm.unwrap_or_default(),
             Kind::Z => peptide.monoisotopic - peptide.nterm.unwrap_or_default() - NH3,
-            Kind::ZDot => peptide.monoisotopic - peptide.nterm.unwrap_or_default() - NH3 + H,
+            Kind::ZDot => peptide.monoisotopic - peptide.nterm.unwrap_or_default() - NH2,
         };
         Self {
             kind,

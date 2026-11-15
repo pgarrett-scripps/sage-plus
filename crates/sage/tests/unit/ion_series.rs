@@ -393,3 +393,108 @@ fn z_dot_ions_are_one_hydrogen_heavier_than_z() {
     }
     assert_eq!(serde_json::to_string(&Kind::ZDot).unwrap(), "\"z_dot\"");
 }
+
+/// Assert m/z to 0.2 mDa: tight enough to catch the 0.549 mDa (one electron)
+/// ammonia error this file pins, loose enough for f32 rounding over a
+/// six-residue running sum.
+fn check_exactly<I: Iterator<Item = Ion>>(iter: I, expected_mz: &[f32]) {
+    let observed = iter.map(|ion| ion.monoisotopic_mass).collect::<Vec<f32>>();
+    assert_eq!(expected_mz.len(), observed.len());
+    for (expected, got) in expected_mz.iter().zip(observed.iter()) {
+        assert!(
+            (expected - got).abs() < 0.0002,
+            "expected {expected}, got {got}, off by {:.6}",
+            got - expected
+        );
+    }
+}
+
+/// Every series of PEPTIDE against m/z computed by hand from the element
+/// masses, pinned tightly enough to see the ammonia error.
+///
+/// Neutral ammonia is N + 3H = 17.026549 and NH2 is N + 2H = 16.018724: a c ion
+/// is b + NH3, a z ion is y - NH3, a radical z-dot ion is y - NH2 and an x ion
+/// is y + CO - 2H. The third hydrogen of NH3 used to be a proton (1.0072764),
+/// one electron light, so c ions came out 0.549 mDa too light (4.8 ppm at c1,
+/// 0.8 ppm at c6) and x, z and z-dot ions 0.549 mDa too heavy. a and b ions
+/// never involved it and are pinned here to show they did not move.
+#[test]
+fn series_masses_pin_the_ammonia_constant() {
+    let peptide = peptide("PEPTIDE");
+
+    check_exactly(
+        ions!(&peptide, Kind::A, 1.0),
+        &[
+            70.06512, 199.1077, 296.16046, 397.20816, 510.29221, 625.31909,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::B, 1.0),
+        &[
+            98.06004, 227.10262, 324.15536, 425.20306, 538.28711, 653.31403,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::C, 1.0),
+        &[
+            115.08659, 244.12917, 341.18192, 442.22961, 555.31366, 670.34058,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::X, 1.0),
+        &[
+            729.2937, 600.2511, 503.19836, 402.15067, 289.06662, 174.03967,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::Y, 1.0),
+        &[
+            703.31445, 574.27185, 477.21909, 376.17139, 263.08734, 148.06041,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::Z, 1.0),
+        &[
+            686.2879, 557.2453, 460.19254, 359.14484, 246.06081, 131.03386,
+        ],
+    );
+    check_exactly(
+        ions!(&peptide, Kind::ZDot, 1.0),
+        &[
+            687.29572, 558.25311, 461.20035, 360.15265, 247.06863, 132.04169,
+        ],
+    );
+}
+
+/// A z-dot ion is exactly one hydrogen heavier than the even-electron z ion,
+/// and exactly NH2 lighter than y.
+#[test]
+fn z_dot_minus_z_is_exactly_one_hydrogen() {
+    let peptide = peptide("PEPTIDE");
+    let z = ions!(&peptide, Kind::Z, 1.0).map(|ion| ion.monoisotopic_mass);
+    let z_dot = ions!(&peptide, Kind::ZDot, 1.0)
+        .map(|ion| ion.monoisotopic_mass)
+        .collect::<Vec<_>>();
+    for (z, z_dot) in z.zip(z_dot) {
+        assert!(
+            (z_dot - z - 1.007825).abs() < 0.0002,
+            "z {z}, z-dot {z_dot}, difference {:.6}",
+            z_dot - z
+        );
+    }
+}
+
+/// `z_radical` is upstream's name for the same ion (`cb9934f`); we accept it in
+/// a configuration and keep writing `z_dot`.
+#[test]
+fn z_radical_is_accepted_as_z_dot() {
+    let kinds: Vec<Kind> = serde_json::from_str(r#"["c","z_radical","z"]"#).unwrap();
+    assert_eq!(kinds, vec![Kind::C, Kind::ZDot, Kind::Z]);
+    assert_eq!(
+        serde_json::to_string(&kinds).unwrap(),
+        r#"["c","z_dot","z"]"#
+    );
+    for alias in [r#""z_dot""#, r#""zdot""#, r#""z.""#, r#""z_radical""#] {
+        assert_eq!(serde_json::from_str::<Kind>(alias).unwrap(), Kind::ZDot);
+    }
+}
