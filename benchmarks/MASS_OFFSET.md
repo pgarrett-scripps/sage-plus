@@ -4,8 +4,9 @@ Evaluation of `search_mode: "mass_offset"` (searching a modification as a precur
 fragment offset) against the equivalent database expansion. Run on 2026-09-19 with
 `claude/mass-offset-search` and the unmodified `0bfd5be` binary as the reference.
 
-Artifacts, configurations, logs, and analysis scripts:
-`/mnt/data1/sage-plus-mass-offset-eval` (run_eval.py, analyze.py, runs/, cascade/).
+Artifacts, configurations, logs, and analysis scripts: a `sage-plus-mass-offset-eval`
+directory on a desktop workstation, local drive, not retained (run_eval.py, analyze.py, runs/,
+cascade/).
 Spectra and truth come from the existing scientific corpus under
 `/data/sage-plus-scientific/20260914`; identity of those inputs is recorded there and is
 not re-established here.
@@ -97,8 +98,8 @@ full workflow was run end to end with phospho declared as a mass offset:
   modification: 2960 of 2961 rank-1 spectra identical, every hyperscore identical, and a
   smaller index (203,040 vs 203,852 peptides).
 
-Cascade needs two source changes, kept in
-`/mnt/data1/sage-plus-mass-offset-eval/cascade-search-mode.patch`:
+Cascade needs two source changes, kept as `cascade-search-mode.patch` in that same
+directory (desktop workstation, local drive, not retained):
 
 1. Pass `search_mode` through `mods.json` into generated Sage configurations
    (`crates/cascade/src/mods.rs`). Without it the field is silently dropped.

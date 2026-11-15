@@ -472,12 +472,13 @@ gain still has to be measured once the features are wired into core LDA (M3).
 ### Reproduce
 
 ```text
-CARGO_TARGET_DIR=/mnt/data1/build-cache/feat-dia cargo build --profile fast-release -p sage-cli --example dia_explore
+cargo build --profile fast-release -p sage-cli --example dia_explore
 dia_explore --raw LFQ_Orbitrap_AIF_Ecoli_01.raw --fasta ecoli.fasta --out DIR \
     --mode wide|pseudo|rescore|tiered|hillfilter [--min-corr 0.5 --apex-tolerance 2 --ms2-min-scans 3 --q3]
 ```
 
-Outputs from the runs are in `/mnt/data1/explore-data/dia/runs/`.
+Outputs from the runs are in a `dia/runs/` directory on a desktop workstation, local drive,
+not retained. The input is PXD028735 `LFQ_Orbitrap_AIF_Ecoli_01.raw`.
 
 ## 9. M1 two-tier benchmark (Orbitrap AIF E. coli, PXD028735)
 

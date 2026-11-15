@@ -71,8 +71,9 @@ two engines assign peptides to groups and estimate protein-level q-values differ
   locally; `Human_01` excluded).
 - FASTA: `hye-irt-defined.fasta` (20,416 human, 6,067 yeast and 4,396 E. coli entries, plus iRT).
   Species come from the accession prefix (`human:`, `yeast:`, `ecoli:`).
-- Expected ratios, from `/mnt/data1/sage-plus-scientific/20260914/quantification-plan.json`
-  (`primary_ratios`): "B over A: human 1, yeast 0.5, E. coli 4", i.e. log2(A/B) = 0, +1, -2.
+- Expected ratios, from the `primary_ratios` of a `quantification-plan.json` written for the
+  PXD028735 HYE design on a desktop workstation, local drive, not retained: "B over A: human 1,
+  yeast 0.5, E. coli 4", i.e. log2(A/B) = 0, +1, -2.
 
 ## Configuration and commands
 

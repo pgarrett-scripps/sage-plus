@@ -28,7 +28,8 @@ Spectra and references are external to this repository and identified by hash:
 - `/data/sage-plus-scientific/20260914/inputs/PXD000138/HCD_2.raw.-1.mgf`
 - `/data/sage-plus-scientific/20260914/ptm-truth/synthetic.fasta`
 - `/data/sage-plus-scientific/20260914/references/human.fasta`
-- `/mnt/data1/sage-plus-scientific/mass-offset-20260919/inputs/paired.fasta`
+- `inputs/paired.fasta` of the `mass-offset-20260919` run directory (desktop workstation,
+  local drive, not retained), built from the human reference above
 
 Measured cost depends on the thread budget (8
 threads here) and the isotope-error range, which multiplies the searched

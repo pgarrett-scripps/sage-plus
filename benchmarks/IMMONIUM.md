@@ -67,7 +67,8 @@ Base is `b14/per-mod-flr` (ad1b86f); candidate is `b14/immonium`, release builds
 (no `immonium` key), `on` (`immonium: true`), `rescore` (`{"rescore": true}`). Two alternating
 repetitions each, one search at a time under the shared memory gate, on a machine shared with
 other agents, so wall times are noisy. Counts are `run-summary.json` 1% FDR values. Runs,
-configs and `analyze.py` are under `/mnt/data1/sage-plus-scientific/immonium-b14/`.
+configs and `analyze.py` are in an `immonium-b14` directory on a desktop workstation,
+local drive, not retained.
 
 Datasets:
 

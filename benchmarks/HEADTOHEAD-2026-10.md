@@ -23,7 +23,7 @@ All numbers below come from files in this directory. `results.json` holds the sa
 
 ## Setup
 
-- **Upstream binary:** the official release tarball at `/home/ty/tools/sage-upstream-v0.15.0-beta.2/sage-v0.15.0-beta.2-x86_64-unknown-linux-gnu/sage`. It was run with `--disable-telemetry-i-dont-want-to-improve-sage`.
+- **Upstream binary:** the official release tarball `sage-v0.15.0-beta.2-x86_64-unknown-linux-gnu`, unpacked on a desktop workstation, local drive, not retained. It was run with `--disable-telemetry-i-dont-want-to-improve-sage`.
 - **Sage Plus binary:** built for this session on a desktop workstation, local drive, not retained.
   - Built with `cargo build --release` from a clean worktree at main `9483f1c4eb33f3f2ee4b4b5c1b4475fa6d207b34` ("Use the reader crates from crates.io"). The build log is `build.log` (5m42s).
   - The binary reports version 0.1.0-beta.17. The version string has not been bumped since Beta 17.
