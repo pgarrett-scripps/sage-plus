@@ -101,7 +101,7 @@ Say exactly where a modification can go, and check it before searching.
 
 Most useful for large databases, many modifications, or many files.
 - Streamed prefilter (above); `prefilter_min_matched_peaks` (default 4) trades a few weak PSMs for memory ([details](DOCS.md#fasta)).
-- Compact peptide, fragment-index, and spectrum storage: 18% less peak memory than upstream Sage `v0.15.0-beta.2` on standard DDA and 41% less on a phospho search, at about the same speed on DDA ([head-to-head](benchmarks/HEADTOHEAD-2026-10.md)).
+- Compact peptide and fragment-index storage, and MS1 spectra freed once quantification is done: 18% less peak memory than upstream Sage `v0.15.0-beta.2` on standard DDA and 41% less on a phospho search, at about the same speed on DDA ([head-to-head](benchmarks/HEADTOHEAD-2026-10.md)).
 - Interleaved fragment-bucket search: 19-27% faster search phase with identical PSMs ([changelog](CHANGELOG.md)).
 - `max_memory_gb` stops a run at a measured memory limit, and `--estimate` previews database size ([details](DOCS.md#memory-guard)).
 
