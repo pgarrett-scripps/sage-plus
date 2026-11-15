@@ -64,6 +64,16 @@
         "min_separating_margin": {
           "type": "integer",
           "minimum": 0
+        },
+        "decoy_arrangement_wins": {
+          "description": "Localizations of target PSMs that no site report carries because an impossible-site decoy arrangement won their competition, whatever localization_q_value is set to. Optional: absent in documents written by earlier versions.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "below_localization_q_value": {
+          "description": "Localizations of target PSMs left out of the site reports because their localization q-value is above localization_q_value. Optional: absent in documents written by earlier versions.",
+          "type": "integer",
+          "minimum": 0
         }
       },
       "required": [

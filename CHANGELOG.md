@@ -9,6 +9,29 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `run-summary.json` says how many localizations the site reports leave out, and why:
+  `ptm_localization.decoy_arrangement_wins` counts those where an impossible-site decoy
+  arrangement won the competition -- which holds whatever `localization_q_value` is set to --
+  and `ptm_localization.below_localization_q_value` those above that cutoff. Both are optional
+  additions to `schema_version` 9, which allows them without a version bump, and one log line
+  reports them. Nothing passes or fails differently: `results.sage.parquet` and all three site
+  reports are byte-identical to the previous commit's on a phospho search. On two synthetic
+  known-site libraries the first count is 16.6% and 22.6% of localized phospho PSMs, a set that
+  is mislocalized two to two and a half times as often as the reported one, and until now it was
+  visible nowhere.
+
+### Changed
+- `DOCS.md` states what `localization_q_value` is worth, measured rather than asserted. It is a
+  rank, not a calibrated rate: on PRIDE PXD000138 and PXD007058, with the synthesis answer key
+  as truth, the default `min_separating_margin: 1` claims 0.48% and 0.86% where the true false
+  localization rate is 1.37% and 1.35%, and because almost every impossible-site decoy win is an
+  exact tie the q-values a run produces are either at or below about 0.005 or exactly 1.0 -- so
+  1% and 5% select the same sites. `min_separating_margin: 2` is documented as the setting for
+  near-zero wrong sites (3 of 6,332 and 2 of 467) at 47% and 38% coverage. The scoring rule, the
+  accessions and the per-margin table are published with the numbers, and the Beta 14 figures
+  are marked as the three-file subset they were measured on. No behaviour changes.
+
 ## [v0.1.0-beta.21] - 2026-11-14
 
 v0.1.0-beta.20 was tagged and its release run published nothing, because the container build

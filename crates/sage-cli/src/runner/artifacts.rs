@@ -137,6 +137,43 @@ fn row_site_q_value(row: &SiteRow, q_values: &HashMap<ProteinSiteKey, f32>) -> f
         .fold(1.0, f32::min)
 }
 
+/// Why one localized modification reaches no site report.
+///
+/// A localization leaves the site reports for exactly two reasons, and a user
+/// counting site rows against PSMs can see neither of them in any output:
+/// `collect_site_rows` skips it. [`Runner::localization_declines`] counts them
+/// for `run-summary.json` through this same function, so the count and the
+/// skip cannot disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Decline {
+    /// An impossible-site decoy arrangement won the competition, so the
+    /// placement has no evidence behind it. Not a threshold: it holds whatever
+    /// `localization_q_value` is set to.
+    DecoyArrangementWon,
+    /// The localization q-value is above `ptm_localization.localization_q_value`.
+    BelowLocalizationQValue,
+}
+
+pub(super) fn site_report_decline(
+    modification: &sage_core::ptm::ModLocalization,
+    localization_q_value: f32,
+) -> Option<Decline> {
+    if modification.decoy_winner {
+        Some(Decline::DecoyArrangementWon)
+    } else if modification.localization_q_value > localization_q_value {
+        Some(Decline::BelowLocalizationQValue)
+    } else {
+        None
+    }
+}
+
+/// Localizations of target PSMs that no site report carries, by reason.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct LocalizationDeclines {
+    pub(super) decoy_arrangement_wins: usize,
+    pub(super) below_localization_q_value: usize,
+}
+
 impl Runner {
     /// Flatten localized PSMs that pass the PTM identification cutoff into one
     /// [`SiteRow`] per localized modification site. Decoy PSMs are included,
@@ -163,9 +200,8 @@ impl Runner {
             let filename = filenames.get(feature.file_id).cloned().unwrap_or_default();
 
             for m in &localization.mods {
-                if m.decoy_winner
-                    || m.localization_q_value
-                        > self.parameters.ptm_localization.localization_q_value
+                if site_report_decline(m, self.parameters.ptm_localization.localization_q_value)
+                    .is_some()
                 {
                     continue;
                 }
@@ -1137,4 +1173,38 @@ impl Runner {
 
         Ok(path)
     }
+    /// Count the localizations of target PSMs that no site report carries.
+    ///
+    /// Target PSMs only: decoy PSMs are in the reports for site-level FDR and
+    /// are not something a user lost. The reasons come from
+    /// [`site_report_decline`], which is also what drops them, so these counts
+    /// describe exactly the rows that are missing.
+    pub(super) fn localization_declines(&self, features: &[Feature]) -> LocalizationDeclines {
+        let mut declines = LocalizationDeclines::default();
+        for feature in features {
+            if feature.label != 1
+                || !passes_site_psm_filter(feature, self.parameters.ptm_localization.psm_q_value)
+            {
+                continue;
+            }
+            let Some(localization) = &feature.localization else {
+                continue;
+            };
+            for m in &localization.mods {
+                match site_report_decline(m, self.parameters.ptm_localization.localization_q_value)
+                {
+                    Some(Decline::DecoyArrangementWon) => declines.decoy_arrangement_wins += 1,
+                    Some(Decline::BelowLocalizationQValue) => {
+                        declines.below_localization_q_value += 1
+                    }
+                    None => {}
+                }
+            }
+        }
+        declines
+    }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/runner/artifacts.rs"]
+mod test;

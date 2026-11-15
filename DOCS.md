@@ -1581,7 +1581,7 @@ modification sites are searched and is not a spectral library.
 - **ptm_localization**: Object. Configure PTM site localization and site-level reports. See [PTM Site Localization](#ptm-site-localization).
   - **enabled**: Boolean. Enable localization (default: false). The `--localize` CLI flag is a shortcut that sets this to true.
   - **psm_q_value**: Float from 0 through 1. Spectrum-level identification q-value cutoff for PSMs localized and included in the site reports (default: 0.01). It is not a PTM localization probability or false-localization-rate threshold.
-  - **localization_q_value**: Float from 0 through 1. Arrangement-level false localization rate cutoff for reported PTM localizations (default: 0.01).
+  - **localization_q_value**: Float from 0 through 1. Arrangement-level false localization rate cutoff for reported PTM localizations (default: 0.01). On known-site libraries this cutoff behaves as a **rank, not a calibrated rate**: the estimate is two to three times optimistic at the default margin, and 1% and 5% select the same sites. See [PTM Site Localization](#ptm-site-localization) for the measured calibration before quoting it as a rate.
   - **min_separating_margin**: Integer, 0 or more. Fewest matched separating ions by which the best arrangement must beat the runner-up to enter the FLR competition (default: 1). See [PTM Site Localization](#ptm-site-localization).
 
 ## PTM Site Localization
@@ -1609,15 +1609,62 @@ For each FDR-passing PSM (spectrum q-value ≤ `ptm_localization.psm_q_value`), 
 
 The false localization rate (FLR) is estimated per modification type. A named modification (a configured name or a known Unimod label) is one type whatever its delta mass, so Phospho written as 79.9663 and as 79.966 is one type. Unnamed mass-only modifications are grouped by delta mass: masses sorted and chained while neighbours are within 0.002 Da, with no fixed grid, so two masses that differ by less than that are never split by a rounding boundary. Site FDR (`site_q_value`) uses the same types. Phospho, oxidation and every other variable modification each get their own target/decoy competition and their own q-values, so one type's decoy wins never set another type's q-values. Pooling them does distort the result: a single oxidized Met has nothing to localize, yet when its PSM is a wrong peptidoform the decoy arrangement often wins. On a phospho dataset searched with Met oxidation, those decoy wins sat at the top of the pooled ranking and cut the phospho localizations at 1% FLR by more than tenfold. Per-type FLR follows the published decoy-residue designs, which estimate the FLR for one modification at a time: LuciPHOr (Fermin et al. 2013, *Mol Cell Proteomics*), LuciPHOr2 (Fermin et al. 2015, *Bioinformatics*) and the decoy-amino-acid FLR of Ramsbottom et al. 2022 (*J Proteome Res*). A PSM that carries several types, such as phospho and oxidation, has one localization per type. Each is scored with the other types held at their placed sites and enters the competition of its own type. A decoy PSM reads its localization q-value off the target curve of its own type; a type with no target localizations gives q-value 1.
 
-**Fully occupied and unseparated localizations.** When a modification has as many candidate sites as copies, such as a peptide with one Met and one oxidation, there is nothing to localize: its sites have probability 1, localization q-value 0, and it does not enter the FLR competition. A localization also stays out of the competition, with q-value 1, unless the best arrangement beats the runner-up by at least `min_separating_margin` matched *separating ions*: fragments, at charges 1 to the fragment charge limit, whose mass differs between those two arrangements. Two arrangements tied on those ions have no spectral evidence between them, which also happens when a spectrum is a mixture of both isomers. On the PXD000138 synthetic known-site library (Marx et al. 2013), single-site phosphopeptides at 1% FLR gave:
+**Fully occupied and unseparated localizations.** When a modification has as many candidate sites as copies, such as a peptide with one Met and one oxidation, there is nothing to localize: its sites have probability 1, localization q-value 0, and it does not enter the FLR competition. A localization also stays out of the competition, with q-value 1, unless the best arrangement beats the runner-up by at least `min_separating_margin` matched *separating ions*: fragments, at charges 1 to the fragment charge limit, whose mass differs between those two arrangements. Two arrangements tied on those ions have no spectral evidence between them, which also happens when a spectrum is a mixture of both isomers. The margin rule is our own addition, not a published method.
 
-| `min_separating_margin` | Localizations passing | Wrong sites | Estimated FLR | True FLR |
-|---|---|---|---|---|
-| none (Beta 14) | 3,640 | 35 | 0.96% | 0.96% |
-| 1 (default) | 3,639 | 34 | 0.44% | 0.93% |
-| 2 | 2,751 | 0 | 0.33% | 0% |
+### What `localization_q_value` is worth, measured
 
-Margin 1 keeps nearly every localization while removing ties from the competition. Margin 2 removed every wrong site in this library but cost about a quarter of the localizations; on PXD007058, phospho localizations at 1% FLR were 7,231 at margin 1 and 5,413 at margin 2. The margin rule is our own addition, not a published method; it was validated only on the library above.
+`localization_q_value` is a **rank, not a calibrated rate**. Two synthetic known-site libraries
+were searched and every reported site compared with the synthesis answer key: PRIDE
+**PXD000138** (Marx et al. 2013, *Nat Biotechnol* 31:557-564, 11 HCD files against the
+101,520-sequence synthetic library) and **PXD007058** (Ferries et al. 2017, *J Proteome Res*
+16:3448-3459, 10 HCD-Orbitrap files against the 127-sequence library, one pool per file).
+
+Scoring rule: a PSM-site is one reported phospho position on a rank-1 target PSM with spectrum
+q-value at most 0.01, whose stripped sequence is in the key and which reports as many phospho as
+the key records for that sequence; the site is **wrong** when its position is not a key position.
+The scope is key peptides carrying two or more S/T/Y, where there is something to localize.
+"True FLR" is wrong PSM-sites over reported PSM-sites, at the setting's own claimed 1%.
+
+| `min_separating_margin` | PXD000138: sites / wrong / true FLR / claimed / coverage | PXD007058: sites / wrong / true FLR / claimed / coverage |
+|---|---|---|
+| 0 | 9,457 / 135 / **1.43%** / 0.57% / 70.3% | 811 / 10 / **1.23%** / 0.92% / 65.8% |
+| 1 (default) | 9,448 / 129 / **1.37%** / 0.48% / 70.3% | 816 / 11 / **1.35%** / 0.86% / 66.2% |
+| 2 | 6,332 / 3 / **0.05%** / 0.36% / 47.1% | 467 / 2 / **0.43%** / 0.67% / 37.9% |
+
+Coverage is the share of localizable PSM-sites reported (13,446 and 1,232 respectively). Three
+things to take from this table:
+
+- **At the default margin the claimed rate is two to three times optimistic**: 0.48% claimed
+  against 1.37% true, and 0.86% against 1.35%. The same factor appears on both libraries, two
+  instruments and two library designs, so it is a property of the estimator, not of one file.
+  Treat the q-value as a ranking of localizations, and the claimed percentage as a floor.
+- **1% and 5% select the same sites.** The estimate is built from impossible-site decoy
+  arrangements, and almost every decoy "win" is an exact tie, which puts it at the bottom of the
+  ranking. The q-values a run produces are therefore either at or below about 0.005 or exactly
+  1.0, with nothing in between: on PXD000138, 13,028 localizations at or below 0.005, 1,611
+  above 0.05 and 2,377 at 1.0. Loosening the cutoff from 1% to 5% returns the same set.
+- **`min_separating_margin: 2` is the setting for near-zero wrong sites**: 3 wrong of 6,332 and
+  2 of 467, at 47% and 38% of the localizable PSM-sites instead of 70% and 66%. It gets there by
+  being conservative, not by estimating better: its claimed rate (0.36%, 0.67%) is still not the
+  true one (0.05%, 0.43%), in the other direction.
+
+In the scope the earlier releases reported (every key peptide of PXD000138, including
+single-S/T/Y ones), the same 11 files give 12,869 / 135 / 1.05% at margin 0, 12,860 / 129 /
+1.00% at margin 1 and 9,744 / 3 / 0.03% at margin 2. The numbers published for Beta 14 (3,640 /
+35 / 0.96%, 3,639 / 34 / 0.93%, 2,751 / 0 / 0%) were measured on a **three-file subset** of this
+library in that scope and are consistent with it: three-file subsets of this run give 3,633 to
+3,651 sites with 38 to 44 wrong, a true FLR of 1.04% to 1.07%, and per-file true FLR ranges from
+0% to 6.5%. The 7,231 and 5,413 localization counts once quoted for PXD007058 came from a
+phospho-enriched search of the full dataset against a proteome database, not from the library
+key above, so they say nothing about accuracy.
+
+Not every localized PSM reaches the site reports, and `run-summary.json` says how many do not:
+`ptm_localization.decoy_arrangement_wins` counts the localizations left out because an
+impossible-site decoy arrangement won their competition, whatever the cutoff, and
+`ptm_localization.below_localization_q_value` those above `localization_q_value`. On the two
+libraries the first is 16.6% and 22.6% of localized phospho PSMs. That set is mislocalized about
+two to two and a half times as often as the reported one, so the refusal is well aimed, but it
+is the reason site rows per PSM do not add up to one.
 
 The current implementation combines one AScore-inspired, site-determining-ion strategy with balanced impossible-site target/decoy competition. It is intentionally not presented as a configurable strategy yet: a future strategy name should select a genuinely different, validated scoring or FLR model rather than act as an alias for the same calculation.
 

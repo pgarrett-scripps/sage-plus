@@ -605,6 +605,17 @@ impl Runner {
         // PTM site reports follow the selected main output format. Site-level
         // FDR is estimated once, on the final site set, after every PSM and
         // localization filter has been applied to targets and decoys alike.
+        let localization_declines = self.localization_declines(&outputs.features);
+        if localization_declines != artifacts::LocalizationDeclines::default() {
+            // Neither number is visible in any site report: the rows are simply
+            // absent, so a user counting sites per PSM sees the shortfall with
+            // no reason given.
+            log::info!(
+                "- localizations not in the site reports: {} where an impossible-site decoy arrangement won, {} above localization_q_value",
+                localization_declines.decoy_arrangement_wins,
+                localization_declines.below_localization_q_value
+            );
+        }
         let mut site_stats = SiteFdrRunStats::default();
         if self.parameters.ptm_localization.enabled {
             let site_rows = self.collect_site_rows(&outputs.features, &filenames);
@@ -730,6 +741,8 @@ impl Runner {
                 target_protein_sites: site_stats.target_protein_sites,
                 decoy_protein_sites: site_stats.decoy_protein_sites,
                 protein_sites_at_one_percent_fdr: site_stats.protein_sites_at_one_percent_fdr,
+                decoy_arrangement_wins: localization_declines.decoy_arrangement_wins,
+                below_localization_q_value: localization_declines.below_localization_q_value,
             },
             models: ModelRunStats {
                 mass_alignment_applied: mass_alignment_files

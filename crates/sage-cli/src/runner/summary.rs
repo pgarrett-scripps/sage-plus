@@ -320,6 +320,15 @@ pub struct PtmLocalizationRunStats {
     /// Target protein sites at site-level q-value <= 0.01.
     #[serde(default)]
     pub protein_sites_at_one_percent_fdr: usize,
+    /// Localizations of target PSMs that no site report carries because an
+    /// impossible-site decoy arrangement won their competition. Not a
+    /// threshold: they are left out whatever `localization_q_value` is.
+    #[serde(default)]
+    pub decoy_arrangement_wins: usize,
+    /// Localizations of target PSMs left out because their localization
+    /// q-value is above `localization_q_value`.
+    #[serde(default)]
+    pub below_localization_q_value: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
