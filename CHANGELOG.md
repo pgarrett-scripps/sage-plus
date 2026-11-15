@@ -9,6 +9,12 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.21] - 2026-11-14
+
+v0.1.0-beta.20 was tagged and its release run published nothing, because the container build
+failed on the context described below; that tag is left unpublished. This release carries
+everything listed under v0.1.0-beta.20 as well as the fixes here.
+
 ### Fixed
 - The release workflow builds its container again. The `docker` job does not build from the
   repository: it stages a minimal context in `.release/docker` and builds from that, and the
