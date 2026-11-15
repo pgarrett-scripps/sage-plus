@@ -36,8 +36,14 @@ entries are retained below for provenance.
   each MS1 spectrum is kept with its metadata only, so quality control still has the file's
   retention-time span and `ms1_read` is 0. On a 1.2 GB PXD028735 mzML at 8 threads that took the
   file read from 4.07 to 3.48 seconds, the whole run from 26.3 to 24.8 seconds and peak memory
-  from 4.37 to 4.02 GiB (release build, exclusive reservation, median of three runs each). No configuration key is added, PSMs are
-  unchanged, and with the default `polymer_check: true` every output is byte-identical.
+  from 4.37 to 4.02 GiB (release build, exclusive reservation, median of three runs each). No
+  configuration key is added, PSMs are unchanged, and with the default `polymer_check: true`
+  every output is byte-identical.
+- `FEATURES.md`, `README.md` and `DOCS.md` no longer say timsTOF m/z uses the instrument's
+  calibration model. TDF m/z has used timsrust's linear scale since the reader moved to
+  `sage-plus-tdf`; only 1/K0 (TDF) and TSF m/z use the stored models. `DOCS.md` also says that
+  `ion_mobility_scale: "linear"` is the scale of Beta 6 (timsrust 0.6.5, linear in √(1/K0)),
+  not that of upstream Sage on timsrust 0.6.6 and later. No behaviour changes.
 
 ## [v0.1.0-beta.21] - 2026-11-14
 

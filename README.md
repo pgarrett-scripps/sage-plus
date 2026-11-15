@@ -18,7 +18,7 @@ Compared with upstream Sage v0.15.0-beta.2. Numbers link to their source.
 | **Input** | | |
 | Thermo RAW, no conversion | ✗ | ✓ RAW to results [2.7x faster](benchmarks/HEADTOHEAD-2026-10.md) than converting first |
 | mzMLb | ✗ | ✓ |
-| timsTOF m/z and 1/K0 from the instrument calibration | linear | ✓ up to [0.054 1/K0](DOCS.md#spectrum-paths) closer |
+| timsTOF 1/K0 and TSF m/z from the instrument calibration | linear | ✓ up to [0.054 1/K0](DOCS.md#spectrum-paths) closer |
 | **PTMs** | | |
 | Site localization with a false-localization rate | ✗ | ✓ [7,231 phosphosites](DOCS.md#ptm-site-localization) at 1% FLR |
 | Site-level FDR and ProForma output | ✗ | ✓ [site q-values](DOCS.md#site-level-fdr), `localized_peptide` |
