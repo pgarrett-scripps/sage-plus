@@ -134,7 +134,7 @@ fn an_unidentified_spectrum_of_a_coeluting_parents_truncation_is_rescued() {
     assert_eq!(stats.parents, 1);
     assert_eq!(stats.searched_spectra, 1);
     assert!(stats.candidates > 0);
-    assert_eq!(stats.skipped, None);
+    assert_eq!(stats.error, None);
     assert_eq!(hits.len(), 1, "{stats:?}");
     let (feature, origin, peptide) = &hits[0];
     assert_eq!(peptide.sequence.as_bytes(), PRODUCT.as_bytes());
@@ -230,7 +230,7 @@ fn identified_spectra_and_database_peptides_are_not_searched_again() {
 }
 
 #[test]
-fn a_file_that_cannot_be_read_again_is_skipped_and_recorded() {
+fn a_file_that_cannot_be_read_again_is_recorded_as_an_error() {
     // The file exists when the search starts and is gone when the rescue pass
     // reads it again.
     let staging = std::env::temp_dir().join(format!(
@@ -253,7 +253,7 @@ fn a_file_that_cannot_be_read_again_is_skipped_and_recorded() {
         None,
     );
     assert!(hits.is_empty());
-    let reason = stats.skipped.expect("the file is recorded as skipped");
+    let reason = stats.error.expect("the file is recorded as failed");
     assert!(reason.contains("sage-rescue-vanishing"), "{reason}");
     std::fs::remove_dir_all(directory).ok();
 }
@@ -266,9 +266,11 @@ fn rescued_psms_of_several_files_share_one_registered_peptide_and_stay_out_of_th
     let before = features.clone();
     let indexed = runner.database.peptides.len();
     let mut annotations = InSourceAnnotations::default();
-    let (rescued, stats) = runner
+    let outcome = runner
         .in_source_rescue(&features, &settings(), &mut annotations, None)
         .unwrap();
+    assert_eq!(outcome.error, None);
+    let (rescued, stats) = (outcome.features, outcome.stats);
     assert_eq!(stats.len(), 2);
     assert_eq!(rescued.len(), 2);
     // One product, registered once, beside the indexed peptides.
@@ -303,12 +305,47 @@ fn rescued_psms_of_several_files_share_one_registered_peptide_and_stay_out_of_th
 }
 
 #[test]
-fn an_open_precursor_tolerance_skips_the_pass() {
+fn an_open_precursor_tolerance_is_refused() {
+    // At the configuration...
+    let workspace = workspace();
+    let config = |tolerance: serde_json::Value, extra: serde_json::Value| {
+        let mut config = serde_json::json!({
+            "database": {
+                "fasta": format!("{workspace}/tests/Q99536.fasta"),
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {},
+                "ion_kinds": ["b", "y"]
+            },
+            "precursor_tol": tolerance,
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [fixture()],
+            "in_source": {"rescue": true},
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            config[key] = value.clone();
+        }
+        serde_json::from_value::<crate::input::Input>(config)
+            .unwrap()
+            .build()
+    };
+    let open = config(
+        serde_json::json!({"da": [-500, 100]}),
+        serde_json::json!({}),
+    );
+    assert!(format!("{:#}", open.err().unwrap()).contains("precursor window"));
+    let wide = config(
+        serde_json::json!({"ppm": [-10, 10]}),
+        serde_json::json!({"wide_window": true}),
+    );
+    assert!(format!("{:#}", wide.err().unwrap()).contains("DDA spectra only"));
+    assert!(config(serde_json::json!({"ppm": [-10, 10]}), serde_json::json!({})).is_ok());
+
+    // ...and by the pass itself, for a runner built some other way.
     let (mut runner, directory) = fixture_runner(&[fixture()], false);
     runner.parameters.precursor_tol = sage_core::mass::Tolerance::Da(-500.0, 100.0);
     let (_, rt) = fixture_spectrum();
     let features = [parent_psm(&runner, 0, 0, rt)];
-    let (rescued, stats) = runner
+    let outcome = runner
         .in_source_rescue(
             &features,
             &settings(),
@@ -316,13 +353,110 @@ fn an_open_precursor_tolerance_skips_the_pass() {
             None,
         )
         .unwrap();
-    assert!(rescued.is_empty());
-    assert!(stats[0]
-        .skipped
-        .as_deref()
-        .unwrap()
-        .contains("precursor window"));
+    assert!(outcome.features.is_empty());
+    assert!(outcome.error.unwrap().contains("precursor window"));
     std::fs::remove_dir_all(directory).ok();
+}
+
+#[test]
+fn a_failure_on_one_file_keeps_every_files_rescue_out() {
+    let (mut runner, directory) = fixture_runner(&[fixture(), fixture()], false);
+    let (_, rt) = fixture_spectrum();
+    let features = [parent_psm(&runner, 0, 0, rt), parent_psm(&runner, 1, 7, rt)];
+    let indexed = runner.database.peptides.len();
+    let mut annotations = InSourceAnnotations::default();
+    super::FAIL_REREAD.with(|fail| fail.set(Some(1)));
+    let outcome = runner.in_source_rescue(&features, &settings(), &mut annotations, None);
+    super::FAIL_REREAD.with(|fail| fail.set(None));
+    let outcome = outcome.unwrap();
+    // File 0 found its hit, but nothing of it is kept.
+    assert!(outcome.features.is_empty());
+    assert_eq!(outcome.stats.len(), 2);
+    assert_eq!(outcome.stats[0].error, None);
+    assert_eq!(outcome.stats[0].target_hits, 1);
+    assert!(outcome.stats[1].error.is_some());
+    let error = outcome.error.expect("the run is told the pass failed");
+    assert!(error.contains("file 1"), "{error}");
+    assert_eq!(runner.database.peptides.len(), indexed);
+    assert!(!annotations.is_rescued(8) && !annotations.is_rescued(9));
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// A whole run whose rescue fails on its second file writes the main results
+/// as a run without the pass writes them, records the failure in
+/// run-summary.json, and exits with an error naming the file.
+#[test]
+fn a_run_whose_rescue_fails_writes_the_main_results_and_exits_with_an_error() {
+    let workspace = workspace();
+    let run = |name: &str, rescue: bool, fail: Option<usize>| {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "sage-rescue-run-{name}-{}-{unique}",
+            std::process::id()
+        ));
+        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+            "database": {
+                "fasta": format!("{workspace}/tests/Q99536.fasta"),
+                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+                "static_mods": {"C": 57.021464},
+                "ion_kinds": ["b", "y"]
+            },
+            "precursor_tol": { "ppm": [-50, 50] },
+            "fragment_tol": { "ppm": [-10, 10] },
+            "mzml_paths": [fixture(), fixture()],
+            "in_source": {"rescue": rescue},
+            "predict_rt": false,
+            "output_directory": directory.to_string_lossy(),
+        }))
+        .unwrap();
+        let runner = Runner::new(input.build().unwrap(), 1).unwrap();
+        super::FAIL_REREAD.with(|cell| cell.set(fail));
+        let result = runner.run(1);
+        super::FAIL_REREAD.with(|cell| cell.set(None));
+        (result, directory)
+    };
+    let rows = |directory: &std::path::Path| {
+        use parquet::file::reader::{FileReader, SerializedFileReader};
+        let file = std::fs::File::open(directory.join("results.sage.parquet")).unwrap();
+        let reader = SerializedFileReader::new(file).unwrap();
+        let metadata = reader.metadata().file_metadata();
+        let fields = metadata
+            .schema()
+            .get_fields()
+            .iter()
+            .map(|field| field.name().to_string())
+            .collect::<Vec<_>>();
+        (metadata.num_rows(), fields)
+    };
+    let (without, without_directory) = run("off", false, None);
+    without.unwrap();
+    let (failed, failed_directory) = run("failed", true, Some(1));
+    let error = format!("{:#}", failed.unwrap_err());
+    assert!(error.contains("file 1"), "{error}");
+    assert_eq!(rows(&failed_directory), rows(&without_directory));
+    assert!(!rows(&failed_directory)
+        .1
+        .iter()
+        .any(|f| f == "in_source_rescued"));
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(failed_directory.join("run-summary.json")).unwrap())
+            .unwrap();
+    let recorded = summary["in_source"]["rescue_error"].as_str().unwrap();
+    assert!(recorded.contains("file 1"), "{recorded}");
+    assert!(summary["in_source"]["rescue"][1]["error"].is_string());
+    // The same run without the failure writes the rescue column.
+    let (completed, completed_directory) = run("completed", true, None);
+    completed.unwrap();
+    assert!(rows(&completed_directory)
+        .1
+        .iter()
+        .any(|f| f == "in_source_rescued"));
+    for directory in [without_directory, failed_directory, completed_directory] {
+        std::fs::remove_dir_all(directory).ok();
+    }
 }
 
 #[test]

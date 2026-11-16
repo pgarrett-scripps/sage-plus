@@ -917,6 +917,25 @@ impl Input {
         if let Some(settings) = in_source.as_ref() {
             settings.validate().map_err(anyhow::Error::msg)?;
         }
+        // The rescue pass refuses up front a search it could not run soundly,
+        // rather than skipping it after the search: DIA and wide-window
+        // spectra are not one precursor's, and a precursor window that reaches
+        // a parent's own mass would let the parent's spectra match its products.
+        if in_source.is_some_and(|settings| settings.rescue()) {
+            let dia_on = self.dia.as_ref().is_some_and(|dia| !dia.is_off());
+            if dia_on || self.wide_window == Some(true) {
+                anyhow::bail!(
+                    "`in_source.rescue` searches DDA spectra only; it cannot be combined with `dia` or `wide_window`"
+                );
+            }
+            if let Some(problem) = sage_core::in_source_rescue::precursor_reach_problem(
+                self.precursor_tol,
+                self.isotope_errors.unwrap_or(DEFAULT_ISOTOPE_ERRORS),
+                database.peptide_max_mass,
+            ) {
+                anyhow::bail!("`in_source.rescue`: {problem}");
+            }
+        }
 
         let quant: QuantSettings = self.quant.map(Into::into).unwrap_or_default();
         let predict_rt = self.predict_rt.unwrap_or(true);

@@ -368,10 +368,12 @@ pub struct InSourceRescueFileStats {
     /// palindromic interior) or a target of this rescue set or of the
     /// database, as the database digest drops such decoys.
     pub dropped_decoy_collisions: usize,
-    /// Why the file was not searched, when it was not: its spectra could not
-    /// be read again. The run carries on without it.
+    /// Why the pass failed on this file, when it did: its spectra could not
+    /// be read again. A failure on any file means no rescue rows are written
+    /// for any file, and the run exits with an error after writing the main
+    /// results.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub skipped: Option<String>,
+    pub error: Option<String>,
     /// Set when the null-control harness shifted the windows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub null_shift_widths: Option<f32>,

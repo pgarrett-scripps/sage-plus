@@ -476,18 +476,23 @@ impl Runner {
             .parameters
             .in_source
             .filter(|settings| settings.rescue());
-        let (rescued_features, in_source_rescue) = match (rescue_settings, in_source.as_mut()) {
-            (Some(settings), Some(annotations)) => {
-                let (rescued, stats) = self.in_source_rescue(
-                    &outputs.features,
-                    &settings,
-                    annotations,
-                    rescue_alignments.as_deref(),
-                )?;
-                (rescued, Some(stats))
-            }
-            _ => (Vec::new(), None),
-        };
+        // All or nothing: when the pass fails on any file, the main results are
+        // written exactly as a run without it writes them, the failure is
+        // recorded in run-summary.json, and the run then exits with an error.
+        let (rescued_features, in_source_rescue, rescue_error) =
+            match (rescue_settings, in_source.as_mut()) {
+                (Some(settings), Some(annotations)) => {
+                    let outcome = self.in_source_rescue(
+                        &outputs.features,
+                        &settings,
+                        annotations,
+                        rescue_alignments.as_deref(),
+                    )?;
+                    (outcome.features, Some(outcome.stats), outcome.error)
+                }
+                _ => (Vec::new(), None, None),
+            };
+        let rescue_written = in_source_rescue.is_some() && rescue_error.is_none();
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
         let output_features = outputs
@@ -525,7 +530,7 @@ impl Runner {
                 .then_some(self.parameters.ptm_localization.localization_q_value),
             in_source.as_ref(),
             self.protein_classes.as_ref(),
-            in_source_rescue.is_some(),
+            rescue_written,
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -834,6 +839,7 @@ impl Runner {
                 modes: annotations.run_modes(),
                 files: annotations.files().to_vec(),
                 rescue: in_source_rescue.clone(),
+                rescue_error: rescue_error.clone(),
             }),
             modifications: ModificationRunStats {
                 static_definitions: self.database_parameters.static_mods.len(),
@@ -911,6 +917,11 @@ impl Runner {
         });
         self.events.check()?;
 
+        if let Some(error) = rescue_error {
+            anyhow::bail!(
+                "{error}. The main results were written in full without rescue rows; run-summary.json records the failure"
+            );
+        }
         Ok(summary)
     }
 

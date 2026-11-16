@@ -28,6 +28,25 @@ pub(super) struct Origin {
 /// it is a product of, and its peptide in the file's rescue database.
 pub(super) type RescueHit = (Feature, Origin, sage_core::peptide::Peptide);
 
+/// What the rescue pass produced for the whole run. It is all or nothing: when
+/// any file failed, `features` is empty for every file, nothing was added to
+/// the database or the annotations, and `error` names the file.
+#[derive(Debug, Default)]
+pub(super) struct RescueOutcome {
+    pub(super) features: Vec<Feature>,
+    pub(super) stats: Vec<InSourceRescueFileStats>,
+    pub(super) error: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test hook: make the pass fail on this file id, as any per-file error
+    /// would, so a test can drive a whole run through a rescue failure.
+    /// Compiled into test builds only.
+    pub(super) static FAIL_REREAD: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
 /// The null-control shift of every co-elution window, in widths. Only a
 /// binary built with the `in-source-rescue-null-control` feature reads
 /// [`sage_core::in_source_rescue::NULL_SHIFT_ENV`], so no released build can
@@ -58,36 +77,33 @@ impl Runner {
     /// materialized mass-offset peptides, so the writers resolve them like any
     /// other. Nothing in `features` changes: rescued PSMs never enter the main
     /// FDR, protein inference or quantification, which have all run by now.
-    /// A file that cannot be searched is recorded and skipped; the run goes on.
+    /// All or nothing: when any file fails, no rescue rows are returned for
+    /// any file and `error` names the file.
     pub(super) fn in_source_rescue(
         &mut self,
         features: &[Feature],
         settings: &InSourceSettings,
         annotations: &mut InSourceAnnotations,
         alignments: Option<&[Alignment]>,
-    ) -> anyhow::Result<(Vec<Feature>, Vec<InSourceRescueFileStats>)> {
+    ) -> anyhow::Result<RescueOutcome> {
         let files = self.parameters.mzml_paths.len();
-        let skip_all = |reason: String| {
-            log::warn!("in_source.rescue skipped: {reason}");
-            (0..files)
-                .map(|file_id| InSourceRescueFileStats {
-                    file_id,
-                    skipped: Some(reason.clone()),
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>()
+        // The configuration is refused up front for these (`Input::build`);
+        // a runner built some other way fails the same way here.
+        let refusal = if self.parameters.wide_window || !self.parameters.dia.is_off() {
+            Some("it searches DDA spectra only, not wide-window or DIA searches".to_string())
+        } else {
+            precursor_reach_problem(
+                self.parameters.precursor_tol,
+                self.parameters.isotope_errors,
+                self.database_parameters.peptide_max_mass,
+            )
         };
-        if self.parameters.wide_window || !self.parameters.dia.is_off() {
-            let reason =
-                "it searches DDA spectra only, not wide-window or DIA searches".to_string();
-            return Ok((Vec::new(), skip_all(reason)));
-        }
-        if let Some(problem) = precursor_reach_problem(
-            self.parameters.precursor_tol,
-            self.parameters.isotope_errors,
-            self.database_parameters.peptide_max_mass,
-        ) {
-            return Ok((Vec::new(), skip_all(problem)));
+        if let Some(reason) = refusal {
+            return Ok(RescueOutcome {
+                stats: Vec::new(),
+                features: Vec::new(),
+                error: Some(format!("in_source.rescue cannot run: {reason}")),
+            });
         }
         let null_shift = null_shift()?;
         if let Some(widths) = null_shift {
@@ -95,17 +111,28 @@ impl Runner {
                 "in_source.rescue null control: every co-elution window is shifted by {widths} widths"
             );
         }
-        let mut next_psm_id = features.iter().map(|f| f.psm_id + 1).max().unwrap_or(0);
-        let mut registered: HashMap<(String, bool), PeptideIx> = HashMap::new();
-        let mut rescued = Vec::new();
-        let mut stats = Vec::new();
+        // Every file is searched before anything is kept, so a failure on one
+        // leaves no rescue rows from the others.
+        let mut per_file = Vec::with_capacity(files);
+        let mut error = None;
         for file_id in 0..files {
             self.cancellation.check()?;
             let started = Instant::now();
             let (hits, file_stats) =
                 self.rescue_file(file_id, features, settings, annotations, null_shift);
-            match &file_stats.skipped {
-                Some(reason) => log::warn!("- in-source rescue, file {file_id} skipped: {reason}"),
+            match &file_stats.error {
+                Some(reason) => {
+                    log::error!(
+                        "- in-source rescue failed on file {file_id} (`{}`): {reason}",
+                        self.parameters.mzml_paths[file_id]
+                    );
+                    error.get_or_insert_with(|| {
+                        format!(
+                            "in_source.rescue failed on file {file_id} (`{}`): {reason}",
+                            self.parameters.mzml_paths[file_id]
+                        )
+                    });
+                }
                 None => log::info!(
                     "- in-source rescue, file {file_id}: {} of {} unidentified MS2 spectra rescued at {} q-value ({} targets, {} decoys competed; {} candidates from {} parents) in {} ms",
                     file_stats.rescued_psms,
@@ -118,6 +145,21 @@ impl Runner {
                     started.elapsed().as_millis()
                 ),
             }
+            per_file.push((hits, file_stats));
+        }
+        let stats = per_file.iter().map(|(_, stats)| stats.clone()).collect();
+        if error.is_some() {
+            log::error!("in_source.rescue wrote no rescue rows for any file, because it did not complete on every file");
+            return Ok(RescueOutcome {
+                features: Vec::new(),
+                stats,
+                error,
+            });
+        }
+        let mut next_psm_id = features.iter().map(|f| f.psm_id + 1).max().unwrap_or(0);
+        let mut registered: HashMap<(String, bool), PeptideIx> = HashMap::new();
+        let mut rescued = Vec::new();
+        for (hits, _) in per_file {
             for (mut feature, origin, peptide) in hits {
                 let key = (peptide.to_string(), peptide.decoy);
                 feature.peptide_idx = *registered
@@ -139,13 +181,16 @@ impl Runner {
                 );
                 rescued.push(feature);
             }
-            stats.push(file_stats);
         }
-        Ok((rescued, stats))
+        Ok(RescueOutcome {
+            features: rescued,
+            stats,
+            error: None,
+        })
     }
 
     /// The rescue hits of one file and what the pass did there. A file whose
-    /// spectra cannot be read again is returned with `skipped` set and no hits.
+    /// spectra cannot be read again is returned with `error` set and no hits.
     pub(super) fn rescue_file(
         &self,
         file_id: usize,
@@ -159,6 +204,11 @@ impl Runner {
             null_shift_widths: null_shift,
             ..Default::default()
         };
+        #[cfg(test)]
+        if FAIL_REREAD.with(|fail| fail.get()) == Some(file_id) {
+            stats.error = Some("injected by the test harness".into());
+            return (Vec::new(), stats);
+        }
         // Spectra with a confident PSM are identified; every other MS2
         // spectrum is searched. Parents are the confident target PSMs, by the
         // thresholds the in-source annotation uses.
@@ -240,16 +290,17 @@ impl Runner {
             self.parameters.deisotope,
             min_deisotope_mz.unwrap_or(0.0),
         );
-        let raw = match sage_cloudpath::util::read_spectra(
+        let reread = sage_cloudpath::util::read_spectra(
             url,
             file_id,
             sn,
             self.parameters.bruker_config,
             false,
-        ) {
+        );
+        let raw = match reread {
             Ok(raw) => raw,
             Err(error) => {
-                stats.skipped = Some(format!("could not read `{url}` again: {error}"));
+                stats.error = Some(format!("could not read `{url}` again: {error}"));
                 return (Vec::new(), stats);
             }
         };

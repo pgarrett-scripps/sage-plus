@@ -84,6 +84,11 @@ pub struct InSourceRunStats {
     /// The rescue pass, per file, when `in_source.rescue` is on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rescue: Option<Vec<sage_core::in_source_rescue::InSourceRescueFileStats>>,
+    /// Why the rescue pass did not complete, naming the file, when it did not.
+    /// No rescue rows were then written for any file, and the run exited with
+    /// an error after writing the main results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rescue_error: Option<String>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target
