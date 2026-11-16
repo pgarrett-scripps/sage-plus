@@ -19,7 +19,7 @@ impl<'db> Scorer<'db> {
         };
 
         let mut query = query.clone();
-        let hits = self.initial_hits(&query, precursor);
+        let hits = self.initial_hits(&query, precursor, None);
 
         let mut candidates: Vec<Feature> = Vec::with_capacity(self.report_psms);
 

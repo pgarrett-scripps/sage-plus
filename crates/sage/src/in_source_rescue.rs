@@ -244,6 +244,15 @@ pub fn truncate(
     piece.monoisotopic = mass;
     piece.nterm = nterm;
     piece.cterm = cterm;
+    // A piece that keeps no labelled residue is in no channel, as the
+    // database digest leaves such a peptide: its heavy and light parents give
+    // the same piece.
+    if !piece
+        .applied_modifications()
+        .any(|modification| modification.kind == crate::peptide::ModificationKind::Label)
+    {
+        piece.set_label_channel(None);
+    }
     Some(piece)
 }
 
@@ -349,6 +358,35 @@ pub fn competition_q_values(evidence: &[(f64, bool)]) -> Vec<f32> {
     out
 }
 
+/// Why the rescue pass did not complete, for `run-summary.json`. When it is
+/// recorded, no rescue rows were written for any file and no per-file counts
+/// are reported, so nothing partial reaches the outputs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InSourceRescueFailure {
+    /// The file the pass failed on, when the failure was a file's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<usize>,
+    /// That file's path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub message: String,
+}
+
+impl std::fmt::Display for InSourceRescueFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.file_id, &self.path) {
+            (Some(id), Some(path)) => {
+                write!(
+                    f,
+                    "in_source.rescue failed on file {id} (`{path}`): {}",
+                    self.message
+                )
+            }
+            _ => write!(f, "in_source.rescue cannot run: {}", self.message),
+        }
+    }
+}
+
 /// What the rescue pass did in one file, for `run-summary.json`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InSourceRescueFileStats {
@@ -374,11 +412,16 @@ pub struct InSourceRescueFileStats {
     /// palindromic interior) or a target of this rescue set or of the
     /// database, as the database digest drops such decoys.
     pub dropped_decoy_collisions: usize,
-    /// Why the pass failed on this file, when it did: its spectra could not
-    /// be read again. A failure on any file means no rescue rows are written
-    /// for any file, and the run exits with an error after writing the main
-    /// results.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Unidentified MS2 spectra not searched because their precursor has no
+    /// charge: trying every charge would read a parent's own spectrum at a
+    /// fraction of its mass, where its truncations lie.
+    #[serde(default)]
+    pub skipped_without_charge: usize,
+    /// Why the pass failed on this file, when it did. Never written: a
+    /// failure on any file replaces every file's record with one
+    /// [`InSourceRescueFailure`].
+    #[serde(skip)]
+    #[schemars(skip)]
     pub error: Option<String>,
     /// Set when the null-control harness shifted the windows.
     #[serde(skip_serializing_if = "Option::is_none")]

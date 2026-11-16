@@ -224,6 +224,10 @@ pub(crate) fn offset_query(mass: f32, tolerance: Tolerance, delta: f32) -> (f32,
     (mass - delta, Tolerance::Da(lo - mass, hi - mass))
 }
 
+/// Which database peptides a restricted search may report
+/// ([`Scorer::score_restricted`]).
+pub type CandidateFilter<'a> = &'a (dyn Fn(PeptideIx) -> bool + Sync);
+
 mod chimera;
 mod feature;
 mod matching;

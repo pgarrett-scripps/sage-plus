@@ -19,7 +19,33 @@ impl<'db> Scorer<'db> {
             return Vec::new();
         };
 
-        let hits = self.initial_hits(query, precursor);
+        let hits = self.initial_hits(query, precursor, None);
+        let mut features = Vec::with_capacity(self.report_psms);
+        self.build_features(query, precursor, &hits, self.report_psms, &mut features);
+        features
+    }
+
+    /// Score a spectrum against only the database peptides `keep` accepts,
+    /// as if the database held no others: rejected candidates are dropped
+    /// before the preliminary top-K cut, in every precursor window, isotope
+    /// error and charge. A standard (non-chimeric) search; recalibration
+    /// applies as in [`Scorer::score`]. Sage Plus's in-source rescue uses it to
+    /// search each spectrum against the products of parents eluting there.
+    pub fn score_restricted(
+        &self,
+        query: &ProcessedSpectrum,
+        keep: CandidateFilter<'_>,
+    ) -> Vec<Feature> {
+        assert_eq!(
+            query.level, 2,
+            "internal bug, trying to score a non-MS2 scan!"
+        );
+        let query = self.recalibrated(query);
+        let query = query.as_ref();
+        let Some(precursor) = query.precursors.first() else {
+            return Vec::new();
+        };
+        let hits = self.initial_hits(query, precursor, Some(keep));
         let mut features = Vec::with_capacity(self.report_psms);
         self.build_features(query, precursor, &hits, self.report_psms, &mut features);
         features

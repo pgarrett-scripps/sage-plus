@@ -88,7 +88,7 @@ pub struct InSourceRunStats {
     /// No rescue rows were then written for any file, and the run exited with
     /// an error after writing the main results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rescue_error: Option<String>,
+    pub rescue_error: Option<sage_core::in_source_rescue::InSourceRescueFailure>,
 }
 
 /// Search tolerances suggested by the signed mass errors of rank-1 target

@@ -928,6 +928,13 @@ impl Input {
                     "`in_source.rescue` searches DDA spectra only; it cannot be combined with `dia` or `wide_window`"
                 );
             }
+            // Every charge tried on one scan reads a parent's own spectrum at
+            // a fraction of its mass, where its truncations lie.
+            if self.override_precursor_charge == Some(true) {
+                anyhow::bail!(
+                    "`in_source.rescue` needs each scan's own precursor charge; it cannot be combined with `override_precursor_charge`"
+                );
+            }
             if let Some(problem) = sage_core::in_source_rescue::precursor_reach_problem(
                 self.precursor_tol,
                 self.isotope_errors.unwrap_or(DEFAULT_ISOTOPE_ERRORS),

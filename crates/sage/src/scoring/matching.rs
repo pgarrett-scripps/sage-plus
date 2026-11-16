@@ -295,7 +295,7 @@ impl<'db> Scorer<'db> {
     ) -> InitialHits {
         let queries = [self.db.query(base_mass, tolerance, self.fragment_tol)];
         let mut hits = Vec::with_capacity(1);
-        self.preliminary_hits_multi(plan, &queries, &[template], &mut hits);
+        self.preliminary_hits_multi(plan, &queries, &[template], None, &mut hits);
         hits.pop().unwrap_or_default()
     }
 
@@ -313,6 +313,7 @@ impl<'db> Scorer<'db> {
         plan: &mut FragmentWindowPlan,
         queries: &[IndexedQuery<'_>],
         templates: &[PreScore],
+        keep: Option<CandidateFilter<'_>>,
         out: &mut Vec<InitialHits>,
     ) {
         debug_assert_eq!(queries.len(), templates.len());
@@ -355,6 +356,19 @@ impl<'db> Scorer<'db> {
                 matched_peaks[window] += 1;
             });
 
+            // A restricted search drops the candidates `keep` rejects before
+            // the top-K cut, as if the database held no others.
+            if let Some(keep) = keep {
+                for (window, &(start, potential)) in segments.iter().enumerate() {
+                    for sc in &mut preliminary[start..start + potential] {
+                        if sc.matched > 0 && !keep(sc.peptide) {
+                            matched_peaks[window] -= sc.matched as usize;
+                            scored_candidates[window] -= 1;
+                            *sc = PreScore::default();
+                        }
+                    }
+                }
+            }
             for (window, &(start, potential)) in segments.iter().enumerate() {
                 if matched_peaks[window] == 0 {
                     out.push(InitialHits::default());
@@ -378,6 +392,7 @@ impl<'db> Scorer<'db> {
         precursor_mass: f32,
         precursor_charge: u8,
         precursor_tol: Tolerance,
+        keep: Option<CandidateFilter<'_>>,
     ) -> InitialHits {
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
         let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
@@ -391,11 +406,13 @@ impl<'db> Scorer<'db> {
                     precursor_charge,
                     precursor_tol,
                     offset,
+                    keep,
                 );
                 hits
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn matched_peaks_with_offset(
         &self,
         fragment_index: &FragmentMatchIndex,
@@ -404,6 +421,7 @@ impl<'db> Scorer<'db> {
         precursor_charge: u8,
         precursor_tol: Tolerance,
         offset: u8,
+        keep: Option<CandidateFilter<'_>>,
     ) -> InitialHits {
         // One plan for every isotope error of this offset: they search the
         // same peaks and differ only in the precursor window.
@@ -431,7 +449,7 @@ impl<'db> Scorer<'db> {
         }
 
         let mut per_window = Vec::with_capacity(queries.len());
-        self.preliminary_hits_multi(plan, &queries, &templates, &mut per_window);
+        self.preliminary_hits_multi(plan, &queries, &templates, keep, &mut per_window);
         let mut hits = per_window
             .into_iter()
             .fold(InitialHits::default(), |mut hits, window| {
@@ -448,6 +466,7 @@ impl<'db> Scorer<'db> {
         &self,
         query: &ProcessedSpectrum,
         precursor: &Precursor,
+        keep: Option<CandidateFilter<'_>>,
     ) -> InitialHits {
         // Sage operates on masses without protons; [M] instead of [MH+]
         let mz = precursor.mz - PROTON;
@@ -462,8 +481,13 @@ impl<'db> Scorer<'db> {
                         .isolation_window
                         .unwrap_or(Tolerance::Da(-2.4, 2.4))
                         * precursor_charge as f32;
-                    hits +=
-                        self.matched_peaks(query, precursor_mass, precursor_charge, precursor_tol);
+                    hits += self.matched_peaks(
+                        query,
+                        precursor_mass,
+                        precursor_charge,
+                        precursor_tol,
+                        keep,
+                    );
                     hits
                 },
             )
@@ -471,7 +495,7 @@ impl<'db> Scorer<'db> {
             let charge = precursor.charge.unwrap();
             // Charge state is already annotated for this precusor, only search once
             let precursor_mass = mz * charge as f32;
-            self.matched_peaks(query, precursor_mass, charge, self.precursor_tol)
+            self.matched_peaks(query, precursor_mass, charge, self.precursor_tol, keep)
         } else {
             // Not all selected ion precursors have charge states annotated (or user has set
             // `override_precursor_charge`)
@@ -485,6 +509,7 @@ impl<'db> Scorer<'db> {
                         precursor_mass,
                         precursor_charge,
                         self.precursor_tol,
+                        keep,
                     );
                     hits
                 },

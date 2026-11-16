@@ -267,6 +267,20 @@ impl Runner {
         // are reported with protein group FDR = 1.0
         let q_protein_group =
             sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
+        // Test hook: confident PSMs a whole-run test needs and a one-spectrum
+        // fixture cannot reach by FDR. Compiled into test builds only.
+        #[cfg(test)]
+        outputs.features.extend(
+            super::in_source_rescue::INJECT_PSMS
+                .with(|cell| cell.take())
+                .into_iter()
+                .map(|mut feature| {
+                    if let Some(alignments) = &alignments {
+                        feature.aligned_rt = alignments[feature.file_id].transform(feature.rt);
+                    }
+                    feature
+                }),
+        );
         self.events.emit(EventKind::FdrCompleted {
             psms: q_spectrum,
             peptides: q_peptide,
@@ -499,11 +513,12 @@ impl Runner {
                         &spectrum_occurrences,
                     )?;
                     spectrum_occurrences.extend(outcome.occurrences);
-                    (outcome.features, Some(outcome.stats), outcome.error)
+                    let stats = outcome.error.is_none().then_some(outcome.stats);
+                    (outcome.features, stats, outcome.error)
                 }
                 _ => (Vec::new(), None, None),
             };
-        let rescue_written = in_source_rescue.is_some() && rescue_error.is_none();
+        let rescue_written = in_source_rescue.is_some();
 
         let output_psm_q_value = self.parameters.output_filter.psm_q_value;
         let output_features = outputs
@@ -922,17 +937,18 @@ impl Runner {
             });
         }
 
-        self.events.emit(EventKind::JobCompleted {
-            runtime_secs: run_time,
-            outputs: summary.output_paths.len(),
-        });
-        self.events.check()?;
-
+        // A failed rescue pass fails the job: the caller reports JobFailed,
+        // so JobCompleted is never sent first.
         if let Some(error) = rescue_error {
             anyhow::bail!(
                 "{error}. The main results were written in full without rescue rows; run-summary.json records the failure"
             );
         }
+        self.events.emit(EventKind::JobCompleted {
+            runtime_secs: run_time,
+            outputs: summary.output_paths.len(),
+        });
+        self.events.check()?;
         Ok(summary)
     }
 

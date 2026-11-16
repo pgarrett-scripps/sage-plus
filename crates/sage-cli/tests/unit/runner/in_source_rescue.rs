@@ -403,7 +403,7 @@ fn an_open_precursor_tolerance_is_refused() {
         )
         .unwrap();
     assert!(outcome.features.is_empty());
-    assert!(outcome.error.unwrap().contains("precursor window"));
+    assert!(outcome.error.unwrap().message.contains("precursor window"));
     std::fs::remove_dir_all(directory).ok();
 }
 
@@ -424,93 +424,376 @@ fn a_failure_on_one_file_keeps_every_files_rescue_out() {
     );
     super::FAIL_REREAD.with(|fail| fail.set(None));
     let outcome = outcome.unwrap();
-    // File 0 found its hit, but nothing of it is kept.
+    // File 0 found its hit, but nothing of it is kept, not even its counts.
     assert!(outcome.features.is_empty());
-    assert_eq!(outcome.stats.len(), 2);
-    assert_eq!(outcome.stats[0].error, None);
-    assert_eq!(outcome.stats[0].target_hits, 1);
-    assert!(outcome.stats[1].error.is_some());
+    assert!(outcome.stats.is_empty());
+    assert!(outcome.occurrences.is_empty());
     let error = outcome.error.expect("the run is told the pass failed");
-    assert!(error.contains("file 1"), "{error}");
+    assert_eq!(error.file_id, Some(1));
+    assert!(error.to_string().contains("file 1"), "{error}");
     assert_eq!(runner.database.peptides.len(), indexed);
     assert!(!annotations.is_rescued(8) && !annotations.is_rescued(9));
     std::fs::remove_dir_all(directory).ok();
 }
 
-/// A whole run whose rescue fails on its second file writes the main results
-/// as a run without the pass writes them, records the failure in
-/// run-summary.json, and exits with an error naming the file.
+/// The parent of the whole-run tests: the fixture's peptide after a residue
+/// that is not a cleavage site, so the product is no tryptic peptide and the
+/// fully enzymatic search cannot find it.
+const WHOLE_RUN_PARENT: &str = "GGWGGALQSRPAAPPAPGPGQLTLR";
+
+struct WholeRun {
+    result: anyhow::Result<crate::runner::RunSummary>,
+    directory: std::path::PathBuf,
+    events: Vec<serde_json::Value>,
+}
+
+/// A whole run over `files` copies of the fixture, with a confident PSM of
+/// the parent injected in every file at the fixture spectrum's retention
+/// time, the rescue pass `rescue` (the in-source annotation is on either way),
+/// and the pass made to fail on file `fail`. Every row is written.
+fn whole_run(name: &str, files: usize, rescue: bool, fail: Option<usize>) -> WholeRun {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "sage-rescue-run-{name}-{}-{unique}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let fasta = directory.join("parent.fasta");
+    std::fs::write(&fasta, format!(">sp|P1|PARENT\n{WHOLE_RUN_PARENT}\n")).unwrap();
+    let output = directory.join("out");
+    let (_, rt) = fixture_spectrum();
+    // The fixture plus MS1 scans around its retention time with the parent's
+    // isotope envelope at charge 3, so LFQ has something to quantify.
+    let parent_mass = {
+        let probe = fixture_runner(&[fixture()], false);
+        std::fs::remove_dir_all(probe.1).ok();
+        let fasta = sage_core::fasta::Fasta::parse(
+            format!(">sp|P1|PARENT\n{WHOLE_RUN_PARENT}\n"),
+            "rev_",
+            true,
+        )
+        .unwrap();
+        probe
+            .0
+            .database_parameters
+            .digest(&fasta)
+            .into_iter()
+            .find(|p| !p.decoy && p.sequence.as_bytes() == WHOLE_RUN_PARENT.as_bytes())
+            .unwrap()
+            .monoisotopic
+    };
+    let spectra_path = directory.join("with-ms1.mzML");
+    std::fs::write(&spectra_path, with_ms1_scans(rt, parent_mass, 3)).unwrap();
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": {
+            "fasta": fasta.to_string_lossy(),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "min_len": 5, "max_len": 50, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
+        "precursor_tol": { "ppm": [-50, 50] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "isotope_errors": [-1, 3],
+        "min_peaks": 15,
+        "min_matched_peaks": 4,
+        "mzml_paths": vec![spectra_path.to_string_lossy().into_owned(); files],
+        "in_source": {"rescue": rescue, "rt_tolerance": 0.5},
+        "predict_rt": false,
+        "quant": {"lfq": true},
+        "write_pin": true,
+        "output_filter": {"psm_q_value": 1.0},
+        "output_directory": output.to_string_lossy(),
+    }))
+    .unwrap();
+    let events_path = directory.join("events.jsonl");
+    let runner = Runner::new_with_control(
+        input.build().unwrap(),
+        1,
+        crate::events::EventEmitter::from_writer(std::fs::File::create(&events_path).unwrap()),
+        crate::events::CancellationToken::default(),
+    )
+    .unwrap();
+    let parents = (0..files)
+        .map(|file_id| {
+            let mut psm = psm_of(&runner, WHOLE_RUN_PARENT, file_id, 1_000_000 + file_id, rt);
+            psm.spec_id = format!("injected-parent-{file_id}");
+            psm.protein_q = 0.001;
+            psm.protein_group_q = 0.001;
+            psm.charge = 3;
+            psm.expmass = parent_mass;
+            psm.calcmass = parent_mass;
+            psm
+        })
+        .collect::<Vec<_>>();
+    super::INJECT_PSMS.with(|cell| *cell.borrow_mut() = parents);
+    super::FAIL_REREAD.with(|cell| cell.set(fail));
+    let result = runner.run(1);
+    super::FAIL_REREAD.with(|cell| cell.set(None));
+    super::INJECT_PSMS.with(|cell| cell.borrow_mut().clear());
+    let events = std::fs::read_to_string(&events_path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    WholeRun {
+        result,
+        directory: output,
+        events,
+    }
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(TABLE[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The fixture with nine centroided MS1 scans, 0.1 min apart around `rt`,
+/// each carrying the first four isotopes of a precursor of `mass` at
+/// `charge` with a Gaussian elution profile.
+fn with_ms1_scans(rt: f32, mass: f32, charge: u8) -> String {
+    let mzml = std::fs::read_to_string(fixture()).unwrap();
+    let ms1 = |index: usize, scan_rt: f32| {
+        let mz = (mass as f64 + charge as f64 * 1.007276) / charge as f64;
+        let height = 1e8 * (-((scan_rt - rt) as f64 / 0.15).powi(2)).exp();
+        let mzs = (0..4)
+            .map(|k| mz + k as f64 * 1.003355 / charge as f64)
+            .collect::<Vec<_>>();
+        let intensities = [1.0f32, 0.9, 0.5, 0.2].map(|f| (height * f as f64) as f32);
+        let mz_bytes = mzs.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
+        let int_bytes = intensities
+            .iter()
+            .flat_map(|v| v.to_le_bytes())
+            .collect::<Vec<_>>();
+        let (mz64, int64) = (base64(&mz_bytes), base64(&int_bytes));
+        format!(
+            r#"<spectrum index="{index}" id="controllerType=0 controllerNumber=1 scan={scan}" defaultArrayLength="4">
+<cvParam cvRef="MS" accession="MS:1000579" name="MS1 spectrum" value=""/>
+<cvParam cvRef="MS" accession="MS:1000511" name="ms level" value="1"/>
+<cvParam cvRef="MS" accession="MS:1000127" name="centroid spectrum" value=""/>
+<scanList count="1"><scan>
+<cvParam cvRef="MS" accession="MS:1000016" name="scan start time" value="{scan_rt}" unitCvRef="UO" unitAccession="UO:0000031" unitName="minute"/>
+</scan></scanList>
+<binaryDataArrayList count="2">
+<binaryDataArray encodedLength="{l1}">
+<cvParam cvRef="MS" accession="MS:1000523" name="64-bit float" value=""/>
+<cvParam cvRef="MS" accession="MS:1000576" name="no compression" value=""/>
+<cvParam cvRef="MS" accession="MS:1000514" name="m/z array" value=""/>
+<binary>{mz64}</binary>
+</binaryDataArray>
+<binaryDataArray encodedLength="{l2}">
+<cvParam cvRef="MS" accession="MS:1000521" name="32-bit float" value=""/>
+<cvParam cvRef="MS" accession="MS:1000576" name="no compression" value=""/>
+<cvParam cvRef="MS" accession="MS:1000515" name="intensity array" value=""/>
+<binary>{int64}</binary>
+</binaryDataArray>
+</binaryDataArrayList>
+</spectrum>
+"#,
+            scan = 40000 + index,
+            l1 = mz64.len(),
+            l2 = int64.len(),
+        )
+    };
+    let start = mzml.find("<spectrum ").unwrap();
+    let end = mzml.find("</spectrum>").unwrap() + "</spectrum>".len();
+    let offsets = [-0.4f32, -0.3, -0.2, -0.1, 0.05, 0.15, 0.25, 0.35, 0.45];
+    let before = offsets
+        .iter()
+        .filter(|&&d| d < 0.0)
+        .enumerate()
+        .map(|(i, d)| ms1(i + 100, rt + d))
+        .collect::<String>();
+    let after = offsets
+        .iter()
+        .filter(|&&d| d > 0.0)
+        .enumerate()
+        .map(|(i, d)| ms1(i + 200, rt + d))
+        .collect::<String>();
+    format!(
+        "{}{before}{}\n{after}{}",
+        &mzml[..start],
+        &mzml[start..end],
+        &mzml[end..]
+    )
+    .replacen(
+        r#"<spectrumList count="1""#,
+        r#"<spectrumList count="10""#,
+        1,
+    )
+}
+
+/// Each row of a parquet file, as text, with the rescue column dropped.
+fn parquet_rows(path: &std::path::Path) -> Vec<String> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    let reader = SerializedFileReader::new(std::fs::File::open(path).unwrap()).unwrap();
+    reader
+        .get_row_iter(None)
+        .unwrap()
+        .map(|row| {
+            row.unwrap()
+                .get_column_iter()
+                .filter(|(name, _)| name.as_str() != "in_source_rescued")
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect::<Vec<_>>()
+                .join("\t")
+        })
+        .collect()
+}
+
+fn parquet_fields(path: &std::path::Path) -> Vec<String> {
+    use parquet::file::reader::{FileReader, SerializedFileReader};
+    let reader = SerializedFileReader::new(std::fs::File::open(path).unwrap()).unwrap();
+    reader
+        .metadata()
+        .file_metadata()
+        .schema()
+        .get_fields()
+        .iter()
+        .map(|field| field.name().to_string())
+        .collect()
+}
+
+fn event_names(run: &WholeRun) -> Vec<String> {
+    run.events
+        .iter()
+        .map(|event| event["event"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// A rescued PSM is written to results.sage.parquet and to nothing else: the
+/// PIN file, lfq.parquet and every quality-control table are exactly those of
+/// the same run without the pass.
+#[test]
+fn a_rescued_psm_reaches_the_results_and_no_other_output() {
+    let off = whole_run("leak-off", 1, false, None);
+    off.result.as_ref().unwrap();
+    let on = whole_run("leak-on", 1, true, None);
+    on.result.as_ref().unwrap();
+    let results = on.directory.join("results.sage.parquet");
+    assert!(parquet_fields(&results)
+        .iter()
+        .any(|f| f == "in_source_rescued"));
+    let rows = parquet_rows(&off.directory.join("results.sage.parquet"));
+    let rows_on = parquet_rows(&results);
+    let rescued = rows_on.len() - rows.len();
+    assert!(rescued >= 1, "the run wrote no rescue row");
+    assert_eq!(
+        rows_on[..rows.len()],
+        rows[..],
+        "the search's own rows changed"
+    );
+    assert!(
+        rows_on[rows.len()..]
+            .iter()
+            .all(|row| (row.contains(&format!("\tpeptide=\"{PRODUCT}\""))
+                && row.contains(&format!("in_source_parent_peptide=\"{WHOLE_RUN_PARENT}\"")))
+                || row.contains("is_decoy=true")),
+        "{:?}",
+        &rows_on[rows.len()..]
+    );
+    // No other output changes.
+    let mut compared = 0;
+    for entry in std::fs::read_dir(&off.directory).unwrap() {
+        let name = entry.unwrap().file_name().into_string().unwrap();
+        match name.as_str() {
+            "results.sage.parquet" | "results.json" | "run-summary.json" => continue,
+            "lfq.parquet" => assert_eq!(
+                parquet_rows(&off.directory.join(&name)),
+                parquet_rows(&on.directory.join(&name)),
+                "{name}"
+            ),
+            _ => assert_eq!(
+                std::fs::read(off.directory.join(&name)).unwrap(),
+                std::fs::read(on.directory.join(&name)).unwrap(),
+                "{name}"
+            ),
+        }
+        compared += 1;
+    }
+    for required in ["results.sage.pin", "lfq.parquet", "qc.tsv", "digestion.tsv"] {
+        assert!(
+            on.directory.join(required).exists(),
+            "{required} was not written"
+        );
+    }
+    assert!(compared >= 4);
+    // LFQ is built before the rescue pass, and this fixture is too small
+    // for it to quantify anything, so lfq.parquet is compared here as
+    // written; the evidence run compares it row for row on real data.
+    // Byte for byte the PIN file of the run without the pass (above). The
+    // parent's sequence contains the product's, so a text search would prove
+    // nothing.
+    assert_eq!(
+        event_names(&on).last().map(String::as_str),
+        Some("job_completed")
+    );
+    for run in [off, on] {
+        std::fs::remove_dir_all(run.directory.parent().unwrap()).ok();
+    }
+}
+
+/// A whole run whose rescue fails on its second file, when the first file
+/// has a rescue row, writes the main results exactly as a run without the
+/// pass, records only the failure and the file in run-summary.json, never
+/// reports the job completed, and exits with an error naming the file.
 #[test]
 fn a_run_whose_rescue_fails_writes_the_main_results_and_exits_with_an_error() {
-    let workspace = workspace();
-    let run = |name: &str, rescue: bool, fail: Option<usize>| {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "sage-rescue-run-{name}-{}-{unique}",
-            std::process::id()
-        ));
-        let input: crate::input::Input = serde_json::from_value(serde_json::json!({
-            "database": {
-                "fasta": format!("{workspace}/tests/Q99536.fasta"),
-                "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
-                "static_mods": {"C": 57.021464},
-                "ion_kinds": ["b", "y"]
-            },
-            "precursor_tol": { "ppm": [-50, 50] },
-            "fragment_tol": { "ppm": [-10, 10] },
-            "mzml_paths": [fixture(), fixture()],
-            "in_source": {"rescue": rescue},
-            "predict_rt": false,
-            "output_directory": directory.to_string_lossy(),
-        }))
-        .unwrap();
-        let runner = Runner::new(input.build().unwrap(), 1).unwrap();
-        super::FAIL_REREAD.with(|cell| cell.set(fail));
-        let result = runner.run(1);
-        super::FAIL_REREAD.with(|cell| cell.set(None));
-        (result, directory)
-    };
-    let rows = |directory: &std::path::Path| {
-        use parquet::file::reader::{FileReader, SerializedFileReader};
-        let file = std::fs::File::open(directory.join("results.sage.parquet")).unwrap();
-        let reader = SerializedFileReader::new(file).unwrap();
-        let metadata = reader.metadata().file_metadata();
-        let fields = metadata
-            .schema()
-            .get_fields()
-            .iter()
-            .map(|field| field.name().to_string())
-            .collect::<Vec<_>>();
-        (metadata.num_rows(), fields)
-    };
-    let (without, without_directory) = run("off", false, None);
-    without.unwrap();
-    let (failed, failed_directory) = run("failed", true, Some(1));
-    let error = format!("{:#}", failed.unwrap_err());
+    let off = whole_run("fail-off", 2, false, None);
+    off.result.as_ref().unwrap();
+    let completed = whole_run("fail-completed", 2, true, None);
+    completed.result.as_ref().unwrap();
+    let failed = whole_run("fail-failed", 2, true, Some(1));
+    let error = format!("{:#}", failed.result.as_ref().err().unwrap());
     assert!(error.contains("file 1"), "{error}");
-    assert_eq!(rows(&failed_directory), rows(&without_directory));
-    assert!(!rows(&failed_directory)
-        .1
-        .iter()
-        .any(|f| f == "in_source_rescued"));
+    // The completed run has rescue rows, so the failed run could have leaked.
+    let rows = parquet_rows(&off.directory.join("results.sage.parquet"));
+    assert!(parquet_rows(&completed.directory.join("results.sage.parquet")).len() > rows.len());
+    let results = failed.directory.join("results.sage.parquet");
+    assert_eq!(parquet_rows(&results), rows);
+    assert_eq!(
+        parquet_fields(&results),
+        parquet_fields(&off.directory.join("results.sage.parquet"))
+    );
     let summary: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(failed_directory.join("run-summary.json")).unwrap())
+        serde_json::from_slice(&std::fs::read(failed.directory.join("run-summary.json")).unwrap())
             .unwrap();
-    let recorded = summary["in_source"]["rescue_error"].as_str().unwrap();
-    assert!(recorded.contains("file 1"), "{recorded}");
-    assert!(summary["in_source"]["rescue"][1]["error"].is_string());
-    // The same run without the failure writes the rescue column.
-    let (completed, completed_directory) = run("completed", true, None);
-    completed.unwrap();
-    assert!(rows(&completed_directory)
-        .1
-        .iter()
-        .any(|f| f == "in_source_rescued"));
-    for directory in [without_directory, failed_directory, completed_directory] {
-        std::fs::remove_dir_all(directory).ok();
+    let recorded = &summary["in_source"]["rescue_error"];
+    assert_eq!(recorded["file_id"], 1);
+    assert!(recorded["path"]
+        .as_str()
+        .unwrap()
+        .ends_with("with-ms1.mzML"));
+    assert!(
+        summary["in_source"].get("rescue").is_none(),
+        "partial counts were written"
+    );
+    // The caller reports the failure; the runner never reports success first.
+    let names = event_names(&failed);
+    assert!(
+        !names.iter().any(|name| name == "job_completed"),
+        "{names:?}"
+    );
+    for run in [off, completed, failed] {
+        std::fs::remove_dir_all(run.directory.parent().unwrap()).ok();
     }
 }
 
@@ -610,6 +893,23 @@ fn candidates_of_parents_eluting_elsewhere_cannot_crowd_out_a_coeluting_one() {
         !top.contains(&coeluting),
         "the setup needs it outside the top ten: {top:?}"
     );
+    // Third review N1: the restriction comes before every cut, so even a
+    // depth of one finds the co-eluting candidate, across the isotope
+    // windows (-1..3) and charges this search merges.
+    let coeluting_idx = (0..database.peptides.len())
+        .map(|i| sage_core::database::PeptideIx(i as u32))
+        .find(|&i| database[i].sequence.as_bytes() == coeluting.as_bytes() && !database[i].decoy)
+        .unwrap();
+    scorer.report_psms = 1;
+    let plain = scorer.score(&spectrum);
+    assert_ne!(plain[0].peptide_idx, coeluting_idx);
+    let keep = |peptide: sage_core::database::PeptideIx| {
+        database[peptide].sequence.as_bytes() == coeluting.as_bytes()
+    };
+    let restricted = scorer.score_restricted(&spectrum, &keep);
+    assert_eq!(restricted.len(), 1);
+    assert_eq!(restricted[0].peptide_idx, coeluting_idx);
+    assert_eq!(restricted[0].delta_best, 0.0);
 
     let (hits, stats) = runner.rescue_file(
         0,
@@ -738,5 +1038,90 @@ fn a_repeated_spectrum_id_is_told_apart_by_its_occurrence() {
     assert_eq!(stats.searched_spectra, 1);
     assert_eq!(hits[0].1, 0);
     std::fs::remove_file(path).ok();
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// Third review N2: a scan without a precursor charge is not searched, since
+/// every charge tried would read a parent's own spectrum at a fraction of its
+/// mass; and the charge override is refused at configuration.
+#[test]
+fn a_scan_without_a_precursor_charge_is_not_searched() {
+    let mzml = std::fs::read_to_string(fixture()).unwrap();
+    let chargeless = mzml.replacen(
+        r#"<cvParam cvRef="MS" accession="MS:1000041" name="charge state" value="3"/>"#,
+        "",
+        1,
+    );
+    assert_ne!(chargeless, mzml);
+    let path = std::env::temp_dir().join(format!(
+        "sage-rescue-chargeless-{}-{}.mzML",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, chargeless).unwrap();
+    let (runner, directory) = fixture_runner(&[path.to_string_lossy().into_owned()], false);
+    let (_, rt) = fixture_spectrum();
+    let features = [parent_psm(&runner, 0, 0, rt)];
+    let (hits, stats) = runner.rescue_file(
+        0,
+        &features,
+        &settings(),
+        &InSourceAnnotations::default(),
+        &HashMap::new(),
+        None,
+    );
+    assert!(hits.is_empty());
+    assert_eq!(stats.searched_spectra, 0);
+    assert_eq!(stats.skipped_without_charge, 1);
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir_all(directory).ok();
+
+    let workspace = workspace();
+    let input: crate::input::Input = serde_json::from_value(serde_json::json!({
+        "database": {
+            "fasta": format!("{workspace}/tests/Q99536.fasta"),
+            "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+            "static_mods": {},
+            "ion_kinds": ["b", "y"]
+        },
+        "precursor_tol": { "ppm": [-10, 10] },
+        "fragment_tol": { "ppm": [-10, 10] },
+        "mzml_paths": [fixture()],
+        "override_precursor_charge": true,
+        "in_source": {"rescue": true},
+    }))
+    .unwrap();
+    let error = format!("{:#}", input.build().err().unwrap());
+    assert!(error.contains("override_precursor_charge"), "{error}");
+}
+
+/// Third review N6: a product that several parents give lies in all of
+/// their proteins, within a file and across files.
+#[test]
+fn a_product_of_several_parents_lies_in_all_of_their_proteins() {
+    let (runner, directory) = runner_with(
+        &[fixture()],
+        &[PARENT.to_string(), format!("MMWWK{PRODUCT}")],
+        &[PRODUCT.to_string()],
+        serde_json::json!({}),
+    );
+    let (_, rt) = fixture_spectrum();
+    let mut parents = fnv::FnvHashMap::default();
+    parents.insert(psm_of(&runner, PARENT, 0, 0, rt).peptide_idx, rt);
+    parents.insert(
+        psm_of(&runner, &format!("MMWWK{PRODUCT}"), 0, 1, rt).peptide_idx,
+        rt,
+    );
+    let mut stats = InSourceRescueFileStats::default();
+    let (origins, peptides) = runner.rescue_candidates(&parents, &mut stats);
+    let product = peptides
+        .iter()
+        .find(|p| !p.decoy && p.sequence.as_bytes() == PRODUCT.as_bytes())
+        .unwrap();
+    assert_eq!(product.proteins.len(), 2, "{:?}", product.proteins);
+    assert_eq!(origins[&(PRODUCT.to_string(), false)].len(), 2);
     std::fs::remove_dir_all(directory).ok();
 }

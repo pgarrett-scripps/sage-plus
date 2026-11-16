@@ -847,15 +847,21 @@
               "rescued_prefix": {"type": "integer", "minimum": 0},
               "rescued_loss": {"type": "integer", "minimum": 0},
               "dropped_decoy_collisions": {"type": "integer", "minimum": 0, "description": "Candidate pairs dropped because the decoy reads as its own target, another candidate or a database peptide."},
-              "error": {"type": "string", "description": "Why the pass failed on this file: its spectra could not be read again. Any failure means no rescue rows for any file; see `rescue_error`."},
+              "skipped_without_charge": {"type": "integer", "minimum": 0, "description": "Unidentified MS2 spectra not searched because their precursor has no charge."},
               "null_shift_widths": {"type": "number", "description": "Present only in a null-control run of the test harness."}
             },
             "required": ["file_id", "parents", "candidates", "searched_spectra", "target_hits", "decoy_hits", "rescued_psms", "rescued_suffix", "rescued_prefix", "rescued_loss", "dropped_decoy_collisions"]
           }
         },
         "rescue_error": {
-          "type": "string",
-          "description": "Present when the in-source rescue pass did not complete on every file, naming the file. No rescue rows were written for any file, results.sage.parquet is exactly what a run without the pass writes, and the run exited with an error."
+          "type": "object",
+          "description": "Present when the in-source rescue pass did not complete on every file. No rescue rows were written for any file, `rescue` is absent (no per-file counts), results.sage.parquet is exactly what a run without the pass writes, and the run exited with an error.",
+          "properties": {
+            "file_id": {"type": "integer", "minimum": 0, "description": "The file the pass failed on."},
+            "path": {"type": "string", "description": "That file's path."},
+            "message": {"type": "string"}
+          },
+          "required": ["message"]
         }
       }
     },

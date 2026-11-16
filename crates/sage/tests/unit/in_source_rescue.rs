@@ -356,3 +356,48 @@ fn a_piece_keeps_the_flanks_and_protein_termini_of_the_ends_it_keeps() {
         assert_eq!(matches!(suffix.position, Position::Cterm), keeps_c);
     }
 }
+
+#[test]
+fn a_piece_without_a_labelled_residue_is_in_no_channel() {
+    // Third review N5: heavy and light parents give the same unlabelled
+    // piece, which the database digest would leave in no channel.
+    let builder: Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"missed_cleavages": 0, "min_len": 5, "max_len": 30},
+        "static_mods": {
+            "SILAC-K": {"mass": 0.0, "sites": ["K"], "channel_offsets": {"light": 0.0, "heavy": 8.014199}},
+            "SILAC-R": {"mass": 0.0, "sites": ["R"], "channel_offsets": {"light": 0.0, "heavy": 10.008269}}
+        },
+        "generate_decoys": true
+    }))
+    .unwrap();
+    let fasta = Fasta::parse(">P1\nMSTEAGLLPVWNEILTK\n".into(), "rev_", true).unwrap();
+    let db = builder.make_parameters().unwrap().build(fasta);
+    let channels = db
+        .peptides
+        .iter()
+        .filter(|p| !p.decoy && p.sequence.as_bytes() == b"MSTEAGLLPVWNEILTK")
+        .collect::<Vec<_>>();
+    assert_eq!(channels.len(), 2);
+    assert!(channels
+        .iter()
+        .any(|p| p.label_channel_str() == Some("heavy")));
+    assert!(channels
+        .iter()
+        .any(|p| p.label_channel_str() == Some("light")));
+    let prefixes = channels
+        .iter()
+        .map(|parent| truncate(parent, 0..parent.sequence.len() - 1, None, None).unwrap())
+        .collect::<Vec<_>>();
+    for prefix in &prefixes {
+        assert_eq!(prefix.label_channel_str(), None);
+    }
+    assert!(prefixes
+        .windows(2)
+        .all(|pair| pair[0].to_string() == pair[1].to_string()));
+    assert!((prefixes[0].monoisotopic - prefixes[1].monoisotopic).abs() < 1e-3);
+    // A piece that keeps the labelled residue keeps its channel.
+    for parent in &channels {
+        let suffix = truncate(parent, 1..parent.sequence.len(), None, None).unwrap();
+        assert_eq!(suffix.label_channel_str(), parent.label_channel_str());
+    }
+}

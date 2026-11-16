@@ -12,7 +12,7 @@ use sage_core::in_source::{
 };
 use sage_core::in_source_rescue::{
     candidates_of, competition_q_values, parent_windows, precursor_reach_problem,
-    InSourceRescueFileStats, Window, RESCUE_Q_VALUE, RESCUE_REPORT_PSMS,
+    InSourceRescueFailure, InSourceRescueFileStats, Window, RESCUE_Q_VALUE, RESCUE_REPORT_PSMS,
 };
 use sage_core::ml::retention_alignment::Alignment;
 
@@ -38,11 +38,15 @@ pub(super) struct RescueOutcome {
     /// where it is not the first, keyed by `psm_id` as the search keys its own.
     pub(super) occurrences: HashMap<usize, usize>,
     pub(super) stats: Vec<InSourceRescueFileStats>,
-    pub(super) error: Option<String>,
+    pub(super) error: Option<InSourceRescueFailure>,
 }
 
 #[cfg(test)]
 thread_local! {
+    /// Test hook: PSMs added to the search's own after its FDR, as if it had
+    /// found them. Compiled into test builds only.
+    pub(super) static INJECT_PSMS: std::cell::RefCell<Vec<Feature>> =
+        const { std::cell::RefCell::new(Vec::new()) };
     /// Test hook: make the pass fail on this file id, as any per-file error
     /// would, so a test can drive a whole run through a rescue failure.
     /// Compiled into test builds only.
@@ -95,6 +99,11 @@ impl Runner {
         // a runner built some other way fails the same way here.
         let refusal = if self.parameters.wide_window || !self.parameters.dia.is_off() {
             Some("it searches DDA spectra only, not wide-window or DIA searches".to_string())
+        } else if self.parameters.override_precursor_charge {
+            Some(
+                "it needs each scan's own precursor charge, not `override_precursor_charge`"
+                    .to_string(),
+            )
         } else {
             precursor_reach_problem(
                 self.parameters.precursor_tol,
@@ -104,7 +113,10 @@ impl Runner {
         };
         if let Some(reason) = refusal {
             return Ok(RescueOutcome {
-                error: Some(format!("in_source.rescue cannot run: {reason}")),
+                error: Some(InSourceRescueFailure {
+                    message: reason,
+                    ..Default::default()
+                }),
                 ..Default::default()
             });
         }
@@ -135,11 +147,10 @@ impl Runner {
                         "- in-source rescue failed on file {file_id} (`{}`): {reason}",
                         self.parameters.mzml_paths[file_id]
                     );
-                    error.get_or_insert_with(|| {
-                        format!(
-                            "in_source.rescue failed on file {file_id} (`{}`): {reason}",
-                            self.parameters.mzml_paths[file_id]
-                        )
+                    error.get_or_insert_with(|| InSourceRescueFailure {
+                        file_id: Some(file_id),
+                        path: Some(self.parameters.mzml_paths[file_id].to_string()),
+                        message: reason.clone(),
                     });
                 }
                 None => log::info!(
@@ -156,25 +167,39 @@ impl Runner {
             }
             per_file.push((hits, file_stats));
         }
-        let stats = per_file.iter().map(|(_, stats)| stats.clone()).collect();
         if error.is_some() {
             log::error!("in_source.rescue wrote no rescue rows for any file, because it did not complete on every file");
+            // Nothing of the files that finished is kept, not even counts.
             return Ok(RescueOutcome {
-                stats,
                 error,
                 ..Default::default()
             });
         }
+        let stats = per_file.iter().map(|(_, stats)| stats.clone()).collect();
         let mut next_psm_id = features.iter().map(|f| f.psm_id + 1).max().unwrap_or(0);
         let mut registered: HashMap<(String, bool), PeptideIx> = HashMap::new();
+        // A product rescued in several files is one peptide, in the proteins
+        // of every parent that gave it in any file.
+        let mut merged: HashMap<(String, bool), sage_core::peptide::Peptide> = HashMap::new();
+        for ((_, _, peptide), _) in per_file.iter().flat_map(|(hits, _)| hits) {
+            match merged.entry((peptide.to_string(), peptide.decoy)) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    merge_proteins(entry.get_mut(), peptide)
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(peptide.clone());
+                }
+            }
+        }
         let mut rescued = Vec::new();
         let mut rescued_occurrences = HashMap::new();
         for (hits, _) in per_file {
             for ((mut feature, origin, peptide), occurrence) in hits {
                 let key = (peptide.to_string(), peptide.decoy);
-                feature.peptide_idx = *registered
-                    .entry(key)
-                    .or_insert_with(|| self.database.push_unindexed_peptide(peptide));
+                feature.peptide_idx = *registered.entry(key.clone()).or_insert_with(|| {
+                    self.database
+                        .push_unindexed_peptide(merged.remove(&key).unwrap_or(peptide))
+                });
                 feature.psm_id = next_psm_id;
                 next_psm_id += 1;
                 if occurrence > 0 {
@@ -309,40 +334,53 @@ impl Runner {
             .map(|(spectrum, occurrence)| (processor.process(spectrum), occurrence))
             .filter(|(spectrum, _)| spectrum.is_searchable(self.parameters.min_peaks))
             .collect::<Vec<_>>();
+        // A scan without a precursor charge would be searched at every
+        // charge, which reads a parent's own spectrum at a fraction of its
+        // mass, where its truncations lie; decoys cannot model that.
+        let searched = spectra.len();
+        let spectra = spectra
+            .into_iter()
+            .filter(|(spectrum, _)| {
+                spectrum
+                    .precursors
+                    .first()
+                    .is_some_and(|precursor| precursor.charge.is_some())
+            })
+            .collect::<Vec<_>>();
+        stats.skipped_without_charge = searched - spectra.len();
         stats.searched_spectra = spectra.len();
 
-        // Every candidate in a spectrum's precursor window is scored: the
-        // depth covers the most rescue peptides any one window can hold, so
-        // the scorer keeps them all and co-elution, applied next, restricts the
-        // spectrum to the candidates of parents eluting there as if the
-        // database held no others.
+        // Each spectrum is searched against only the candidates whose parent
+        // co-elutes with it, dropped before any candidate is cut, so a
+        // candidate of a parent eluting elsewhere can never take its place.
         let mut scorer = self.scorer();
         scorer.db = &database;
-        scorer.report_psms = scorer
-            .report_psms
-            .max(RESCUE_REPORT_PSMS)
-            .max(window_depth(&database, self.parameters.precursor_tol));
+        scorer.report_psms = scorer.report_psms.max(RESCUE_REPORT_PSMS);
         scorer.chimera = false;
-        // Each spectrum keeps its best hit among the candidates whose parent
-        // co-elutes with it, and reports the longest such parent.
         let hits = spectra
             .par_iter()
             .filter_map(|(spectrum, occurrence)| {
-                let mut coeluting = scorer.score(spectrum).into_iter().filter_map(|feature| {
-                    let origins = origins[feature.peptide_idx.0 as usize]?;
-                    coeluting_origin(origins, &windows, feature.rt).map(|origin| (feature, origin))
-                });
-                let (mut feature, origin) = coeluting.next()?;
-                // The margin to the next candidate is among co-eluting ones,
-                // the only candidates this spectrum was searched against.
-                feature.delta_next = coeluting.next().map_or(feature.hyperscore, |(next, _)| {
-                    feature.hyperscore - next.hyperscore
-                });
-                feature.delta_best = 0.0;
+                let rt = spectrum.scan_start_time;
+                let keep = |peptide: PeptideIx| {
+                    origins[peptide.0 as usize]
+                        .is_some_and(|origins| coeluting_origin(origins, &windows, rt).is_some())
+                };
+                let mut scored = scorer.score_restricted(spectrum, &keep).into_iter();
+                let mut feature = scored.next()?;
+                let origin = coeluting_origin(
+                    origins[feature.peptide_idx.0 as usize]?,
+                    &windows,
+                    feature.rt,
+                )?;
+                // Every reported candidate co-elutes, so delta_next and
+                // delta_best are among the candidates this spectrum was
+                // searched against, as for any search.
+                debug_assert!(feature.delta_best == 0.0);
                 let peptide = database[feature.peptide_idx].clone();
                 if let Some(immonium) = &self.parameters.immonium {
                     feature.immonium = Some(immonium.evaluate(spectrum, &peptide));
                 }
+                feature.rank = 1;
                 Some(((feature, origin, peptide), *occurrence))
             })
             .collect::<Vec<_>>();
@@ -407,11 +445,18 @@ impl Runner {
                     parent_len: candidate.parent_len,
                 };
                 let key = candidate.peptide.to_string();
-                let entry = targets.entry(key.clone()).or_insert_with(|| {
-                    order.push(key);
-                    (candidate.peptide, Vec::new())
-                });
-                entry.1.push(origin);
+                match targets.entry(key.clone()) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        // A product of several parents lies in all of their
+                        // proteins.
+                        merge_proteins(&mut entry.get_mut().0, &candidate.peptide);
+                        entry.get_mut().1.push(origin);
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        order.push(key);
+                        entry.insert((candidate.peptide, vec![origin]));
+                    }
+                }
             }
         }
         let target_sequences = targets
@@ -449,32 +494,20 @@ impl Runner {
     }
 }
 
-/// The most peptides of `database` whose masses fit in one precursor window,
-/// plus the two the index range lookup can add at its ends: a scorer depth at
-/// least this large keeps every candidate of every window.
-pub(super) fn window_depth(
-    database: &sage_core::database::IndexedDatabase,
-    precursor_tol: sage_core::mass::Tolerance,
-) -> usize {
-    let masses = database
-        .peptides
-        .iter()
-        .map(|peptide| peptide.monoisotopic)
-        .collect::<Vec<_>>();
-    let Some(&heaviest) = masses.last() else {
-        return 0;
-    };
-    // The widest window is the one at the heaviest mass.
-    let (lo, hi) = precursor_tol.bounds(heaviest);
-    let width = hi - lo;
-    let (mut start, mut most) = (0, 0);
-    for (end, &mass) in masses.iter().enumerate() {
-        while mass - masses[start] > width {
-            start += 1;
-        }
-        most = most.max(end - start + 1);
-    }
-    most + 2
+/// Add `other`'s proteins and protein sites to `peptide`'s, as the database
+/// digest merges a peptide found in several proteins.
+pub(super) fn merge_proteins(
+    peptide: &mut sage_core::peptide::Peptide,
+    other: &sage_core::peptide::Peptide,
+) {
+    peptide.proteins.extend(other.proteins.iter().cloned());
+    peptide.proteins.sort_unstable();
+    peptide.proteins.dedup();
+    let mut sites = peptide.protein_sites.to_vec();
+    sites.extend(other.protein_sites.iter().cloned());
+    sites.sort_unstable();
+    sites.dedup();
+    peptide.protein_sites = sites.into();
 }
 
 /// The longest of a peptide's parents that elutes at `rt`, the lowest index

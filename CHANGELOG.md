@@ -20,7 +20,7 @@ entries are retained below for provenance.
   written in full, exactly as without the pass, the failure is recorded in `run-summary.json`,
   and Sage exits with an error naming the file. A configuration with a precursor window of
   16 Da or more (open searches), where the rescue q-value would be optimistic, or with
-  `wide_window` or `dia`, is refused. With the option off, which is the default,
+  `wide_window`, `dia` or `override_precursor_charge`, is refused. With the option off, which is the default,
   every output is unchanged.
 - `run-summary.json` says how many localizations the site reports leave out, and why:
   `ptm_localization.decoy_arrangement_wins` counts those where an impossible-site decoy
