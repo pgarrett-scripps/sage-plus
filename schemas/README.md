@@ -17,7 +17,11 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `results.sage.v7.parquet.schema` (unlabeled) and `results.sage.v8.parquet.schema` (labeled) are
   v5 and v6 plus two nullable columns at the end, `in_source_parent_peptide` and `in_source_type`,
   filled when `in_source` is on and null when it is off, as every optional column before them.
-  Current Sage writes v7 or v8.
+- `results.sage.v9.parquet.schema` (unlabeled) and `results.sage.v10.parquet.schema` (labeled) are
+  v7 and v8 plus one nullable column at the end, `in_source_rescued`, true on the rows the
+  in-source rescue pass added. They are written only when `in_source.rescue` is on and the pass
+  completed on every file.
+  Current Sage writes v7 or v8, and v9 or v10 with `in_source.rescue`.
 - `lfq.v1.parquet.schema` describes the separate long-form `lfq.parquet` table.
 - `lfq.v2.parquet.schema` adds label identity and reference-channel ratios.
 - `lfq.v3.parquet.schema` adds strict MS2 evidence and experimental per-file signal diagnostics to unlabeled LFQ.

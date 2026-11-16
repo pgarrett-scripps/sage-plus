@@ -22,6 +22,28 @@ fn fixture() -> String {
 /// A runner over `files` copies of the fixture (or `paths` when given), whose
 /// database holds the parent and, with `keep_product`, the product too.
 fn fixture_runner(paths: &[String], keep_product: bool) -> (Runner, std::path::PathBuf) {
+    let excluded = if keep_product {
+        Vec::new()
+    } else {
+        vec![PRODUCT.to_string()]
+    };
+    runner_with(
+        paths,
+        &[PARENT.to_string()],
+        &excluded,
+        serde_json::json!({}),
+    )
+}
+
+/// A runner over `paths` whose database is the digest of one protein per
+/// sequence in `proteins`, less `excluded` peptides and their decoys, with
+/// `variable_mods` added to the configuration.
+fn runner_with(
+    paths: &[String],
+    proteins: &[String],
+    excluded: &[String],
+    variable_mods: serde_json::Value,
+) -> (Runner, std::path::PathBuf) {
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -30,12 +52,18 @@ fn fixture_runner(paths: &[String], keep_product: bool) -> (Runner, std::path::P
         std::env::temp_dir().join(format!("sage-rescue-test-{}-{unique}", std::process::id()));
     std::fs::create_dir_all(&directory).unwrap();
     let fasta = directory.join("parent.fasta");
-    std::fs::write(&fasta, format!(">sp|P1|PARENT\n{PARENT}\n")).unwrap();
+    let text = proteins
+        .iter()
+        .enumerate()
+        .map(|(index, sequence)| format!(">sp|P{index}|PARENT{index}\n{sequence}\n"))
+        .collect::<String>();
+    std::fs::write(&fasta, text).unwrap();
     let input: crate::input::Input = serde_json::from_value(serde_json::json!({
         "database": {
             "fasta": fasta.to_string_lossy(),
             "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 1, "min_len": 5, "max_len": 50, "semi_enzymatic": false},
             "static_mods": {},
+            "variable_mods": variable_mods,
             "ion_kinds": ["b", "y"]
         },
         "precursor_tol": { "ppm": [-50, 50] },
@@ -50,25 +78,28 @@ fn fixture_runner(paths: &[String], keep_product: bool) -> (Runner, std::path::P
     }))
     .unwrap();
     let mut runner = Runner::new(input.build().unwrap(), 1).unwrap();
-    // The main database: the full digest, less the product unless kept.
+    // The main database: the full digest, less the excluded peptides.
     let fasta =
         sage_core::fasta::Fasta::parse(std::fs::read_to_string(&fasta).unwrap(), "rev_", true)
             .unwrap();
+    let dropped = excluded
+        .iter()
+        .flat_map(|sequence| [sequence.clone(), reversed_interior(sequence)])
+        .collect::<HashSet<_>>();
     let peptides = runner
         .database_parameters
         .digest(&fasta)
         .into_iter()
         .filter(|peptide| {
-            keep_product || {
-                let sequence = std::str::from_utf8(peptide.sequence.as_bytes()).unwrap();
-                sequence != PRODUCT && sequence != reversed_interior(PRODUCT)
-            }
+            !dropped.contains(std::str::from_utf8(peptide.sequence.as_bytes()).unwrap())
         })
         .collect::<Vec<_>>();
+    let offsets = runner.database.mass_offsets.clone();
     runner.database = runner
         .database_parameters
         .clone()
         .build_from_peptides(peptides);
+    assert_eq!(runner.database.mass_offsets.len(), offsets.len());
     (runner, directory)
 }
 
@@ -90,11 +121,16 @@ fn fixture_spectrum() -> (String, f32) {
 
 /// A confident PSM of the parent in `file_id`, on another spectrum, at `rt`.
 fn parent_psm(runner: &Runner, file_id: usize, psm_id: usize, rt: f32) -> Feature {
+    psm_of(runner, PARENT, file_id, psm_id, rt)
+}
+
+/// A confident PSM of the database peptide `sequence`, on another spectrum.
+fn psm_of(runner: &Runner, sequence: &str, file_id: usize, psm_id: usize, rt: f32) -> Feature {
     let parent = (0..runner.database.peptides.len())
         .map(|index| sage_core::database::PeptideIx(index as u32))
         .find(|&index| {
             let peptide = &runner.database[index];
-            !peptide.decoy && peptide.sequence.as_bytes() == PARENT.as_bytes()
+            !peptide.decoy && peptide.sequence.as_bytes() == sequence.as_bytes()
         })
         .expect("the parent is in the database");
     Feature {
@@ -129,6 +165,7 @@ fn an_unidentified_spectrum_of_a_coeluting_parents_truncation_is_rescued() {
         &features,
         &settings(),
         &InSourceAnnotations::default(),
+        &HashMap::new(),
         None,
     );
     assert_eq!(stats.parents, 1);
@@ -136,7 +173,8 @@ fn an_unidentified_spectrum_of_a_coeluting_parents_truncation_is_rescued() {
     assert!(stats.candidates > 0);
     assert_eq!(stats.error, None);
     assert_eq!(hits.len(), 1, "{stats:?}");
-    let (feature, origin, peptide) = &hits[0];
+    let ((feature, origin, peptide), occurrence) = &hits[0];
+    assert_eq!(*occurrence, 0);
     assert_eq!(peptide.sequence.as_bytes(), PRODUCT.as_bytes());
     assert!(!peptide.decoy);
     assert_eq!(origin.parent, features[0].peptide_idx);
@@ -164,6 +202,7 @@ fn a_parent_that_does_not_coelute_rescues_nothing() {
             &features,
             &settings(),
             &InSourceAnnotations::default(),
+            &HashMap::new(),
             None,
         );
         assert!(hits.is_empty(), "{stats:?}");
@@ -176,6 +215,7 @@ fn a_parent_that_does_not_coelute_rescues_nothing() {
         &features,
         &settings(),
         &InSourceAnnotations::default(),
+        &HashMap::new(),
         Some(5.0),
     );
     assert!(hits.is_empty());
@@ -196,6 +236,7 @@ fn identified_spectra_and_database_peptides_are_not_searched_again() {
         &features,
         &settings(),
         &InSourceAnnotations::default(),
+        &HashMap::new(),
         None,
     );
     assert!(hits.is_empty());
@@ -250,6 +291,7 @@ fn a_file_that_cannot_be_read_again_is_recorded_as_an_error() {
         &features,
         &settings(),
         &InSourceAnnotations::default(),
+        &HashMap::new(),
         None,
     );
     assert!(hits.is_empty());
@@ -267,7 +309,13 @@ fn rescued_psms_of_several_files_share_one_registered_peptide_and_stay_out_of_th
     let indexed = runner.database.peptides.len();
     let mut annotations = InSourceAnnotations::default();
     let outcome = runner
-        .in_source_rescue(&features, &settings(), &mut annotations, None)
+        .in_source_rescue(
+            &features,
+            &settings(),
+            &mut annotations,
+            None,
+            &HashMap::new(),
+        )
         .unwrap();
     assert_eq!(outcome.error, None);
     let (rescued, stats) = (outcome.features, outcome.stats);
@@ -351,6 +399,7 @@ fn an_open_precursor_tolerance_is_refused() {
             &settings(),
             &mut InSourceAnnotations::default(),
             None,
+            &HashMap::new(),
         )
         .unwrap();
     assert!(outcome.features.is_empty());
@@ -366,7 +415,13 @@ fn a_failure_on_one_file_keeps_every_files_rescue_out() {
     let indexed = runner.database.peptides.len();
     let mut annotations = InSourceAnnotations::default();
     super::FAIL_REREAD.with(|fail| fail.set(Some(1)));
-    let outcome = runner.in_source_rescue(&features, &settings(), &mut annotations, None);
+    let outcome = runner.in_source_rescue(
+        &features,
+        &settings(),
+        &mut annotations,
+        None,
+        &HashMap::new(),
+    );
     super::FAIL_REREAD.with(|fail| fail.set(None));
     let outcome = outcome.unwrap();
     // File 0 found its hit, but nothing of it is kept.
@@ -477,5 +532,211 @@ fn palindromic_candidates_are_dropped_with_their_decoys() {
     assert_eq!(stats.candidates, 0);
     assert!(stats.dropped_decoy_collisions > 0);
     assert!(origins.is_empty() && peptides.is_empty());
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// The fixture's peptide with the residues at `i` and `i + 1` exchanged, for
+/// each pair given: same composition, so the same precursor mass.
+fn swapped(pairs: &[usize]) -> String {
+    let mut bytes = PRODUCT.as_bytes().to_vec();
+    for &i in pairs {
+        bytes.swap(i, i + 1);
+    }
+    String::from_utf8(bytes).unwrap()
+}
+
+/// Second review G: co-elution restricts a spectrum's candidates before they
+/// compete. Eleven candidates of parents eluting elsewhere outscore the one
+/// co-eluting candidate on the fixture spectrum; with only the top ten hits
+/// kept and filtered afterwards, the co-eluting candidate was never seen.
+#[test]
+fn candidates_of_parents_eluting_elsewhere_cannot_crowd_out_a_coeluting_one() {
+    let elsewhere = std::iter::once(PRODUCT.to_string())
+        .chain([6, 8, 9, 10, 11, 12, 13, 14, 15, 16].map(|i| swapped(&[i])))
+        .collect::<Vec<_>>();
+    let coeluting = swapped(&[1, 6, 10, 14]);
+    let products = elsewhere
+        .iter()
+        .chain([&coeluting])
+        .cloned()
+        .collect::<Vec<_>>();
+    let parents = products
+        .iter()
+        .map(|product| format!("GGWGGK{product}"))
+        .collect::<Vec<_>>();
+    let (runner, directory) = runner_with(&[fixture()], &parents, &products, serde_json::json!({}));
+    let (_, rt) = fixture_spectrum();
+    let mut features = parents[..elsewhere.len()]
+        .iter()
+        .enumerate()
+        .map(|(index, parent)| psm_of(&runner, parent, 0, index, rt + 30.0))
+        .collect::<Vec<_>>();
+    features.push(psm_of(
+        &runner,
+        parents.last().unwrap(),
+        0,
+        elsewhere.len(),
+        rt,
+    ));
+
+    // The setup: on this spectrum the co-eluting candidate ranks below ten.
+    let mut stats = InSourceRescueFileStats::default();
+    let medians = features
+        .iter()
+        .map(|feature| (feature.peptide_idx, feature.rt))
+        .collect::<fnv::FnvHashMap<_, _>>();
+    let (_, peptides) = runner.rescue_candidates(&medians, &mut stats);
+    let database = runner.rescue_database(peptides);
+    let mut scorer = runner.scorer();
+    scorer.db = &database;
+    scorer.report_psms = 10;
+    scorer.chimera = false;
+    let spectra =
+        sage_cloudpath::util::read_mzml(&sage_cloudpath::to_url(&fixture()).unwrap(), 0, None)
+            .unwrap();
+    let (_, processor) = runner.spectrum_reading();
+    let spectrum = processor.process(spectra[0].clone());
+    let top = scorer
+        .score(&spectrum)
+        .into_iter()
+        .map(|feature| {
+            std::str::from_utf8(database[feature.peptide_idx].sequence.as_bytes())
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(top.len(), 10);
+    assert!(
+        !top.contains(&coeluting),
+        "the setup needs it outside the top ten: {top:?}"
+    );
+
+    let (hits, stats) = runner.rescue_file(
+        0,
+        &features,
+        &settings(),
+        &InSourceAnnotations::default(),
+        &HashMap::new(),
+        None,
+    );
+    assert_eq!(hits.len(), 1, "{stats:?}");
+    let ((_, origin, peptide), _) = &hits[0];
+    assert_eq!(peptide.sequence.as_bytes(), coeluting.as_bytes());
+    assert_eq!(origin.parent, features.last().unwrap().peptide_idx);
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// Second review B: the rescue database has no mass offsets, so no offset
+/// hypothesis takes a scorer slot from an unshifted product.
+#[test]
+fn the_rescue_database_carries_no_mass_offsets() {
+    let (runner, directory) = runner_with(
+        &[fixture()],
+        &[PARENT.to_string()],
+        &[PRODUCT.to_string()],
+        serde_json::json!({
+            "Phospho": {"mass": 79.966331, "sites": ["S", "T", "Y"], "search_mode": "mass_offset"}
+        }),
+    );
+    assert!(
+        !runner.database.mass_offsets.is_empty(),
+        "the search has an offset"
+    );
+    let (_, rt) = fixture_spectrum();
+    let mut parents = fnv::FnvHashMap::default();
+    parents.insert(parent_psm(&runner, 0, 0, rt).peptide_idx, rt);
+    let mut stats = InSourceRescueFileStats::default();
+    let (_, peptides) = runner.rescue_candidates(&parents, &mut stats);
+    let database = runner.rescue_database(peptides);
+    assert!(database.mass_offsets.is_empty());
+    assert!(database.offset_library.is_none());
+    // And the product is still rescued with the offset configured.
+    let features = [parent_psm(&runner, 0, 0, rt)];
+    let (hits, stats) = runner.rescue_file(
+        0,
+        &features,
+        &settings(),
+        &InSourceAnnotations::default(),
+        &HashMap::new(),
+        None,
+    );
+    assert_eq!(hits.len(), 1, "{stats:?}");
+    assert!(hits[0].0 .0.mass_offset.is_none());
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// Second review E: a spectrum is its ID and its occurrence among the file's
+/// spectra of that ID. With the fixture's spectrum written twice under one ID,
+/// a confident PSM on the first copy leaves the second searched, and the
+/// rescued PSM records the second occurrence, so its reporter ions and
+/// fragments are looked up on its own spectrum.
+#[test]
+fn a_repeated_spectrum_id_is_told_apart_by_its_occurrence() {
+    let mzml = std::fs::read_to_string(fixture()).unwrap();
+    let start = mzml.find("<spectrum ").unwrap();
+    let end = mzml.find("</spectrum>").unwrap() + "</spectrum>".len();
+    let spectrum = &mzml[start..end];
+    let doubled = format!("{}{spectrum}\n{spectrum}{}", &mzml[..start], &mzml[end..]).replacen(
+        "<spectrumList count=\"1\"",
+        "<spectrumList count=\"2\"",
+        1,
+    );
+    let path = std::env::temp_dir().join(format!(
+        "sage-rescue-repeated-{}-{}.mzML",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, doubled).unwrap();
+    let (mut runner, directory) = fixture_runner(&[path.to_string_lossy().into_owned()], false);
+    let (id, rt) = fixture_spectrum();
+    let mut first = parent_psm(&runner, 0, 1, rt);
+    first.spec_id = id;
+    let features = [parent_psm(&runner, 0, 0, rt), first];
+    // The first copy has the confident PSM (occurrence 0, the default).
+    let (hits, stats) = runner.rescue_file(
+        0,
+        &features,
+        &settings(),
+        &InSourceAnnotations::default(),
+        &HashMap::new(),
+        None,
+    );
+    assert_eq!(stats.searched_spectra, 1, "{stats:?}");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(
+        hits[0].1, 1,
+        "the rescued spectrum is the second occurrence"
+    );
+    // The whole pass records it against the rescued PSM's id.
+    let outcome = runner
+        .in_source_rescue(
+            &features,
+            &settings(),
+            &mut InSourceAnnotations::default(),
+            None,
+            &HashMap::new(),
+        )
+        .unwrap();
+    assert_eq!(outcome.features.len(), 1);
+    assert_eq!(
+        outcome.occurrences.get(&outcome.features[0].psm_id),
+        Some(&1)
+    );
+    // With the confident PSM on the second copy instead, the first is searched.
+    let occurrences = HashMap::from([(1usize, 1usize)]);
+    let (hits, stats) = runner.rescue_file(
+        0,
+        &features,
+        &settings(),
+        &InSourceAnnotations::default(),
+        &occurrences,
+        None,
+    );
+    assert_eq!(stats.searched_spectra, 1);
+    assert_eq!(hits[0].1, 0);
+    std::fs::remove_file(path).ok();
     std::fs::remove_dir_all(directory).ok();
 }

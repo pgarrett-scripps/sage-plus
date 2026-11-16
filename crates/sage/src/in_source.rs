@@ -887,6 +887,42 @@ pub fn derive_rt_tolerance(spreads: &mut [f32], rt_span: f32) -> (f32, &'static 
     }
 }
 
+/// Each peptide's median retention time in one file, and the file's
+/// co-elution tolerance with where it came from: `settings.rt_tolerance` when
+/// set, else [`derive_rt_tolerance`] over the pairwise spread of repeated
+/// PSMs. The annotation and the rescue pass both take their windows from this,
+/// so the two cannot drift apart. `rts` is each peptide's PSM retention times
+/// in the file; the vectors are sorted in place.
+pub fn file_retention(
+    rts: &mut FnvHashMap<PeptideIx, Vec<f32>>,
+    settings: &InSourceSettings,
+) -> (FnvHashMap<PeptideIx, f32>, f32, &'static str) {
+    let mut rt_min = f32::MAX;
+    let mut rt_max = f32::MIN;
+    let mut medians: FnvHashMap<PeptideIx, f32> = FnvHashMap::default();
+    let mut spreads = Vec::new();
+    for (peptide_idx, values) in rts.iter_mut() {
+        for &rt in values.iter() {
+            rt_min = rt_min.min(rt);
+            rt_max = rt_max.max(rt);
+        }
+        medians.insert(*peptide_idx, median(values));
+        // Half the distance between two PSMs of one peptide, each pair
+        // counted once: how far each of the two sits from the centre of the
+        // pair, which is the quantity the window applies to a PSM and its
+        // parent's median. Distances from the peptide's own median would be
+        // biased low instead: the median PSM is zero from itself by
+        // construction, and a peptide seen twice contributes the same half
+        // distance twice.
+        pairwise_half_distances(values, &mut spreads);
+    }
+    let (rt_tolerance, source) = match settings.rt_tolerance {
+        Some(configured) => (configured, "configured"),
+        None => derive_rt_tolerance(&mut spreads, (rt_max - rt_min).max(0.0)),
+    };
+    (medians, rt_tolerance, source)
+}
+
 /// One confident PSM taking part in the annotation.
 struct ConfidentPsm {
     psm_id: usize,
@@ -1073,30 +1109,10 @@ fn annotate_file(
     // Retention times of every peptide in this file, which give both the
     // parents' retention times and the spread the tolerance comes from.
     let mut rts: FnvHashMap<PeptideIx, Vec<f32>> = FnvHashMap::default();
-    let mut rt_min = f32::MAX;
-    let mut rt_max = f32::MIN;
     for psm in psms {
         rts.entry(psm.peptide_idx).or_default().push(psm.rt);
-        rt_min = rt_min.min(psm.rt);
-        rt_max = rt_max.max(psm.rt);
     }
-    let mut medians: FnvHashMap<PeptideIx, f32> = FnvHashMap::default();
-    let mut spreads = Vec::new();
-    for (peptide_idx, values) in rts.iter_mut() {
-        medians.insert(*peptide_idx, median(values));
-        // Half the distance between two PSMs of one peptide, each pair
-        // counted once: how far each of the two sits from the centre of the
-        // pair, which is the quantity the window applies to a PSM and its
-        // parent's median. Distances from the peptide's own median would be
-        // biased low instead: the median PSM is zero from itself by
-        // construction, and a peptide seen twice contributes the same half
-        // distance twice.
-        pairwise_half_distances(values, &mut spreads);
-    }
-    let (rt_tolerance, rt_tolerance_source) = match settings.rt_tolerance {
-        Some(configured) => (configured, "configured"),
-        None => derive_rt_tolerance(&mut spreads, (rt_max - rt_min).max(0.0)),
-    };
+    let (medians, rt_tolerance, rt_tolerance_source) = file_retention(&mut rts, settings);
 
     // One set of counts per mode: a difference in peak widths is not a
     // difference in minutes, so the two are never pooled.

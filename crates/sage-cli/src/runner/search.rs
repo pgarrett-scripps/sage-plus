@@ -489,6 +489,33 @@ impl Runner {
         Ok(path)
     }
 
+    /// How this search reads and processes spectra: the TMT signal-to-noise
+    /// level the readers take, and the spectrum processor. Shared by the main
+    /// read and the in-source rescue pass's re-read, so the two cannot drift.
+    pub(super) fn spectrum_reading(&self) -> (Option<u8>, SpectrumProcessor) {
+        let sn = self
+            .parameters
+            .quant
+            .tmt_settings
+            .sn
+            .then_some(self.parameters.quant.tmt_settings.level);
+
+        let min_deisotope_mz = match &self.parameters.quant.tmt {
+            Some(i) => match self.parameters.quant.tmt_settings.level {
+                2 => i.reporter_masses().last().map(|x| x * (1.0 + 20E-6)),
+                _ => None,
+            },
+            None => None,
+        };
+
+        let sp = SpectrumProcessor::with_deisotope_settings(
+            self.parameters.max_peaks,
+            self.parameters.deisotope,
+            min_deisotope_mz.unwrap_or(0.0),
+        );
+        (sn, sp)
+    }
+
     /// Score MS2 spectra. Also returns search-time `psm_id` -> occurrence for
     /// PSMs from spectra whose ID repeats within a file, so the post-FDR pass
     /// can match each PSM to the spectrum it was scored against.
@@ -741,26 +768,7 @@ impl Runner {
         );
         let start = Instant::now();
 
-        let sn = self
-            .parameters
-            .quant
-            .tmt_settings
-            .sn
-            .then_some(self.parameters.quant.tmt_settings.level);
-
-        let min_deisotope_mz = match &self.parameters.quant.tmt {
-            Some(i) => match self.parameters.quant.tmt_settings.level {
-                2 => i.reporter_masses().last().map(|x| x * (1.0 + 20E-6)),
-                _ => None,
-            },
-            None => None,
-        };
-
-        let sp = SpectrumProcessor::with_deisotope_settings(
-            self.parameters.max_peaks,
-            self.parameters.deisotope,
-            min_deisotope_mz.unwrap_or(0.0),
-        );
+        let (sn, sp) = self.spectrum_reading();
 
         // If the file format supports parallel reading, then we can read
         // then it is faster to read each file in series. (since each spectra

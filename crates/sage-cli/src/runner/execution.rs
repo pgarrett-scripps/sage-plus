@@ -139,7 +139,7 @@ impl Runner {
         });
         // Carry repeated-spectrum occurrences over from search-time to final
         // PSM ids so the post-FDR pass can tell same-ID spectra apart.
-        let spectrum_occurrences = if outputs.repeated_spectrum_psms.is_empty() {
+        let mut spectrum_occurrences = if outputs.repeated_spectrum_psms.is_empty() {
             HashMap::new()
         } else {
             outputs
@@ -487,7 +487,9 @@ impl Runner {
                         &settings,
                         annotations,
                         rescue_alignments.as_deref(),
+                        &spectrum_occurrences,
                     )?;
+                    spectrum_occurrences.extend(outcome.occurrences);
                     (outcome.features, Some(outcome.stats), outcome.error)
                 }
                 _ => (Vec::new(), None, None),

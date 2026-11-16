@@ -7,8 +7,8 @@ use fnv::{FnvHashMap, FnvHashSet};
 use sage_core::database::PeptideIx;
 use sage_core::enzyme::EnzymeParameters;
 use sage_core::in_source::{
-    derive_rt_tolerance, pairwise_half_distances, InSourceAnnotation, InSourceAnnotations,
-    InSourceKind, InSourceSettings, Placement, PEPTIDE_Q_VALUE, PSM_Q_VALUE,
+    file_retention, InSourceAnnotation, InSourceAnnotations, InSourceKind, InSourceSettings,
+    Placement, PEPTIDE_Q_VALUE, PSM_Q_VALUE,
 };
 use sage_core::in_source_rescue::{
     candidates_of, competition_q_values, parent_windows, precursor_reach_problem,
@@ -34,6 +34,9 @@ pub(super) type RescueHit = (Feature, Origin, sage_core::peptide::Peptide);
 #[derive(Debug, Default)]
 pub(super) struct RescueOutcome {
     pub(super) features: Vec<Feature>,
+    /// Each rescued PSM's occurrence among its file's spectra of that ID,
+    /// where it is not the first, keyed by `psm_id` as the search keys its own.
+    pub(super) occurrences: HashMap<usize, usize>,
     pub(super) stats: Vec<InSourceRescueFileStats>,
     pub(super) error: Option<String>,
 }
@@ -85,6 +88,7 @@ impl Runner {
         settings: &InSourceSettings,
         annotations: &mut InSourceAnnotations,
         alignments: Option<&[Alignment]>,
+        occurrences: &HashMap<usize, usize>,
     ) -> anyhow::Result<RescueOutcome> {
         let files = self.parameters.mzml_paths.len();
         // The configuration is refused up front for these (`Input::build`);
@@ -100,9 +104,8 @@ impl Runner {
         };
         if let Some(reason) = refusal {
             return Ok(RescueOutcome {
-                stats: Vec::new(),
-                features: Vec::new(),
                 error: Some(format!("in_source.rescue cannot run: {reason}")),
+                ..Default::default()
             });
         }
         let null_shift = null_shift()?;
@@ -118,8 +121,14 @@ impl Runner {
         for file_id in 0..files {
             self.cancellation.check()?;
             let started = Instant::now();
-            let (hits, file_stats) =
-                self.rescue_file(file_id, features, settings, annotations, null_shift);
+            let (hits, file_stats) = self.rescue_file(
+                file_id,
+                features,
+                settings,
+                annotations,
+                occurrences,
+                null_shift,
+            );
             match &file_stats.error {
                 Some(reason) => {
                     log::error!(
@@ -151,22 +160,26 @@ impl Runner {
         if error.is_some() {
             log::error!("in_source.rescue wrote no rescue rows for any file, because it did not complete on every file");
             return Ok(RescueOutcome {
-                features: Vec::new(),
                 stats,
                 error,
+                ..Default::default()
             });
         }
         let mut next_psm_id = features.iter().map(|f| f.psm_id + 1).max().unwrap_or(0);
         let mut registered: HashMap<(String, bool), PeptideIx> = HashMap::new();
         let mut rescued = Vec::new();
+        let mut rescued_occurrences = HashMap::new();
         for (hits, _) in per_file {
-            for (mut feature, origin, peptide) in hits {
+            for ((mut feature, origin, peptide), occurrence) in hits {
                 let key = (peptide.to_string(), peptide.decoy);
                 feature.peptide_idx = *registered
                     .entry(key)
                     .or_insert_with(|| self.database.push_unindexed_peptide(peptide));
                 feature.psm_id = next_psm_id;
                 next_psm_id += 1;
+                if occurrence > 0 {
+                    rescued_occurrences.insert(feature.psm_id, occurrence);
+                }
                 // Retention times are written on the run's aligned scale, as
                 // every other row's are, when the run was aligned.
                 feature.aligned_rt = alignments
@@ -184,6 +197,7 @@ impl Runner {
         }
         Ok(RescueOutcome {
             features: rescued,
+            occurrences: rescued_occurrences,
             stats,
             error: None,
         })
@@ -197,8 +211,9 @@ impl Runner {
         features: &[Feature],
         settings: &InSourceSettings,
         annotations: &InSourceAnnotations,
+        occurrences: &HashMap<usize, usize>,
         null_shift: Option<f32>,
-    ) -> (Vec<RescueHit>, InSourceRescueFileStats) {
+    ) -> (Vec<(RescueHit, usize)>, InSourceRescueFileStats) {
         let mut stats = InSourceRescueFileStats {
             file_id,
             null_shift_widths: null_shift,
@@ -210,13 +225,17 @@ impl Runner {
             return (Vec::new(), stats);
         }
         // Spectra with a confident PSM are identified; every other MS2
-        // spectrum is searched. Parents are the confident target PSMs, by the
-        // thresholds the in-source annotation uses.
+        // spectrum is searched. A spectrum is its ID and its occurrence among
+        // the file's spectra of that ID, as the search numbers them, so a
+        // repeated ID is told apart. Parents are the confident target PSMs, by
+        // the thresholds the in-source annotation uses.
+        let occurrence_of =
+            |feature: &Feature| occurrences.get(&feature.psm_id).copied().unwrap_or(0);
         let mut identified = FnvHashSet::default();
         let mut rts: FnvHashMap<PeptideIx, Vec<f32>> = FnvHashMap::default();
         for feature in features.iter().filter(|f| f.file_id == file_id) {
             if feature.spectrum_q <= PSM_Q_VALUE && feature.label == 1 {
-                identified.insert(feature.spec_id.clone());
+                identified.insert((feature.spec_id.as_str(), occurrence_of(feature)));
             }
             if feature.label == 1
                 && feature.spectrum_q <= PSM_Q_VALUE
@@ -229,27 +248,8 @@ impl Runner {
         if rts.is_empty() {
             return (Vec::new(), stats);
         }
-        // The retention-time tolerance the annotation derives for this file.
-        let mut spreads = Vec::new();
-        let (mut rt_min, mut rt_max) = (f32::MAX, f32::MIN);
-        let mut medians = FnvHashMap::default();
-        for (&peptide, values) in rts.iter_mut() {
-            values.sort_by(f32::total_cmp);
-            rt_min = rt_min.min(values[0]);
-            rt_max = rt_max.max(values[values.len() - 1]);
-            pairwise_half_distances(values, &mut spreads);
-            let mid = values.len() / 2;
-            let median = if values.len() % 2 == 0 {
-                (values[mid - 1] + values[mid]) / 2.0
-            } else {
-                values[mid]
-            };
-            medians.insert(peptide, median);
-        }
-        let rt_tolerance = match settings.rt_tolerance {
-            Some(configured) => configured,
-            None => derive_rt_tolerance(&mut spreads, (rt_max - rt_min).max(0.0)).0,
-        };
+        // The medians and tolerance the annotation derives for this file.
+        let (medians, rt_tolerance, _) = file_retention(&mut rts, settings);
         let windows = parent_windows(
             file_id,
             &medians,
@@ -263,33 +263,18 @@ impl Runner {
         if peptides.is_empty() {
             return (Vec::new(), stats);
         }
-        let mut peptides = peptides;
-        sage_core::database::Parameters::reorder_peptides(&mut peptides);
-        let database = self
-            .database_parameters
-            .clone()
-            .build_from_peptides(peptides);
+        let database = self.rescue_database(peptides);
+        // Each rescue peptide's parents, by its index in the rescue database.
+        let origins = database
+            .peptides
+            .iter()
+            .map(|peptide| origins.get(&(peptide.to_string(), peptide.decoy)))
+            .collect::<Vec<_>>();
 
         // The unidentified MS2 spectra, read and processed as the main search
         // reads and processes them, searchable by the same rule.
         let url = &self.parameters.mzml_paths[file_id];
-        let sn = self
-            .parameters
-            .quant
-            .tmt_settings
-            .sn
-            .then_some(self.parameters.quant.tmt_settings.level);
-        let min_deisotope_mz = match &self.parameters.quant.tmt {
-            Some(i) if self.parameters.quant.tmt_settings.level == 2 => {
-                i.reporter_masses().last().map(|x| x * (1.0 + 20E-6))
-            }
-            _ => None,
-        };
-        let processor = SpectrumProcessor::with_deisotope_settings(
-            self.parameters.max_peaks,
-            self.parameters.deisotope,
-            min_deisotope_mz.unwrap_or(0.0),
-        );
+        let (sn, processor) = self.spectrum_reading();
         let reread = sage_cloudpath::util::read_spectra(
             url,
             file_id,
@@ -304,42 +289,84 @@ impl Runner {
                 return (Vec::new(), stats);
             }
         };
-        let spectra = raw
+        // Occurrences are numbered over the MS2-and-higher spectra in file
+        // order, as the search numbers them.
+        let mut seen: HashMap<String, usize> = HashMap::new();
+        let numbered = raw
+            .into_iter()
+            .filter(|spectrum| spectrum.ms_level != 1)
+            .map(|spectrum| {
+                let count = seen.entry(spectrum.id.clone()).or_insert(0);
+                *count += 1;
+                (spectrum, *count - 1)
+            })
+            .collect::<Vec<_>>();
+        let spectra = numbered
             .into_par_iter()
-            .filter(|spectrum| spectrum.ms_level == 2 && !identified.contains(&spectrum.id))
-            .map(|spectrum| processor.process(spectrum))
-            .filter(|spectrum| spectrum.is_searchable(self.parameters.min_peaks))
+            .filter(|(spectrum, occurrence)| {
+                spectrum.ms_level == 2 && !identified.contains(&(spectrum.id.as_str(), *occurrence))
+            })
+            .map(|(spectrum, occurrence)| (processor.process(spectrum), occurrence))
+            .filter(|(spectrum, _)| spectrum.is_searchable(self.parameters.min_peaks))
             .collect::<Vec<_>>();
         stats.searched_spectra = spectra.len();
 
+        // Every candidate in a spectrum's precursor window is scored: the
+        // depth covers the most rescue peptides any one window can hold, so
+        // the scorer keeps them all and co-elution, applied next, restricts the
+        // spectrum to the candidates of parents eluting there as if the
+        // database held no others.
         let mut scorer = self.scorer();
         scorer.db = &database;
-        scorer.report_psms = scorer.report_psms.max(RESCUE_REPORT_PSMS);
+        scorer.report_psms = scorer
+            .report_psms
+            .max(RESCUE_REPORT_PSMS)
+            .max(window_depth(&database, self.parameters.precursor_tol));
         scorer.chimera = false;
         // Each spectrum keeps its best hit among the candidates whose parent
         // co-elutes with it, and reports the longest such parent.
         let hits = spectra
             .par_iter()
-            .filter_map(|spectrum| {
-                let hit = scorer
-                    .score(spectrum)
-                    .into_iter()
-                    .filter(|feature| feature.mass_offset.is_none())
-                    .find_map(|feature| {
-                        let peptide = &database[feature.peptide_idx];
-                        let key = (peptide.to_string(), peptide.decoy);
-                        coeluting_origin(origins.get(&key)?, &windows, feature.rt)
-                            .map(|origin| (feature, origin, peptide.clone()))
-                    });
-                hit.map(|(mut feature, origin, peptide)| {
-                    if let Some(immonium) = &self.parameters.immonium {
-                        feature.immonium = Some(immonium.evaluate(spectrum, &peptide));
-                    }
-                    (feature, origin, peptide)
-                })
+            .filter_map(|(spectrum, occurrence)| {
+                let mut coeluting = scorer.score(spectrum).into_iter().filter_map(|feature| {
+                    let origins = origins[feature.peptide_idx.0 as usize]?;
+                    coeluting_origin(origins, &windows, feature.rt).map(|origin| (feature, origin))
+                });
+                let (mut feature, origin) = coeluting.next()?;
+                // The margin to the next candidate is among co-eluting ones,
+                // the only candidates this spectrum was searched against.
+                feature.delta_next = coeluting.next().map_or(feature.hyperscore, |(next, _)| {
+                    feature.hyperscore - next.hyperscore
+                });
+                feature.delta_best = 0.0;
+                let peptide = database[feature.peptide_idx].clone();
+                if let Some(immonium) = &self.parameters.immonium {
+                    feature.immonium = Some(immonium.evaluate(spectrum, &peptide));
+                }
+                Some(((feature, origin, peptide), *occurrence))
             })
             .collect::<Vec<_>>();
-        (finish_hits(hits, &mut stats), stats)
+        let (hits, hit_occurrences): (Vec<_>, Vec<_>) = hits.into_iter().unzip();
+        let hits = finish_hits(hits, &mut stats);
+        (hits.into_iter().zip(hit_occurrences).collect(), stats)
+    }
+
+    /// The database a file's rescue candidates are searched in: the main
+    /// search's settings without its mass offsets, because a rescue candidate
+    /// is a product as it is and an offset hypothesis would only take scorer
+    /// slots from it.
+    pub(super) fn rescue_database(
+        &self,
+        mut peptides: Vec<sage_core::peptide::Peptide>,
+    ) -> sage_core::database::IndexedDatabase {
+        sage_core::database::Parameters::reorder_peptides(&mut peptides);
+        let mut database = self
+            .database_parameters
+            .clone()
+            .build_from_peptides(peptides);
+        database.mass_offsets.clear();
+        database.offset_library = None;
+        database
     }
 
     /// The candidates of a file's parents, deduplicated across parents, without
@@ -420,6 +447,34 @@ impl Runner {
         }
         (origins, peptides)
     }
+}
+
+/// The most peptides of `database` whose masses fit in one precursor window,
+/// plus the two the index range lookup can add at its ends: a scorer depth at
+/// least this large keeps every candidate of every window.
+pub(super) fn window_depth(
+    database: &sage_core::database::IndexedDatabase,
+    precursor_tol: sage_core::mass::Tolerance,
+) -> usize {
+    let masses = database
+        .peptides
+        .iter()
+        .map(|peptide| peptide.monoisotopic)
+        .collect::<Vec<_>>();
+    let Some(&heaviest) = masses.last() else {
+        return 0;
+    };
+    // The widest window is the one at the heaviest mass.
+    let (lo, hi) = precursor_tol.bounds(heaviest);
+    let width = hi - lo;
+    let (mut start, mut most) = (0, 0);
+    for (end, &mass) in masses.iter().enumerate() {
+        while mass - masses[start] > width {
+            start += 1;
+        }
+        most = most.max(end - start + 1);
+    }
+    most + 2
 }
 
 /// The longest of a peptide's parents that elutes at `rt`, the lowest index

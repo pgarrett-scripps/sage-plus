@@ -273,6 +273,10 @@ fn label_channel_masses_survive_truncation() {
             parent.monoisotopic
         );
         assert_eq!(whole.label_channel_str(), parent.label_channel_str());
+        // The label group resolves through the channel base, as the writers
+        // do for the label_group column; this panicked when truncation
+        // rebuilt the modifications without their channel bases.
+        assert_eq!(whole.label_group(), parent.label_group());
         // A suffix keeps the C-terminal K or R, and its label mass.
         let suffix = truncate(parent, 1..len, None, None).unwrap();
         let first = parent.sequence.as_bytes()[0];
@@ -280,6 +284,11 @@ fn label_channel_masses_survive_truncation() {
             - monoisotopic(first)
             - parent.modification_at(0)
             - parent.nterm.unwrap_or(0.0);
+        let light_group = suffix.label_group();
+        assert!(
+            !light_group.contains("8.014") && !light_group.contains("10.008"),
+            "{light_group}"
+        );
         assert!(
             (suffix.monoisotopic - expected).abs() < 1e-3,
             "{parent} suffix: {} vs {expected}",
@@ -298,4 +307,52 @@ fn the_precursor_window_must_stay_short_of_the_lightest_product() {
     // So do wide isotope errors on a narrow tolerance.
     assert!(precursor_reach_problem(Tolerance::Ppm(-10.0, 10.0), (-16, 0), 5000.0).is_some());
     assert!(precursor_reach_problem(Tolerance::Ppm(f32::NAN, 10.0), (0, 0), 5000.0).is_some());
+}
+
+#[test]
+fn a_score_that_is_not_a_number_ends_the_competition_and_is_never_accepted() {
+    // This looped forever when ties were found with `==`, which is false for
+    // NaN.
+    let evidence = [
+        (f64::NAN, true),
+        (9.0, false),
+        (8.0, false),
+        (f64::NAN, false),
+    ];
+    let q = competition_q_values(&evidence);
+    assert_eq!(q[0], 1.0);
+    assert_eq!(q[3], 1.0);
+    // The NaN decoy is not counted: 9 -> (0+1)/1, 8 -> (0+1)/2.
+    assert!((q[1] - 0.5).abs() < 1e-6, "{q:?}");
+    assert!((q[2] - 0.5).abs() < 1e-6, "{q:?}");
+    // Infinite scores are numbers and tie with each other.
+    let q = competition_q_values(&[(f64::INFINITY, false), (f64::INFINITY, true)]);
+    assert_eq!(q[0], q[1]);
+}
+
+#[test]
+fn a_piece_keeps_the_flanks_and_protein_termini_of_the_ends_it_keeps() {
+    let db = database();
+    for parent in db
+        .peptides
+        .iter()
+        .filter(|p| !p.decoy && p.sequence.len() >= 8)
+    {
+        let len = parent.sequence.len();
+        let residues = parent.sequence.as_bytes();
+        let prefix = truncate(parent, 0..len - 2, None, None).unwrap();
+        let suffix = truncate(parent, 2..len, None, None).unwrap();
+        for (piece, parent_site) in prefix.protein_sites.iter().zip(parent.protein_sites.iter()) {
+            assert_eq!(piece.prev_aa, parent_site.prev_aa);
+            assert_eq!(piece.next_aa, Some(residues[len - 2]));
+        }
+        for (piece, parent_site) in suffix.protein_sites.iter().zip(parent.protein_sites.iter()) {
+            assert_eq!(piece.prev_aa, Some(residues[1]));
+            assert_eq!(piece.next_aa, parent_site.next_aa);
+        }
+        let keeps_n = matches!(parent.position, Position::Nterm | Position::Full);
+        let keeps_c = matches!(parent.position, Position::Cterm | Position::Full);
+        assert_eq!(matches!(prefix.position, Position::Nterm), keeps_n);
+        assert_eq!(matches!(suffix.position, Position::Cterm), keeps_c);
+    }
 }

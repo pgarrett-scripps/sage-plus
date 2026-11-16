@@ -22,7 +22,7 @@ use crate::enzyme::{Enzyme, Position, ProteinOccurrence};
 use crate::in_source::{InSourceKind, PeakApexes, Placement};
 use crate::mass::{monoisotopic, Tolerance, H2O, NEUTRON, NH3};
 use crate::modification::ModificationDefinition;
-use crate::peptide::{AppliedModification, CompactModifications, Peptide, Site};
+use crate::peptide::{Peptide, Site};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -180,37 +180,60 @@ pub fn truncate(
     let (storage, offset) = parent.sequence.source();
     let offset = offset as usize;
     let sequence = storage.peptide(offset + keep.start..offset + keep.end)?;
-    let mut applied = Vec::new();
-    for modification in parent.applied_modifications() {
-        let site = match modification.site {
-            Site::Nterm if keep.start == 0 => Site::Nterm,
-            Site::Cterm if keep.end == len => Site::Cterm,
-            Site::Sequence(i) if keep.contains(&(i as usize)) => {
-                Site::Sequence(i - keep.start as u32)
-            }
-            _ => continue,
-        };
-        applied.push(AppliedModification {
-            site,
-            modification: Arc::new(modification.modification.clone()),
-            kind: modification.kind,
-        });
-    }
-    for (site, delta) in [(Site::Nterm, nterm_delta), (Site::Cterm, cterm_delta)] {
-        if let Some(delta) = delta {
-            applied.push(AppliedModification {
-                site,
-                modification: Arc::new(ModificationDefinition::bare(delta)),
-                kind: Default::default(),
-            });
-        }
-    }
+    let extra = [(Site::Nterm, nterm_delta), (Site::Cterm, cterm_delta)]
+        .into_iter()
+        .filter_map(|(site, delta)| Some((site, Arc::new(ModificationDefinition::bare(delta?)))))
+        .collect::<Vec<_>>();
+    let modifications = parent.modifications.piece(keep.clone(), len, &extra).ok()?;
+    let parent_residues = parent.sequence.as_bytes();
+    let protein_sites = parent
+        .protein_sites
+        .iter()
+        .map(|site| ProteinOccurrence {
+            start: site.start.map(|start| start + keep.start as u32),
+            // A kept terminus keeps its flank; a cut one is flanked by the
+            // parent's residue next to the cut.
+            prev_aa: if keep.start == 0 {
+                site.prev_aa
+            } else {
+                Some(parent_residues[keep.start - 1])
+            },
+            next_aa: if keep.end == len {
+                site.next_aa
+            } else {
+                Some(parent_residues[keep.end])
+            },
+            ..site.clone()
+        })
+        .collect::<Vec<_>>();
+    let mut piece = Peptide {
+        decoy: false,
+        sequence,
+        modifications,
+        label: parent.label.clone(),
+        nterm: None,
+        cterm: None,
+        monoisotopic: 0.0,
+        missed_cleavages: parent.missed_cleavages,
+        semi_enzymatic: keep.start != 0 || keep.end != len || parent.semi_enzymatic,
+        position: match (
+            keep.start == 0 && matches!(parent.position, Position::Nterm | Position::Full),
+            keep.end == len && matches!(parent.position, Position::Cterm | Position::Full),
+        ) {
+            (true, true) => Position::Full,
+            (true, false) => Position::Nterm,
+            (false, true) => Position::Cterm,
+            (false, false) => Position::Internal,
+        },
+        proteins: parent.proteins.clone(),
+        protein_sites: protein_sites.into(),
+    };
     let mut mass = H2O;
-    for &residue in sequence.as_bytes() {
+    for &residue in piece.sequence.as_bytes() {
         mass += monoisotopic(residue);
     }
     let (mut nterm, mut cterm) = (None, None);
-    for modification in &applied {
+    for modification in piece.applied_modifications() {
         mass += modification.modification.mass;
         match modification.site {
             Site::Nterm => nterm = Some(nterm.unwrap_or(0.0) + modification.modification.mass),
@@ -218,31 +241,10 @@ pub fn truncate(
             Site::Sequence(_) => {}
         }
     }
-    let modifications = CompactModifications::from_applied(applied).ok()?;
-    let protein_sites = parent
-        .protein_sites
-        .iter()
-        .map(|site| ProteinOccurrence {
-            start: site.start.map(|start| start + keep.start as u32),
-            prev_aa: None,
-            next_aa: None,
-            ..site.clone()
-        })
-        .collect::<Vec<_>>();
-    Some(Peptide {
-        decoy: false,
-        sequence,
-        modifications,
-        label: parent.label.clone(),
-        nterm,
-        cterm,
-        monoisotopic: mass,
-        missed_cleavages: parent.missed_cleavages,
-        semi_enzymatic: keep.start != 0 || keep.end != len || parent.semi_enzymatic,
-        position: Position::Internal,
-        proteins: parent.proteins.clone(),
-        protein_sites: protein_sites.into(),
-    })
+    piece.monoisotopic = mass;
+    piece.nterm = nterm;
+    piece.cterm = cterm;
+    Some(piece)
 }
 
 /// Where a parent elutes in one file, in the file's retention-time units.
@@ -311,15 +313,19 @@ pub fn parent_windows(
 /// score threshold at or below its own, as the main spectrum FDR computes it.
 /// Equal scores share one threshold.
 pub fn competition_q_values(evidence: &[(f64, bool)]) -> Vec<f32> {
-    let mut order = (0..evidence.len()).collect::<Vec<_>>();
+    // A score that is not a number takes no part in the competition and gets
+    // q-value 1: it can neither be accepted nor move another hit's threshold.
+    let mut order = (0..evidence.len())
+        .filter(|&index| !evidence[index].0.is_nan())
+        .collect::<Vec<_>>();
     order.sort_by(|&a, &b| evidence[b].0.total_cmp(&evidence[a].0));
-    let mut fdr = vec![1.0f32; evidence.len()];
+    let mut fdr = vec![1.0f32; order.len()];
     let (mut targets, mut decoys) = (0usize, 0usize);
     let mut start = 0;
     while start < order.len() {
         let score = evidence[order[start]].0;
         let mut end = start;
-        while end < order.len() && evidence[order[end]].0 == score {
+        while end < order.len() && evidence[order[end]].0.total_cmp(&score).is_eq() {
             if evidence[order[end]].1 {
                 decoys += 1;
             } else {

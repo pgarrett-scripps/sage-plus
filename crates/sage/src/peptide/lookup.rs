@@ -276,6 +276,90 @@ impl CompactModifications {
         Ok(compact)
     }
 
+    /// The modifications a contiguous piece `keep` of a `len`-residue peptide
+    /// keeps, renumbered from the piece's first residue, plus `extra` terminal
+    /// definitions. Records keep their kind and, for precursor-label records,
+    /// their channel base, so a piece of a labelled peptide resolves to its
+    /// label group as the peptide does. A terminal modification stays only on
+    /// a piece that keeps that terminus.
+    pub fn piece(
+        &self,
+        keep: std::ops::Range<usize>,
+        len: usize,
+        extra: &[(Site, Arc<ModificationDefinition>)],
+    ) -> Result<Self, ModificationLookupError> {
+        let kept = self
+            .entries
+            .iter()
+            .filter_map(|encoded| {
+                let record = self.lookup.record(encoded.modification_id);
+                let position = match record.site.site(encoded.position) {
+                    Site::Nterm if keep.start == 0 => 0,
+                    Site::Cterm if keep.end == len => 0,
+                    Site::Sequence(i) if keep.contains(&(i as usize)) => {
+                        (i as usize - keep.start) as u8
+                    }
+                    _ => return None,
+                };
+                Some((position, record))
+            })
+            .collect::<Vec<_>>();
+        let extra_records = extra.iter().map(|(site, definition)| LookupRecord {
+            site: SiteClass::from_site(*site),
+            kind: ModificationKind::Ordinary,
+            definition: definition.clone(),
+            base: None,
+        });
+        // Every record of the parent's lookup when they fit, so channel
+        // partners stay resolvable; otherwise the kept records and the channel
+        // bases their labels resolve to.
+        let lookup = ModificationLookup::from_records(
+            self.lookup
+                .records
+                .iter()
+                .cloned()
+                .chain(extra_records.clone()),
+        )
+        .or_else(|_| {
+            let bases = kept
+                .iter()
+                .filter_map(|(_, record)| record.base.as_ref().map(|base| (record.site, base)))
+                .flat_map(|(site, base)| {
+                    self.lookup.records.iter().filter(move |candidate| {
+                        candidate.site == site
+                            && candidate.kind == ModificationKind::ChannelBase
+                            && Arc::ptr_eq(&candidate.definition, base)
+                    })
+                })
+                .cloned();
+            ModificationLookup::from_records(
+                kept.iter()
+                    .map(|(_, record)| (*record).clone())
+                    .chain(bases)
+                    .chain(extra_records.clone()),
+            )
+        })?;
+        let mut piece = Self {
+            entries: SmallVec::new(),
+            lookup,
+        };
+        for (position, record) in kept {
+            let id = piece
+                .lookup
+                .id(record.site, &record.definition, record.kind)
+                .expect("a kept record is in the piece's lookup");
+            piece.entries.push(EncodedModification {
+                position,
+                modification_id: id,
+            });
+        }
+        for (site, definition) in extra {
+            piece.push(*site, definition, ModificationKind::Ordinary);
+        }
+        piece.sort();
+        Ok(piece)
+    }
+
     pub(super) fn install_lookup(&mut self, lookup: Arc<ModificationLookup>) {
         if self.entries.is_empty() {
             self.lookup = lookup;
