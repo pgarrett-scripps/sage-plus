@@ -5,7 +5,7 @@ name = "paper"
 # See HISTORY.md for what bumps major, minor, and patch.
 version = "3.13.0"
 description = "Python toolchain for building the manuscript"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # The manuscript toolchain. Small, stable, and the same for every project that
 # uses this scaffold, which is why it is locked (uv.lock is committed) and why the
