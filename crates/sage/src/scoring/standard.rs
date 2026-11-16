@@ -19,7 +19,7 @@ impl<'db> Scorer<'db> {
             return Vec::new();
         };
 
-        let hits = self.initial_hits(query, precursor, None);
+        let hits = self.initial_hits(query, precursor, KeepAll);
         let mut features = Vec::with_capacity(self.report_psms);
         self.build_features(query, precursor, &hits, self.report_psms, &mut features);
         features
@@ -45,7 +45,7 @@ impl<'db> Scorer<'db> {
         let Some(precursor) = query.precursors.first() else {
             return Vec::new();
         };
-        let hits = self.initial_hits(query, precursor, Some(keep));
+        let hits = self.initial_hits(query, precursor, KeepIf(keep));
         let mut features = Vec::with_capacity(self.report_psms);
         self.build_features(query, precursor, &hits, self.report_psms, &mut features);
         features

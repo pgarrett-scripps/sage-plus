@@ -156,6 +156,37 @@ impl AddAssign<InitialHits> for InitialHits {
     }
 }
 
+/// Which candidates a search keeps before its top-K cut: every one
+/// ([`KeepAll`], the ordinary search) or those a filter accepts
+/// ([`KeepIf`], [`Scorer::score_restricted`]). A type parameter rather than an
+/// `Option`, so the ordinary search is compiled without the filter at all.
+pub(super) trait KeepCandidate: Copy {
+    const ALL: bool;
+    fn keep(&self, peptide: PeptideIx) -> bool;
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct KeepAll;
+
+impl KeepCandidate for KeepAll {
+    const ALL: bool = true;
+    #[inline(always)]
+    fn keep(&self, _: PeptideIx) -> bool {
+        true
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct KeepIf<'a>(pub(super) CandidateFilter<'a>);
+
+impl KeepCandidate for KeepIf<'_> {
+    const ALL: bool = false;
+    #[inline]
+    fn keep(&self, peptide: PeptideIx) -> bool {
+        (self.0)(peptide)
+    }
+}
+
 impl<'db> Scorer<'db> {
     /// Mark every peptide that contributes at least one preliminary fragment
     /// match for this spectrum. Keeping all contributors preserves the normal
@@ -295,7 +326,7 @@ impl<'db> Scorer<'db> {
     ) -> InitialHits {
         let queries = [self.db.query(base_mass, tolerance, self.fragment_tol)];
         let mut hits = Vec::with_capacity(1);
-        self.preliminary_hits_multi(plan, &queries, &[template], None, &mut hits);
+        self.preliminary_hits_multi(plan, &queries, &[template], KeepAll, &mut hits);
         hits.pop().unwrap_or_default()
     }
 
@@ -308,12 +339,12 @@ impl<'db> Scorer<'db> {
     /// order, each exactly what that window alone would produce -- the counts
     /// are per peptide index, so the order matches are seen in cannot change
     /// them, and each window is then k-selected on its own.
-    pub(super) fn preliminary_hits_multi(
+    pub(super) fn preliminary_hits_multi<K: KeepCandidate>(
         &self,
         plan: &mut FragmentWindowPlan,
         queries: &[IndexedQuery<'_>],
         templates: &[PreScore],
-        keep: Option<CandidateFilter<'_>>,
+        keep: K,
         out: &mut Vec<InitialHits>,
     ) {
         debug_assert_eq!(queries.len(), templates.len());
@@ -358,10 +389,12 @@ impl<'db> Scorer<'db> {
 
             // A restricted search drops the candidates `keep` rejects before
             // the top-K cut, as if the database held no others.
-            if let Some(keep) = keep {
+            // `K::ALL` is a constant, so the unrestricted search compiles to
+            // the code it had before restriction existed.
+            if !K::ALL {
                 for (window, &(start, potential)) in segments.iter().enumerate() {
                     for sc in &mut preliminary[start..start + potential] {
-                        if sc.matched > 0 && !keep(sc.peptide) {
+                        if sc.matched > 0 && !keep.keep(sc.peptide) {
                             matched_peaks[window] -= sc.matched as usize;
                             scored_candidates[window] -= 1;
                             *sc = PreScore::default();
@@ -386,13 +419,13 @@ impl<'db> Scorer<'db> {
         });
     }
 
-    pub(super) fn matched_peaks(
+    pub(super) fn matched_peaks<K: KeepCandidate>(
         &self,
         query: &ProcessedSpectrum,
         precursor_mass: f32,
         precursor_charge: u8,
         precursor_tol: Tolerance,
-        keep: Option<CandidateFilter<'_>>,
+        keep: K,
     ) -> InitialHits {
         let max_fragment_charge = max_fragment_charge(self.max_fragment_charge, precursor_charge);
         let fragment_index = FragmentMatchIndex::new(query, max_fragment_charge);
@@ -413,7 +446,7 @@ impl<'db> Scorer<'db> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn matched_peaks_with_offset(
+    fn matched_peaks_with_offset<K: KeepCandidate>(
         &self,
         fragment_index: &FragmentMatchIndex,
         plan: &mut FragmentWindowPlan,
@@ -421,7 +454,7 @@ impl<'db> Scorer<'db> {
         precursor_charge: u8,
         precursor_tol: Tolerance,
         offset: u8,
-        keep: Option<CandidateFilter<'_>>,
+        keep: K,
     ) -> InitialHits {
         // One plan for every isotope error of this offset: they search the
         // same peaks and differ only in the precursor window.
@@ -462,11 +495,11 @@ impl<'db> Scorer<'db> {
         hits
     }
 
-    pub(super) fn initial_hits(
+    pub(super) fn initial_hits<K: KeepCandidate>(
         &self,
         query: &ProcessedSpectrum,
         precursor: &Precursor,
-        keep: Option<CandidateFilter<'_>>,
+        keep: K,
     ) -> InitialHits {
         // Sage operates on masses without protons; [M] instead of [MH+]
         let mz = precursor.mz - PROTON;
