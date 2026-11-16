@@ -101,6 +101,15 @@ impl Runner {
 
     pub fn run_with_summary(mut self, parallel: usize) -> anyhow::Result<RunSummary> {
         anyhow::ensure!(parallel > 0, "batch size must be greater than zero");
+        // A null-control harness build checks its shift before the search, so
+        // a bad value cannot cost a finished search.
+        if self
+            .parameters
+            .in_source
+            .is_some_and(|settings| settings.rescue())
+        {
+            super::in_source_rescue::null_shift()?;
+        }
         for warning in self.denoise_warnings() {
             log::warn!("{warning}");
         }

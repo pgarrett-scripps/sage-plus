@@ -56,7 +56,7 @@ thread_local! {
 /// have its results changed by the environment; a value that is set but is
 /// not a finite number stops the run instead of being ignored.
 #[cfg(feature = "in-source-rescue-null-control")]
-fn null_shift() -> anyhow::Result<Option<f32>> {
+pub(super) fn null_shift() -> anyhow::Result<Option<f32>> {
     use sage_core::in_source_rescue::NULL_SHIFT_ENV;
     match std::env::var(NULL_SHIFT_ENV) {
         Err(std::env::VarError::NotPresent) => Ok(None),
@@ -69,7 +69,7 @@ fn null_shift() -> anyhow::Result<Option<f32>> {
 }
 
 #[cfg(not(feature = "in-source-rescue-null-control"))]
-fn null_shift() -> anyhow::Result<Option<f32>> {
+pub(super) fn null_shift() -> anyhow::Result<Option<f32>> {
     Ok(None)
 }
 
