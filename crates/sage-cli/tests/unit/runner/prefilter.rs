@@ -102,7 +102,13 @@ fn a_unit_none_of_whose_copies_matches_keeps_nothing() {
             .unwrap();
         builder.add(&spectra.1);
         let index = Runner::finish_spectrum_index(builder);
-        let shared = SharedSequences::scan(&fasta, &enzyme, None, true, true);
+        let shared = SharedSequences::scan(
+            &fasta,
+            &enzyme,
+            None,
+            db_params.generate_decoys,
+            db_params.merge_isoleucine_leucine,
+        );
         let mut deferred = Vec::new();
         for protein in 0..fasta.targets.len() {
             for digest in fasta.digest_protein(protein, &enzyme, None) {

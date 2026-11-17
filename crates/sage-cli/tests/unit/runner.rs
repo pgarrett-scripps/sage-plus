@@ -1215,7 +1215,8 @@ fn a_motif_rule_takes_the_whole_unit_path() -> anyhow::Result<()> {
     assert!(super::prefilter::early_test_is_exact(
         &plain.make_parameters().map_err(anyhow::Error::msg)?
     ));
-    // And it keeps what the whole digest keeps.
+    // And it keeps what the whole digest keeps (on this one spectrum the
+    // fallback is not what decides it; the assertions above guard it).
     let fasta = shared_digest_fasta() + ">sp|N|MOTIF\nAAKLQSRPANSPAPGPGQLTLRAAK\n";
     let kept = assert_prefilter_equivalence(
         "motif",
@@ -1249,7 +1250,8 @@ fn a_shared_key_only_a_later_spectrum_batch_matches_is_kept() -> anyhow::Result<
         &spectra,
     )?;
     assert!(keeps_shared_peptide(&kept));
-    // Batch 1 alone keeps no copy of the shared peptide.
+    // Batch 1 alone matches nothing at all: the database is refused as empty,
+    // so in the two-batch run the shared peptide's key is live in batch 2 only.
     let alone = assert_prefilter_equivalence(
         "batch-one",
         &shared_digest_fasta(),
@@ -1257,10 +1259,101 @@ fn a_shared_key_only_a_later_spectrum_batch_matches_is_kept() -> anyhow::Result<
         serde_json::json!({}),
         &spectra[..1],
     );
-    if let Ok(alone) = alone {
-        assert!(!keeps_shared_peptide(&alone));
-    }
+    let error = format!("{:#}", alone.expect_err("batch 1 alone must keep nothing"));
+    assert!(error.contains("no target peptides"), "{error}");
+    // The other way round: the unit is built in batch 1 and carried, with
+    // its survivors, through batch 2, which itself matches nothing shared.
+    let reversed = vec![original.display().to_string(), moved.display().to_string()];
+    let kept = assert_prefilter_equivalence(
+        "batches-reversed",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({}),
+        &reversed,
+    )?;
+    assert!(keeps_shared_peptide(&kept));
     std::fs::remove_file(moved).ok();
+    Ok(())
+}
+
+#[test]
+fn a_unit_built_in_one_batch_gains_matches_in_the_next() -> anyhow::Result<()> {
+    // Batch 1 matches the unmodified shared peptide (every copy), batch 2
+    // only its protein N-terminal acetylated form: the unit built in batch 1
+    // must take batch 2's matches too.
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let acetylated =
+        std::env::temp_dir().join(format!("sage-prefilter-gain-{}.mzML", std::process::id()));
+    std::fs::write(
+        &acetylated,
+        std::fs::read_to_string(&original)?.replace(
+            "643.034396630915",
+            &format!("{}", 643.034396630915 + 42.010565 / 3.0),
+        ),
+    )?;
+    let kept = assert_prefilter_equivalence(
+        "gain",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({
+            "variable_mods": {"Acetyl": {"mass": 42.010565, "sites": ["protein_n_term"], "max_count": 1}}
+        }),
+        &[
+            original.display().to_string(),
+            acetylated.display().to_string(),
+        ],
+    )?;
+    assert!(kept.iter().any(|peptide| !peptide.decoy
+        && peptide.nterm.is_some()
+        && peptide.sequence.as_bytes() == SHARED_PEPTIDE.as_bytes()));
+    std::fs::remove_file(acetylated).ok();
+    Ok(())
+}
+
+#[test]
+fn a_ptm_library_site_on_one_of_many_identical_copies_is_kept() -> anyhow::Result<()> {
+    // The fixture's precursor moved by one phospho (charge 3): only the
+    // library-supported phospho form can match. Forty internal copies have no
+    // library site and one has; all share sequence and position, so a copy
+    // remembered as dead must not stand in for the one with the site.
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let phospho = std::env::temp_dir().join(format!(
+        "sage-prefilter-phospho-{}.mzML",
+        std::process::id()
+    ));
+    std::fs::write(
+        &phospho,
+        std::fs::read_to_string(&original)?.replace(
+            "643.034396630915",
+            &format!("{}", 643.034396630915 + 79.966331 / 3.0),
+        ),
+    )?;
+    let p = SHARED_PEPTIDE;
+    let fasta = (0..40)
+        .map(|index| format!(">sp|INT{index}|INTERNAL{index}\nMSGGWGGK{p}AAGEDK\n"))
+        .collect::<String>()
+        + &format!(">sp|SITE|WITH_SITE\nMSGGWGGK{p}AAGEDK\n");
+    let kept = assert_prefilter_equivalence(
+        "library-memo",
+        &fasta,
+        &[(
+            "library.tsv",
+            // The S of the shared peptide: residue 11 of the protein.
+            "protein\tposition\tresidue\tmodification\nsp|SITE|WITH_SITE\t11\tS\tPhospho\n"
+                .to_string(),
+        )],
+        serde_json::json!({
+            "variable_mods": {"Phospho": {"mass": 79.966331, "sites": ["S"], "max_count": 1, "site_mode": "library"}},
+            "ptm_library": "library.tsv"
+        }),
+        &[phospho.display().to_string()],
+    )?;
+    assert!(kept.iter().any(|peptide| !peptide.decoy
+        && !peptide.modifications.is_empty()
+        && peptide.sequence.as_bytes() == p.as_bytes()));
+    std::fs::remove_file(phospho).ok();
     Ok(())
 }
 

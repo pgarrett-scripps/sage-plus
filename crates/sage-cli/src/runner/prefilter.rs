@@ -112,6 +112,9 @@ impl Runner {
         }
 
         let (checked, deferred_digests) = (stream.checked, stream.deferred_digests);
+        // With the early test, "peptides checked" leaves out the peptides of
+        // shared keys no copy could match, and "shared sequences handled
+        // together" counts only the digests of the units that were built.
         if stream.early_test {
             info!(
                 "prefilter: {} shared keys could match a spectrum batch; {} shared digests were filtered as units",
@@ -606,9 +609,9 @@ impl ProteinStream<'_> {
                 self.unit_slots.insert(slot);
             }
             log::info!(
-                "prefilter: {} of {} shared keys could match this spectrum batch; {} shared digests filtered as units",
+                "prefilter: {} of {} shared keys (one slot holds every palindrome) could match this spectrum batch; {} shared digests filtered as units",
                 slots.len(),
-                shared.slots() - 1,
+                shared.slots(),
                 digests.len()
             );
             self.live_keys += slots.len();
