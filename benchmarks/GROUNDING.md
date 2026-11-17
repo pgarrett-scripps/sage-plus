@@ -27,7 +27,7 @@ into the `sage-core` crate. `integration.rs` means `crates/sage-cli/tests/integr
 | HC-EFF-04 index built once | Structural (one `IndexedDatabase` per `Runner`). | No test asserts a single build. |
 | HC-EFF-05 memory bounds | `sage-cli` unit `memory.rs`; `database.rs`: `memory_estimate_totals_are_additive_over_protein_chunks`; `benchmarks/large_db` | Peak RSS is recorded in benchmarks, not per run. |
 | HC-INTER-01 open, versioned formats | `config_schema.rs`: `committed_config_schema_matches_rust_types`, `generated_config_schema_has_expected_contract`; Parquet schemas in `schemas/` are loaded by the writers and round-tripped in `sage-cloudpath` `parquet.rs` | Gap: `run-summary.json`, `results.json`, `digestion.tsv` and `diagnostic_ions.tsv` have no published schema. |
-| HC-INTER-02 controlled vocabularies | `peff.rs` and `unimod.rs` unit tests (input side). | Gap: outputs carry no UNIMOD accessions or CV terms. |
+| HC-INTER-02 controlled vocabularies | `unimod.rs` unit tests (input side). `peff.rs` has unit tests but no caller: PEFF files are not read. | Gap: outputs carry no UNIMOD accessions or CV terms; PEFF input is not supported. |
 | HC-INTER-03 database identity | `sage-cli` unit `provenance.rs`: `fasta_hash_is_stable_and_matches_sha256sum`, `headers_count_decoys_sources_and_organisms`; `integration.rs`: `parquet_footers_and_run_summary_record_provenance` | No release is recorded; UniProt FASTA headers carry none. |
 | HC-INTER-04 documented API | `sage-cli` unit `api.rs`. | Error conditions are not systematically documented; no published rustdoc. |
 | HC-TEST-01 rules mapped to tests | This file. | Failure-mode tests are missing for HC-QUANT-02 (TMT) and HC-FDR-06. |
