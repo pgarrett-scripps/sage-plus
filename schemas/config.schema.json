@@ -2031,6 +2031,13 @@
           ],
           "default": null,
           "description": "Named variable definitions with mass, explicit sites, and optional\nper-modification limits, library policy, and fragment behavior.\nUpstream Sage symbol-keyed masses (`{\"M\": [15.9949]}`) remain readable."
+        },
+        "variant_fasta": {
+          "description": "Path to a FASTA of variant proteins — sample proteins carrying\nsequence variants such as single amino acid variants — searched\nalongside `fasta`. Its proteins are ordinary targets with their own\ndecoys. A peptide is a variant peptide only when every protein it\nbelongs to is one of these; the variant peptides get a separate\ntarget-decoy q-value and are kept out of protein inference. Requires\ngenerated decoys. Unset (the default) leaves every output as it was.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

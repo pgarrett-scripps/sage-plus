@@ -382,6 +382,10 @@ impl Runner {
                 self.database_parameters.entrapment_fasta.as_deref(),
                 sage_core::fasta::ProteinClass::Entrapment,
             ),
+            (
+                self.database_parameters.variant_fasta.as_deref(),
+                sage_core::fasta::ProteinClass::Variant,
+            ),
         ] {
             let Some(path) = path else { continue };
             let url = sage_cloudpath::to_url(path)?;

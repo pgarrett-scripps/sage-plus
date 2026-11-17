@@ -135,8 +135,27 @@ fn assign_count_q_values<Ix>(scores: &mut [Row<Ix>], threshold: f32) -> usize {
 }
 
 pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
+    let (q_values, passing) = picked_peptide_q_values(db, features, |_| true);
+    features
+        .par_iter_mut()
+        .zip(q_values)
+        .for_each(|(feat, q)| feat.peptide_q = q.unwrap_or(1.0));
+    passing
+}
+
+/// Picked peptide-level q-values over the features `include` selects, in
+/// feature order: `None` for a feature left out. Only included features take
+/// part in the competition, so this is the picked-peptide FDR of that subset
+/// on its own, as a class-specific (separate) FDR needs. With every feature
+/// included it is exactly [`picked_peptide`]. Returns the number of target
+/// peptides passing 1%.
+pub fn picked_peptide_q_values(
+    db: &IndexedDatabase,
+    features: &[Feature],
+    include: impl Fn(&Feature) -> bool + Sync,
+) -> (Vec<Option<f32>>, usize) {
     let mut map: FnvHashMap<PeptideKey, Competition<PeptideIx>> = FnvHashMap::default();
-    for feat in features.iter() {
+    for feat in features.iter().filter(|feat| include(feat)) {
         let peptide = &db[feat.peptide_idx];
         let key = peptide_competition_key(db, feat.peptide_idx);
 
@@ -175,24 +194,29 @@ pub fn picked_peptide(db: &IndexedDatabase, features: &mut [Feature]) -> usize {
         })
         .collect::<FnvHashMap<_, _>>();
 
-    features.par_iter_mut().for_each(|feat| {
-        // The index lookup first: a peptide the competition recorded needs no
-        // key, and building one allocates.
-        feat.peptide_q = scores
-            .get(&feat.peptide_idx)
-            .copied()
-            .or_else(|| {
-                key_scores
-                    .get(&(
-                        peptide_competition_key(db, feat.peptide_idx),
-                        db[feat.peptide_idx].decoy,
-                    ))
+    let q_values = features
+        .par_iter()
+        .map(|feat| {
+            include(feat).then(|| {
+                // The index lookup first: a peptide the competition recorded
+                // needs no key, and building one allocates.
+                scores
+                    .get(&feat.peptide_idx)
                     .copied()
+                    .or_else(|| {
+                        key_scores
+                            .get(&(
+                                peptide_competition_key(db, feat.peptide_idx),
+                                db[feat.peptide_idx].decoy,
+                            ))
+                            .copied()
+                    })
+                    .unwrap_or(1.0)
             })
-            .unwrap_or(1.0);
-    });
+        })
+        .collect();
 
-    passing
+    (q_values, passing)
 }
 
 /// Target/decoy competition identity for picked peptide-level FDR.

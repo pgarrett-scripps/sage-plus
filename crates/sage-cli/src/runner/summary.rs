@@ -50,6 +50,10 @@ pub struct RunSummary {
     /// absent when no `entrapment_fasta` was searched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entrapment: Option<EntrapmentRunStats>,
+    /// Variant proteins and the class-specific q-values of their peptides;
+    /// absent when no `variant_fasta` was searched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<VariantRunStats>,
     /// In-source fragmentation and neutral-loss annotation; absent when the
     /// annotation is off, so a search without it writes the summary it wrote
     /// before.
@@ -304,6 +308,29 @@ pub struct EntrapmentRunStats {
     pub psms: sage_core::entrapment::EntrapmentEstimate,
     pub peptides: sage_core::entrapment::EntrapmentEstimate,
     pub proteins: sage_core::entrapment::EntrapmentEstimate,
+}
+
+/// Variant proteins of one run. A peptide is a variant peptide only when
+/// every protein it belongs to is a variant protein; its PSMs get the
+/// class-specific `variant_spectrum_q` and `variant_peptide_q` and are kept
+/// out of protein inference. The counts say why a variant result is what it
+/// is: a class with few targets and decoys cannot pass at 1%.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VariantRunStats {
+    /// The searched `variant_fasta`.
+    pub path: String,
+    /// Proteins read from it.
+    pub variant_proteins: usize,
+    /// Database target peptides of the variant class, and target peptides of
+    /// a variant protein that a non-variant protein also explains, which are
+    /// reference peptides.
+    pub variant_peptides: usize,
+    pub shared_peptides: usize,
+    /// Variant-class PSMs and peptides that took part in the class
+    /// competition, and the targets passing 1% by the class q-value and by
+    /// the global one.
+    pub psms: sage_core::variant::VariantClassCounts,
+    pub peptides: sage_core::variant::VariantClassCounts,
 }
 
 const fn run_summary_schema_version() -> u32 {

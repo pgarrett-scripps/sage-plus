@@ -802,6 +802,35 @@
         }
       }
     },
+    "variants": {
+      "type": "object",
+      "description": "Variant proteins of `database.variant_fasta` and the class-specific counts of their peptides; absent when none was searched.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "variant_proteins": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "variant_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Database target peptides whose every protein is a variant protein."
+        },
+        "shared_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Database target peptides of a variant protein that a non-variant protein also explains: reference peptides."
+        },
+        "psms": {
+          "$ref": "#/$defs/VariantClassCounts"
+        },
+        "peptides": {
+          "$ref": "#/$defs/VariantClassCounts"
+        }
+      }
+    },
     "in_source": {
       "type": "object",
       "description": "In-source fragmentation and in-source neutral loss annotation; absent when `in_source` is off.",
@@ -1195,6 +1224,28 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1
+        }
+      }
+    },
+    "VariantClassCounts": {
+      "type": "object",
+      "description": "Targets and decoys of one level of the variant class that took part in its target-decoy competition, and the targets passing 1% by the class-specific q-value and by the global one.",
+      "properties": {
+        "targets": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoys": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passing_variant_q": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passing_global_q": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

@@ -442,6 +442,11 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             ProteinClass::Entrapment,
             "entrapment",
         ),
+        (
+            database_parameters.variant_fasta.as_deref(),
+            ProteinClass::Variant,
+            "variant",
+        ),
     ] {
         let Some(path) = path else { continue };
         let url = sage_cloudpath::to_url(path)?;
@@ -451,6 +456,16 @@ fn load_fasta(database_parameters: &Parameters) -> anyhow::Result<Fasta> {
             database_parameters.generate_decoys,
         )
         .with_context(|| format!("Failed to read {label} FASTA `{path}`"))?;
+        if class == ProteinClass::Variant {
+            if let Some(accession) = fasta.shared_accession(&proteins) {
+                anyhow::bail!(
+                    "variant FASTA `{path}`: protein `{accession}` is already in another FASTA of \
+                     this search; give each variant protein its own accession (for example \
+                     `{accession}_R175H`), or its reference protein's peptides would be read as \
+                     variant peptides"
+                );
+            }
+        }
         info!(
             "{label} FASTA: {} proteins from {}",
             proteins.targets.len(),

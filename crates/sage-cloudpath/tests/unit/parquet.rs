@@ -1561,3 +1561,119 @@ fn the_rescue_column_is_written_only_when_the_rescue_pass_ran() -> parquet::erro
     assert_eq!(rows[1]["in_source_type"], "\"fragment:suffix\"");
     Ok(())
 }
+
+#[test]
+fn variant_columns_are_written_only_for_a_variant_fasta_search() -> parquet::errors::Result<()> {
+    use sage_core::fasta::{Fasta, ProteinClass, ProteinClasses};
+    let mut fasta = Fasta::parse(">P04637\nPEPTIDERK\n".into(), "rev_", true).unwrap();
+    let variants = Fasta::parse(">P04637_R175H\nPEPTIDEHK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(variants, ProteinClass::Variant);
+    let classes = ProteinClasses::of_fasta(&fasta).expect("one variant protein");
+
+    let peptide = |sequence: &[u8], proteins: Vec<&str>, decoy: bool| Peptide {
+        sequence: sequence.into(),
+        proteins: proteins.into_iter().map(Arc::from).collect(),
+        decoy,
+        ..Peptide::default()
+    };
+    let mut database = IndexedDatabase::default();
+    database
+        .peptides
+        .push(peptide(b"PEPTIDER", vec!["P04637"], false));
+    database
+        .peptides
+        .push(peptide(b"PEPTIDEHK", vec!["P04637_R175H"], false));
+    // Cut from the variant protein, but the reference explains it too.
+    database
+        .peptides
+        .push(peptide(b"SHAREDK", vec!["P04637", "P04637_R175H"], false));
+    database
+        .peptides
+        .push(peptide(b"PHEDITPEK", vec!["P04637_R175H"], true));
+    let feature = |psm_id: usize, peptide: u32, label: i32, score: f32| Feature {
+        psm_id,
+        peptide_idx: PeptideIx(peptide),
+        label,
+        discriminant_score: score,
+        ..Feature::default()
+    };
+    let features = [
+        feature(0, 0, 1, 9.0),
+        feature(1, 1, 1, 8.0),
+        feature(2, 2, 1, 7.0),
+        feature(3, 3, -1, 6.0),
+    ];
+    let (q_values, _, _) = sage_core::variant::variant_q_values(&database, &features, &classes);
+
+    let write = |variants: Option<&sage_core::variant::VariantQValues>| {
+        let rows = features.iter().collect::<Vec<_>>();
+        serialize_features_with_variants(
+            &rows,
+            &[],
+            &HashMap::new(),
+            &["run-a".into()],
+            &database,
+            1.0,
+            &[],
+            None,
+            None,
+            None,
+            Some(&classes),
+            false,
+            variants,
+        )
+    };
+    let version = |bytes: &[u8]| -> parquet::errors::Result<Option<String>> {
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes.to_vec()))?;
+        Ok(reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .and_then(|metadata| {
+                metadata
+                    .iter()
+                    .find(|entry| entry.key == "sage.schema.version")
+                    .and_then(|entry| entry.value.clone())
+            }))
+    };
+    let column = |bytes: &[u8], name: &str| -> parquet::errors::Result<Vec<String>> {
+        let reader = SerializedFileReader::new(bytes::Bytes::from(bytes.to_vec()))?;
+        reader
+            .get_row_iter(None)?
+            .map(|row| {
+                let row = row?;
+                Ok(row
+                    .get_column_iter()
+                    .find(|(column, _)| column.as_str() == name)
+                    .map(|(_, field)| field.to_string())
+                    .unwrap_or_else(|| "absent".into()))
+            })
+            .collect()
+    };
+
+    // Off: the v7 file, without any variant column.
+    let off = write(None)?;
+    assert_eq!(version(&off)?.as_deref(), Some("7"));
+    assert_eq!(column(&off, "is_variant")?, vec!["absent"; 4]);
+    assert_eq!(column(&off, "in_source_rescued")?, vec!["absent"; 4]);
+
+    // On: v11; only the variant peptide is a variant, the decoy row is null
+    // as for `is_entrapment`, and the rescue column is null with rescue off.
+    let on = write(Some(&q_values))?;
+    assert_eq!(version(&on)?.as_deref(), Some("11"));
+    assert_eq!(
+        column(&on, "is_variant")?,
+        vec!["false", "true", "false", "null"]
+    );
+    assert_eq!(column(&on, "in_source_rescued")?, vec!["null"; 4]);
+    let spectrum_q = column(&on, "variant_spectrum_q")?;
+    assert_eq!(spectrum_q[0], "null");
+    assert_ne!(spectrum_q[1], "null");
+    assert_eq!(spectrum_q[2], "null");
+    // The variant peptide's decoy is in the class and has a class q-value.
+    assert_ne!(spectrum_q[3], "null");
+    let peptide_q = column(&on, "variant_peptide_q")?;
+    assert_eq!(peptide_q[0], "null");
+    assert_ne!(peptide_q[1], "null");
+    Ok(())
+}

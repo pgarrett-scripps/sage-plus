@@ -822,6 +822,7 @@ fn digestion() {
     let params = Parameters {
         contaminant_fasta: None,
         entrapment_fasta: None,
+        variant_fasta: None,
         bucket_size: 128,
         enzyme: EnzymeBuilder {
             missed_cleavages: Some(1.into()),

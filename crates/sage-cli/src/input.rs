@@ -572,6 +572,16 @@ impl Input {
                 "Either `database.fasta` or `database.peptides` must be set"
             );
             ensure!(
+                database.variant_fasta.is_none() || database.fasta.is_some(),
+                "`database.variant_fasta` requires `database.fasta`"
+            );
+            ensure!(
+                database.variant_fasta.is_none() || database.generate_decoys != Some(false),
+                "`database.variant_fasta` needs generated decoys: with `generate_decoys: false` \
+                 the variant peptides have no decoys of their own, so their q-value cannot be \
+                 estimated"
+            );
+            ensure!(
                 database.custom_cleavage_sites.is_none() || database.fasta.is_some(),
                 "`database.custom_cleavage_sites` requires `database.fasta`"
             );

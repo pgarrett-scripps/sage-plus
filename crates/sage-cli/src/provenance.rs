@@ -49,7 +49,7 @@ pub struct Provenance {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct InputFile {
     /// Spectrum files: the name used in the `filename` output columns.
-    /// Database files: `contaminant_fasta`, `entrapment_fasta`, `peptides`,
+    /// Database files: `contaminant_fasta`, `entrapment_fasta`, `variant_fasta`, `peptides`,
     /// `custom_cleavage_sites` or `ptm_library`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -179,6 +179,7 @@ impl Provenance {
         let database_inputs = [
             ("peptides", database.peptides.as_deref()),
             ("contaminant_fasta", database.contaminant_fasta.as_deref()),
+            ("variant_fasta", database.variant_fasta.as_deref()),
             (
                 "custom_cleavage_sites",
                 database.custom_cleavage_sites.as_deref(),

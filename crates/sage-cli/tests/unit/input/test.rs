@@ -1046,3 +1046,48 @@ fn startup_log_lists_defaults_only_for_unset_settings() {
         );
     }
 }
+
+#[test]
+fn a_variant_fasta_needs_a_fasta_and_generated_decoys() {
+    let input = |database: serde_json::Value| -> Input {
+        serde_json::from_value(serde_json::json!({
+            "database": database,
+            "mzml_paths": ["missing.mzML"],
+            "precursor_tol": {"ppm": [-10, 10]},
+            "fragment_tol": {"ppm": [-20, 20]}
+        }))
+        .unwrap()
+    };
+    let base = serde_json::json!({
+        "fasta": "missing.fasta",
+        "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+        "static_mods": {},
+        "ion_kinds": ["b", "y"],
+        "variant_fasta": "variants.fasta"
+    });
+    assert!(input(base.clone()).validate().is_ok());
+    let mut explicit = base.clone();
+    explicit["generate_decoys"] = serde_json::json!(true);
+    assert!(input(explicit).validate().is_ok());
+
+    // FASTA decoys would leave the variant peptides without decoys of their
+    // own, so the class q-value could not be estimated: refused before any
+    // spectrum is read.
+    let mut fasta_decoys = base.clone();
+    fasta_decoys["generate_decoys"] = serde_json::json!(false);
+    let error = input(fasta_decoys).validate().unwrap_err().to_string();
+    assert!(
+        error.contains("`database.variant_fasta` needs generated decoys"),
+        "{error}"
+    );
+
+    // A peptide list has no proteins for variant proteins to be compared with.
+    let mut peptides_only = base;
+    peptides_only.as_object_mut().unwrap().remove("fasta");
+    peptides_only["peptides"] = serde_json::json!("p.tsv");
+    let error = input(peptides_only).validate().unwrap_err().to_string();
+    assert!(
+        error.contains("`database.variant_fasta` requires `database.fasta`"),
+        "{error}"
+    );
+}

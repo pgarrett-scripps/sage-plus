@@ -3,7 +3,7 @@ use sage_core::immonium::ImmoniumSettings;
 use sage_core::in_source::InSourceAnnotations;
 
 pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
-    build_results_schema(false, false)
+    build_results_schema(false, false, false)
 }
 
 /// Schema version of `results.sage.parquet`: 7 without precursor labels, 8
@@ -13,25 +13,35 @@ pub fn build_schema() -> Result<Type, parquet::errors::ParquetError> {
 /// columns to versions 1 and 2; versions 5 and 6 added `localized_peptide`;
 /// versions 7 and 8 add `in_source_parent_peptide` and `in_source_type`. As
 /// with every optional column before them, the columns are always written and
-/// are null when the option is off.
-fn results_schema_version(has_labels: bool, rescue: bool) -> &'static str {
-    match (has_labels, rescue) {
-        (false, false) => "7",
-        (true, false) => "8",
-        (false, true) => "9",
-        (true, true) => "10",
+/// are null when the option is off. Versions 11 and 12 are 9 and 10 plus
+/// `is_variant`, `variant_spectrum_q` and `variant_peptide_q`, written only
+/// with `database.variant_fasta`, and with `in_source_rescued` null when the
+/// rescue pass is off.
+fn results_schema_version(has_labels: bool, rescue: bool, variants: bool) -> &'static str {
+    match (has_labels, rescue, variants) {
+        (false, false, false) => "7",
+        (true, false, false) => "8",
+        (false, true, false) => "9",
+        (true, true, false) => "10",
+        (false, _, true) => "11",
+        (true, _, true) => "12",
     }
 }
 
 fn build_results_schema(
     has_labels: bool,
     rescue: bool,
+    variants: bool,
 ) -> Result<Type, parquet::errors::ParquetError> {
-    parquet::schema::parser::parse_message_type(match (has_labels, rescue) {
-        (false, false) => include_str!("../../../../schemas/results.sage.v7.parquet.schema"),
-        (true, false) => include_str!("../../../../schemas/results.sage.v8.parquet.schema"),
-        (false, true) => include_str!("../../../../schemas/results.sage.v9.parquet.schema"),
-        (true, true) => include_str!("../../../../schemas/results.sage.v10.parquet.schema"),
+    parquet::schema::parser::parse_message_type(match (has_labels, rescue, variants) {
+        (false, false, false) => {
+            include_str!("../../../../schemas/results.sage.v7.parquet.schema")
+        }
+        (true, false, false) => include_str!("../../../../schemas/results.sage.v8.parquet.schema"),
+        (false, true, false) => include_str!("../../../../schemas/results.sage.v9.parquet.schema"),
+        (true, true, false) => include_str!("../../../../schemas/results.sage.v10.parquet.schema"),
+        (false, _, true) => include_str!("../../../../schemas/results.sage.v11.parquet.schema"),
+        (true, _, true) => include_str!("../../../../schemas/results.sage.v12.parquet.schema"),
     })
 }
 
@@ -210,16 +220,55 @@ pub fn serialize_features_with_rescue(
     protein_classes: Option<&sage_core::fasta::ProteinClasses>,
     rescue: bool,
 ) -> Result<Vec<u8>, parquet::errors::ParquetError> {
+    serialize_features_with_variants(
+        features,
+        reporter_ions,
+        spectrum_occurrences,
+        filenames,
+        database,
+        output_psm_q_value,
+        provenance,
+        immonium,
+        localization_q_cutoff,
+        in_source,
+        protein_classes,
+        rescue,
+        None,
+    )
+}
+
+/// [`serialize_features_with_rescue`], with the variant columns when
+/// `variants` is set (a `database.variant_fasta` search): `is_variant`, true
+/// when every protein of the peptide is a variant protein (null on decoy rows,
+/// as `is_entrapment`), and the class-specific `variant_spectrum_q` and
+/// `variant_peptide_q`, null on rows whose peptide is not a variant peptide.
+/// Written as schema version 11, or 12 with precursor labels.
+#[allow(clippy::too_many_arguments)]
+pub fn serialize_features_with_variants(
+    features: &[&Feature],
+    reporter_ions: &[TmtQuant],
+    spectrum_occurrences: &HashMap<usize, usize>,
+    filenames: &[String],
+    database: &IndexedDatabase,
+    output_psm_q_value: f32,
+    provenance: &[(String, String)],
+    immonium: Option<&ImmoniumSettings>,
+    localization_q_cutoff: Option<f32>,
+    in_source: Option<&InSourceAnnotations>,
+    protein_classes: Option<&sage_core::fasta::ProteinClasses>,
+    rescue: bool,
+    variants: Option<&sage_core::variant::VariantQValues>,
+) -> Result<Vec<u8>, parquet::errors::ParquetError> {
     let has_labels = !database.label_channels.is_empty();
     let has_fragment_losses = database.fragment_losses.is_some();
-    let schema = build_results_schema(has_labels, rescue)?;
+    let schema = build_results_schema(has_labels, rescue, variants.is_some())?;
 
     let options = writer_properties(
         vec![
             KeyValue::new("sage.schema.name".into(), Some("results.sage".into())),
             KeyValue::new(
                 "sage.schema.version".into(),
-                Some(results_schema_version(has_labels, rescue).into()),
+                Some(results_schema_version(has_labels, rescue, variants.is_some()).into()),
             ),
             KeyValue::new(
                 "sage.output_filter.spectrum_q_max".into(),
@@ -588,13 +637,40 @@ pub fn serialize_features_with_rescue(
                 }),
             )?;
         }
-        if rescue {
+        if rescue || variants.is_some() {
             if let Some(column) = rg.next_column()? {
                 write_optional_column::<BoolType>(
                     column,
                     features.iter().map(|f| {
-                        Some(in_source.is_some_and(|annotations| annotations.is_rescued(f.psm_id)))
+                        rescue.then(|| {
+                            in_source.is_some_and(|annotations| annotations.is_rescued(f.psm_id))
+                        })
                     }),
+                )?;
+            }
+        }
+        if let Some(variants) = variants {
+            if let Some(column) = rg.next_column()? {
+                write_optional_column::<BoolType>(
+                    column,
+                    features.iter().map(|f| {
+                        let peptide = &database[f.peptide_idx];
+                        protein_classes
+                            .filter(|_| !peptide.decoy)
+                            .map(|classes| classes.is_variant(peptide.proteins.iter()))
+                    }),
+                )?;
+            }
+            if let Some(column) = rg.next_column()? {
+                write_optional_column::<FloatType>(
+                    column,
+                    features.iter().map(|f| variants.spectrum_q(f.psm_id)),
+                )?;
+            }
+            if let Some(column) = rg.next_column()? {
+                write_optional_column::<FloatType>(
+                    column,
+                    features.iter().map(|f| variants.peptide_q(f.psm_id)),
                 )?;
             }
         }

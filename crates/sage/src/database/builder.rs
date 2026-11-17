@@ -174,6 +174,14 @@ pub struct Builder {
     /// discovery proportion estimable. Unset (the default) leaves every
     /// output column as it was.
     pub entrapment_fasta: Option<String>,
+    /// Path to a FASTA of variant proteins — sample proteins carrying
+    /// sequence variants such as single amino acid variants — searched
+    /// alongside `fasta`. Its proteins are ordinary targets with their own
+    /// decoys. A peptide is a variant peptide only when every protein it
+    /// belongs to is one of these; the variant peptides get a separate
+    /// target-decoy q-value and are kept out of protein inference. Requires
+    /// generated decoys. Unset (the default) leaves every output as it was.
+    pub variant_fasta: Option<String>,
     /// Expand ambiguous FASTA residues into every residue they may stand
     /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues
     /// (default false: peptides containing B, X or Z are not searched).
@@ -311,6 +319,7 @@ impl Builder {
             fasta: self.fasta.unwrap_or_default(),
             contaminant_fasta: self.contaminant_fasta,
             entrapment_fasta: self.entrapment_fasta,
+            variant_fasta: self.variant_fasta,
             expand_ambiguous_residues: self.expand_ambiguous_residues.unwrap_or(false),
             max_ambiguous_variants: self.max_ambiguous_variants.unwrap_or(20).max(1),
             merge_isoleucine_leucine: self.merge_isoleucine_leucine.unwrap_or(true),
@@ -358,6 +367,9 @@ pub struct Parameters {
     /// Path to a FASTA of entrapment proteins, searched alongside `fasta`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entrapment_fasta: Option<String>,
+    /// Path to a FASTA of variant proteins, searched alongside `fasta`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_fasta: Option<String>,
     pub expand_ambiguous_residues: bool,
     pub max_ambiguous_variants: usize,
     pub merge_isoleucine_leucine: bool,

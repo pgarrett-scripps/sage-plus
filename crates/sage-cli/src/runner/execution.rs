@@ -252,21 +252,42 @@ impl Runner {
         let q_spectrum = self.spectrum_fdr(&mut outputs.features);
         self.events.emit(EventKind::LdaScoringCompleted);
         let q_peptide = sage_core::fdr::picked_peptide(&self.database, &mut outputs.features);
-        // Protein FDR is based exclusively on proteotypic (unique, non-shared) peptides. Shared peptides
-        // are reported with protein FDR = 1.0
-        let q_protein = sage_core::fdr::picked_protein(&self.database, &mut outputs.features);
-        // Conducts "IDPicker-based protein grouping at 1% peptide FDR"
-        sage_core::protein_grouping::generate_protein_groups(
-            &self.database,
-            &mut outputs.features,
-            self.parameters.protein_grouping,
-            Some(self.parameters.protein_grouping_peptide_fdr),
-        );
-        // Uses the "Picked Group FDR" approach to compute protein group FDR for the IDPicker groups,
-        // including rescued subset grouping (rsG). Shared peptides (between different groups)
-        // are reported with protein group FDR = 1.0
-        let q_protein_group =
-            sage_core::fdr::picked_protein_group(&self.database, &mut outputs.features);
+        // Variant peptides (`database.variant_fasta`): a class-specific q-value
+        // beside the global ones, and no part in protein inference.
+        let variant_classes = self
+            .database_parameters
+            .variant_fasta
+            .as_ref()
+            .and(self.protein_classes.as_ref());
+        let variants = variant_classes.map(|classes| {
+            sage_core::variant::variant_q_values(&self.database, &outputs.features, classes)
+        });
+        let infer_proteins = |features: &mut [sage_core::scoring::Feature]| {
+            // Protein FDR is based exclusively on proteotypic (unique, non-shared) peptides. Shared peptides
+            // are reported with protein FDR = 1.0
+            let q_protein = sage_core::fdr::picked_protein(&self.database, features);
+            // Conducts "IDPicker-based protein grouping at 1% peptide FDR"
+            sage_core::protein_grouping::generate_protein_groups(
+                &self.database,
+                features,
+                self.parameters.protein_grouping,
+                Some(self.parameters.protein_grouping_peptide_fdr),
+            );
+            // Uses the "Picked Group FDR" approach to compute protein group FDR for the IDPicker groups,
+            // including rescued subset grouping (rsG). Shared peptides (between different groups)
+            // are reported with protein group FDR = 1.0
+            let q_protein_group = sage_core::fdr::picked_protein_group(&self.database, features);
+            (q_protein, q_protein_group)
+        };
+        let (q_protein, q_protein_group) = match variant_classes {
+            Some(classes) => sage_core::variant::infer_proteins_without_variants(
+                &self.database,
+                classes,
+                &mut outputs.features,
+                infer_proteins,
+            ),
+            None => infer_proteins(&mut outputs.features),
+        };
         // Test hook: confident PSMs a whole-run test needs and a one-spectrum
         // fixture cannot reach by FDR. Compiled into test builds only.
         #[cfg(test)]
@@ -541,7 +562,7 @@ impl Runner {
         );
         self.parquet_provenance = provenance.parquet_metadata();
 
-        let bytes = sage_cloudpath::parquet::serialize_features_with_rescue(
+        let bytes = sage_cloudpath::parquet::serialize_features_with_variants(
             &output_features,
             &outputs.quant,
             &spectrum_occurrences,
@@ -557,6 +578,7 @@ impl Runner {
             in_source.as_ref(),
             self.protein_classes.as_ref(),
             rescue_written,
+            variants.as_ref().map(|(q_values, _, _)| q_values),
         )?;
 
         let path = self.make_path("results.sage.parquet");
@@ -855,6 +877,7 @@ impl Runner {
             inputs: input_stats,
             contaminants,
             entrapment,
+            variants: self.variant_stats(variants.as_ref()),
             in_source: in_source.as_ref().map(|annotations| InSourceRunStats {
                 rt_tolerance: self
                     .parameters
@@ -1051,6 +1074,42 @@ impl Runner {
         })
     }
 
+    /// The variant proteins of this run and the class counts of their
+    /// peptides. `None` when no variant FASTA was searched.
+    fn variant_stats(
+        &self,
+        variants: Option<&(
+            sage_core::variant::VariantQValues,
+            sage_core::variant::VariantClassCounts,
+            sage_core::variant::VariantClassCounts,
+        )>,
+    ) -> Option<super::summary::VariantRunStats> {
+        let path = self.database_parameters.variant_fasta.clone()?;
+        let classes = self.protein_classes.as_ref()?;
+        let (_, psms, peptides) = variants?;
+        let mut variant_peptides = 0usize;
+        let mut shared_peptides = 0usize;
+        for peptide in self.database.peptides.iter().filter(|p| !p.decoy) {
+            if classes.is_variant(peptide.proteins.iter()) {
+                variant_peptides += 1;
+            } else if peptide
+                .proteins
+                .iter()
+                .any(|protein| classes.is_variant_protein(protein))
+            {
+                shared_peptides += 1;
+            }
+        }
+        Some(super::summary::VariantRunStats {
+            path,
+            variant_proteins: classes.variant_proteins(),
+            variant_peptides,
+            shared_peptides,
+            psms: *psms,
+            peptides: *peptides,
+        })
+    }
+
     /// How much of the confident output came from the contaminant FASTA.
     /// `None` when none was searched. A PSM counts where it passes the same
     /// cutoffs the run reports at, and only targets are counted: a decoy is a
@@ -1112,3 +1171,7 @@ impl Runner {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/runner/variant.rs"]
+mod variant_test;

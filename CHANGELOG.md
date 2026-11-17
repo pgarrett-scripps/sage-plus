@@ -9,6 +9,23 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+### Added
+- `database.variant_fasta` (default unset): a FASTA of variant proteins, for example sample
+  proteins carrying single amino acid variants, searched alongside `fasta` as ordinary targets
+  with their own decoys. A peptide is a variant peptide only when every protein it belongs to is a
+  variant protein; a sequence any other protein explains is a reference peptide. Variant PSMs get
+  a separate, class-specific target-decoy q-value at the PSM and peptide level, estimated from the
+  variant-class PSMs and their decoys alone, in two new columns `variant_spectrum_q` and
+  `variant_peptide_q`, beside `is_variant`; the global q-values are unchanged in meaning. Variant
+  PSMs are kept out of protein inference (picked protein and protein-group FDR and grouping) and
+  reported with `protein_q` and `protein_group_q` 1. `run-summary.json` gets a `variants` block
+  with the class targets and decoys and the targets passing 1% by each q-value. The results file
+  is schema version 11 (12 with precursor labels), v9 or v10 plus the three columns, with
+  `in_source_rescued` null when the rescue pass is off. Refused before any spectrum is read:
+  `generate_decoys: false`, a search without `database.fasta`, and a variant protein whose
+  accession is already in another FASTA of the search. With the option unset, which is the
+  default, every output is unchanged.
+
 ## [v0.1.0-beta.22] - 2026-11-17
 
 ### Added

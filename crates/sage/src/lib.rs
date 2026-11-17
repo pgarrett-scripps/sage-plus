@@ -39,3 +39,4 @@ pub mod spectrum;
 pub mod spectrum_index;
 pub mod tmt;
 pub mod unimod;
+pub mod variant;

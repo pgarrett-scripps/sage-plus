@@ -17,6 +17,9 @@ pub enum ProteinClass {
     Contaminant,
     /// `database.entrapment_fasta`.
     Entrapment,
+    /// `database.variant_fasta`: proteins carrying sequence variants, such
+    /// as single amino acid variants, of the sample proteins.
+    Variant,
 }
 
 /// The classes of the proteins a peptide was digested from. A peptide can
@@ -24,7 +27,8 @@ pub enum ProteinClass {
 /// than one class, and the rules read it:
 ///
 /// - contaminant: **any** of its proteins is a contaminant;
-/// - entrapment: **every** one of its proteins is entrapment.
+/// - entrapment: **every** one of its proteins is entrapment;
+/// - variant: **every** one of its proteins is a variant protein.
 ///
 /// One byte, so that carrying it on every [`crate::peptide::Peptide`] of a
 /// database of tens of millions costs nothing: it fits the padding the
@@ -36,12 +40,14 @@ impl ProteinClassSet {
     const SAMPLE: u8 = 1;
     const CONTAMINANT: u8 = 1 << 1;
     const ENTRAPMENT: u8 = 1 << 2;
+    const VARIANT: u8 = 1 << 3;
 
     const fn flag(class: ProteinClass) -> u8 {
         match class {
             ProteinClass::Sample => Self::SAMPLE,
             ProteinClass::Contaminant => Self::CONTAMINANT,
             ProteinClass::Entrapment => Self::ENTRAPMENT,
+            ProteinClass::Variant => Self::VARIANT,
         }
     }
 
@@ -72,6 +78,12 @@ impl ProteinClassSet {
         self.0 == Self::ENTRAPMENT
     }
 
+    /// Whether every protein of this peptide is a variant protein. An empty
+    /// set is not a variant.
+    pub const fn is_variant(self) -> bool {
+        self.0 == Self::VARIANT
+    }
+
     /// Whether any class at all was recorded.
     pub const fn is_empty(self) -> bool {
         self.0 == 0
@@ -87,6 +99,7 @@ impl ProteinClassSet {
 pub struct ProteinClasses {
     contaminant: fnv::FnvHashSet<Arc<str>>,
     entrapment: fnv::FnvHashSet<Arc<str>>,
+    variant: fnv::FnvHashSet<Arc<str>>,
     /// Proteins of `database.fasta` itself, the original targets an
     /// entrapment ratio is taken against.
     sample: usize,
@@ -106,6 +119,9 @@ impl ProteinClasses {
                 ProteinClass::Entrapment => {
                     classes.entrapment.insert(accession.clone());
                 }
+                ProteinClass::Variant => {
+                    classes.variant.insert(accession.clone());
+                }
             }
         }
         (!classes.is_empty()).then_some(classes)
@@ -123,6 +139,8 @@ impl ProteinClasses {
                 set.insert(ProteinClass::Contaminant);
             } else if self.entrapment.contains(protein) {
                 set.insert(ProteinClass::Entrapment);
+            } else if self.variant.contains(protein) {
+                set.insert(ProteinClass::Variant);
             } else {
                 set.insert(ProteinClass::Sample);
             }
@@ -153,6 +171,26 @@ impl ProteinClasses {
         self.entrapment.contains(protein)
     }
 
+    /// Whether **every** protein of this peptide is a variant protein, which
+    /// is what makes the peptide a variant peptide: a peptide that a protein
+    /// of `database.fasta` (or any other non-variant protein) also explains
+    /// is a reference peptide, whatever variant protein it is also cut from.
+    /// A peptide without proteins is not a variant.
+    pub fn is_variant<'a>(&self, proteins: impl IntoIterator<Item = &'a Arc<str>>) -> bool {
+        let mut proteins = proteins.into_iter().peekable();
+        proteins.peek().is_some() && proteins.all(|protein| self.variant.contains(protein))
+    }
+
+    /// Whether an accession is one of the variant proteins.
+    pub fn is_variant_protein(&self, protein: &Arc<str>) -> bool {
+        self.variant.contains(protein)
+    }
+
+    /// Variant proteins the FASTA contributed.
+    pub fn variant_proteins(&self) -> usize {
+        self.variant.len()
+    }
+
     /// Entrapment proteins the FASTA contributed.
     pub fn entrapment_proteins(&self) -> usize {
         self.entrapment.len()
@@ -169,7 +207,7 @@ impl ProteinClasses {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.contaminant.is_empty() && self.entrapment.is_empty()
+        self.contaminant.is_empty() && self.entrapment.is_empty() && self.variant.is_empty()
     }
 }
 
@@ -265,6 +303,23 @@ impl Fasta {
         self.classes
             .extend(std::iter::repeat_n(class, other.targets.len()));
         self.targets.extend(other.targets);
+    }
+
+    /// The first accession of `other` that this FASTA already holds, in
+    /// `other`'s order. Classes are read per accession, so a variant protein
+    /// sharing an accession with a reference protein would make that
+    /// reference protein's peptides variant peptides.
+    pub fn shared_accession<'a>(&self, other: &'a Fasta) -> Option<&'a str> {
+        let known = self
+            .targets
+            .iter()
+            .map(|(accession, _)| accession.as_ref())
+            .collect::<fnv::FnvHashSet<_>>();
+        other
+            .targets
+            .iter()
+            .map(|(accession, _)| accession.as_ref())
+            .find(|accession| known.contains(accession))
     }
 
     /// The class of protein `index` of [`Self::targets`].

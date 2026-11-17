@@ -357,3 +357,57 @@ fn a_peptide_is_entrapment_only_when_every_protein_is() {
     // Contaminants and entrapment are separate axes.
     assert!(!classes.is_contaminant([accession("AT1G01010")].iter()));
 }
+
+#[test]
+fn a_peptide_is_a_variant_only_when_every_protein_is_a_variant_protein() {
+    let mut fasta = Fasta::parse(">P04637\nPEPTIDERK\n".into(), "rev_", true).unwrap();
+    let variants = Fasta::parse(
+        ">P04637_R175H\nPEPTIDEHK\n>P04637_K9N\nPEPTIDERN\n".into(),
+        "rev_",
+        true,
+    )
+    .unwrap();
+    fasta.extend_with_class(variants, ProteinClass::Variant);
+    let entrapment = Fasta::parse(">AT1G01010\nENTRAPPEDK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(entrapment, ProteinClass::Entrapment);
+    let classes = ProteinClasses::of_fasta(&fasta).expect("variant proteins are a class");
+
+    assert_eq!(classes.variant_proteins(), 2);
+    assert_eq!(classes.sample_proteins(), 1);
+    let accession = |name: &str| Arc::<str>::from(name);
+    assert!(classes.is_variant([accession("P04637_R175H")].iter()));
+    assert!(classes.is_variant([accession("P04637_R175H"), accession("P04637_K9N")].iter()));
+    // The reference protein, or any protein that is not a variant protein,
+    // also explains the sequence: a reference peptide.
+    assert!(!classes.is_variant([accession("P04637_R175H"), accession("P04637")].iter()));
+    assert!(!classes.is_variant([accession("P04637_R175H"), accession("AT1G01010")].iter()));
+    assert!(!classes.is_variant([accession("P04637")].iter()));
+    assert!(!classes.is_variant(std::iter::empty()));
+    assert!(classes.is_variant_protein(&accession("P04637_K9N")));
+    assert!(!classes.is_variant_protein(&accession("P04637")));
+    // A separate axis from entrapment and contaminants.
+    assert!(!classes.is_entrapment([accession("P04637_R175H")].iter()));
+    assert!(!classes.is_contaminant([accession("P04637_R175H")].iter()));
+    // The per-peptide class set reads the same way.
+    let mut set = classes.classes_of([accession("P04637_R175H")].iter());
+    assert!(set.is_variant());
+    set.union(ProteinClassSet::of(ProteinClass::Sample));
+    assert!(!set.is_variant());
+}
+
+#[test]
+fn a_variant_fasta_alone_makes_the_classes_non_empty() {
+    let mut fasta = Fasta::parse(">P04637\nPEPTIDERK\n".into(), "rev_", true).unwrap();
+    let variants = Fasta::parse(">P04637_R175H\nPEPTIDEHK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(variants, ProteinClass::Variant);
+    assert!(ProteinClasses::of_fasta(&fasta).is_some());
+}
+
+#[test]
+fn a_shared_accession_is_found_in_the_other_fastas_order() {
+    let fasta = Fasta::parse(">P1\nPEPTIDEK\n>P2\nPEPTIDER\n".into(), "rev_", true).unwrap();
+    let distinct = Fasta::parse(">P1_V\nPEPTIDEH\n".into(), "rev_", true).unwrap();
+    assert_eq!(fasta.shared_accession(&distinct), None);
+    let shared = Fasta::parse(">P3\nAAAK\n>P2\nPEPTIDEH\n>P1\nK\n".into(), "rev_", true).unwrap();
+    assert_eq!(fasta.shared_accession(&shared), Some("P2"));
+}

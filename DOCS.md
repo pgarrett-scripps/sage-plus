@@ -538,6 +538,7 @@ For additional information about configuration options and output file formats, 
     "fasta": "dual.fasta",  // str: mandatory path to FASTA file
     "contaminant_fasta": "contaminants.fasta", // Optional[str] {default=null}: searched alongside `fasta`, flagged in `is_contaminant`
     "entrapment_fasta": "arabidopsis.fasta", // Optional[str] {default=null}: a proteome that cannot be in the sample, for the FDP estimate
+    "variant_fasta": "variants.fasta", // Optional[str] {default=null}: variant proteins; their peptides get a separate q-value
     "expand_ambiguous_residues": false, // Optional[bool] {default=false}: Search B, Z and X as the residues they stand for
     "max_ambiguous_variants": 20, // Optional[int] {default=20}: Drop peptides with more expanded variants
     "merge_isoleucine_leucine": true, // Optional[bool] {default=true}: Merge peptides that differ only in I, L and J
@@ -1199,6 +1200,13 @@ alongside the library, because the location table does not embed chemical masses
   whether its peptide is entrapment, in `is_entrapment`, and `run-summary.json` reports the
   estimate for PSMs, peptides and proteins. Unset leaves every output column as it was. See
   [Entrapment proteins](#entrapment-proteins).
+- **variant_fasta**: String. Path to a FASTA of variant proteins — sample proteins carrying
+  sequence variants, such as single amino acid variants, frameshifts or fusions (default:
+  unset). Its proteins are ordinary targets with their own decoys. A peptide is a variant
+  peptide only when every protein it belongs to is a variant protein; its PSMs get a separate,
+  class-specific q-value in `variant_spectrum_q` and `variant_peptide_q` and are kept out of
+  protein inference. Needs generated decoys (`generate_decoys: false` is refused) and
+  `database.fasta`. Unset leaves every output as it was. See [Variant proteins](#variant-proteins).
 - **contaminant_fasta**: String. Path to a FASTA of common contaminant proteins, searched
   alongside `fasta` (default: unset). Its proteins are ordinary targets with the same enzyme,
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
@@ -1800,7 +1808,10 @@ They are v1 and v2 plus twelve nullable columns at the end: the two fragment-los
 seven `immonium_*` columns, `localized_peptide`, then `in_source_parent_peptide` and
 `in_source_type`. With `in_source.rescue` on, and the pass completed, the file is
 `results.sage.v9.parquet.schema` or `results.sage.v10.parquet.schema` instead: the same plus
-`in_source_rescued` at the end.
+`in_source_rescued` at the end. With `database.variant_fasta` set, the file is
+`results.sage.v11.parquet.schema` or `results.sage.v12.parquet.schema`: v9 or v10 plus
+`is_variant`, `variant_spectrum_q` and `variant_peptide_q`, with `in_source_rescued` null when the
+rescue pass is off.
 
 - `psm_id`: Identifier of the PSM, shared with `matched_fragments.sage.parquet`.
 - `filename`: File containing this PSM.
@@ -1864,7 +1875,9 @@ seven `immonium_*` columns, `localized_peptide`, then `in_source_parent_peptide`
 - `immonium_explained`, `immonium_missing`, `immonium_unexplained`, `immonium_residue_ions`, `immonium_modified_explained`, `immonium_modified_unexplained`, `immonium_modified_ions`: Immonium-ion evidence; see [Immonium ions](#immonium-ions). Null when `immonium` is off.
 - `localized_peptide`: The peptide in ProForma 2.0 with each localized modification on its best sites; see [PTM site localization](#ptm-site-localization). Null when `ptm_localization` is off or the PSM was not localized.
 - `in_source_parent_peptide`, `in_source_type`: The longer co-eluting peptide this PSM's ion came from, and what kind of product it is: `fragment:suffix`, `fragment:prefix`, `fragment:internal`, `loss:<mass>`, or a fragment and a loss together, as in `fragment:suffix+loss:17.0265`; see [In-source fragmentation](#in-source-fragmentation). Null when `in_source` is off and on any PSM it did not flag.
-- `in_source_rescued`: True on the rows of the [in-source rescue](#in-source-rescue) pass, false on every other row. Present only when `in_source.rescue` is on (schema version 9, or 10 with precursor labels).
+- `in_source_rescued`: True on the rows of the [in-source rescue](#in-source-rescue) pass, false on every other row. Present only when `in_source.rescue` is on (schema version 9, or 10 with precursor labels), and null on every row of a version 11 or 12 file written with the pass off.
+- `is_variant`: Whether **every** protein of the peptide comes from `database.variant_fasta`. Null on decoy rows. Present only with `database.variant_fasta` (schema version 11, or 12 with precursor labels); see [Variant proteins](#variant-proteins).
+- `variant_spectrum_q`, `variant_peptide_q`: The PSM- and peptide-level q-values of the variant class alone, for target and decoy rows of variant peptides; null on every other row, and on the rows of the in-source rescue pass. Lower is better. Present only with `database.variant_fasta`.
 
 These columns provide comprehensive information about each candidate peptide spectrum match (PSM) identified by the Sage search engine.
 
@@ -1978,6 +1991,59 @@ discoveries: PSMs at 1% spectrum and peptide q-value, peptides at 1% peptide q-v
 An estimate much larger than the q-value threshold it is compared against means the search did
 not control the FDR at that threshold on this data — not that this run is broken. Read it with
 the ratio: a small entrapment database makes `1/r` large and the bound loose.
+
+## Variant proteins
+
+Patient-specific (proteogenomic) searches add proteins the reference proteome does not have:
+sample proteins carrying single amino acid variants, frameshifts, fusions or novel junctions.
+`database.variant_fasta` searches them alongside `database.fasta`. Its proteins are ordinary
+targets — same enzyme, same modifications and their own decoys — so variant peptides compete for
+spectra as every other peptide does, and the global `spectrum_q`, `peptide_q` keep their meaning.
+
+A PSM is a variant identification when **every** protein of its peptide comes from the variant
+FASTA. A variant protein written as the whole protein shares most of its peptides with the
+reference protein; those peptides are reference peptides, because the reference explains the
+spectrum without the variant. Only the peptides that differ from every non-variant protein are
+variant peptides. Proteins are told apart by accession, so give each variant protein its own
+accession (for example `P04637_R175H`); a variant protein whose accession repeats a reference
+one is read as that reference protein.
+
+**Why a separate q-value.** The variant class is small next to the proteome and its false
+discoveries need not follow the run's overall rate, so a global 1% says little about the error
+among the variant identifications. Sage Plus therefore also estimates the FDR within the class
+alone, a separate (class-specific) FDR as recommended for proteogenomics (Nesvizhskii,
+*Proteogenomics: concepts, applications and computational strategies*, Nature Methods 2014): the
+run's own target-decoy estimate, `(decoys + 1) / targets` with a running minimum, over
+variant-class PSMs only (`variant_spectrum_q`), and the picked-peptide competition over
+variant-class peptides only (`variant_peptide_q`). Scores are the run's discriminant score; no
+separate model is trained. A decoy of a variant peptide keeps that peptide's proteins, so the
+class has its own decoys. Report a variant identification where both the global and the variant
+q-values pass.
+
+**Few decoys.** The estimate is conservative, not optimistic, for a small class: with the +1, a
+class with fewer than about 100 target PSMs above a score can never reach 1% there, and a run with
+few variant PSMs passes none. `run-summary.json` says how many targets and decoys took part, so an
+empty result is explained rather than silent.
+
+**Proteins.** Variant PSMs are kept out of protein inference: they take no part in the picked
+protein and protein-group FDR or in protein grouping, and are reported with `protein_q` and
+`protein_group_q` 1 and their own protein list as their group. Counted as protein evidence, variant
+false discoveries would move the protein results; the protein numbers of a run with variants are
+those of its reference PSMs.
+
+**What it writes.** In `results.sage.parquet` (schema version 11, or 12 with precursor labels):
+`is_variant`, null on decoy rows, and `variant_spectrum_q` and `variant_peptide_q`, null on rows
+whose peptide is not a variant peptide. In `run-summary.json`, a `variants` block: the file,
+`variant_proteins`, `variant_peptides`, `shared_peptides` (target peptides of a variant protein
+that a non-variant protein also explains), and for `psms` and `peptides` the class `targets` and
+`decoys` that took part and the targets passing 1% by the variant q-value
+(`passing_variant_q`) and by the global one (`passing_global_q`). `lfq.parquet`, the PIN file and
+the quality-control tables do not mark variant peptides.
+
+Not built: a table of variants applied to the reference proteins at digestion, sample sheets that
+say which file or channel carries which variant, and a flag for variants that have the mass of a
+reference peptide plus a modification (Asn to Asp against deamidation). The FASTA must hold every
+variant sequence you want searched.
 
 ## Contaminant proteins
 
@@ -2105,7 +2171,7 @@ In a fully enzymatic search an in-source product, such as a truncated tryptic pe
 1. **Parents** are the file's confident target PSMs, at the thresholds the annotation uses (spectrum and peptide q-value at most 0.01).
 2. **Candidates** of each parent are every N-terminal truncation (a C-terminal piece, `fragment:suffix`, at the ordinary peptide mass of its span) and every C-terminal truncation (an N-terminal piece, `fragment:prefix`, which is b-type and 18.010565 Da light, searched as its span carrying a C-terminal −18.010565 Da so the y-series fragments shift with it), down to `database.enzyme.min_len` residues, and the parent after losing water or ammonia (`loss:18.0106`, `loss:17.0265`), placed on the N-terminus where the dominant in-source losses happen (pyroglutamate from an N-terminal E or Q). Modifications on the residues a piece keeps stay where they were; a terminal modification stays only on a piece that keeps that terminus. Internal pieces and losses declared by modifications are not generated in this version. A candidate already in the database is dropped, because the main search scored it. A piece's missed cleavages are counted on the piece itself.
 3. **Decoys:** every candidate gets the decoy every database peptide gets, its interior reversed. A candidate whose decoy reads the same as itself (a palindromic interior), as another candidate, or as a database peptide is dropped together with its decoy, as the database digest drops such decoys, so every candidate that is searched has its own decoy; `dropped_decoy_collisions` counts them.
-4. **Spectra:** each file is read again, and only its MS2 spectra without a confident PSM are processed, filtered by `min_peaks` and searched, with the main search's tolerances, scorer and spectrum processing, against a small database built from that file's candidates, without the search's mass offsets. A spectrum is its ID and its occurrence among the file's spectra of that ID, as in the search, so a repeated ID is told apart. A spectrum whose precursor has no charge is not searched (`skipped_without_charge`): trying every charge would read a parent's own spectrum at a fraction of its mass, where its truncations lie. A piece that keeps no labelled residue of a SILAC parent is in no channel, as the database digest leaves such a peptide. The pass is all or nothing: if it fails on any file, for example because the file cannot be read again, no rescue rows are written for any file, every output is written exactly as a run without the pass writes it (version 7 or 8 `results.sage.parquet`, no `in_source_rescued` column), `run-summary.json` records only the failure, in `in_source.rescue_error` (`file_id`, `path`, `message`), with no per-file counts, an error naming the file is logged, and Sage exits with an error after writing them.
+4. **Spectra:** each file is read again, and only its MS2 spectra without a confident PSM are processed, filtered by `min_peaks` and searched, with the main search's tolerances, scorer and spectrum processing, against a small database built from that file's candidates, without the search's mass offsets. A spectrum is its ID and its occurrence among the file's spectra of that ID, as in the search, so a repeated ID is told apart. A spectrum whose precursor has no charge is not searched (`skipped_without_charge`): trying every charge would read a parent's own spectrum at a fraction of its mass, where its truncations lie. A piece that keeps no labelled residue of a SILAC parent is in no channel, as the database digest leaves such a peptide. The pass is all or nothing: if it fails on any file, for example because the file cannot be read again, no rescue rows are written for any file, every output is written exactly as a run without the pass writes it (version 7 or 8 `results.sage.parquet`, no `in_source_rescued` column; with `database.variant_fasta`, version 11 or 12 with that column null), `run-summary.json` records only the failure, in `in_source.rescue_error` (`file_id`, `path`, `message`), with no per-file counts, an error naming the file is logged, and Sage exits with an error after writing them.
 5. **Co-elution:** a spectrum keeps its best-scoring hit among the candidates whose parent elutes where the spectrum was acquired: inside one of the parent's quantified peaks in that file when quantification gave it one, otherwise within the file's retention-time tolerance (derived as above, or `in_source.rt_tolerance`) of the parent's median retention time. A candidate that several parents give is reported against the longest of them that co-elutes. Each spectrum is searched against only the candidates of parents that co-elute with it: the others are dropped before any candidate is cut, in every precursor window, isotope error and charge, as if the database held no others, so they cannot crowd one out. A candidate that several parents give lies in all of their proteins.
 6. **Error control:** the kept hits of a file, targets and decoys, compete on the score, and each gets a q-value from that competition alone: the smallest `(decoys + 1) / targets`, counted over the hits at or above a score threshold, of any threshold at or below its own score, as the main spectrum FDR computes it. Equal scores share a threshold. A rescued PSM is a target at rescue q-value at most 0.01.
 7. **Precursor tolerance:** the pass needs the precursor window to stay well short of the smallest product-to-parent mass difference, the parent less ammonia at 17.0265 Da: the configured tolerance at `database.peptide_max_mass` plus the largest isotope error must be below 16 Da. Wider, as in an open search, a parent's own spectra that missed the main threshold would match its truncations, which share its fragment series, and reversed decoys cannot model that, so the rescue q-value would be optimistic. Such a configuration is refused before the search starts.

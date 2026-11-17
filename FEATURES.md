@@ -44,6 +44,13 @@ cannot support a claim of FDR control are not used. A peptide a sample protein a
 an original target, not an entrapment discovery. See
 [entrapment proteins](DOCS.md#entrapment-proteins).
 
+**Search variant proteins with their own q-value.** `database.variant_fasta` adds proteins
+carrying single amino acid variants, frameshifts or fusions, for patient-specific searches. A
+peptide only those proteins explain is a variant peptide: it is marked in `is_variant`, gets a
+class-specific q-value at the PSM and peptide level (`variant_spectrum_q`, `variant_peptide_q`)
+from the variant PSMs and their own decoys alone, and is kept out of protein inference. See
+[variant proteins](DOCS.md#variant-proteins).
+
 **Keep contaminants in the search and out of the conclusions.** `database.contaminant_fasta`
 searches a second FASTA of keratins, proteases and the rest of the laboratory background as
 ordinary targets — same enzyme, same modifications, same decoys — and reports in
