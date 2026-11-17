@@ -684,3 +684,42 @@ fn internal_prefix_requires_a_residue_and_never_panics() {
     );
     assert!("~1".parse::<ModificationSpecificity>().is_err());
 }
+
+#[test]
+fn unnamed_modification_maps_serialize_in_site_order_every_time() {
+    // `results.json` echoes the search's parameters. These maps are hash maps,
+    // so their keys used to come out in a different order from run to run.
+    let parameters = || {
+        let builder: crate::database::Builder = serde_json::from_value(serde_json::json!({
+            "static_mods": {"C": 57.021464, "^": 1.0, "K": 2.0},
+            "variable_mods": {"M": [15.994915], "^": [42.010565], "S": [79.966331], "[": [-17.026549]}
+        }))
+        .unwrap();
+        serde_json::to_string(&builder.make_parameters().unwrap()).unwrap()
+    };
+    let first = parameters();
+    for _ in 0..20 {
+        assert_eq!(parameters(), first);
+    }
+    // The written order is sorted by site (a parsed `Value` sorts its keys
+    // anyway, so read the positions from the text).
+    let at = |key: &str| first.find(&format!("\"{key}\":[")).unwrap();
+    assert!(at("M") < at("S") && at("S") < at("[") && at("[") < at("^"));
+    let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+    let keys = |field: &str| {
+        value[field]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let mut sorted = keys("variable_mods");
+    sorted.sort();
+    assert_eq!(keys("variable_mods"), sorted);
+    assert_eq!(keys("variable_mods").len(), 4);
+    assert_eq!(value["variable_mods"]["M"], serde_json::json!([15.994915]));
+    let mut sorted = keys("static_mods");
+    sorted.sort();
+    assert_eq!(keys("static_mods"), sorted);
+}

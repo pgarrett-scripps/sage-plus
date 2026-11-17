@@ -573,7 +573,7 @@ pub fn serialize_static_mods<S: serde::Serializer>(
         named_modifications(mods.iter().map(|(s, m)| (*s, m as &dyn NamedEntry)))
             .serialize(serializer)
     } else {
-        mods.serialize(serializer)
+        sorted_by_site(mods).serialize(serializer)
     }
 }
 
@@ -592,6 +592,17 @@ pub fn serialize_variable_mods<S: serde::Serializer>(
         )
         .serialize(serializer)
     } else {
-        mods.serialize(serializer)
+        sorted_by_site(mods).serialize(serializer)
     }
+}
+
+/// The entries of a modification map keyed by their written site and in that
+/// order, so a serialized configuration does not depend on hash order. Keys
+/// and values are the ones the map holds.
+fn sorted_by_site<V>(
+    mods: &HashMap<ModificationSpecificity, V>,
+) -> std::collections::BTreeMap<String, &V> {
+    mods.iter()
+        .map(|(site, value)| (site.to_string(), value))
+        .collect()
 }

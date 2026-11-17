@@ -34,6 +34,15 @@ entries are retained below for provenance.
   alone measured 17.9% and the variant q-value passed none. With the option unset, which is the
   default, every output is unchanged.
 
+### Fixed
+- `results.json` writes unnamed `static_mods` and `variable_mods` in site order. They are hash
+  maps, so their keys came out in a different order from run to run, and two runs of the same
+  configuration differed in `results.json` (for example `"^"` before `"M"` in one and after it in
+  the other) though every key and value was the same. Keys and values are unchanged.
+- `README.md` and `FEATURES.md` gave 19 GiB for the human + 100x gut catalog search, a Beta 11
+  run on a pre-release binary; the current code measures 22.2 GiB at 8 threads (21.6 GiB at 16),
+  in `benchmarks/LARGE_DB_MEMORY-2026-11.md`.
+
 ## [v0.1.0-beta.22] - 2026-11-17
 
 ### Added

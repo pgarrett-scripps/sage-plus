@@ -8,7 +8,8 @@ and outputs are documented in [DOCS.md](DOCS.md).
 **Search very large databases in bounded memory.** With `prefilter` on, proteins stream through an
 index of the spectra, and only peptides that could match a spectrum enter the search index. A human
 reference plus a 100x gut-microbiome catalog, which ran out of memory before Beta 11, now finishes
-in 19 GiB (14,459 PSMs in 451 s). See [settings](DOCS.md#fasta) and the
+in 22.2 GiB peak memory at 8 threads (21.6 GiB at 16; 15,063 PSMs at 1%). See
+[settings](DOCS.md#fasta), the [measurements](benchmarks/LARGE_DB_MEMORY-2026-11.md) and the
 [Beta 11 measurements](CHANGELOG.md#v010-beta11---2026-09-26).
 
 **Localize PTM sites with a false-localization rate.** `ptm_localization` rescores each arrangement
