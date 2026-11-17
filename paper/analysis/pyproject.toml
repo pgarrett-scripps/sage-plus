@@ -2,7 +2,7 @@
 name = "analysis"
 version = "0"
 description = "Analysis that produces the manuscript's figures and tables"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 # REPLACE THIS LIST with whatever your analysis needs. It is deliberately separate
 # from the manuscript toolchain in ../pyproject.toml: those dependencies are the
