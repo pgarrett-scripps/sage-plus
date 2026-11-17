@@ -1229,7 +1229,7 @@
     },
     "VariantClassCounts": {
       "type": "object",
-      "description": "Targets and decoys of one level of the variant class that took part in its target-decoy competition, and the targets passing 1% by the class-specific q-value and by the global one.",
+      "description": "Targets and decoys of one level of the variant class that took part in its target-decoy competition, and the targets passing 1% by the class-specific q-value and by the global one. Peptide counts are of database peptidoforms: the channels of a labelled peptide count separately.",
       "properties": {
         "targets": {
           "type": "integer",

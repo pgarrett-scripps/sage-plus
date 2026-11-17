@@ -164,21 +164,53 @@ fn without_variant_psms_protein_inference_sees_every_psm() {
 }
 
 #[test]
-fn the_picked_peptide_subset_of_everything_is_picked_peptide() {
-    let (db, _) = database(3, 0);
-    let mut features = vec![
-        psm(0, 0, false, 9.0),
-        psm(1, 0, true, 9.5),
-        psm(2, 1, false, 4.0),
-        psm(3, 2, true, 3.0),
-    ];
-    let (subset, _) = picked_peptide_q_values(&db, &features, |_| true);
-    crate::fdr::picked_peptide(&db, &mut features);
-    assert_eq!(
-        subset,
-        features
-            .iter()
-            .map(|f| Some(f.peptide_q))
-            .collect::<Vec<_>>()
-    );
+fn a_variant_decoy_cannot_raise_the_reference_proteins_q_values() {
+    // 200 reference proteins, each with one target PSM, and a variant protein
+    // whose decoy outscores them all. Counted in the picked protein FDR, that
+    // decoy makes every reference protein's q-value 2/200; kept out, 1/200.
+    let mut db = IndexedDatabase::default();
+    let mut features = Vec::new();
+    for index in 0..200u32 {
+        db.peptides.push(Peptide {
+            sequence: format!("PEPTIDE{}K", "G".repeat(index as usize + 1))
+                .as_bytes()
+                .into(),
+            proteins: vec![Arc::from(format!("P{index}"))].into_iter().collect(),
+            ..Peptide::default()
+        });
+        features.push(Feature {
+            psm_id: index as usize,
+            peptide_idx: PeptideIx(index),
+            label: 1,
+            discriminant_score: 10.0 + index as f32,
+            ..Feature::default()
+        });
+    }
+    db.peptides.push(Peptide {
+        sequence: b"VARIANTHK".as_slice().into(),
+        proteins: vec![Arc::from("P0_V")].into_iter().collect(),
+        decoy: true,
+        ..Peptide::default()
+    });
+    features.push(Feature {
+        psm_id: 200,
+        peptide_idx: PeptideIx(200),
+        label: -1,
+        discriminant_score: 1000.0,
+        ..Feature::default()
+    });
+    let mut fasta = Fasta::parse(">P0\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let variants = Fasta::parse(">P0_V\nVARIANTHK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(variants, ProteinClass::Variant);
+    let classes = ProteinClasses::of_fasta(&fasta).unwrap();
+
+    let mut counted = features.clone();
+    crate::fdr::picked_protein(&db, &mut counted);
+    assert_eq!(counted[199].protein_q, 0.01);
+
+    infer_proteins_without_variants(&db, &classes, &mut features, |features| {
+        crate::fdr::picked_protein(&db, features)
+    });
+    assert_eq!(features[199].protein_q, 0.005);
+    assert_eq!(features[200].protein_q, 1.0);
 }

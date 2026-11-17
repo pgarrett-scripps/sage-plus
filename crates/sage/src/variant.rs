@@ -60,7 +60,9 @@ impl VariantQValues {
     Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 pub struct VariantClassCounts {
-    /// Target PSMs (or peptides) of the class that took part.
+    /// Target PSMs (or peptides) of the class that took part. Peptides are
+    /// counted as database peptidoforms, so the channels of a labelled
+    /// peptide count separately.
     pub targets: usize,
     /// Decoy PSMs (or peptides) of the class that took part.
     pub decoys: usize,

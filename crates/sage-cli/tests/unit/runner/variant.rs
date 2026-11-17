@@ -161,7 +161,9 @@ fn a_whole_run_marks_the_variant_peptide_and_keeps_it_out_of_protein_inference()
     assert_ne!(variant["variant_spectrum_q"], "null");
     assert_ne!(variant["variant_peptide_q"], "null");
     assert_eq!(variant["in_source_rescued"], "null");
-    // Kept out of protein inference.
+    // Reported as kept out of protein inference. On one spectrum these values
+    // hold either way; the exclusion itself is tested in sage-core's
+    // `a_variant_decoy_cannot_raise_the_reference_proteins_q_values`.
     assert_eq!(variant["protein_q"], "1.0");
     assert_eq!(variant["protein_group_q"], "1.0");
     assert_eq!(
@@ -173,8 +175,27 @@ fn a_whole_run_marks_the_variant_peptide_and_keeps_it_out_of_protein_inference()
     assert_eq!(stats.variant_proteins, 1);
     assert!(stats.variant_peptides > 0);
     assert!(stats.psms.targets >= 1);
-    // The same spectrum, the same rows: only the class columns are added.
+    // One spectrum either way, so as many rows; byte identity of a run with the
+    // option off is checked against main on real data with two binaries.
     assert_eq!(on_rows.len(), off_rows.len());
     std::fs::remove_dir_all(off_directory).ok();
     std::fs::remove_dir_all(on_directory).ok();
+}
+
+#[test]
+fn a_variant_fasta_without_a_target_protein_is_refused() {
+    // Every entry carries the decoy tag, so with generated decoys none is
+    // read: the run must not quietly search as if the option were unset.
+    let directory = directory("empty-variants");
+    let input = input(
+        &directory,
+        REFERENCE,
+        Some(&format!(">rev_sp|P2_V|CARRIER_VARIANT\nGGWGGK{PEPTIDE}\n")),
+    );
+    let error = match Runner::new(input.build().unwrap(), 1) {
+        Ok(_) => panic!("a variant FASTA with no target protein must be refused"),
+        Err(error) => format!("{error:#}"),
+    };
+    assert!(error.contains("Failed to read variant FASTA"), "{error}");
+    std::fs::remove_dir_all(directory).ok();
 }

@@ -2005,8 +2005,13 @@ FASTA. A variant protein written as the whole protein shares most of its peptide
 reference protein; those peptides are reference peptides, because the reference explains the
 spectrum without the variant. Only the peptides that differ from every non-variant protein are
 variant peptides. Proteins are told apart by accession, so give each variant protein its own
-accession (for example `P04637_R175H`); a variant protein whose accession repeats a reference
-one is read as that reference protein.
+accession (for example `P04637_R175H`): a variant protein whose accession is already in
+`database.fasta` (or the contaminant or entrapment FASTA) is refused at database build, because
+classes are read per accession. Protein names in a `database.peptides` list are not checked
+against the variant FASTA; do not name a variant accession there. With
+`merge_isoleucine_leucine: false`, an I/L variant (Ile to Leu or back) has the mass and fragments
+of its reference peptide and is not told apart from it; with the default merge it becomes the same
+peptide and so a reference peptide.
 
 **Why a separate q-value.** The variant class is small next to the proteome and its false
 discoveries need not follow the run's overall rate, so a global 1% says little about the error
@@ -2033,12 +2038,17 @@ those of its reference PSMs.
 
 **What it writes.** In `results.sage.parquet` (schema version 11, or 12 with precursor labels):
 `is_variant`, null on decoy rows, and `variant_spectrum_q` and `variant_peptide_q`, null on rows
-whose peptide is not a variant peptide. In `run-summary.json`, a `variants` block: the file,
+whose peptide is not a variant peptide and on the rows of the in-source rescue pass. In
+`run-summary.json`, a `variants` block: the file,
 `variant_proteins`, `variant_peptides`, `shared_peptides` (target peptides of a variant protein
 that a non-variant protein also explains), and for `psms` and `peptides` the class `targets` and
 `decoys` that took part and the targets passing 1% by the variant q-value
-(`passing_variant_q`) and by the global one (`passing_global_q`). `lfq.parquet`, the PIN file and
-the quality-control tables do not mark variant peptides.
+(`passing_variant_q`) and by the global one (`passing_global_q`); peptide counts are of database
+peptidoforms, so the two channels of a SILAC peptide count twice. `lfq.parquet`, the PIN file and
+the quality-control tables do not mark variant peptides, and the protein-level quality-control
+and report counts leave variant PSMs out, since their `protein_q` is 1. With an entrapment FASTA
+as well, variant proteins and peptides count as original targets in the entrapment ratio at both
+levels.
 
 Not built: a table of variants applied to the reference proteins at digestion, sample sheets that
 say which file or channel carries which variant, and a flag for variants that have the mass of a
