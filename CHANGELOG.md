@@ -34,6 +34,16 @@ entries are retained below for provenance.
   alone measured 17.9% and the variant q-value passed none. With the option unset, which is the
   default, every output is unchanged.
 
+### Changed
+- The prefilter tests each copy of a shared digest (a sequence, or generated decoy sequence,
+  that occurs more than once in the database) against the spectrum index as it streams, and
+  groups and filters only the shared sequences some copy could match, per spectrum batch. Peak
+  memory of the human + 100x gut catalog search falls from 22.2 GiB to 6.85 GiB at 16 threads,
+  with every output identical and no slower (exclusive median 4:31.5 before, 4:24.6 after), in
+  `benchmarks/LARGE_DB_MEMORY-2026-11.md`. A `motif:` modification rule keeps the previous
+  whole-group path, logged. The log counts "peptides checked" and "shared sequences handled
+  together" now leave out shared sequences no copy could match.
+
 ### Fixed
 - `results.json` writes unnamed `static_mods` and `variable_mods` in site order. They are hash
   maps, so their keys came out in a different order from run to run, and two runs of the same

@@ -1245,10 +1245,15 @@ alongside the library, because the location table does not embed chemical masses
   files are read and processed once. If keeping them would push the final fragment index past
   the memory limit, they are released and read again by the search.
   Digests whose sequence, or generated decoy sequence, occurs more than once in the database
-  (shared peptides, repeated proteins, decoy collisions) are set aside while streaming, grouped
-  with every digest that shares the sequence or its decoy, and each group is filtered as a
-  small database of its own, as a whole-database digest would filter it, so results are
-  unchanged.
+  (shared peptides, repeated proteins, decoy collisions) are tested one copy at a time while
+  streaming; only the sequences some copy could match are then grouped with every digest that
+  shares the sequence or its decoy, and each group is filtered as a small database of its own,
+  as a whole-database digest would filter it, so results are unchanged. With a `motif:`
+  modification rule, whose sites depend on the protein around each copy, every shared sequence
+  is grouped and filtered this way instead (logged; it needs more memory on large databases).
+  The prefilter's log counts reflect this: "peptides checked" leaves out the peptides of shared
+  sequences no copy could match, and "shared sequences handled together" counts only the
+  digests of the groups that were built.
 - **prefilter_chunk_size**: Deprecated and ignored; accepted so older configurations parse.
 - **prefilter_min_matched_peaks**: Integer. Preliminary fragment matches one precursor
   hypothesis of a spectrum needs to keep a peptide (default: 4, and never more than

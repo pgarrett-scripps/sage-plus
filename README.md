@@ -26,7 +26,7 @@ Compared with upstream Sage v0.15.0-beta.2. Numbers link to their source.
 | Named mods with explicit and motif sites | ✗ | ✓ e.g. `first_residue:K`, [`motif:N*-{P}-[ST]`](DOCS.md#motif-sites) |
 | Per-site neutral losses, per-mod caps, site libraries | ✗ | ✓ losses add [+7.8% localizations](DOCS.md#static-and-variable-behavior) |
 | **Scale** | | |
-| Huge databases | chunked prefilter | ✓ streamed: human + 100x gut catalog in [22 GiB](benchmarks/LARGE_DB_MEMORY-2026-11.md) |
+| Huge databases | chunked prefilter | ✓ streamed: human + 100x gut catalog in [6.9 GiB](benchmarks/LARGE_DB_MEMORY-2026-11.md) |
 | Peak memory, standard DDA | 7.6 GiB | ✓ [6.2 GiB](benchmarks/HEADTOHEAD-2026-10.md) (−18%) |
 | Memory limit and size estimate before a run | ✗ | ✓ [`max_memory_gb`, `--estimate`](DOCS.md#memory-guard) |
 | **Identifications** | | |
