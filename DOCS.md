@@ -2050,8 +2050,16 @@ that a `database.fasta` protein also explains, reported on that protein only), a
 peptidoforms, so the two channels of a SILAC peptide count twice. `lfq.parquet`, the PIN file and
 the quality-control tables do not mark variant peptides, and the protein-level quality-control
 and report counts leave variant PSMs out, since their `protein_q` is 1. With an entrapment FASTA
-as well, variant proteins and peptides count as original targets in the entrapment ratio at both
-levels.
+as well, variant peptides count as original targets in the peptide-level entrapment ratio; the
+protein-level ratio counts the `database.fasta` proteins only, since variant proteins take no part
+in protein inference.
+
+Three edge cases follow from reporting reference peptides on their reference proteins. With
+`in_source` on and a semi- or non-enzymatic digest, a truncation of a variant peptide that no
+longer covers the variant residue is a reference peptide, so it is not paired with its variant
+parent. With the default I/L merge, an Ile-to-Leu variant merges with its reference peptide, and
+the sequence shown may be the variant's spelling of it. A `ptm_library` site that names a variant
+accession applies to variant peptides only.
 
 Not built: a table of variants applied to the reference proteins at digestion, sample sheets that
 say which file or channel carries which variant, and a flag for variants that have the mass of a

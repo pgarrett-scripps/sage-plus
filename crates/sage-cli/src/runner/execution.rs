@@ -1007,10 +1007,11 @@ impl Runner {
             }
         }
         let peptide_ratio = database_ratio(target_peptides, entrapment_peptides);
-        // Variant proteins are original targets too, as their peptides are
-        // at the peptide level.
-        let original_proteins = classes.sample_proteins() + classes.variant_proteins();
-        let protein_ratio = database_ratio(original_proteins, classes.entrapment_proteins());
+        // Variant peptides are original targets at the peptide level; at the
+        // protein level only `fasta` proteins are, since variant PSMs take no
+        // part in protein inference and a variant protein is never reported.
+        let protein_ratio =
+            database_ratio(classes.sample_proteins(), classes.entrapment_proteins());
 
         // Confident discoveries of each level, split by class.
         let mut psms = (0usize, 0usize);
@@ -1057,7 +1058,7 @@ impl Runner {
         Some(super::summary::EntrapmentRunStats {
             path,
             entrapment_proteins: classes.entrapment_proteins(),
-            target_proteins: original_proteins,
+            target_proteins: classes.sample_proteins(),
             entrapment_peptides,
             target_peptides,
             shared_peptides,

@@ -292,3 +292,25 @@ fn without_variant_proteins_no_peptide_is_touched() {
     assert_eq!(keep_reference_proteins(&mut peptides, &classes), 0);
     assert_eq!(peptides[0].proteins.len(), 2);
 }
+
+#[test]
+fn the_picked_peptide_subset_of_everything_is_picked_peptide() {
+    // `picked_peptide` is built on `picked_peptide_q_values`; this pins that
+    // the subset form with every feature included gives its q-values.
+    let (db, _) = database(3, 0);
+    let mut features = vec![
+        psm(0, 0, false, 9.0),
+        psm(1, 0, true, 9.5),
+        psm(2, 1, false, 4.0),
+        psm(3, 2, true, 3.0),
+    ];
+    let (subset, _) = picked_peptide_q_values(&db, &features, |_| true);
+    crate::fdr::picked_peptide(&db, &mut features);
+    assert_eq!(
+        subset,
+        features
+            .iter()
+            .map(|f| Some(f.peptide_q))
+            .collect::<Vec<_>>()
+    );
+}

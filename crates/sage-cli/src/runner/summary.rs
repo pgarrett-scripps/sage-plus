@@ -290,8 +290,7 @@ pub struct ContaminantFileStats {
 pub struct EntrapmentRunStats {
     /// The searched `entrapment_fasta`.
     pub path: String,
-    /// Proteins read from it, and the original target proteins: those of
-    /// `fasta` and of `variant_fasta`.
+    /// Proteins read from it, and from `fasta`.
     pub entrapment_proteins: usize,
     pub target_proteins: usize,
     /// Database target peptides of each class. A peptide that any sample
