@@ -654,9 +654,15 @@ pub fn serialize_features_with_variants(
                 write_optional_column::<BoolType>(
                     column,
                     features.iter().map(|f| {
+                        // Rescue rows are not classed: a product's sequence
+                        // may lie in a reference protein while its proteins
+                        // are its variant parent's, and it has no class
+                        // q-value.
                         let peptide = &database[f.peptide_idx];
+                        let rescued =
+                            in_source.is_some_and(|annotations| annotations.is_rescued(f.psm_id));
                         protein_classes
-                            .filter(|_| !peptide.decoy)
+                            .filter(|_| !peptide.decoy && !rescued)
                             .map(|classes| classes.is_variant(peptide.proteins.iter()))
                     }),
                 )?;

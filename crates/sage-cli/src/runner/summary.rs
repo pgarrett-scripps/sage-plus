@@ -326,6 +326,9 @@ pub struct VariantRunStats {
     /// are reference peptides reported on their reference proteins only.
     pub variant_peptides: usize,
     pub shared_peptides: usize,
+    /// Variant target peptides with no decoy in the database (their decoy
+    /// collided with a target), which compete unpaired.
+    pub unpaired_peptides: usize,
     /// Variant-class PSMs and peptides that took part in the class
     /// competition, and the targets passing 1% by the class q-value and by
     /// the global one.

@@ -1091,3 +1091,42 @@ fn a_variant_fasta_needs_a_fasta_and_generated_decoys() {
         "{error}"
     );
 }
+
+#[test]
+fn a_variant_fasta_refuses_an_empty_fasta_path_and_a_peptide_list() {
+    let input = |database: serde_json::Value| -> Input {
+        serde_json::from_value(serde_json::json!({
+            "database": database,
+            "mzml_paths": ["missing.mzML"],
+            "precursor_tol": {"ppm": [-10, 10]},
+            "fragment_tol": {"ppm": [-20, 20]}
+        }))
+        .unwrap()
+    };
+    let base = serde_json::json!({
+        "fasta": "missing.fasta",
+        "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "semi_enzymatic": false},
+        "static_mods": {},
+        "ion_kinds": ["b", "y"],
+        "variant_fasta": "variants.fasta"
+    });
+    // An empty path skips FASTA loading, so the variant FASTA would never be
+    // read: the run would be searched as if the option were unset.
+    let mut empty = base.clone();
+    empty["fasta"] = serde_json::json!("");
+    empty["peptides"] = serde_json::json!("p.tsv");
+    let error = input(empty).validate().unwrap_err().to_string();
+    assert!(
+        error.contains("`database.variant_fasta` requires `database.fasta`"),
+        "{error}"
+    );
+    // A listed peptide gets proteins outside every class, so a variant
+    // peptide it repeats would quietly lose its class.
+    let mut listed = base;
+    listed["peptides"] = serde_json::json!("p.tsv");
+    let error = input(listed).validate().unwrap_err().to_string();
+    assert!(
+        error.contains("`database.variant_fasta` cannot be combined with `database.peptides`"),
+        "{error}"
+    );
+}

@@ -58,9 +58,7 @@ impl VariantQValues {
 /// pass at [`Q_VALUE`] by the class q-value and by the global one. These are
 /// what explain an empty variant result: a class needs about 100 targets above
 /// a threshold before anything can pass at 1%.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct VariantClassCounts {
     /// Target PSMs (or peptides) of the class that took part. Peptides are
     /// counted as database peptidoforms, so the channels of a labelled
@@ -72,6 +70,21 @@ pub struct VariantClassCounts {
     pub passing_variant_q: usize,
     /// Targets at or below 1% by the run's global q-value.
     pub passing_global_q: usize,
+    /// The smallest class q-value the class could reach, `1 / targets` (the
+    /// +1 of the estimate with no decoy above any target): a class whose
+    /// floor is above 1% cannot pass anything at 1%. Absent without targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub q_floor: Option<f32>,
+    /// The smallest class q-value a target reached. Absent without targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lowest_q: Option<f32>,
+}
+
+impl VariantClassCounts {
+    fn finish(&mut self, lowest_q: Option<f32>) {
+        self.q_floor = (self.targets > 0).then(|| 1.0 / self.targets as f32);
+        self.lowest_q = lowest_q;
+    }
 }
 
 /// Map the peptides a protein of `database.fasta` explains to their reference
@@ -152,19 +165,23 @@ pub fn variant_q_values(
 
     let mut q_values = VariantQValues::default();
     let mut psms = VariantClassCounts::default();
+    let mut lowest_psm_q: Option<f32> = None;
     for (feature, &q) in class.iter().zip(&spectrum_q) {
         q_values.spectrum.insert(feature.psm_id, q);
         match feature.label == -1 {
             true => psms.decoys += 1,
             false => {
                 psms.targets += 1;
+                lowest_psm_q = Some(lowest_psm_q.map_or(q, |lowest| lowest.min(q)));
                 psms.passing_variant_q += usize::from(q <= Q_VALUE);
                 psms.passing_global_q += usize::from(feature.spectrum_q <= Q_VALUE);
             }
         }
     }
 
+    psms.finish(lowest_psm_q);
     let mut peptides = VariantClassCounts::default();
+    let mut lowest_peptide_q: Option<f32> = None;
     let mut seen: FnvHashSet<PeptideIx> = FnvHashSet::default();
     let mut passing: FnvHashSet<(PeptideIx, bool)> = FnvHashSet::default();
     for (feature, q) in features.iter().zip(peptide_q) {
@@ -177,6 +194,9 @@ pub fn variant_q_values(
                 false => peptides.targets += 1,
             }
         }
+        if !decoy {
+            lowest_peptide_q = Some(lowest_peptide_q.map_or(q, |lowest| lowest.min(q)));
+        }
         if !decoy && q <= Q_VALUE && passing.insert((feature.peptide_idx, true)) {
             peptides.passing_variant_q += 1;
         }
@@ -184,7 +204,23 @@ pub fn variant_q_values(
             peptides.passing_global_q += 1;
         }
     }
+    peptides.finish(lowest_peptide_q);
     (q_values, psms, peptides)
+}
+
+/// Variant target peptides of the database that have no decoy: their
+/// generated decoy collided with a target and was dropped. They compete with
+/// no decoy of their own, which in a small class moves the estimate.
+pub fn unpaired_variant_peptides(db: &IndexedDatabase, classes: &ProteinClasses) -> usize {
+    db.peptides
+        .par_iter()
+        .enumerate()
+        .filter(|(index, peptide)| {
+            !peptide.decoy
+                && classes.is_variant(peptide.proteins.iter())
+                && db.paired_peptide_index(PeptideIx(*index as u32)).is_none()
+        })
+        .count()
 }
 
 /// Run protein inference (`infer`: picked protein FDR, grouping, picked

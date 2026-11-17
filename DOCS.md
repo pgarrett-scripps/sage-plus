@@ -1205,8 +1205,9 @@ alongside the library, because the location table does not embed chemical masses
   unset). Its proteins are ordinary targets with their own decoys. A peptide is a variant
   peptide only when every protein it belongs to is a variant protein; its PSMs get a separate,
   class-specific q-value in `variant_spectrum_q` and `variant_peptide_q` and are kept out of
-  protein inference. Needs generated decoys (`generate_decoys: false` is refused) and
-  `database.fasta`. Unset leaves every output as it was. See [Variant proteins](#variant-proteins).
+  protein inference. Entries must be whole protein sequences. Needs generated decoys
+  (`generate_decoys: false` is refused) and `database.fasta`, and cannot be combined with
+  `database.peptides`. Unset leaves every output as it was. See [Variant proteins](#variant-proteins).
 - **contaminant_fasta**: String. Path to a FASTA of common contaminant proteins, searched
   alongside `fasta` (default: unset). Its proteins are ordinary targets with the same enzyme,
   modifications and decoy rules; what it adds is that every PSM says whether its peptide
@@ -2000,18 +2001,27 @@ sample proteins carrying single amino acid variants, frameshifts, fusions or nov
 targets — same enzyme, same modifications and their own decoys — so variant peptides compete for
 spectra as every other peptide does, and the global `spectrum_q`, `peptide_q` keep their meaning.
 
-A PSM is a variant identification when **every** protein of its peptide comes from the variant
-FASTA. A variant protein written as the whole protein shares most of its peptides with the
-reference protein; those peptides are reference peptides, because the reference explains the
-spectrum without the variant, and they are reported on their `database.fasta` proteins only: the
-variant accessions are dropped from them, so a variant copy does not make every peptide of its
-reference protein shared and protein inference keeps its evidence. Only the peptides that differ
-from every non-variant protein are variant peptides. (A peptide that only a contaminant or
-entrapment protein shares with a variant protein keeps both accessions.) Proteins are told apart by accession, so give each variant protein its own
-accession (for example `P04637_R175H`): a variant protein whose accession is already in
-`database.fasta` (or the contaminant or entrapment FASTA) is refused at database build, because
-classes are read per accession. Protein names in a `database.peptides` list are not checked
-against the variant FASTA; do not name a variant accession there. With
+**Write whole proteins.** Each entry must be the whole protein sequence with the variant applied,
+under its own accession (for example `P04637_R175H`). Peptides are compared at the digest level:
+a PSM is a variant identification when **every** protein its digested peptide came from is a
+variant protein. A peptide the reference digest also produces is a reference peptide — the
+reference explains the spectrum without the variant — and it is reported on its `database.fasta`
+proteins only: the variant accessions are dropped from it, so a variant copy does not make every
+peptide of its reference protein shared and protein inference keeps its evidence. A variant that
+creates a cleavage site yields a peptide on the far side of the new site that carries no variant
+residue yet is in no reference digest; it is a variant peptide, because it exists only if the
+variant does. An entry written as a window around the variant, or as the variant peptide alone,
+has artificial ends: its first and last digested peptides are not in the reference digest, so
+they are classed as variant peptides although the reference contains their sequences, and they
+are false candidates. Position-level input (protein, position, residue) is a later variant
+table, not this option. A peptide that only a contaminant or entrapment protein shares with a
+variant protein keeps both accessions.
+
+**Refused before any spectrum is read:** `generate_decoys: false` (the class would have no decoys
+of its own); a missing or empty `database.fasta`; `database.peptides` (a listed peptide's protein
+is outside every class, so a variant peptide it repeats would lose its class without notice); a
+variant protein whose accession is already in `database.fasta` or the contaminant or entrapment
+FASTA (classes are read per accession); and a variant FASTA with no target protein. With
 `merge_isoleucine_leucine: false`, an I/L variant (Ile to Leu or back) has the mass and fragments
 of its reference peptide and is not told apart from it; with the default merge it becomes the same
 peptide and so a reference peptide.
@@ -2025,13 +2035,34 @@ run's own target-decoy estimate, `(decoys + 1) / targets` with a running minimum
 variant-class PSMs only (`variant_spectrum_q`), and the picked-peptide competition over
 variant-class peptides only (`variant_peptide_q`). Scores are the run's discriminant score; no
 separate model is trained. A decoy of a variant peptide keeps that peptide's proteins, so the
-class has its own decoys. Report a variant identification where both the global and the variant
-q-values pass.
+class has its own decoys. Reversed decoys model a random match, not the error a variant search
+fears most — the spectrum of a reference peptide, or of a modified reference peptide, matched to
+the variant one residue away — so the class q-value can be optimistic for exactly those cases.
 
-**Few decoys.** The estimate is conservative, not optimistic, for a small class: with the +1, a
-class with fewer than about 100 target PSMs above a score can never reach 1% there, and a run with
-few variant PSMs passes none. `run-summary.json` says how many targets and decoys took part, so an
-empty result is explained rather than silent.
+**What it measures.** A control on one human file (PXD028735 HYE, Orbitrap DDA): for each of a set
+of confidently identified human peptides, the reference FASTA was given a substitution so that
+only `variant_fasta` holds the true sequence, beside 19,000-20,000 made-up variants that no sample
+carries. Each made-up variant identification is false, so their share is a lower bound on the
+class's false discovery proportion (FDP).
+
+| At 1% | 1,000 true variants | 50 true variants |
+| --- | --- | --- |
+| variant PSMs by `variant_spectrum_q` (true / false, FDP) | 1,518 / 25, 1.6% | 0 / 0 |
+| variant PSMs by `spectrum_q` | 1,510 / 13, 0.9% | 69 / 15, 17.9% |
+| variant PSMs by both | 1,510 / 13, 0.9% | 0 / 0 |
+| variant peptides by `variant_peptide_q` | 1,029 / 19, 1.8% | 0 / 0 |
+| variant peptides by `peptide_q` | 1,029 / 7, 0.7% | 52 / 8, 13.3% |
+| true peptides found (of those the reference search found) | 1,000 of 1,000 | 0 of 50 |
+
+Read it this way. With many true variants, the class q-value alone is looser than the global one
+(1.6-1.8% measured at a claimed 1%, a lower bound), so report a variant identification only where
+**both** `spectrum_q` and `variant_spectrum_q` pass (0.9% in the control). With few true variants
+in a large library, the global q-value alone lets about one false variant through for every five
+true ones, and the class cannot reach 1% at all: with the +1, no class q-value falls below one
+over the number of targets that outscore the class's best decoy (here 1/64 = 0.016, reported as
+`lowest_q`), and never below `q_floor`, one over all its targets. Keep `variant_fasta` to
+variants that can be in the samples searched (the samples' own variants), not a population
+catalogue: every variant no sample carries adds false candidates and decoys and raises the floor.
 
 **Proteins.** Variant PSMs are kept out of protein inference: they take no part in the picked
 protein and protein-group FDR or in protein grouping, and are reported with `protein_q` and
@@ -2041,18 +2072,21 @@ those of its reference PSMs.
 
 **What it writes.** In `results.sage.parquet` (schema version 11, or 12 with precursor labels):
 `is_variant`, null on decoy rows, and `variant_spectrum_q` and `variant_peptide_q`, null on rows
-whose peptide is not a variant peptide and on the rows of the in-source rescue pass. In
-`run-summary.json`, a `variants` block: the file,
+whose peptide is not a variant peptide. Rows of the in-source rescue pass are not classed:
+`is_variant` and both class q-values are null on them, and their proteins follow the same
+reference mapping as database peptides. In `run-summary.json`, a `variants` block: the file,
 `variant_proteins`, `variant_peptides`, `shared_peptides` (target peptides of a variant protein
-that a `database.fasta` protein also explains, reported on that protein only), and for `psms` and `peptides` the class `targets` and
-`decoys` that took part and the targets passing 1% by the variant q-value
-(`passing_variant_q`) and by the global one (`passing_global_q`); peptide counts are of database
-peptidoforms, so the two channels of a SILAC peptide count twice. `lfq.parquet`, the PIN file and
-the quality-control tables do not mark variant peptides, and the protein-level quality-control
-and report counts leave variant PSMs out, since their `protein_q` is 1. With an entrapment FASTA
-as well, variant peptides count as original targets in the peptide-level entrapment ratio; the
-protein-level ratio counts the `database.fasta` proteins only, since variant proteins take no part
-in protein inference.
+that a `database.fasta` protein also explains, reported on that protein only),
+`unpaired_peptides` (variant target peptides whose decoy collided with a target and was dropped,
+so they compete without one), and for `psms` and `peptides` the class `targets` and `decoys` that
+took part, the targets passing 1% by the variant q-value (`passing_variant_q`) and by the global
+one (`passing_global_q`), `q_floor` (`1 / targets`, the smallest q-value the class could reach
+with no decoy at all) and `lowest_q` (the smallest it did reach; above 0.01, nothing passes). Peptide counts are of database peptidoforms, so the two
+channels of a SILAC peptide count twice. `lfq.parquet`, the PIN file and the quality-control tables
+do not mark variant peptides, and the protein-level quality-control and report counts leave
+variant PSMs out, since their `protein_q` is 1. With an entrapment FASTA as well, variant peptides
+count as original targets in the peptide-level entrapment ratio; the protein-level ratio counts
+the `database.fasta` proteins only, since variant proteins take no part in protein inference.
 
 Three edge cases follow from reporting reference peptides on their reference proteins. With
 `in_source` on and a semi- or non-enzymatic digest, a truncation of a variant peptide that no

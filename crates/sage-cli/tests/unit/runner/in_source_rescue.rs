@@ -1125,3 +1125,50 @@ fn a_product_of_several_parents_lies_in_all_of_their_proteins() {
     assert_eq!(origins[&(PRODUCT.to_string(), false)].len(), 2);
     std::fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+fn a_product_of_a_reference_and_a_variant_parent_stays_on_the_reference_protein() {
+    let (mut runner, directory) = fixture_runner(&[fixture()], false);
+    let mut fasta =
+        sage_core::fasta::Fasta::parse(format!(">P1\nGGWGGK{PRODUCT}\n"), "rev_", true).unwrap();
+    fasta.extend_with_class(
+        sage_core::fasta::Fasta::parse(format!(">P1_V\nGGWAGK{PRODUCT}\n"), "rev_", true).unwrap(),
+        sage_core::fasta::ProteinClass::Variant,
+    );
+    let classes = sage_core::fasta::ProteinClasses::of_fasta(&fasta).unwrap();
+    // Only the two parents: the product itself is left out of the database.
+    let parents_of = [format!("GGWGGK{PRODUCT}"), format!("GGWAGK{PRODUCT}")];
+    let mut peptides = runner.database_parameters.digest(&fasta);
+    peptides.retain(|p| {
+        !p.decoy
+            && parents_of
+                .iter()
+                .any(|parent| p.sequence.as_bytes() == parent.as_bytes())
+    });
+    runner.database = runner
+        .database_parameters
+        .clone()
+        .build_from_peptides(peptides);
+    runner.protein_classes = Some(classes.clone());
+    let mut parents = fnv::FnvHashMap::default();
+    for index in 0..runner.database.peptides.len() {
+        parents.insert(sage_core::database::PeptideIx(index as u32), 10.0);
+    }
+    let mut stats = InSourceRescueFileStats::default();
+    let (_, peptides) = runner.rescue_candidates(&parents, &mut stats);
+    let proteins = |sequence: &str| {
+        peptides
+            .iter()
+            .find(|p| !p.decoy && p.sequence.as_bytes() == sequence.as_bytes())
+            .unwrap_or_else(|| panic!("{sequence} is a candidate"))
+            .proteins
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+    };
+    // In both parents: the reference protein only, as a database peptide.
+    assert_eq!(proteins(PRODUCT), vec!["P1"]);
+    // Only in the variant parent: its variant protein.
+    assert_eq!(proteins(&format!("WAGK{PRODUCT}")), vec!["P1_V"]);
+    std::fs::remove_dir_all(directory).ok();
+}

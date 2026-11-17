@@ -572,8 +572,18 @@ impl Input {
                 "Either `database.fasta` or `database.peptides` must be set"
             );
             ensure!(
-                database.variant_fasta.is_none() || database.fasta.is_some(),
+                database.variant_fasta.is_none()
+                    || database
+                        .fasta
+                        .as_deref()
+                        .is_some_and(|fasta| !fasta.is_empty()),
                 "`database.variant_fasta` requires `database.fasta`"
+            );
+            ensure!(
+                database.variant_fasta.is_none() || database.peptides.is_none(),
+                "`database.variant_fasta` cannot be combined with `database.peptides`: a listed \
+                 peptide's protein is outside every protein class, so a variant peptide it repeats \
+                 would lose its class without notice"
             );
             ensure!(
                 database.variant_fasta.is_none() || database.generate_decoys != Some(false),

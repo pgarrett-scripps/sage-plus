@@ -490,6 +490,12 @@ impl Runner {
             peptides.push(target);
             peptides.push(decoy);
         }
+        // A product inherits its parents' proteins, so with variant proteins
+        // it follows the same rule as a database peptide: a product of a
+        // reference parent stays on the reference proteins only.
+        if let Some(classes) = &self.protein_classes {
+            sage_core::variant::keep_reference_proteins(&mut peptides, classes);
+        }
         (origins, peptides)
     }
 }

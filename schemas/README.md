@@ -43,7 +43,8 @@ These files are the versioned, machine-readable Parquet message schemas for Sage
 - `matched_fragments.sage.v1.parquet.schema` describes `matched_fragments.sage.parquet`, one row per
   matched fragment ion of a retained PSM.
 - `run-summary.v9.schema.json` is the JSON Schema for `run-summary.json` (`schema_version` 9).
-  Objects allow additional properties; optional fields may be added without a version bump.
+  Objects allow additional properties; optional fields may be added without a version bump, as
+  the optional `variants` block (written only with `database.variant_fasta`) was.
 - `digestion.v1.tsv.schema.json`, `qc_composition.v1.tsv.schema.json`,
   `qc_chromatography.v1.tsv.schema.json` and `diagnostic_ions.v1.tsv.schema.json` are
   Frictionless Table Schemas giving the column order, types and meaning of `digestion.tsv`,

@@ -76,6 +76,8 @@ fn reference_decoys_do_not_enter_the_variant_q_value() {
             decoys: 0,
             passing_variant_q: 100,
             passing_global_q: 0,
+            q_floor: Some(0.01),
+            lowest_q: Some(0.01),
         }
     );
     assert_eq!(peptides.targets, 100);
@@ -93,6 +95,9 @@ fn a_class_without_decoys_cannot_pass_below_one_over_its_targets() {
         assert_eq!(q.spectrum_q(feature.psm_id), Some(0.02));
     }
     assert_eq!(psms.passing_variant_q, 0);
+    // The floor says why: 1 / 50 targets is above 1%.
+    assert_eq!(psms.q_floor, Some(0.02));
+    assert_eq!(psms.lowest_q, Some(0.02));
 }
 
 #[test]
@@ -313,4 +318,75 @@ fn the_picked_peptide_subset_of_everything_is_picked_peptide() {
             .map(|f| Some(f.peptide_q))
             .collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn two_fastas_through_digest_decoys_merge_and_mapping_class_targets_and_decoys_together() {
+    // P1 and two variant copies: P1_K9 (G9K, a new trypsin site) and P1_V18
+    // (A18V). Fully tryptic digest with generated decoys, as a search builds
+    // it; no sequence has a palindromic interior, so every decoy is kept.
+    let reference = ">P1\nMSEQAAAAGWYFWRTSTAGTKDEFGHSR\n";
+    let variants = ">P1_K9\nMSEQAAAAKWYFWRTSTAGTKDEFGHSR\n>P1_V18\nMSEQAAAAGWYFWRTSTVGTKDEFGHSR\n";
+    let mut fasta = Fasta::parse(reference.into(), "rev_", true).unwrap();
+    fasta.extend_with_class(
+        Fasta::parse(variants.into(), "rev_", true).unwrap(),
+        ProteinClass::Variant,
+    );
+    let mut classes = ProteinClasses::of_fasta(&fasta).unwrap();
+    let builder: crate::database::Builder = serde_json::from_value(serde_json::json!({
+        "enzyme": {"cleave_at": "KR", "restrict": "P", "missed_cleavages": 0, "min_len": 5},
+        "clip_n_term_met": false,
+        "static_mods": {},
+        "generate_decoys": true
+    }))
+    .unwrap();
+    let parameters = builder.make_parameters().unwrap();
+    let mut peptides = parameters.digest(&fasta);
+    let shared = keep_reference_proteins(&mut peptides, &classes);
+    classes.set_variant_shared_peptides(shared);
+
+    let find = |sequence: &str, decoy: bool| {
+        let sequence = match decoy {
+            // A generated decoy reverses the interior, keeping both ends.
+            true => {
+                let bytes = sequence.as_bytes();
+                let mut interior = bytes[1..bytes.len() - 1].to_vec();
+                interior.reverse();
+                let mut out = vec![bytes[0]];
+                out.extend(interior);
+                out.push(bytes[bytes.len() - 1]);
+                String::from_utf8(out).unwrap()
+            }
+            false => sequence.to_string(),
+        };
+        peptides
+            .iter()
+            .find(|p| p.decoy == decoy && p.sequence.as_bytes() == sequence.as_bytes())
+            .unwrap_or_else(|| panic!("{sequence} (decoy {decoy}) is in the database"))
+    };
+    let proteins = |peptide: &Peptide| {
+        peptide
+            .proteins
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+    };
+    for decoy in [false, true] {
+        // Shared with both variant copies: reference proteins only, not a
+        // variant, target and decoy alike.
+        assert_eq!(proteins(find("DEFGHSR", decoy)), vec!["P1"]);
+        assert!(!classes.is_variant(find("DEFGHSR", decoy).proteins.iter()));
+        assert_eq!(proteins(find("TSTAGTK", decoy)), vec!["P1"]);
+        // The substitution's own peptide, target and decoy, in the class.
+        assert!(classes.is_variant(find("TSTVGTK", decoy).proteins.iter()));
+        assert!(classes.is_variant(find("MSEQAAAAK", decoy).proteins.iter()));
+        // A peptide the new cleavage site creates carries no variant residue
+        // but exists only in the variant digest: evidence of the variant, so
+        // in the class (DOCS: compared at the digest level).
+        assert!(classes.is_variant(find("WYFWR", decoy).proteins.iter()));
+        assert_eq!(proteins(find("WYFWR", decoy)), vec!["P1_K9"]);
+    }
+    // Mapped targets: MSEQAAAAGWYFWR (P1, P1_V18), TSTAGTK (P1, P1_K9) and
+    // DEFGHSR (all three).
+    assert_eq!(shared, 3);
 }

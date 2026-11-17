@@ -180,8 +180,10 @@ pub struct Builder {
     /// decoys. A peptide is a variant peptide only when every protein it
     /// belongs to is one of these, and a peptide a `fasta` protein explains
     /// is reported on its `fasta` proteins only; the variant peptides get a separate
-    /// target-decoy q-value and are kept out of protein inference. Requires
-    /// generated decoys. Unset (the default) leaves every output as it was.
+    /// target-decoy q-value and are kept out of protein inference. Entries
+    /// must be whole protein sequences. Requires generated decoys and
+    /// `fasta`, and cannot be combined with `peptides`. Unset (the default)
+    /// leaves every output as it was.
     pub variant_fasta: Option<String>,
     /// Expand ambiguous FASTA residues into every residue they may stand
     /// for: B to D or N, Z to E or Q, X to each of the 20 standard residues

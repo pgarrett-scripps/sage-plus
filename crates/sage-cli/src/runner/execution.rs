@@ -1102,6 +1102,10 @@ impl Runner {
             variant_proteins: classes.variant_proteins(),
             variant_peptides,
             shared_peptides,
+            unpaired_peptides: sage_core::variant::unpaired_variant_peptides(
+                &self.database,
+                classes,
+            ),
             psms: *psms,
             peptides: *peptides,
         })

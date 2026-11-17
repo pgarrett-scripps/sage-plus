@@ -23,9 +23,15 @@ entries are retained below for provenance.
   reported with `protein_q` and `protein_group_q` 1. `run-summary.json` gets a `variants` block
   with the class targets and decoys and the targets passing 1% by each q-value. The results file
   is schema version 11 (12 with precursor labels), v9 or v10 plus the three columns, with
-  `in_source_rescued` null when the rescue pass is off. Refused before any spectrum is read:
-  `generate_decoys: false`, a search without `database.fasta`, and a variant protein whose
-  accession is already in another FASTA of the search. With the option unset, which is the
+  `in_source_rescued` null when the rescue pass is off; rows of the in-source rescue pass are not
+  classed. `run-summary.json` also gives each level's `q_floor` and `lowest_q`, so a class that
+  cannot reach 1% says so, and `unpaired_peptides`. Entries must be whole protein sequences.
+  Refused before any spectrum is read: `generate_decoys: false`, a missing or empty
+  `database.fasta`, `database.peptides`, a variant protein whose accession is already in another
+  FASTA of the search, and a variant FASTA with no target protein. On a control with 1,000 true
+  variants among 19,392 false ones, 1% by both the global and the variant q-value measured 0.9%
+  false variant PSMs (1.6% by the variant q-value alone); with 50 true variants the global q-value
+  alone measured 17.9% and the variant q-value passed none. With the option unset, which is the
   default, every output is unchanged.
 
 ## [v0.1.0-beta.22] - 2026-11-17

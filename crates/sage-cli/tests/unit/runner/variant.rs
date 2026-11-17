@@ -30,6 +30,23 @@ fn input(
     fasta: &str,
     variant_fasta: Option<&str>,
 ) -> crate::input::Input {
+    input_with(
+        directory,
+        fasta,
+        variant_fasta,
+        serde_json::json!({}),
+        serde_json::json!({}),
+    )
+}
+
+/// [`input`] with `database` keys and top-level keys added.
+fn input_with(
+    directory: &std::path::Path,
+    fasta: &str,
+    variant_fasta: Option<&str>,
+    database_extra: serde_json::Value,
+    extra: serde_json::Value,
+) -> crate::input::Input {
     let reference = directory.join("reference.fasta");
     std::fs::write(&reference, fasta).unwrap();
     let mut database = serde_json::json!({
@@ -43,7 +60,10 @@ fn input(
         std::fs::write(&path, text).unwrap();
         database["variant_fasta"] = serde_json::json!(path.to_string_lossy());
     }
-    serde_json::from_value(serde_json::json!({
+    for (key, value) in database_extra.as_object().unwrap() {
+        database[key] = value.clone();
+    }
+    let mut config = serde_json::json!({
         "database": database,
         "precursor_tol": { "ppm": [-50, 50] },
         "fragment_tol": { "ppm": [-10, 10] },
@@ -54,8 +74,11 @@ fn input(
         "predict_rt": false,
         "output_filter": {"psm_q_value": 1.0},
         "output_directory": directory.join("out").to_string_lossy(),
-    }))
-    .unwrap()
+    });
+    for (key, value) in extra.as_object().unwrap() {
+        config[key] = value.clone();
+    }
+    serde_json::from_value(config).unwrap()
 }
 
 const REFERENCE: &str = ">sp|P1|REFERENCE\nMSAGGWGGKAAAEELLGGK\n";
@@ -173,8 +196,21 @@ fn a_whole_run_marks_the_variant_peptide_and_keeps_it_out_of_protein_inference()
 
     let stats = on.variants.expect("a variant FASTA was searched");
     assert_eq!(stats.variant_proteins, 1);
-    assert!(stats.variant_peptides > 0);
-    assert!(stats.psms.targets >= 1);
+    // GGWGGK and the fixture peptide, both only on the variant protein.
+    assert_eq!(stats.variant_peptides, 2);
+    assert_eq!(stats.shared_peptides, 0);
+    assert_eq!(stats.unpaired_peptides, 0);
+    // One spectrum, one target PSM of the class, no decoy: q is the floor 1/1.
+    let one = sage_core::variant::VariantClassCounts {
+        targets: 1,
+        decoys: 0,
+        passing_variant_q: 0,
+        passing_global_q: 0,
+        q_floor: Some(1.0),
+        lowest_q: Some(1.0),
+    };
+    assert_eq!(stats.psms, one);
+    assert_eq!(stats.peptides, one);
     // One spectrum either way, so as many rows; byte identity of a run with the
     // option off is checked against main on real data with two binaries.
     assert_eq!(on_rows.len(), off_rows.len());
@@ -229,5 +265,124 @@ fn a_peptide_the_reference_explains_is_reported_on_the_reference_protein_only() 
     assert_eq!(row["num_proteins"], "1");
     let stats = summary.variants.expect("a variant FASTA was searched");
     assert!(stats.shared_peptides >= 1);
+    std::fs::remove_dir_all(directory).ok();
+}
+
+/// A whole run with the fixture peptide on a variant protein only, and the
+/// given extra settings; returns the summary and the results rows.
+fn variant_run(
+    name: &str,
+    database_extra: serde_json::Value,
+    extra: serde_json::Value,
+) -> (
+    crate::runner::RunSummary,
+    String,
+    Vec<HashMap<String, String>>,
+) {
+    let directory = directory(name);
+    let summary = Runner::new(
+        input_with(
+            &directory,
+            REFERENCE,
+            Some(&format!(">sp|P2_V|CARRIER_VARIANT\nGGWGGK{PEPTIDE}\n")),
+            database_extra,
+            extra,
+        )
+        .build()
+        .unwrap(),
+        1,
+    )
+    .unwrap()
+    .run(1)
+    .unwrap();
+    let results = directory.join("out").join("results.sage.parquet");
+    let version = schema_version(&results);
+    let rows = rows(&results);
+    std::fs::remove_dir_all(directory).ok();
+    (summary, version, rows)
+}
+
+fn variant_row(rows: &[HashMap<String, String>]) -> &HashMap<String, String> {
+    rows.iter()
+        .find(|row| row["peptide"].trim_matches('"') == PEPTIDE)
+        .expect("the fixture spectrum is matched to its peptide")
+}
+
+#[test]
+fn the_variant_class_is_the_same_with_the_prefilter() {
+    let (plain, _, plain_rows) = variant_run("plain", serde_json::json!({}), serde_json::json!({}));
+    let (prefiltered, version, rows) = variant_run(
+        "prefilter",
+        serde_json::json!({"prefilter": true, "prefilter_min_matched_peaks": 1}),
+        serde_json::json!({}),
+    );
+    assert_eq!(version, "11");
+    assert_eq!(variant_row(&rows)["is_variant"], "true");
+    assert_eq!(
+        variant_row(&rows)["variant_spectrum_q"],
+        variant_row(&plain_rows)["variant_spectrum_q"]
+    );
+    assert_eq!(
+        prefiltered.variants.unwrap().psms,
+        plain.variants.unwrap().psms
+    );
+}
+
+#[test]
+fn precursor_labels_write_schema_12_with_the_variant_columns() {
+    let (summary, version, rows) = variant_run(
+        "labels",
+        serde_json::json!({"static_mods": {"Arg10": {
+            "mass": 0.0,
+            "channel_offsets": {"light": 0.0, "heavy": 10.008269},
+            "sites": ["R"]
+        }}}),
+        serde_json::json!({}),
+    );
+    assert_eq!(version, "12");
+    let row = variant_row(&rows);
+    assert_eq!(row["is_variant"], "true");
+    assert_ne!(row["variant_spectrum_q"], "null");
+    assert_eq!(summary.variants.unwrap().psms.targets, 1);
+}
+
+#[test]
+fn with_the_rescue_pass_on_the_rescue_column_is_written_beside_the_variant_columns() {
+    let (_, version, rows) = variant_run(
+        "rescue",
+        serde_json::json!({}),
+        serde_json::json!({"in_source": {"rescue": true}}),
+    );
+    assert_eq!(version, "11");
+    let row = variant_row(&rows);
+    // A search row: not rescued, classed.
+    assert_eq!(row["in_source_rescued"], "false");
+    assert_eq!(row["is_variant"], "true");
+}
+
+#[test]
+fn entrapment_and_contaminant_fastas_keep_their_own_columns_beside_the_variants() {
+    let directory = directory("classes");
+    let entrapment = directory.join("entrapment.fasta");
+    std::fs::write(&entrapment, ">AT1G01010\nMNEEKAWVVRSTTPPHGGQK\n").unwrap();
+    let contaminant = directory.join("contaminant.fasta");
+    std::fs::write(&contaminant, ">CON_P02768\nMKWVTFISLLFLFSSAYSR\n").unwrap();
+    let (summary, version, rows) = variant_run(
+        "classes",
+        serde_json::json!({
+            "entrapment_fasta": entrapment.to_string_lossy(),
+            "contaminant_fasta": contaminant.to_string_lossy()
+        }),
+        serde_json::json!({}),
+    );
+    assert_eq!(version, "11");
+    let row = variant_row(&rows);
+    assert_eq!(row["is_variant"], "true");
+    assert_eq!(row["is_entrapment"], "false");
+    assert_eq!(row["is_contaminant"], "false");
+    assert!(summary.entrapment.is_some());
+    assert!(summary.contaminants.is_some());
+    let variants = summary.variants.unwrap();
+    assert_eq!(variants.variant_proteins, 1);
     std::fs::remove_dir_all(directory).ok();
 }

@@ -823,6 +823,11 @@
           "minimum": 0,
           "description": "Database target peptides of a variant protein that a `database.fasta` protein also explains: reference peptides, reported on their reference proteins only."
         },
+        "unpaired_peptides": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Variant target peptides whose generated decoy collided with a target and was dropped, so they compete without a decoy."
+        },
         "psms": {
           "$ref": "#/$defs/VariantClassCounts"
         },
@@ -1246,6 +1251,14 @@
         "passing_global_q": {
           "type": "integer",
           "minimum": 0
+        },
+        "q_floor": {
+          "type": "number",
+          "description": "1 / targets: the smallest class q-value reachable with no decoy at all. Absent without targets."
+        },
+        "lowest_q": {
+          "type": "number",
+          "description": "The smallest class q-value a target reached; above 0.01, nothing passes at 1%. Absent without targets."
         }
       }
     },

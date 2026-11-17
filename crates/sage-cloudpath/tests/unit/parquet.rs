@@ -1675,5 +1675,44 @@ fn variant_columns_are_written_only_for_a_variant_fasta_search() -> parquet::err
     let peptide_q = column(&on, "variant_peptide_q")?;
     assert_eq!(peptide_q[0], "null");
     assert_ne!(peptide_q[1], "null");
+
+    // With the rescue pass on: a rescue row is not classed (its proteins are
+    // its parent's, and it has no class q-value), every other row is.
+    let mut annotations = sage_core::in_source::InSourceAnnotations::default();
+    annotations.insert_rescued(
+        1,
+        sage_core::in_source::InSourceAnnotation {
+            parent: PeptideIx(0),
+            kind: sage_core::in_source::InSourceKind {
+                placement: sage_core::in_source::Placement::Suffix,
+                loss: None,
+            },
+        },
+    );
+    let rows = features.iter().collect::<Vec<_>>();
+    let rescued = serialize_features_with_variants(
+        &rows,
+        &[],
+        &HashMap::new(),
+        &["run-a".into()],
+        &database,
+        1.0,
+        &[],
+        None,
+        None,
+        Some(&annotations),
+        Some(&classes),
+        true,
+        Some(&q_values),
+    )?;
+    assert_eq!(version(&rescued)?.as_deref(), Some("11"));
+    assert_eq!(
+        column(&rescued, "in_source_rescued")?,
+        vec!["false", "true", "false", "false"]
+    );
+    assert_eq!(
+        column(&rescued, "is_variant")?,
+        vec!["false", "null", "false", "null"]
+    );
     Ok(())
 }
