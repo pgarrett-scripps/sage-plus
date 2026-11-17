@@ -48,7 +48,8 @@ an original target, not an entrapment discovery. See
 carrying single amino acid variants, frameshifts or fusions, for patient-specific searches. A
 peptide only those proteins explain is a variant peptide: it is marked in `is_variant`, gets a
 class-specific q-value at the PSM and peptide level (`variant_spectrum_q`, `variant_peptide_q`)
-from the variant PSMs and their own decoys alone, and is kept out of protein inference. See
+from the variant PSMs and their own decoys alone, and is kept out of protein inference; peptides
+the reference protein also explains stay on the reference protein. See
 [variant proteins](DOCS.md#variant-proteins).
 
 **Keep contaminants in the search and out of the conclusions.** `database.contaminant_fasta`

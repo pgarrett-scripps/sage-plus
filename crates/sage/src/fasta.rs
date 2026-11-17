@@ -103,6 +103,10 @@ pub struct ProteinClasses {
     /// Proteins of `database.fasta` itself, the original targets an
     /// entrapment ratio is taken against.
     sample: usize,
+    /// Target peptides of a variant protein that a protein of
+    /// `database.fasta` also explains, mapped to their reference proteins
+    /// only by [`crate::variant::keep_reference_proteins`].
+    variant_shared_peptides: usize,
 }
 
 impl ProteinClasses {
@@ -181,9 +185,29 @@ impl ProteinClasses {
         proteins.peek().is_some() && proteins.all(|protein| self.variant.contains(protein))
     }
 
+    /// Whether an accession is a protein of `database.fasta` itself: in no
+    /// other class.
+    pub fn is_sample_protein(&self, protein: &Arc<str>) -> bool {
+        !self.contaminant.contains(protein)
+            && !self.entrapment.contains(protein)
+            && !self.variant.contains(protein)
+    }
+
     /// Whether an accession is one of the variant proteins.
     pub fn is_variant_protein(&self, protein: &Arc<str>) -> bool {
         self.variant.contains(protein)
+    }
+
+    /// Record how many target peptides were mapped to their reference
+    /// proteins only (see [`crate::variant::keep_reference_proteins`]).
+    pub fn set_variant_shared_peptides(&mut self, peptides: usize) {
+        self.variant_shared_peptides = peptides;
+    }
+
+    /// Target peptides of a variant protein that a reference protein also
+    /// explains, which are reported on their reference proteins only.
+    pub fn variant_shared_peptides(&self) -> usize {
+        self.variant_shared_peptides
     }
 
     /// Variant proteins the FASTA contributed.

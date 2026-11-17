@@ -13,7 +13,9 @@ entries are retained below for provenance.
 - `database.variant_fasta` (default unset): a FASTA of variant proteins, for example sample
   proteins carrying single amino acid variants, searched alongside `fasta` as ordinary targets
   with their own decoys. A peptide is a variant peptide only when every protein it belongs to is a
-  variant protein; a sequence any other protein explains is a reference peptide. Variant PSMs get
+  variant protein; a sequence any other protein explains is a reference peptide, and one that a
+  `database.fasta` protein explains is reported on its reference proteins only, so a variant copy
+  of a protein does not make its peptides shared and protein inference keeps its evidence. Variant PSMs get
   a separate, class-specific target-decoy q-value at the PSM and peptide level, estimated from the
   variant-class PSMs and their decoys alone, in two new columns `variant_spectrum_q` and
   `variant_peptide_q`, beside `is_variant`; the global q-values are unchanged in meaning. Variant

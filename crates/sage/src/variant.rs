@@ -22,9 +22,11 @@ use crate::database::{IndexedDatabase, PeptideIx};
 use crate::fasta::ProteinClasses;
 use crate::fdr::picked_peptide_q_values;
 use crate::ml::qvalue::grouped_q_values;
+use crate::peptide::Peptide;
 use crate::scoring::Feature;
 use fnv::{FnvHashMap, FnvHashSet};
 use itertools::{Either, Itertools};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// The q-value threshold the counts are reported at.
@@ -70,6 +72,54 @@ pub struct VariantClassCounts {
     pub passing_variant_q: usize,
     /// Targets at or below 1% by the run's global q-value.
     pub passing_global_q: usize,
+}
+
+/// Map the peptides a protein of `database.fasta` explains to their reference
+/// proteins only, dropping the variant accessions (and their protein
+/// occurrences) from them. A variant protein is mostly its reference
+/// protein's sequence, so without this nearly every reference peptide would
+/// be shared between a protein and its variant copy, and protein inference,
+/// which rests on unshared peptides, would lose most of its evidence. Variant
+/// peptides, and peptides that only contaminant or entrapment proteins share
+/// with a variant protein, are left as they are. Returns how many target
+/// peptides lost a variant accession.
+pub fn keep_reference_proteins(peptides: &mut [Peptide], classes: &ProteinClasses) -> usize {
+    if classes.variant_proteins() == 0 {
+        return 0;
+    }
+    peptides
+        .par_iter_mut()
+        .map(|peptide| {
+            let mixed = peptide
+                .proteins
+                .iter()
+                .any(|protein| classes.is_sample_protein(protein))
+                && peptide
+                    .proteins
+                    .iter()
+                    .any(|protein| classes.is_variant_protein(protein));
+            if !mixed {
+                return 0;
+            }
+            peptide
+                .proteins
+                .retain(|protein| !classes.is_variant_protein(protein));
+            if peptide
+                .protein_sites
+                .iter()
+                .any(|site| classes.is_variant_protein(&site.protein))
+            {
+                peptide.protein_sites = peptide
+                    .protein_sites
+                    .iter()
+                    .filter(|site| !classes.is_variant_protein(&site.protein))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into();
+            }
+            usize::from(!peptide.decoy)
+        })
+        .sum()
 }
 
 /// Is this PSM's peptide a variant peptide? Decoys keep the accessions of the

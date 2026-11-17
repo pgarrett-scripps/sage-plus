@@ -821,7 +821,7 @@
         "shared_peptides": {
           "type": "integer",
           "minimum": 0,
-          "description": "Database target peptides of a variant protein that a non-variant protein also explains: reference peptides."
+          "description": "Database target peptides of a variant protein that a `database.fasta` protein also explains: reference peptides, reported on their reference proteins only."
         },
         "psms": {
           "$ref": "#/$defs/VariantClassCounts"

@@ -199,3 +199,35 @@ fn a_variant_fasta_without_a_target_protein_is_refused() {
     assert!(error.contains("Failed to read variant FASTA"), "{error}");
     std::fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+fn a_peptide_the_reference_explains_is_reported_on_the_reference_protein_only() {
+    // The fixture peptide is in the reference protein and in its variant copy,
+    // which differs elsewhere: a reference peptide, on the reference protein.
+    let directory = directory("reference-mapped");
+    let summary = Runner::new(
+        input(
+            &directory,
+            &format!(">sp|P2|CARRIER\nGGWGGK{PEPTIDE}\n"),
+            Some(&format!(">sp|P2_V|CARRIER_G1A\nAGWGGK{PEPTIDE}\n")),
+        )
+        .build()
+        .unwrap(),
+        1,
+    )
+    .unwrap()
+    .run(1)
+    .unwrap();
+    let rows = rows(&directory.join("out").join("results.sage.parquet"));
+    let row = rows
+        .iter()
+        .find(|row| row["peptide"].trim_matches('"') == PEPTIDE)
+        .expect("the fixture spectrum is matched to its peptide");
+    assert_eq!(row["is_variant"], "false");
+    assert_eq!(row["variant_spectrum_q"], "null");
+    assert_eq!(row["proteins"].trim_matches('"'), "sp|P2|CARRIER");
+    assert_eq!(row["num_proteins"], "1");
+    let stats = summary.variants.expect("a variant FASTA was searched");
+    assert!(stats.shared_peptides >= 1);
+    std::fs::remove_dir_all(directory).ok();
+}

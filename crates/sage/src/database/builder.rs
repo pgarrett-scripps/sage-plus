@@ -178,7 +178,8 @@ pub struct Builder {
     /// sequence variants such as single amino acid variants — searched
     /// alongside `fasta`. Its proteins are ordinary targets with their own
     /// decoys. A peptide is a variant peptide only when every protein it
-    /// belongs to is one of these; the variant peptides get a separate
+    /// belongs to is one of these, and a peptide a `fasta` protein explains
+    /// is reported on its `fasta` proteins only; the variant peptides get a separate
     /// target-decoy q-value and are kept out of protein inference. Requires
     /// generated decoys. Unset (the default) leaves every output as it was.
     pub variant_fasta: Option<String>,

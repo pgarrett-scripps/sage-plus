@@ -323,8 +323,8 @@ pub struct VariantRunStats {
     /// Proteins read from it.
     pub variant_proteins: usize,
     /// Database target peptides of the variant class, and target peptides of
-    /// a variant protein that a non-variant protein also explains, which are
-    /// reference peptides.
+    /// a variant protein that a `database.fasta` protein also explains, which
+    /// are reference peptides reported on their reference proteins only.
     pub variant_peptides: usize,
     pub shared_peptides: usize,
     /// Variant-class PSMs and peptides that took part in the class

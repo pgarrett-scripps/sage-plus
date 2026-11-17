@@ -1089,19 +1089,13 @@ impl Runner {
         let path = self.database_parameters.variant_fasta.clone()?;
         let classes = self.protein_classes.as_ref()?;
         let (_, psms, peptides) = variants?;
-        let mut variant_peptides = 0usize;
-        let mut shared_peptides = 0usize;
-        for peptide in self.database.peptides.iter().filter(|p| !p.decoy) {
-            if classes.is_variant(peptide.proteins.iter()) {
-                variant_peptides += 1;
-            } else if peptide
-                .proteins
-                .iter()
-                .any(|protein| classes.is_variant_protein(protein))
-            {
-                shared_peptides += 1;
-            }
-        }
+        let variant_peptides = self
+            .database
+            .peptides
+            .iter()
+            .filter(|peptide| !peptide.decoy && classes.is_variant(peptide.proteins.iter()))
+            .count();
+        let shared_peptides = classes.variant_shared_peptides();
         Some(super::summary::VariantRunStats {
             path,
             variant_proteins: classes.variant_proteins(),

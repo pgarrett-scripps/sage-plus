@@ -2003,8 +2003,11 @@ spectra as every other peptide does, and the global `spectrum_q`, `peptide_q` ke
 A PSM is a variant identification when **every** protein of its peptide comes from the variant
 FASTA. A variant protein written as the whole protein shares most of its peptides with the
 reference protein; those peptides are reference peptides, because the reference explains the
-spectrum without the variant. Only the peptides that differ from every non-variant protein are
-variant peptides. Proteins are told apart by accession, so give each variant protein its own
+spectrum without the variant, and they are reported on their `database.fasta` proteins only: the
+variant accessions are dropped from them, so a variant copy does not make every peptide of its
+reference protein shared and protein inference keeps its evidence. Only the peptides that differ
+from every non-variant protein are variant peptides. (A peptide that only a contaminant or
+entrapment protein shares with a variant protein keeps both accessions.) Proteins are told apart by accession, so give each variant protein its own
 accession (for example `P04637_R175H`): a variant protein whose accession is already in
 `database.fasta` (or the contaminant or entrapment FASTA) is refused at database build, because
 classes are read per accession. Protein names in a `database.peptides` list are not checked
@@ -2041,7 +2044,7 @@ those of its reference PSMs.
 whose peptide is not a variant peptide and on the rows of the in-source rescue pass. In
 `run-summary.json`, a `variants` block: the file,
 `variant_proteins`, `variant_peptides`, `shared_peptides` (target peptides of a variant protein
-that a non-variant protein also explains), and for `psms` and `peptides` the class `targets` and
+that a `database.fasta` protein also explains, reported on that protein only), and for `psms` and `peptides` the class `targets` and
 `decoys` that took part and the targets passing 1% by the variant q-value
 (`passing_variant_q`) and by the global one (`passing_global_q`); peptide counts are of database
 peptidoforms, so the two channels of a SILAC peptide count twice. `lfq.parquet`, the PIN file and

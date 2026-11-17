@@ -214,3 +214,81 @@ fn a_variant_decoy_cannot_raise_the_reference_proteins_q_values() {
     assert_eq!(features[199].protein_q, 0.005);
     assert_eq!(features[200].protein_q, 1.0);
 }
+
+#[test]
+fn a_reference_peptide_keeps_only_its_reference_proteins() {
+    let mut fasta = Fasta::parse(">P1\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let variants = Fasta::parse(">P1_V\nPEPTIDEH\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(variants, ProteinClass::Variant);
+    let entrapment = Fasta::parse(">AT1\nENTRAPK\n".into(), "rev_", true).unwrap();
+    fasta.extend_with_class(entrapment, ProteinClass::Entrapment);
+    let classes = ProteinClasses::of_fasta(&fasta).unwrap();
+
+    let occurrence = |protein: &str| crate::enzyme::ProteinOccurrence {
+        protein: Arc::from(protein),
+        start: Some(0),
+        prev_aa: None,
+        next_aa: None,
+        source: None,
+        met_clipped: false,
+    };
+    let peptide = |proteins: &[&str], decoy: bool| Peptide {
+        sequence: b"PEPTIDEK".as_slice().into(),
+        proteins: proteins.iter().map(|&p| Arc::from(p)).collect(),
+        protein_sites: proteins
+            .iter()
+            .map(|p| occurrence(p))
+            .collect::<Vec<_>>()
+            .into(),
+        decoy,
+        ..Peptide::default()
+    };
+    let mut peptides = vec![
+        peptide(&["P1", "P1_V"], false),
+        peptide(&["P1", "P1_V"], true),
+        peptide(&["P1_V"], false),
+        peptide(&["AT1", "P1_V"], false),
+        peptide(&["P1"], false),
+    ];
+    let shared = keep_reference_proteins(&mut peptides, &classes);
+    // Only the target that a reference protein explains is counted; its decoy
+    // is mapped the same way.
+    assert_eq!(shared, 1);
+    let proteins = |peptide: &Peptide| {
+        peptide
+            .proteins
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(proteins(&peptides[0]), vec!["P1"]);
+    assert_eq!(peptides[0].protein_sites.len(), 1);
+    assert_eq!(peptides[0].protein_sites[0].protein.as_ref(), "P1");
+    assert_eq!(proteins(&peptides[1]), vec!["P1"]);
+    // A variant peptide stays a variant peptide.
+    assert_eq!(proteins(&peptides[2]), vec!["P1_V"]);
+    assert!(classes.is_variant(peptides[2].proteins.iter()));
+    // Shared with an entrapment protein only: unchanged, so it stays an
+    // original target and is not turned into an entrapment discovery.
+    assert_eq!(proteins(&peptides[3]), vec!["AT1", "P1_V"]);
+    assert_eq!(proteins(&peptides[4]), vec!["P1"]);
+}
+
+#[test]
+fn without_variant_proteins_no_peptide_is_touched() {
+    let fasta = Fasta::parse(">P1\nPEPTIDEK\n".into(), "rev_", true).unwrap();
+    let mut entrapment_only = fasta.clone();
+    entrapment_only.extend_with_class(
+        Fasta::parse(">AT1\nENTRAPK\n".into(), "rev_", true).unwrap(),
+        ProteinClass::Entrapment,
+    );
+    let classes = ProteinClasses::of_fasta(&entrapment_only).unwrap();
+    let mut peptides = vec![Peptide {
+        proteins: vec![Arc::from("P1"), Arc::from("AT1")]
+            .into_iter()
+            .collect(),
+        ..Peptide::default()
+    }];
+    assert_eq!(keep_reference_proteins(&mut peptides, &classes), 0);
+    assert_eq!(peptides[0].proteins.len(), 2);
+}

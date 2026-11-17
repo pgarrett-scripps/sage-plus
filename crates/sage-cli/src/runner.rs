@@ -698,6 +698,12 @@ impl Runner {
                 let _ = trim_allocator();
             }
         }
+        // A reference peptide stays on its reference proteins only, so a
+        // variant protein does not make it shared (see `variant`).
+        if let Some(classes) = protein_classes.as_mut() {
+            let shared = sage_core::variant::keep_reference_proteins(&mut all_peptides, classes);
+            classes.set_variant_shared_peptides(shared);
+        }
         let database = database_parameters
             .clone()
             .build_from_peptides(all_peptides);
