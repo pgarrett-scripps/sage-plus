@@ -9,6 +9,8 @@ entries are retained below for provenance.
 
 ## [Unreleased]
 
+## [v0.1.0-beta.22] - 2026-11-17
+
 ### Added
 - `in_source.rescue` (default false): a second pass that searches each file's unidentified MS2
   spectra for the in-source products of its confident peptides, N- and C-terminal truncations
@@ -20,7 +22,8 @@ entries are retained below for provenance.
   written in full, exactly as without the pass, the failure is recorded in `run-summary.json`,
   and Sage exits with an error naming the file. A configuration with a precursor window of
   16 Da or more (open searches), where the rescue q-value would be optimistic, or with
-  `wide_window`, `dia` or `override_precursor_charge`, is refused. With the option off, which is the default,
+  `wide_window`, `dia` or `override_precursor_charge`, is refused; spectra without a recorded
+  precursor charge are skipped by the pass and counted. With the option off, which is the default,
   every output is unchanged.
 - `run-summary.json` says how many localizations the site reports leave out, and why:
   `ptm_localization.decoy_arrangement_wins` counts those where an impossible-site decoy
@@ -56,6 +59,9 @@ entries are retained below for provenance.
   `sage-plus-tdf`; only 1/K0 (TDF) and TSF m/z use the stored models. `DOCS.md` also says that
   `ion_mobility_scale: "linear"` is the scale of Beta 6 (timsrust 0.6.5, linear in √(1/K0)),
   not that of upstream Sage on timsrust 0.6.6 and later. No behaviour changes.
+- `FEATURES.md` and `DOCS.md` no longer describe PEFF support. No PEFF file is read (the
+  `peff` module has no caller), and `database.max_peff_variable_mods` is not a configuration key:
+  a configuration that sets it is refused as an unknown field. No behaviour changes.
 
 ### Fixed
 - timsTOF ddaPASEF precursors whose `MonoisotopicMz` and `Charge` Bruker left NULL can now be
