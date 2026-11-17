@@ -37,6 +37,12 @@ impl Runner {
             db_params.merge_isoleucine_leucine,
         );
         let scanned = started.elapsed();
+        let early_test = early_test_is_exact(&db_params);
+        if !early_test {
+            info!(
+                "prefilter: a motif modification rule is configured, so shared sequences are filtered as whole units (more memory on large databases)"
+            );
+        }
 
         let budget = PrefilterBudgets::for_search(&self.parameters).index_bytes;
         let mut stream = ProteinStream {
@@ -49,10 +55,14 @@ impl Runner {
                 .map(|_| AtomicBitSet::new(0))
                 .collect(),
             units: None,
+            early_test,
+            unit_slots: AtomicBitSet::new(0),
             peptides: Vec::new(),
             checked: 0,
             deferred_digests: 0,
+            live_keys: 0,
         };
+        stream.unit_slots = AtomicBitSet::new(stream.shared.slots());
         let mut builder = self.spectrum_index_builder(&db_params);
         let batches = self
             .parameters
@@ -102,6 +112,12 @@ impl Runner {
         }
 
         let (checked, deferred_digests) = (stream.checked, stream.deferred_digests);
+        if stream.early_test {
+            info!(
+                "prefilter: {} shared keys could match a spectrum batch; {} shared digests were filtered as units",
+                stream.live_keys, deferred_digests
+            );
+        }
         let mut all_peptides = stream.peptides;
         db_params.reorder_peptides_with_labels(&mut all_peptides);
         info!(
@@ -324,16 +340,29 @@ impl SharedSequences {
         }
     }
 
-    /// Canonical key of `digest`, when it is shared.
-    fn shared_key(&self, digest: &Digest) -> Option<u64> {
+    /// Canonical key of `digest`, when it is shared, with its slot: its
+    /// index in `keys`, or [`Self::slots`]` - 1` for a palindrome whose key
+    /// the scan did not record (a single palindrome is still shared, with
+    /// its own decoy).
+    fn shared_slot(&self, digest: &Digest) -> Option<(u64, usize)> {
         let (forward, reversed) =
             canonical_sequence_hashes(digest.sequence.as_bytes(), self.merge_isoleucine_leucine);
+        let palindrome = self.generate_decoys && forward == reversed;
         let key = match self.generate_decoys {
-            true if forward == reversed => return Some(PALINDROME),
+            true if palindrome => PALINDROME,
             true => forward.min(reversed),
             false => forward,
         };
-        self.keys.binary_search(&key).is_ok().then_some(key)
+        match self.keys.binary_search(&key) {
+            Ok(slot) => Some((key, slot)),
+            Err(_) if palindrome => Some((key, self.keys.len())),
+            Err(_) => None,
+        }
+    }
+
+    /// Number of key slots: every recorded key, and one for palindromes.
+    fn slots(&self) -> usize {
+        self.keys.len() + 1
     }
 }
 
@@ -356,21 +385,125 @@ struct ProteinStream<'a> {
     /// Survivors of each protein's own peptides. Expansion is deterministic,
     /// so peptide positions agree between spectrum batches.
     keeps: Vec<AtomicBitSet>,
-    /// Shared digests by key, collected while streaming the first batch.
+    /// Shared digests by key: with the early test, only the units some copy
+    /// could match, added batch by batch; without it, every shared key,
+    /// collected while streaming the first batch.
     units: Option<Vec<SharedUnit>>,
+    /// Test each shared copy as it is streamed, and keep only the units some
+    /// copy could match (see [`ProteinStream::run`]). Off when a motif rule is
+    /// configured.
+    early_test: bool,
+    /// Key slots that already have a unit, which filters them exactly.
+    unit_slots: AtomicBitSet,
     peptides: Vec<Peptide>,
     checked: usize,
     deferred_digests: usize,
+    /// Live shared keys and the shared digests in their units, summed over
+    /// spectrum batches.
+    live_keys: usize,
+}
+
+/// Whether the early test of shared copies is exact for this search. A motif
+/// rule decides a shared peptide's sites from the union over all its
+/// occurrences (`ModificationSpecificity::sites_for_occurrences`), so a unit
+/// can carry a combination of sites no single copy produces; such searches
+/// keep the whole-unit path.
+pub(super) fn early_test_is_exact(db_params: &Parameters) -> bool {
+    !db_params
+        .static_mods
+        .keys()
+        .chain(db_params.variable_mods.keys())
+        .any(|specificity| specificity.is_motif())
+}
+
+/// The early test of one shared copy: expanded on its own, with every
+/// modification form, label channel and decoy and without collision pruning
+/// (a superset of what its unit yields for it), does any peptide match
+/// `index`?
+pub(super) fn copy_could_match(
+    expander: &DigestExpander,
+    index: &SpectrumIndex,
+    scratch: &mut sage_core::spectrum_index::Scratch,
+    digest: Digest,
+) -> bool {
+    let origins = vec![ProteinOccurrence::of_protein_digest(&digest)];
+    expander
+        .expand(DigestGroup::of(digest, origins), None)
+        .iter()
+        .any(|copy| index.matches(expander.parameters(), copy, scratch))
+}
+
+/// A copy that one spectrum batch found to match nothing, packed into one
+/// word: protein (28 bits), start (20), length (12), position (2), decoy (1)
+/// and a set bit. Copies that do not fit are not remembered.
+fn dead_copy(protein: usize, digest: &Digest) -> Option<u64> {
+    let start = digest.protein_start? as u64;
+    let (protein, len) = (protein as u64, digest.sequence.len() as u64);
+    if protein >= 1 << 28 || start >= 1 << 20 || len >= 1 << 12 {
+        return None;
+    }
+    let position = match digest.position {
+        sage_core::enzyme::Position::Nterm => 0,
+        sage_core::enzyme::Position::Cterm => 1,
+        sage_core::enzyme::Position::Full => 2,
+        sage_core::enzyme::Position::Internal => 3,
+    };
+    Some(1 << 63 | protein << 35 | start << 15 | len << 3 | position << 1 | digest.decoy as u64)
+}
+
+/// Whether `digest` is the same copy as the remembered `dead` one: the same
+/// sequence, checked residue by residue so that no hash decides it, the same
+/// protein position class and decoy flag.
+fn same_as_dead(fasta: &Fasta, dead: u64, digest: &Digest) -> bool {
+    let protein = (dead >> 35 & ((1 << 28) - 1)) as usize;
+    let start = (dead >> 15 & ((1 << 20) - 1)) as usize;
+    let len = (dead >> 3 & ((1 << 12) - 1)) as usize;
+    let position = match dead >> 1 & 3 {
+        0 => sage_core::enzyme::Position::Nterm,
+        1 => sage_core::enzyme::Position::Cterm,
+        2 => sage_core::enzyme::Position::Full,
+        _ => sage_core::enzyme::Position::Internal,
+    };
+    digest.position == position
+        && digest.decoy == (dead & 1 == 1)
+        && fasta.targets[protein]
+            .1
+            .as_bytes()
+            .get(start..start + len)
+            .is_some_and(|span| span == digest.sequence.as_bytes())
 }
 
 impl ProteinStream<'_> {
     /// Stream every protein through `index`. The final batch also closes
     /// label and decoy partners and collects the survivors.
+    ///
+    /// With the early test, a shared copy is expanded on its own (every
+    /// modification form and decoy, without collision pruning: a superset of
+    /// what its unit yields for it) and tested against `index`. A unit keeps
+    /// a peptide only if it matches `index` or is the label or decoy partner
+    /// of one that does, so a unit none of whose copies could match keeps
+    /// nothing and is never built. The units of the keys some copy could
+    /// match are collected in one more digestion pass and filtered exactly as
+    /// before. Each batch adds the units of its own live keys; a new unit
+    /// starts with no survivors, which is right, as no earlier batch could
+    /// match any of its copies.
     fn run(&mut self, index: &SpectrumIndex, last: bool) {
         let collect_shared = self.units.is_none();
+        let early_test = self.early_test;
         let (fasta, enzyme, custom_cleavages, shared) =
             (self.fasta, self.enzyme, self.custom_cleavages, &self.shared);
         let generate_decoys = self.db_params.generate_decoys;
+        // Per batch: keys some copy could match, and per key one copy found
+        // to match nothing, so identical copies are not tested again. With a
+        // PTM library a copy's expansion depends on its own protein position,
+        // and a copy with expanded ambiguous residues is not a protein span,
+        // so neither is remembered.
+        let live = AtomicBitSet::new(if early_test { shared.slots() } else { 0 });
+        let remember = early_test && self.db_params.loaded_ptm_library.is_none();
+        let dead = (0..if remember { shared.slots() } else { 0 })
+            .map(|_| std::sync::atomic::AtomicU64::new(0))
+            .collect::<Vec<_>>();
+        let unit_slots = &self.unit_slots;
         let results = self.db_params.with_digest_expander(|expander| {
             self.keeps
                 .par_iter_mut()
@@ -382,9 +515,42 @@ impl ProteinStream<'_> {
                         let mut peptides = Vec::new();
                         let first = keep.is_empty();
                         for digest in fasta.digest_protein(protein, enzyme, custom_cleavages) {
-                            if let Some(key) = shared.shared_key(&digest) {
-                                if collect_shared {
-                                    deferred.push((key, digest));
+                            if let Some((key, slot)) = shared.shared_slot(&digest) {
+                                if !early_test {
+                                    if collect_shared {
+                                        deferred.push((key, digest));
+                                    }
+                                    continue;
+                                }
+                                // A unit filters its key exactly; a key already
+                                // live needs no second copy.
+                                if unit_slots.contains(slot) || live.contains(slot) {
+                                    continue;
+                                }
+                                let memo = (remember && digest.expanded_from.is_none())
+                                    .then(|| dead_copy(protein, &digest))
+                                    .flatten();
+                                let known = dead
+                                    .get(slot)
+                                    .map(|cell| cell.load(std::sync::atomic::Ordering::Relaxed))
+                                    .unwrap_or(0);
+                                if memo.is_some()
+                                    && known != 0
+                                    && same_as_dead(fasta, known, &digest)
+                                {
+                                    continue;
+                                }
+                                if copy_could_match(expander, index, scratch, digest) {
+                                    live.insert(slot);
+                                } else if let Some(memo) = memo {
+                                    // The first dead copy of a key is remembered;
+                                    // a later one with another sequence is tested.
+                                    let _ = dead[slot].compare_exchange(
+                                        0,
+                                        memo,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    );
                                 }
                                 continue;
                             }
@@ -413,7 +579,44 @@ impl ProteinStream<'_> {
             deferred.extend(protein_deferred);
             self.checked += checked;
         }
-        if collect_shared {
+        if early_test {
+            drop(dead);
+            // One more digestion pass collects every digest of the keys this
+            // batch made live, for the units it adds.
+            let slots = (0..shared.slots())
+                .filter(|&slot| live.contains(slot))
+                .collect::<Vec<_>>();
+            let digests = match slots.is_empty() {
+                true => Vec::new(),
+                false => (0..fasta.targets.len())
+                    .into_par_iter()
+                    .flat_map_iter(|protein| {
+                        fasta
+                            .digest_protein(protein, enzyme, custom_cleavages)
+                            .into_iter()
+                            .filter_map(|digest| {
+                                let (key, slot) = shared.shared_slot(&digest)?;
+                                live.contains(slot).then_some((key, digest))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>(),
+            };
+            for &slot in &slots {
+                self.unit_slots.insert(slot);
+            }
+            log::info!(
+                "prefilter: {} of {} shared keys could match this spectrum batch; {} shared digests filtered as units",
+                slots.len(),
+                shared.slots() - 1,
+                digests.len()
+            );
+            self.live_keys += slots.len();
+            self.deferred_digests += digests.len();
+            self.units
+                .get_or_insert_with(Vec::new)
+                .extend(shared_units(digests));
+        } else if collect_shared {
             self.deferred_digests = deferred.len();
             self.units = Some(shared_units(deferred));
         }

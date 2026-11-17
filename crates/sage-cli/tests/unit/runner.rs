@@ -78,6 +78,7 @@ fn pair_closure_is_target_decoy_symmetric() {
 use rayon::prelude::*;
 use sage_cloudpath::Url;
 use sage_core::database::PeptideIx;
+use sage_core::peptide::Peptide;
 use sage_core::scoring::{AtomicBitSet, Feature};
 use sage_core::spectrum::ProcessedSpectrum;
 use std::io::Write;
@@ -924,5 +925,400 @@ fn isoleucine_leucine_twins_merge_with_and_without_prefilter() -> anyhow::Result
     assert_eq!(targets[0].proteins.len(), 3);
     assert_eq!(decoys[0].proteins, targets[0].proteins);
     std::fs::remove_dir_all(directory).ok();
+    Ok(())
+}
+
+/// The fixture spectrum's peptide, put into proteins in every context a
+/// shared digest can have.
+const SHARED_PEPTIDE: &str = "LQSRPAAPPAPGPGQLTLR";
+
+/// Proteins whose digests are shared in each way the early test of shared
+/// copies must handle: one peptide internal, protein N-terminal (also after
+/// initiator Met clipping) and C-terminal; its I and J twins; a target equal
+/// to another digest's generated decoy (DLGEENFK, DFNEEGLK); palindromes.
+fn shared_digest_fasta() -> String {
+    let p = SHARED_PEPTIDE;
+    [
+        format!(">sp|A|INTERNAL\nMSGGWGGK{p}AAGEDK\n"),
+        format!(">sp|B|NTERM\n{p}WSPEDK\n"),
+        format!(">sp|C|CLIPPED\nM{p}GGHEK\n"),
+        format!(">sp|D|CTERM\nGGWGGK{p}\n"),
+        ">sp|E|ITWIN\nAAKLQSRPAAPPAPGPGQITLRAAK\n".to_string(),
+        ">sp|F|JTWIN\nAAKLQSRPAAPPAPGPGQJTLRAAK\n".to_string(),
+        ">sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n"
+            .to_string(),
+        ">sp|REV|REVERSED_DIGEST\nMSSRDFNEEGLKAGSEYR\n".to_string(),
+        ">sp|H|PALINDROMES\nGAPAKGAPAKWPEDGKSPAPSR\n".to_string(),
+        ">sp|I|PALINDROMES2\nWWKGAPAKSPAPSR\n".to_string(),
+    ]
+    .concat()
+}
+
+/// The streamed prefilter (with the early test of shared copies) against the
+/// whole-digest prefilter, on `fasta` plus `files` (written next to it and
+/// named in `database` by their file name) and the configuration `database`
+/// merged into the test configuration, over `spectra`, each its own spectrum
+/// batch. Asserts the two keep the same peptides, at the default and at the
+/// loosest `prefilter_min_matched_peaks`, and that something is kept.
+/// Returns the peptides kept at the default.
+fn assert_prefilter_equivalence(
+    name: &str,
+    fasta: &str,
+    files: &[(&str, String)],
+    database: serde_json::Value,
+    spectra: &[String],
+) -> anyhow::Result<Vec<Peptide>> {
+    use super::prefilter::PrefilterBudgets;
+    use crate::events::{CancellationToken, EventEmitter};
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::env::temp_dir().join(format!(
+        "sage-prefilter-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root)?;
+    let fasta_path = root.join("proteins.fasta");
+    std::fs::write(&fasta_path, fasta)?;
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(workspace.join("tests/config.json"))?)?;
+    config["database"]["fasta"] = fasta_path.display().to_string().into();
+    config["database"]["prefilter"] = true.into();
+    for (file, text) in files {
+        std::fs::write(root.join(file), text)?;
+    }
+    for (key, value) in database.as_object().unwrap() {
+        // A string naming one of `files` becomes its path.
+        let value = match value.as_str() {
+            Some(file) if files.iter().any(|(name, _)| *name == file) => {
+                serde_json::Value::from(root.join(file).display().to_string())
+            }
+            _ => value.clone(),
+        };
+        match (key.as_str(), &value) {
+            ("ptm_library", serde_json::Value::String(path)) => {
+                config["database"]["ptm_library"] = serde_json::json!({"path": path});
+            }
+            _ => config["database"][key] = value,
+        }
+    }
+    config["mzml_paths"] = serde_json::json!(spectra);
+    config["batch_size"] = 1.into();
+    let mut kept = Vec::new();
+    for min_matched in [4, 1] {
+        let mut config = config.clone();
+        config["database"]["prefilter_min_matched_peaks"] = min_matched.into();
+        config["output_directory"] = root.join("out").display().to_string().into();
+        let input: crate::input::Input = serde_json::from_value(config)?;
+        let mut search = input.build()?;
+        // Every file is its own spectrum batch.
+        search.prefilter_budgets = Some(PrefilterBudgets { index_bytes: 1 });
+        let runner = super::Runner::new_with_control(
+            search,
+            1,
+            EventEmitter::from_writer(EventLog::default()),
+            CancellationToken::default(),
+        )?;
+        let mut database = runner.database_parameters.clone();
+        super::load_ptm_library(&mut database)?;
+        let proteins = super::load_fasta(&database)?;
+        let cleavages = super::load_custom_cleavages(&database, &proteins)?;
+        let whole = runner.prefilter_whole_digest(1, &proteins, cleavages.as_ref())?;
+        let (streamed, _) = runner.prefilter_peptides(1, proteins, cleavages)?;
+        assert!(
+            !whole.is_empty(),
+            "{name}: nothing kept, the case tests nothing"
+        );
+        assert!(
+            streamed == whole,
+            "{name} (prefilter_min_matched_peaks {min_matched}): streamed kept {} peptides, whole digest {}",
+            streamed.len(),
+            whole.len()
+        );
+        if min_matched == 4 {
+            kept = streamed;
+        }
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(kept)
+}
+
+fn fixture_spectra() -> Vec<String> {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    vec![workspace
+        .join("tests/LQSRPAAPPAPGPGQLTLR.mzML")
+        .display()
+        .to_string()]
+}
+
+/// Whether `peptides` holds the fixture peptide as a target.
+fn keeps_shared_peptide(peptides: &[Peptide]) -> bool {
+    peptides.iter().any(|peptide| {
+        !peptide.decoy
+            && sage_core::ambiguous_residues::isoleucine_leucine_eq(
+                peptide.sequence.as_bytes(),
+                SHARED_PEPTIDE.as_bytes(),
+            )
+    })
+}
+
+#[test]
+fn early_test_keeps_shared_digests_under_terminal_modifications_and_met_clipping(
+) -> anyhow::Result<()> {
+    let kept = assert_prefilter_equivalence(
+        "terminal",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({
+            "clip_n_term_met": true,
+            "static_mods": {"Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]}},
+            "variable_mods": {
+                "Acetyl": {"mass": 42.010565, "sites": ["protein_n_term"], "max_count": 1},
+                "Amidated": {"mass": -0.984016, "sites": ["protein_c_term"], "max_count": 1},
+                "Oxidation": {"mass": 15.994915, "sites": ["M"], "max_count": 1}
+            }
+        }),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_isoleucine_leucine_twins_with_and_without_merging() -> anyhow::Result<()> {
+    for merge in [true, false] {
+        let kept = assert_prefilter_equivalence(
+            &format!("twins-{merge}"),
+            &shared_digest_fasta(),
+            &[],
+            serde_json::json!({"merge_isoleucine_leucine": merge}),
+            &fixture_spectra(),
+        )?;
+        assert!(keeps_shared_peptide(&kept));
+    }
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_label_channels() -> anyhow::Result<()> {
+    let kept = assert_prefilter_equivalence(
+        "silac",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({"static_mods": {
+            "Carbamidomethyl": {"mass": 57.021464, "sites": ["C"]},
+            "Arg10": {"mass": 0.0, "channel_offsets": {"light": 0.0, "heavy": 10.008269}, "sites": ["R"]},
+            "Lys8": {"mass": 0.0, "channel_offsets": {"light": 0.0, "heavy": 8.014199}, "sites": ["K"]}
+        }}),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_expanded_ambiguous_residues() -> anyhow::Result<()> {
+    // Z expands to E and Q; each expansion equals another protein's digest.
+    let fasta = shared_digest_fasta()
+        + ">sp|Z|AMBIGUOUS\nAAKLQSRPAAPPAPGPGQZTLRAAK\n"
+        + ">sp|Q|EXPANSION_Q\nWWKLQSRPAAPPAPGPGQQTLRWWK\n"
+        + ">sp|X|AMBIGUOUS_X\nAAKLQSRPAAPPAPGPGXLTLRGGK\n";
+    let kept = assert_prefilter_equivalence(
+        "ambiguous",
+        &fasta,
+        &[],
+        serde_json::json!({"expand_ambiguous_residues": true, "max_ambiguous_variants": 20}),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_custom_cleavages() -> anyhow::Result<()> {
+    // Cut protein A inside the shared peptide and protein B after it.
+    let kept = assert_prefilter_equivalence(
+        "custom-cleavage",
+        &shared_digest_fasta(),
+        &[(
+            "sites.tsv",
+            "protein\tposition\nsp|A|INTERNAL\t11\nsp|B|NTERM\t20\nsp|D|CTERM\t9\n".to_string(),
+        )],
+        serde_json::json!({"custom_cleavage_sites": "sites.tsv"}),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_ptm_library_sites() -> anyhow::Result<()> {
+    // The library supports Phospho on the shared peptide's S in two proteins.
+    let kept = assert_prefilter_equivalence(
+        "ptm-library",
+        &shared_digest_fasta(),
+        &[(
+            "library.tsv",
+            "protein\tposition\tresidue\tmodification\nsp|A|INTERNAL\t11\tS\tPhospho\nsp|B|NTERM\t3\tS\tPhospho\n"
+                .to_string(),
+        )],
+        serde_json::json!({
+            "variable_mods": {"Phospho": {"mass": 79.966331, "sites": ["S"], "max_count": 1, "site_mode": "library"}},
+            "ptm_library": "library.tsv"
+        }),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn early_test_keeps_variant_entrapment_and_contaminant_proteins() -> anyhow::Result<()> {
+    let p = SHARED_PEPTIDE;
+    let kept = assert_prefilter_equivalence(
+        "classes",
+        &shared_digest_fasta(),
+        &[
+            (
+                "variants.fasta",
+                format!(">sp|A_V|INTERNAL_G4A\nMSGAWGGK{p}AAGEDK\n"),
+            ),
+            (
+                "entrapment.fasta",
+                format!(">AT1G01010\nMNEEK{p}STTPPHGGQK\n"),
+            ),
+            ("contaminants.fasta", format!(">CON_TEST\nWWK{p}GGK\n")),
+        ],
+        serde_json::json!({
+            "variant_fasta": "variants.fasta",
+            "entrapment_fasta": "entrapment.fasta",
+            "contaminant_fasta": "contaminants.fasta"
+        }),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn a_motif_rule_takes_the_whole_unit_path() -> anyhow::Result<()> {
+    let motif: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+        "variable_mods": {"Deamidated": {"mass": 0.984016, "sites": ["motif:N*-{P}-[ST]"], "max_count": 1}}
+    }))?;
+    assert!(!super::prefilter::early_test_is_exact(
+        &motif.make_parameters().map_err(anyhow::Error::msg)?
+    ));
+    let plain: sage_core::database::Builder = serde_json::from_value(serde_json::json!({
+        "variable_mods": {"Deamidated": {"mass": 0.984016, "sites": ["N"], "max_count": 1}}
+    }))?;
+    assert!(super::prefilter::early_test_is_exact(
+        &plain.make_parameters().map_err(anyhow::Error::msg)?
+    ));
+    // And it keeps what the whole digest keeps.
+    let fasta = shared_digest_fasta() + ">sp|N|MOTIF\nAAKLQSRPANSPAPGPGQLTLRAAK\n";
+    let kept = assert_prefilter_equivalence(
+        "motif",
+        &fasta,
+        &[],
+        serde_json::json!({"variable_mods": {"Deamidated": {"mass": 0.984016, "sites": ["motif:N*-{P}-[ST]"], "max_count": 1}}}),
+        &fixture_spectra(),
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    Ok(())
+}
+
+#[test]
+fn a_shared_key_only_a_later_spectrum_batch_matches_is_kept() -> anyhow::Result<()> {
+    // Batch 1 is the fixture with its precursor moved far away, so nothing
+    // shared matches it; batch 2 is the fixture itself.
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let moved =
+        std::env::temp_dir().join(format!("sage-prefilter-moved-{}.mzML", std::process::id()));
+    std::fs::write(
+        &moved,
+        std::fs::read_to_string(&original)?.replace("643.034396630915", "401.034396630915"),
+    )?;
+    let spectra = vec![moved.display().to_string(), original.display().to_string()];
+    let kept = assert_prefilter_equivalence(
+        "batches",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({}),
+        &spectra,
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    // Batch 1 alone keeps no copy of the shared peptide.
+    let alone = assert_prefilter_equivalence(
+        "batch-one",
+        &shared_digest_fasta(),
+        &[],
+        serde_json::json!({}),
+        &spectra[..1],
+    );
+    if let Ok(alone) = alone {
+        assert!(!keeps_shared_peptide(&alone));
+    }
+    std::fs::remove_file(moved).ok();
+    Ok(())
+}
+
+#[test]
+fn a_key_whose_only_matching_copy_is_protein_n_terminal_is_kept() -> anyhow::Result<()> {
+    // The fixture's precursor moved by one acetyl (charge 3): only the
+    // protein N-terminal acetylated form can match, so the internal copies of
+    // the shared peptide match nothing and its N-terminal copy does. A copy
+    // found dead must not stand in for a copy at another position.
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let original = workspace.join("tests/LQSRPAAPPAPGPGQLTLR.mzML");
+    let acetylated =
+        std::env::temp_dir().join(format!("sage-prefilter-acetyl-{}.mzML", std::process::id()));
+    std::fs::write(
+        &acetylated,
+        std::fs::read_to_string(&original)?.replace(
+            "643.034396630915",
+            &format!("{}", 643.034396630915 + 42.010565 / 3.0),
+        ),
+    )?;
+    let p = SHARED_PEPTIDE;
+    // Many internal copies, one protein N-terminal one.
+    let fasta = (0..40)
+        .map(|index| format!(">sp|INT{index}|INTERNAL{index}\nMSGGWGGK{p}AAGEDK\n"))
+        .collect::<String>()
+        + &format!(">sp|B|NTERM\n{p}WSPEDK\n");
+    let kept = assert_prefilter_equivalence(
+        "nterm-only",
+        &fasta,
+        &[],
+        serde_json::json!({
+            "variable_mods": {"Acetyl": {"mass": 42.010565, "sites": ["protein_n_term"], "max_count": 1}}
+        }),
+        &[acetylated.display().to_string()],
+    )?;
+    assert!(keeps_shared_peptide(&kept));
+    std::fs::remove_file(acetylated).ok();
+    Ok(())
+}
+
+#[test]
+fn a_key_only_a_generated_decoy_matches_is_kept() -> anyhow::Result<()> {
+    // LLTLQGPGPAPPAAPRSQR (one missed cleavage) is the digest whose generated
+    // decoy is the fixture's peptide, and the fixture peptide is in no
+    // protein, so only the decoy can match. Two proteins share the digest.
+    let fasta = ">sp|DA|DECOY_SOURCE_A\nGGKLLTLQGPGPAPPAAPRSQRWWK\n\
+                 >sp|DB|DECOY_SOURCE_B\nAAKLLTLQGPGPAPPAAPRSQRGGK\n"
+        .to_string()
+        + ">sp|P02768|ALBU_HUMAN\nMKWVTFISLLFLFSSAYSRGVFRRDAHKSEVAHRFKDLGEENFKALVLIAFAQYLQQCPFEDHVK\n";
+    let kept = assert_prefilter_equivalence(
+        "decoy-only",
+        &fasta,
+        &[],
+        serde_json::json!({}),
+        &fixture_spectra(),
+    )?;
+    assert!(kept
+        .iter()
+        .any(|peptide| peptide.decoy && peptide.sequence.as_bytes() == SHARED_PEPTIDE.as_bytes()));
     Ok(())
 }
